@@ -167,8 +167,12 @@ function parseStreamingSwapEvents(events) {
     const count = Number(attrs.count);
 
     if (interval === 0 && quantity > 1 && count > 0 && count === quantity) {
+      const txId = attrs.tx_id || attrs.tx_hash || '';
+      if (!txId) {
+        log(`  WARN: streaming_swap completed (${count}/${quantity} subs) but no tx_id — attrs: ${JSON.stringify(attrs).slice(0, 200)}`);
+      }
       rapidSwaps.push({
-        tx_id: attrs.tx_id || '',
+        tx_id: txId,
         interval,
         quantity,
         count,
@@ -177,6 +181,10 @@ function parseStreamingSwapEvents(events) {
         in: attrs.in || '',
         out: attrs.out || ''
       });
+    } else if (interval === 0 && quantity > 1 && count > 0 && count < quantity) {
+      // In-progress rapid swap sub — ignore, will catch on completion
+    } else if (interval === 0 && quantity > 1) {
+      log(`  SKIP: streaming_swap interval=0 qty=${quantity} count=${count} tx=${attrs.tx_id || '?'}`);
     }
   }
 

@@ -67,9 +67,12 @@ async function fetchMidgardActionPage(nextPageToken = ''): Promise<{ actions: an
 }
 
 export async function fetchRapidSwapRows(
-  options: { maxPages?: number } = {}
-): Promise<{ rows: Record<string, unknown>[]; scannedPages: number; scannedActions: number; observedAt: string }> {
-  const maxPages = Math.max(1, Math.trunc(options.maxPages || 20));
+  options: { maxPages?: number; knownTxIds?: Set<string> } = {}
+): Promise<{ rows: Record<string, unknown>[]; scannedPages: number; scannedActions: number; observedAt: string; stoppedEarly: boolean }> {
+  // When knownTxIds is provided, scan up to maxPages but stop early once
+  // we hit a page where every detected rapid swap is already in the DB.
+  const maxPages = Math.max(1, Math.trunc(options.maxPages || 200));
+  const knownTxIds = options.knownTxIds || null;
   const observedAt = new Date().toISOString();
 
   const [network, pools] = await Promise.all([
@@ -83,6 +86,8 @@ export async function fetchRapidSwapRows(
   let nextPageToken = '';
   let scannedPages = 0;
   let scannedActions = 0;
+  let stoppedEarly = false;
+  let consecutiveKnownPages = 0;
 
   for (let page = 0; page < maxPages; page += 1) {
     const payload = await fetchMidgardActionPage(nextPageToken);
@@ -91,6 +96,8 @@ export async function fetchRapidSwapRows(
     scannedPages += 1;
     scannedActions += actions.length;
 
+    let foundNewOnPage = false;
+
     for (const action of actions) {
       const row = normalizeRapidSwapAction(action, {
         observedAt,
@@ -98,7 +105,26 @@ export async function fetchRapidSwapRows(
       });
 
       if (row?.tx_id) {
-        rowsByTxId.set(String(row.tx_id), row);
+        const txId = String(row.tx_id);
+        if (knownTxIds && !knownTxIds.has(txId)) {
+          foundNewOnPage = true;
+        }
+        rowsByTxId.set(txId, row);
+      }
+    }
+
+    // If we have known IDs to compare against, track consecutive pages
+    // with no new rapid swaps. After 3 such pages, we've caught up.
+    if (knownTxIds) {
+      if (!foundNewOnPage) {
+        consecutiveKnownPages++;
+      } else {
+        consecutiveKnownPages = 0;
+      }
+
+      if (consecutiveKnownPages >= 3) {
+        stoppedEarly = true;
+        break;
       }
     }
 
@@ -113,6 +139,7 @@ export async function fetchRapidSwapRows(
     rows: [...rowsByTxId.values()],
     scannedPages,
     scannedActions,
-    observedAt
+    observedAt,
+    stoppedEarly
   };
 }

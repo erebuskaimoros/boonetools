@@ -6,6 +6,7 @@
     fetchRapidSwapsDashboard,
     getRapidSwapsApiConfigError
   } from './rapid-swaps/api.js';
+  import { computeDailyData, toChartDateKey } from './rapid-swaps/charts.js';
   import { midgard } from './api/midgard.js';
   import Chart from 'chart.js/auto';
   import { SankeyController, Flow } from 'chartjs-chart-sankey';
@@ -33,15 +34,9 @@
   // Tabs
   let activeTab = 'overview';
 
-  // Local date key helper (consistent local-time bucketing everywhere)
-  function toLocalDateKey(d) {
-    if (typeof d === 'string') d = new Date(d);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
-
   // Overview date range filter (defaults to last 7 days inclusive of today)
-  let overviewDateFrom = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return toLocalDateKey(d); })();
-  let overviewDateTo = toLocalDateKey(new Date());
+  let overviewDateFrom = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return toChartDateKey(d); })();
+  let overviewDateTo = toChartDateKey(new Date());
 
   // Table filters + sorting
   let filterPath = '';
@@ -75,7 +70,7 @@
 
   // Filter swaps by overview date range
   $: overviewSwaps = allSwaps.filter(s => {
-    const d = toLocalDateKey(s.action_date);
+    const d = toChartDateKey(s.action_date);
     return d >= overviewDateFrom && d <= overviewDateTo;
   });
 
@@ -239,81 +234,6 @@
     });
     return sorted;
   }
-
-
-  // --- Data Computation ---
-  function computeDailyData(swaps, midgardHistory) {
-    if (!swaps.length) return { labels: [], volume: [], cumVolume: [], count: [], cumCount: [], efficiency: [], pctFaster: [], volumePct: [], countPct: [] };
-
-    const byDay = {};
-    for (const row of swaps) {
-      const d = new Date(row.action_date);
-      if (!Number.isFinite(d.getTime())) continue;
-      const key = toLocalDateKey(d);
-      if (!byDay[key]) byDay[key] = [];
-      byDay[key].push(row);
-    }
-
-    // Build Midgard lookup using same local-date bucketing
-    // totalVolumeUSD is in 1e2 (cents) format per Midgard convention
-    const mgByDay = {};
-    if (midgardHistory?.intervals?.length) {
-      for (const iv of midgardHistory.intervals) {
-        // Offset to midday so local-date conversion lands on the correct day
-        const key = toLocalDateKey(new Date((Number(iv.startTime) + 43200) * 1000));
-        mgByDay[key] = {
-          volume: (Number(iv.totalVolumeUSD) || 0) / 1e2,
-          count: Number(iv.totalCount) || 0
-        };
-      }
-    }
-
-    const sortedKeys = Object.keys(byDay).sort();
-    const labels = sortedKeys.map(k => {
-      const [y, m, d] = k.split('-').map(Number);
-      return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    });
-
-    const volume = [];
-    const cumVolume = [];
-    const count = [];
-    const cumCount = [];
-    const efficiency = [];
-    const pctFaster = [];
-    const volumePct = [];
-    const countPct = [];
-    let cumVol = 0;
-    let cumCnt = 0;
-
-    for (const key of sortedKeys) {
-      const rows = byDay[key];
-      const dayVol = rows.reduce((s, r) => s + (Number(r.input_estimated_usd) || 0), 0);
-      cumVol += dayVol;
-      volume.push(dayVol);
-      cumVolume.push(cumVol);
-      count.push(rows.length);
-      cumCnt += rows.length;
-      cumCount.push(cumCnt);
-
-      let totalSubs = 0;
-      let totalBlocks = 0;
-      for (const r of rows) {
-        const subs = Number(r.streaming_count) || 0;
-        const blocks = Number(r.blocks_used) || 0;
-        totalSubs += subs;
-        totalBlocks += blocks;
-      }
-      efficiency.push(totalBlocks > 0 ? +(totalSubs / totalBlocks).toFixed(2) : 1);
-      pctFaster.push(totalSubs > 0 ? +((1 - totalBlocks / totalSubs) * 100).toFixed(1) : 0);
-
-      const mg = mgByDay[key];
-      volumePct.push(mg && mg.volume > 0 ? +((dayVol / mg.volume) * 100).toFixed(2) : null);
-      countPct.push(mg && mg.count > 0 ? +((rows.length / mg.count) * 100).toFixed(2) : null);
-    }
-
-    return { labels, volume, cumVolume, count, cumCount, efficiency, pctFaster, volumePct, countPct };
-  }
-
   const AFFILIATE_NAMES = {
     't': 'THORSwap', '-t': 'THORSwap', 't1': 'Trust Wallet', '-_': 'SwapKit',
     'll': 'Live Ledger', 'ej': 'Edge Wallet', 'wr': 'THORWallet', 'dx': 'ASGARDEX',
@@ -1136,11 +1056,11 @@
       dashboardError = '';
 
       // Keep date range end pinned to today (handles midnight rollover)
-      const today = toLocalDateKey(new Date());
+      const today = toChartDateKey(new Date());
       if (overviewDateTo < today) {
         overviewDateTo = today;
       }
-      // Fetch Midgard swap history covering same date range for market share charts
+      // Fetch Midgard swap history covering the same UTC-day range for adoption charts.
       try {
         const swaps = dashboard?.all_swaps || [];
         if (swaps.length) {
@@ -1151,10 +1071,14 @@
             const to = Math.floor(Date.now() / 1000);
             midgardSwapHistory = await midgard.getSwapHistory({ interval: 'day', from, to });
 
-            // Midgard interval=day only returns completed UTC days.
+            // Midgard daily history is UTC-bucketed.
             // Fetch today's partial-day aggregate so adoption charts include the current day.
-            const todayStart = new Date();
-            todayStart.setHours(0, 0, 0, 0);
+            const now = new Date();
+            const todayStart = new Date(Date.UTC(
+              now.getUTCFullYear(),
+              now.getUTCMonth(),
+              now.getUTCDate()
+            ));
             const todayFrom = Math.floor(todayStart.getTime() / 1000);
             const todayData = await midgard.getSwapHistory({ from: todayFrom, to });
             if (todayData?.meta) {
@@ -1302,6 +1226,7 @@
     <section class="data-section">
       <div class="section-head">
         <h3>DAILY TRENDS</h3>
+        <span class="section-sub">Grouped by UTC day to match Midgard history</span>
       </div>
       {#if loading && !dashboard}
         <div class="empty">Loading...</div>
@@ -1326,7 +1251,7 @@
       <section class="data-section">
         <div class="section-head">
           <h3>ADOPTION</h3>
-          <span class="section-sub">Rapid swaps as percentage of total THORChain activity</span>
+          <span class="section-sub">Rapid swaps as percentage of total THORChain activity, grouped by UTC day</span>
         </div>
         <div class="chart-grid">
           <div class="chart-card">

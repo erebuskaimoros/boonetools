@@ -132,14 +132,28 @@ Deno.serve(async (request) => {
     assertSchedulerAuth(request);
 
     const supabase = createAdminClient();
-    const maxPages = Math.max(1, Number(Deno.env.get('RAPID_SWAPS_MAX_PAGES') || 20));
+    const maxPages = Math.max(1, Number(Deno.env.get('RAPID_SWAPS_MAX_PAGES') || 200));
 
     jobId = await insertJobRun(supabase, {
       job_name: 'rapid-swaps-recent-actions',
       status: 'running'
     });
 
-    const result = await fetchRapidSwapRows({ maxPages });
+    // Fetch recent known tx_ids so we can stop scanning once we overlap
+    const knownTxIds = new Set<string>();
+    const { data: recentRows } = await supabase
+      .from('rapid_swaps')
+      .select('tx_id')
+      .order('action_date', { ascending: false })
+      .limit(2000);
+
+    if (recentRows) {
+      for (const row of recentRows) {
+        knownTxIds.add(String(row.tx_id));
+      }
+    }
+
+    const result = await fetchRapidSwapRows({ maxPages, knownTxIds });
     await upsertRapidSwaps(supabase, result.rows);
 
     const payload = {
@@ -150,7 +164,8 @@ Deno.serve(async (request) => {
         scanned_pages: result.scannedPages,
         scanned_actions: result.scannedActions,
         rapid_swaps_upserted: result.rows.length,
-        observed_at: result.observedAt
+        observed_at: result.observedAt,
+        stopped_early: result.stoppedEarly
       }
     };
 
