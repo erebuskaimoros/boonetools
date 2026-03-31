@@ -5,7 +5,8 @@
  *
  * Connects to THORChain's Tendermint RPC WebSocket, subscribes to NewBlock events,
  * and watches for streaming_swap completions with interval=0 (rapid swaps).
- * When detected, fetches the full action from Midgard and upserts to Supabase.
+ * When detected, it durably records a reconciliation hint and attempts an immediate
+ * Midgard resolution, leaving authoritative catch-up to the scheduler.
  *
  * Usage:
  *   SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... node scripts/rapid-swap-listener.mjs
@@ -20,28 +21,24 @@
 import WebSocket from 'ws';
 import { createClient } from '@supabase/supabase-js';
 import {
-  normalizeRapidSwapAction,
-  buildAssetUsdIndex
-} from '../src/lib/rapid-swaps/model.js';
+  enrichRapidSwapHint,
+  fetchRapidSwapPriceIndex,
+  resolveRapidSwapHint
+} from '../src/lib/rapid-swaps/backend.js';
+import {
+  normalizeRapidSwapHint,
+  RAPID_SWAP_CANDIDATE_STATUS
+} from '../src/lib/rapid-swaps/reconciliation.js';
 
 // ---- Config ----
 
 const RPC_WS_URL = process.env.RPC_WS_URL || 'wss://rpc.thorchain.network/websocket';
 const MIDGARD_DELAY_MS = Number(process.env.MIDGARD_DELAY_MS) || 5000;
 
-const MIDGARD_BASES = [
-  'https://midgard.thorchain.network/v2',
-  'https://midgard.liquify.com/v2'
-];
-
-const THORNODE_BASES = [
-  'https://thornode.thorchain.network',
-  'https://thornode.thorchain.liquify.com'
-];
-
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 const PING_INTERVAL_MS = 30000;
+const PRICE_INDEX_TTL_MS = 60000;
 
 // ---- Supabase ----
 
@@ -59,42 +56,20 @@ function createSupabase() {
 
 const supabase = createSupabase();
 
-// ---- Fetch helpers ----
+// ---- Shared recovery state ----
 
-async function fetchJson(url, headers = {}) {
-  const res = await fetch(url, {
-    headers: { Accept: 'application/json', 'x-client-id': 'BooneTools', ...headers }
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  const ct = (res.headers.get('content-type') || '').toLowerCase();
-  if (ct.includes('text/html')) throw new Error(`Challenge response for ${url}`);
-  return res.json();
-}
+let cachedPriceIndex = null;
+let cachedPriceIndexAt = 0;
 
-async function fetchWithFallback(bases, path) {
-  let lastErr;
-  for (const base of bases) {
-    try {
-      return await fetchJson(`${base}${path}`);
-    } catch (err) {
-      lastErr = err;
-    }
+async function getCachedPriceIndex() {
+  const now = Date.now();
+  if (cachedPriceIndex && (now - cachedPriceIndexAt) < PRICE_INDEX_TTL_MS) {
+    return cachedPriceIndex;
   }
-  throw lastErr;
-}
 
-async function fetchMidgardAction(txId) {
-  const data = await fetchWithFallback(MIDGARD_BASES, `/actions?txid=${txId}`);
-  const actions = data?.actions || [];
-  return actions[0] || null;
-}
-
-async function fetchPriceIndex() {
-  const [network, pools] = await Promise.all([
-    fetchWithFallback(THORNODE_BASES, '/thorchain/network'),
-    fetchWithFallback(THORNODE_BASES, '/thorchain/pools')
-  ]);
-  return buildAssetUsdIndex(network, Array.isArray(pools) ? pools : []);
+  cachedPriceIndex = await fetchRapidSwapPriceIndex();
+  cachedPriceIndexAt = now;
+  return cachedPriceIndex;
 }
 
 // ---- Heartbeat ----
@@ -144,6 +119,55 @@ async function upsertRapidSwap(row) {
     .from('rapid_swaps')
     .upsert(row, { onConflict: 'tx_id' });
   if (error) throw new Error(`Supabase upsert failed: ${error.message}`);
+}
+
+async function upsertRapidSwapCandidate(hintInput, patch = {}) {
+  const now = new Date().toISOString();
+  const candidate = normalizeRapidSwapHint({
+    ...hintInput,
+    ...patch
+  });
+  const { data: existing, error: existingError } = await supabase
+    .from('rapid_swap_candidates')
+    .select('status,attempts,resolved_tx_id,resolved_at')
+    .eq('hint_key', candidate.hint_key)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(`Supabase candidate lookup failed: ${existingError.message}`);
+  }
+
+  const preserveResolved = existing?.status === RAPID_SWAP_CANDIDATE_STATUS.RESOLVED
+    && candidate.status !== RAPID_SWAP_CANDIDATE_STATUS.RESOLVED;
+
+  const { error } = await supabase
+    .from('rapid_swap_candidates')
+    .upsert(
+      {
+        hint_key: candidate.hint_key,
+        source: candidate.source,
+        tx_id: candidate.tx_id,
+        source_address: candidate.source_address,
+        memo: candidate.memo,
+        observed_height: candidate.observed_height,
+        last_height: candidate.last_height,
+        status: preserveResolved ? existing.status : candidate.status,
+        attempts: preserveResolved
+          ? Number(existing.attempts || candidate.attempts || 0)
+          : candidate.attempts,
+        last_seen_at: now,
+        next_retry_at: patch.next_retry_at || now,
+        resolved_tx_id: patch.resolved_tx_id || existing?.resolved_tx_id || '',
+        resolved_at: patch.resolved_at || existing?.resolved_at || null,
+        last_error: preserveResolved ? null : (patch.last_error || null),
+        raw_hint: candidate.raw_hint
+      },
+      { onConflict: 'hint_key' }
+    );
+
+  if (error) {
+    throw new Error(`Supabase candidate upsert failed: ${error.message}`);
+  }
 }
 
 // ---- Event parsing ----
@@ -209,53 +233,57 @@ function tryDecode(val) {
 // ---- Process detected rapid swap ----
 
 async function processRapidSwap(detected, blockHeight) {
-  const { tx_id } = detected;
-  if (!tx_id) return;
+  const initialHint = normalizeRapidSwapHint({
+    source: 'ws',
+    tx_id: detected.tx_id,
+    observed_height: blockHeight || detected.last_height,
+    last_height: detected.last_height,
+    deposit: detected.deposit,
+    in: detected.in,
+    out: detected.out,
+    raw_hint: detected
+  });
+  const hint = await enrichRapidSwapHint(initialHint).catch(() => initialHint);
+  const reference = hint.tx_id || hint.hint_key;
 
-  log(`Rapid swap detected: ${tx_id} (${detected.count}/${detected.quantity} subs, block ${blockHeight})`);
+  log(`Rapid swap detected: ${reference} (${detected.count}/${detected.quantity} subs, block ${blockHeight})`);
+
+  await upsertRapidSwapCandidate(hint, {
+    status: RAPID_SWAP_CANDIDATE_STATUS.PENDING
+  });
 
   // Wait for Midgard to index — rapid swaps complete fast but Midgard
   // needs time to index and mark status=success
   await sleep(MIDGARD_DELAY_MS);
 
-  let row = null;
-  let retries = 10;
+  const resolution = await resolveRapidSwapHint(hint, {
+    priceIndex: await getCachedPriceIndex()
+  }).catch((error) => ({
+    row: null,
+    hint,
+    resolvedBy: '',
+    error
+  }));
 
-  while (retries > 0) {
-    const action = await fetchMidgardAction(tx_id).catch(() => null);
-
-    if (action) {
-      const priceIndex = await fetchPriceIndex().catch(() => ({ prices: new Map(), runePriceUsd: 0 }));
-      row = normalizeRapidSwapAction(action, {
-        observedAt: new Date().toISOString(),
-        priceIndex
-      });
-
-      if (row) break;
-
-      // Action exists but didn't pass filter (likely status != success yet)
-      log(`  ${tx_id} status=${action?.status || '?'}, waiting for completion...`);
-    } else {
-      log(`  Midgard not ready for ${tx_id}...`);
-    }
-
-    retries--;
-    if (retries > 0) {
-      await sleep(10000);
-    }
-  }
-
-  if (!row) {
-    log(`  Failed to record ${tx_id} after retries, skipping`);
+  if (!resolution.row) {
+    await upsertRapidSwapCandidate(resolution.hint || hint, {
+      status: RAPID_SWAP_CANDIDATE_STATUS.PENDING,
+      last_error: resolution.error?.message || 'Deferred to scheduler reconciliation'
+    });
+    log(`  Deferred ${reference} to scheduler reconciliation`);
     return;
   }
 
-  // Remove raw_action to save space (it's large)
-  delete row.raw_action;
-
   // Upsert to Supabase
-  await upsertRapidSwap(row);
-  log(`  Upserted ${tx_id}: ${row.source_asset} -> ${row.target_asset}, $${row.input_estimated_usd}, ${row.streaming_count}/${row.streaming_quantity} subs, ${row.blocks_used} blocks`);
+  await upsertRapidSwap(resolution.row);
+  await upsertRapidSwapCandidate(resolution.hint || hint, {
+    status: RAPID_SWAP_CANDIDATE_STATUS.RESOLVED,
+    resolved_tx_id: resolution.row.tx_id,
+    resolved_at: new Date().toISOString(),
+    last_error: ''
+  });
+
+  log(`  Upserted ${resolution.row.tx_id} via ${resolution.resolvedBy || 'listener'}: ${resolution.row.source_asset} -> ${resolution.row.target_asset}, $${resolution.row.input_estimated_usd}, ${resolution.row.streaming_count}/${resolution.row.streaming_quantity} subs, ${resolution.row.blocks_used} blocks`);
 }
 
 // ---- WebSocket connection ----

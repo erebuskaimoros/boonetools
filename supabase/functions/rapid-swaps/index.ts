@@ -24,6 +24,7 @@ function createAdminClient() {
 
 const RAPID_SWAP_COLUMNS = [
   'tx_id',
+  'action_height',
   'action_date',
   'observed_at',
   'memo',
@@ -60,7 +61,7 @@ Deno.serve(async (request) => {
     const supabase = createAdminClient();
     const recentWindowStart = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-    const [recentResult, topResult, startResult, lastRunResult, wsListenerResult, countResult, recentCountResult, recentVolumeResult] = await Promise.all([
+    const [recentResult, topResult, startResult, lastRunResult, wsListenerResult, countResult, recentCountResult, recentVolumeResult, pendingCandidatesResult, syncStateResult] = await Promise.all([
       supabase
         .from('rapid_swaps')
         .select(RAPID_SWAP_COLUMNS)
@@ -105,10 +106,19 @@ Deno.serve(async (request) => {
       supabase
         .from('rapid_swaps')
         .select('input_estimated_usd')
-        .gte('action_date', recentWindowStart)
+        .gte('action_date', recentWindowStart),
+      supabase
+        .from('rapid_swap_candidates')
+        .select('hint_key', { count: 'exact', head: true })
+        .eq('status', 'pending'),
+      supabase
+        .from('rapid_swap_sync_state')
+        .select('last_scanned_height,last_scanned_at,stats_json')
+        .eq('sync_key', 'rapid-swaps-canonical')
+        .maybeSingle()
     ]);
 
-    for (const result of [recentResult, topResult, startResult, lastRunResult, wsListenerResult, countResult, recentCountResult, recentVolumeResult]) {
+    for (const result of [recentResult, topResult, startResult, lastRunResult, wsListenerResult, countResult, recentCountResult, recentVolumeResult, pendingCandidatesResult, syncStateResult]) {
       if (result.error) {
         throw new Error(result.error.message);
       }
@@ -186,7 +196,13 @@ Deno.serve(async (request) => {
           last_run_at: lastRunAt,
           last_run_status: lastRunResult.data?.status || 'unknown',
           freshness_seconds: freshnessSeconds,
-          last_run_stats: lastRunResult.data?.stats_json || {}
+          last_run_stats: lastRunResult.data?.stats_json || {},
+          pending_candidates: pendingCandidatesResult.count || 0,
+          canonical_sync: syncStateResult.data ? {
+            last_scanned_height: Number(syncStateResult.data.last_scanned_height || 0),
+            last_scanned_at: syncStateResult.data.last_scanned_at || null,
+            stats: syncStateResult.data.stats_json || {}
+          } : null
         },
         ws_listener: wsListenerResult.data ? {
           last_heartbeat: wsListenerResult.data.finished_at || null,

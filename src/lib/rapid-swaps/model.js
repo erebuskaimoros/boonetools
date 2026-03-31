@@ -287,6 +287,7 @@ export function normalizeRapidSwapAction(action, options = {}) {
 
   return {
     tx_id: getRapidSwapTxId(action),
+    action_height: safeNumber(action?.height, 0),
     action_date: actionDate,
     observed_at: observedAt,
     memo: String(action?.metadata?.swap?.memo || ''),
