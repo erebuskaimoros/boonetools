@@ -6,6 +6,7 @@
   import { formatNumber, simplifyNumber, formatCountdown, getAddressSuffix } from '$lib/utils/formatting';
   import { fromBaseUnit } from '$lib/utils/blockchain';
   import { getChurnInfo, getLastChurn, getNodes, getLeaveStatus, LEAVE_STATUS } from '$lib/utils/nodes';
+  import { estimateCurrentChurnYields } from '$lib/bond-tracker/apy.js';
   import { calculateAPR, calculateAPY } from '$lib/utils/calculations';
   import { LoadingBar, StatusIndicator, ActionButton, Toast, RefreshIcon, BookmarkIcon, CopyIcon, CurrencySelector } from '$lib/components';
   import { get } from 'svelte/store';
@@ -130,16 +131,11 @@
     }
   };
 
-  const fetchChurnInterval = async () => {
-    try {
-      // Use shared churn utilities
-      const churnInfo = await getChurnInfo(recentChurnTimestamp);
-      isChurningHalted = churnInfo.isHalted;
-      nextChurnTime = churnInfo.nextChurnTimestamp;
-      updateCountdown();
-    } catch (error) {
-      console.error("Error fetching churn interval:", error);
-    }
+  const applyChurnInfo = (churnInfo) => {
+    if (!churnInfo) return;
+    isChurningHalted = churnInfo.isHalted;
+    nextChurnTime = churnInfo.nextChurnTimestamp;
+    updateCountdown();
   };
 
   const updateCountdown = () => {
@@ -214,6 +210,9 @@
       allNodes = allNodesData;
       recentChurnTimestamp = lastChurn?.timestampSec || 0;
       runePriceUSD = fromBaseUnit(runePriceData.rune_price_in_tor);
+      const churnInfoPromise = recentChurnTimestamp > 0
+        ? getChurnInfo(recentChurnTimestamp).catch(() => null)
+        : Promise.resolve(null);
 
       const balanceAsset = btcPoolData.balance_asset;
       const balanceRune = btcPoolData.balance_rune;
@@ -239,12 +238,6 @@
         const currentAward = Number(nodeData.current_award) * (1 - nodeOperatorFee);
         const userAward = bondOwnershipPercentage * currentAward;
 
-        // Calculate APY for this node
-        const currentTime = Date.now() / 1000;
-        const timeDiff = currentTime - recentChurnTimestamp;
-        const apr = calculateAPR(userAward, userBond, timeDiff);
-        const nodeAPY = calculateAPY(apr);
-
         // Get leave status for churn indicator
         const fullNodeData = allNodes.find(n => n.node_address === node.address);
         const nodeLeaveStatus = fullNodeData ? getLeaveStatus(fullNodeData, allNodes) : null;
@@ -256,7 +249,6 @@
           status: nodeData.status,
           bond: userBond,
           award: userAward,
-          apy: nodeAPY,
           fee: nodeOperatorFee,
           bondFormatted: simplifyNumber(fromBaseUnit(userBond)),
           bondFullAmount: Math.round(userBond / 1e8),
@@ -266,27 +258,39 @@
         };
       });
 
-      bondNodes = await Promise.all(nodeDataPromises);
+      const [churnInfo, resolvedBondNodes] = await Promise.all([
+        churnInfoPromise,
+        Promise.all(nodeDataPromises)
+      ]);
+
+      applyChurnInfo(churnInfo);
+
+      bondNodes = resolvedBondNodes.map((node) => ({
+        ...node,
+        apy: estimateCurrentChurnYields({
+          reward: node.award,
+          principal: node.bond,
+          lastChurnTimestamp: recentChurnTimestamp,
+          churnIntervalSeconds: churnInfo?.churnIntervalSeconds
+        }).apy
+      }));
       
       // Calculate totals
       totalBond = bondNodes.reduce((sum, node) => sum + node.bond, 0);
       totalAward = bondNodes.reduce((sum, node) => sum + node.award, 0);
       
-      // Calculate weighted average APY
-      let weightedAPYSum = 0;
-      for (const node of bondNodes) {
-        const weight = node.bond / totalBond;
-        weightedAPYSum += node.apy * weight;
-      }
-      aggregateAPY = weightedAPYSum;
+      aggregateAPY = estimateCurrentChurnYields({
+        reward: totalAward,
+        principal: totalBond,
+        lastChurnTimestamp: recentChurnTimestamp,
+        churnIntervalSeconds: churnInfo?.churnIntervalSeconds
+      }).apy;
       
       // Update legacy variables for existing reactive statements
       my_bond = totalBond;
       my_award = totalAward;
       APY = aggregateAPY;
       bondvaluebtc = bondNodes.reduce((sum, node) => sum + node.btcValue, 0);
-
-      await fetchChurnInterval();
       
     } catch (error) {
       console.error("Error fetching multi-node data:", error);
@@ -330,17 +334,22 @@
 
       // Process churn data for APY calculation
       recentChurnTimestamp = lastChurn?.timestampSec || 0;
-      const currentTime = Date.now() / 1000;
-      const timeDiff = currentTime - recentChurnTimestamp;
-      const apr = calculateAPR(my_award, my_bond, timeDiff);
-      APY = calculateAPY(apr);
+      const churnInfo = recentChurnTimestamp > 0
+        ? await getChurnInfo(recentChurnTimestamp).catch(() => null)
+        : null;
+      applyChurnInfo(churnInfo);
+      APY = estimateCurrentChurnYields({
+        reward: my_award,
+        principal: my_bond,
+        lastChurnTimestamp: recentChurnTimestamp,
+        churnIntervalSeconds: churnInfo?.churnIntervalSeconds
+      }).apy;
 
       // Process price data
       runePriceUSD = fromBaseUnit(runePriceData.rune_price_in_tor);
 
       // Fetch additional data (these also run in parallel with each other)
       fetchBtcPoolData();
-      fetchChurnInterval();
     } catch (error) {
       console.error("Error fetching or processing data:", error);
     }
