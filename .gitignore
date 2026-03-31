@@ -1,0 +1,13 @@
+.env
+.env.local
+/node_modules/
+/dist/
+/.vscode/
+.DS_Store
+.cursorrules
+CLAUDE.md
+public/docs/
+.playwright-mcp/
+supabase/.temp/
+.claude/
+knowledge/sessions/

@@ -1,0 +1,44 @@
+name: Rapid Swaps Scheduler
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-scheduler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Supabase rapid-swaps-scheduler
+        env:
+          RAPID_SWAPS_SCHEDULER_URL: ${{ secrets.RAPID_SWAPS_SCHEDULER_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NODEOP_SCHEDULER_SECRET: ${{ secrets.NODEOP_SCHEDULER_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${RAPID_SWAPS_SCHEDULER_URL}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY}" ]; then
+            echo "Missing required secrets: RAPID_SWAPS_SCHEDULER_URL and/or SUPABASE_SERVICE_ROLE_KEY"
+            exit 1
+          fi
+
+          if [ -n "${NODEOP_SCHEDULER_SECRET:-}" ]; then
+            curl --fail --show-error --silent \
+              -X POST \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/json" \
+              -H "x-nodeop-secret: ${NODEOP_SCHEDULER_SECRET}" \
+              "${RAPID_SWAPS_SCHEDULER_URL}" \
+              | tee /tmp/rapid-swaps-scheduler-response.json
+          else
+            curl --fail --show-error --silent \
+              -X POST \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Content-Type: application/json" \
+              "${RAPID_SWAPS_SCHEDULER_URL}" \
+              | tee /tmp/rapid-swaps-scheduler-response.json
+          fi
+
+          echo
+          echo "Rapid swaps scheduler trigger completed"

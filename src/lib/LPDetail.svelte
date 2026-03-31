@@ -1,0 +1,712 @@
+<script>
+  import { onMount } from 'svelte';
+  import axios from 'axios';
+  import { formatUSD, getAddressSuffix, copyToClipboard } from '$lib/utils/formatting';
+  import { fromBaseUnit, getAssetShortName } from '$lib/utils/blockchain';
+  import { calculateLPValue } from '$lib/utils/liquidity';
+  import { getAssetLogo } from '$lib/constants/assets';
+  import { CopyIcon } from '$lib/components';
+
+  export let address = null;
+  export let pool = null;
+  export let height = null;
+  export let goBack;
+  export let runePrice;
+  export let assetPrices;
+  let lpData = null;
+  let loading = true;
+  let error = null;
+  let showMore = false;
+
+  const API_DOMAIN = import.meta.env.VITE_API_DOMAIN || 'https://thornode.thorchain.network';
+
+  // Asset logos now imported from $lib/constants/assets via getAssetLogo()
+
+  $: {
+    if (pool && address) {
+      loadLPData();
+    }
+  }
+
+  async function loadLPData() {
+    loading = true;
+    error = null;
+
+    let url = `${API_DOMAIN}/thorchain/pool/${pool}/liquidity_provider/${address}`;
+    if (height) {
+      url += `?height=${height}`;
+    }
+
+    try {
+      const response = await axios.get(url);
+      lpData = response.data;
+
+      // Convert deposit and redeem values from base units
+      ['rune_deposit_value', 'asset_deposit_value', 'rune_redeem_value', 'asset_redeem_value'].forEach(key => {
+        if (lpData[key]) {
+          lpData[key] = fromBaseUnit(lpData[key]);
+        }
+      });
+    } catch (err) {
+      error = 'Failed to fetch LP details';
+      console.error(error, err);
+    } finally {
+      loading = false;
+    }
+  }
+
+  function formatValue(value, asset) {
+    if (typeof value === 'number') {
+      const price = asset === 'RUNE' ? runePrice : assetPrices[pool];
+      const usdValue = value * price;
+      return {
+        native: value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        usd: usdValue.toLocaleString('en-US', { 
+          style: 'currency', 
+          currency: 'USD',
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0 
+        })
+      };
+    }
+    return { native: value, usd: 'N/A' };
+  }
+
+  function calculateNetChange(runeDeposit, runeRedeem, assetDeposit, assetRedeem) {
+    // Use shared calculateLPValue for profit calculations
+    const position = {
+      runeDepositValue: runeDeposit,
+      runeRedeemValue: runeRedeem,
+      assetDepositValue: assetDeposit,
+      assetRedeemValue: assetRedeem
+    };
+    const lpValue = calculateLPValue(position, runePrice, assetPrices[pool]);
+
+    // Add unit changes which the shared function doesn't compute
+    return {
+      rune: runeRedeem - runeDeposit,
+      asset: assetRedeem - assetDeposit,
+      profitUSD: lpValue.profitUSD,
+      profitPercentage: lpValue.profitPercentage,
+      isProfit: lpValue.isProfit
+    };
+  }
+
+  function getRunescanUrl(blockHeight) {
+    return `https://runescan.io/block/${blockHeight}`;
+  }
+
+  function handleGoBack() {
+    goBack();
+  }
+
+  function toggleShowMore() {
+    showMore = !showMore;
+  }
+
+  // Copy current page URL to clipboard
+  async function copyPageUrl() {
+    const url = window.location.href;
+    const success = await copyToClipboard(url, 'page URL');
+    if (success) {
+      alert('URL copied to clipboard!');
+    } else {
+      alert('Failed to copy URL');
+    }
+  }
+</script>
+
+{#if pool && address}
+  <div class="lp-detail">
+    <div class="container">
+      <div class="header-container">
+        <div class="title-container">
+          <h2>{address ? `${getAddressSuffix(address, 4).toUpperCase()}` : ''} LP Details - {pool ? ` ${getAssetShortName(pool)}` : ''}</h2>
+        </div>
+        <button class="copy-url-button" on:click={copyPageUrl} title="Copy page URL">
+          <CopyIcon size={16} />
+        </button>
+      </div>
+
+      {#if !pool}
+        <p>Loading pool information...</p>
+      {:else if loading}
+        <p>Loading LP details...</p>
+      {:else if error}
+        <p class="error">{error}</p>
+      {:else if lpData}
+        {@const netChange = calculateNetChange(lpData.rune_deposit_value, lpData.rune_redeem_value, lpData.asset_deposit_value, lpData.asset_redeem_value)}
+        
+        <!-- Total Value Card -->
+        <div class="total-value">
+          {#if height}
+            <span class="total-label">Total Value (as of height {height})</span>
+          {:else}
+            <span class="total-label">Total Value</span>
+          {/if}
+          <span class="total-amount">
+            {formatUSD((lpData.rune_redeem_value * runePrice) + (lpData.asset_redeem_value * assetPrices[pool]))}
+          </span>
+        </div>
+
+        <!-- Stats Grid -->
+        <div class="stats-container">
+          <div class="stat-box">
+            <span class="stat-label">Net Profit/Loss</span>
+            <span class="stat-value {netChange.isProfit ? 'positive' : 'negative'}">
+              {formatUSD(netChange.profitUSD)}
+              <span class="percent-change">
+                ({netChange.profitPercentage.toFixed(2)}%)
+              </span>
+            </span>
+          </div>
+          
+          <div class="stat-box">
+            <span class="stat-label">RUNE Balance</span>
+            <span class="stat-value">
+              {formatValue(lpData.rune_redeem_value, 'RUNE').native}
+              <div class="logo-container small">
+                <img src="/assets/coins/RUNE-ICON.svg" alt="RUNE" class="asset-icon" />
+                <div class="chain-logo-container">
+                  <img src="/assets/chains/THOR.svg" alt="THOR" class="chain-icon" />
+                </div>
+              </div>
+            </span>
+          </div>
+
+          <div class="stat-box">
+            <span class="stat-label">{getAssetShortName(pool)} Balance</span>
+            <span class="stat-value">
+              {formatValue(lpData.asset_redeem_value, pool).native}
+              <div class="logo-container small">
+                <img 
+                  src={getAssetLogo(pool) || '/assets/runetools-logo.svg'} 
+                  alt={pool}
+                  class="asset-icon"
+                />
+                <div class="chain-logo-container">
+                  <img 
+                    src={`/assets/chains/${pool.split('.')[0]}.svg`}
+                    alt={pool.split('.')[0]}
+                    class="chain-icon"
+                  />
+                </div>
+              </div>
+            </span>
+          </div>
+        </div>
+
+        <!-- Position Details Cards -->
+        <div class="position-grid">
+          <div class="position-card">
+            <h3>RUNE Position</h3>
+            <div class="position-details">
+              <div class="amount-row">
+                <span class="label">Deposit</span>
+                <span class="amount">
+                  {formatValue(lpData.rune_deposit_value, 'RUNE').native}
+                  <div class="logo-container small">
+                    <img src="/assets/coins/RUNE-ICON.svg" alt="RUNE" class="asset-icon" />
+                    <div class="chain-logo-container">
+                      <img src="/assets/chains/THOR.svg" alt="THOR" class="chain-icon" />
+                    </div>
+                  </div>
+                </span>
+                <span class="usd-value">{formatValue(lpData.rune_deposit_value, 'RUNE').usd}</span>
+              </div>
+              <div class="amount-row">
+                <span class="label">Change</span>
+                <span class="amount {netChange.rune >= 0 ? 'positive' : 'negative'}">
+                  {netChange.rune.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  <div class="logo-container small">
+                    <img src="/assets/coins/RUNE-ICON.svg" alt="RUNE" class="asset-icon" />
+                    <div class="chain-logo-container">
+                      <img src="/assets/chains/THOR.svg" alt="THOR" class="chain-icon" />
+                    </div>
+                  </div>
+                </span>
+                <span class="usd-value">{formatValue(netChange.rune, 'RUNE').usd}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="position-card">
+            <h3>{getAssetShortName(pool)} Position</h3>
+            <div class="position-details">
+              <div class="amount-row">
+                <span class="label">Deposit</span>
+                <span class="amount">
+                  {formatValue(lpData.asset_deposit_value, pool).native}
+                  <div class="logo-container small">
+                    <img 
+                      src={getAssetLogo(pool) || '/assets/runetools-logo.svg'} 
+                      alt={pool}
+                      class="asset-icon"
+                    />
+                    <div class="chain-logo-container">
+                      <img 
+                        src={`/assets/chains/${pool.split('.')[0]}.svg`}
+                        alt={pool.split('.')[0]}
+                        class="chain-icon"
+                      />
+                    </div>
+                  </div>
+                </span>
+                <span class="usd-value">{formatValue(lpData.asset_deposit_value, pool).usd}</span>
+              </div>
+              <div class="amount-row">
+                <span class="label">Change</span>
+                <span class="amount {netChange.asset >= 0 ? 'positive' : 'negative'}">
+                  {netChange.asset.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  <div class="logo-container small">
+                    <img 
+                      src={getAssetLogo(pool) || '/assets/runetools-logo.svg'} 
+                      alt={pool}
+                      class="asset-icon"
+                    />
+                    <div class="chain-logo-container">
+                      <img 
+                        src={`/assets/chains/${pool.split('.')[0]}.svg`}
+                        alt={pool.split('.')[0]}
+                        class="chain-icon"
+                      />
+                    </div>
+                  </div>
+                </span>
+                <span class="usd-value">{formatValue(netChange.asset, pool).usd}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Additional Info Card -->
+        <div class="info-card">
+          <h3>Additional Information</h3>
+          <div class="info-content">
+            <!-- Always show these -->
+            {#each Object.entries(lpData) as [key, value]}
+              {#if ['rune_address', 'asset_address', 'asset'].includes(key)}
+                <div class="info-row">
+                  <div class="info-label">
+                    {#if key === 'rune_address'}
+                      RUNE Address
+                    {:else if key === 'asset_address'}
+                      Asset Address
+                    {:else if key === 'asset'}
+                      Pool
+                    {/if}
+                  </div>
+                  <div class="info-value">
+                    {#if key === 'rune_address' || key === 'asset_address'}
+                      <span class="address">{value}</span>
+                    {:else}
+                      {value}
+                    {/if}
+                  </div>
+                </div>
+              {/if}
+            {/each}
+
+            <!-- Show More section -->
+            {#if showMore}
+              {#each Object.entries(lpData) as [key, value]}
+                {#if ['last_add_height', 'last_withdraw_height', 'units', 'pending_rune', 'pending_asset', 'luvi_deposit_value', 'luvi_redeem_value', 'luvi_growth_pct'].includes(key)}
+                  <div class="info-row">
+                    <div class="info-label">
+                      {#if key === 'last_add_height'}
+                        Last Add Block
+                      {:else if key === 'last_withdraw_height'}
+                        Last Withdraw Block
+                      {:else if key === 'units'}
+                        Liquidity Units
+                      {:else if key === 'pending_rune'}
+                        Pending RUNE
+                      {:else if key === 'pending_asset'}
+                        Pending Asset
+                      {:else if key === 'luvi_deposit_value'}
+                        LUVI Deposit Value
+                      {:else if key === 'luvi_redeem_value'}
+                        LUVI Redeem Value
+                      {:else if key === 'luvi_growth_pct'}
+                        LUVI Growth %
+                      {/if}
+                    </div>
+                    <div class="info-value">
+                      {#if key === 'last_add_height' || key === 'last_withdraw_height'}
+                        <a href={getRunescanUrl(value)} target="_blank" rel="noopener noreferrer">{value}</a>
+                      {:else if key === 'luvi_growth_pct'}
+                        {(Number(value) * 100).toFixed(2)}%
+                      {:else}
+                        {value}
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
+              {/each}
+            {/if}
+
+            <!-- Show More button -->
+            <button class="show-more-button" on:click={toggleShowMore}>
+              {showMore ? 'Show Less' : 'Show More'}
+            </button>
+          </div>
+        </div>
+      {:else}
+        <p>No data available for this LP.</p>
+      {/if}
+    </div>
+  </div>
+{:else}
+  <p>Please select a pool and enter an address to view LP details.</p>
+{/if}
+
+<style>
+  .lp-detail {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+    font-family: 'Exo', sans-serif;
+  }
+
+  .container {
+    background-color: #1a1a1a;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+  }
+
+  h2 {
+    text-align: center;
+    margin: 0;
+    padding: 20px;
+    background-color: #2c2c2c;
+    color: #4A90E2;
+    font-size: 22px;
+    font-weight: 600;
+  }
+
+  .total-value {
+    text-align: center;
+    padding: 20px;
+    margin: 20px;
+    background-color: #2c2c2c;
+    border-radius: 8px;
+  }
+
+  .total-label {
+    display: block;
+    color: #a9a9a9;
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+
+  .total-amount {
+    font-size: 28px;
+    font-weight: bold;
+    color: white;
+  }
+
+  .stats-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    padding: 20px;
+  }
+
+  .stat-box {
+    background-color: #2c2c2c;
+    border-radius: 8px;
+    padding: 15px;
+    text-align: center;
+  }
+
+  .stat-label {
+    display: block;
+    color: #a9a9a9;
+    font-size: 14px;
+    margin-bottom: 8px;
+  }
+
+  .stat-value {
+    font-size: 20px;
+    font-weight: bold;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .position-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    padding: 20px;
+  }
+
+  .position-card {
+    background-color: #2c2c2c;
+    border-radius: 8px;
+    padding: 20px;
+  }
+
+  .position-card h3 {
+    margin: 0 0 15px 0;
+    color: #4A90E2;
+    font-size: 18px;
+  }
+
+  .amount-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .amount-row:last-child {
+    border-bottom: none;
+  }
+
+  .label {
+    color: #a9a9a9;
+    font-size: 14px;
+  }
+
+  .amount {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: white;
+    font-weight: 500;
+  }
+
+  .asset-icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .usd-value {
+    color: #a9a9a9;
+    font-size: 14px;
+  }
+
+  .info-card {
+    margin: 20px;
+    background-color: #2c2c2c;
+    border-radius: 8px;
+    padding: 20px;
+  }
+
+  .info-card h3 {
+    margin: 0 0 15px 0;
+    color: #4A90E2;
+    font-size: 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 10px;
+  }
+
+  .info-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .info-row {
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    background-color: rgba(255, 255, 255, 0.03);
+    border-radius: 4px;
+    gap: 4px;
+  }
+
+  .info-row:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+
+  .info-label {
+    color: #a9a9a9;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .info-value {
+    color: white;
+    font-family: monospace;
+    font-size: 14px;
+    word-break: break-all;
+  }
+
+  .info-value .address {
+    color: #4A90E2;
+  }
+
+  .info-value a {
+    color: #4A90E2;
+    text-decoration: none;
+  }
+
+  .info-value a:hover {
+    text-decoration: underline;
+  }
+
+  @media (min-width: 768px) {
+    .info-row {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .info-label {
+      min-width: 150px;
+      font-size: 13px;
+    }
+
+    .info-value {
+      text-align: right;
+      flex: 1;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .lp-detail {
+      padding: 10px;
+    }
+
+    .stats-container,
+    .position-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .show-more-button {
+    margin-top: 10px;
+    background-color: transparent;
+    border: 1px solid #4A90E2;
+    color: #4A90E2;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    width: 100%;
+    font-size: 14px;
+  }
+
+  .show-more-button:hover {
+    background-color: #4A90E2;
+    color: white;
+  }
+
+  .logo-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    height: 32px;
+  }
+
+  .logo-container.small {
+    height: 24px;
+    width: 24px;
+  }
+
+  .asset-icon {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    position: relative;
+    z-index: 1;
+  }
+
+  .logo-container.small .asset-icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .chain-logo-container {
+    position: absolute;
+    bottom: 0;
+    right: -4px;
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .logo-container.small .chain-logo-container {
+    width: 12px;
+    height: 12px;
+    right: -2px;
+    bottom: -2px;
+  }
+
+  .chain-icon {
+    width: 16px;
+    height: 16px;
+    object-fit: contain;
+    border: none;
+    pointer-events: none;
+  }
+
+  .logo-container.small .chain-icon {
+    width: 12px;
+    height: 12px;
+  }
+
+  .header-container {
+    position: relative;
+    padding: 20px;
+    background-color: #2c2c2c;
+    text-align: center;
+  }
+
+  .title-container {
+    margin: 0 40px;  /* Make space for the button */
+  }
+
+  .header-container h2 {
+    padding: 0;
+    background-color: transparent;
+    margin: 0;
+  }
+
+  .copy-url-button {
+    position: absolute;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    color: #4A90E2;
+    border: none;
+    padding: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: color 0.3s ease;
+  }
+
+  .copy-url-button:hover {
+    color: #357abd;
+  }
+
+  @media (max-width: 768px) {
+    .header-container {
+      padding: 20px 10px;
+    }
+
+    .title-container {
+      margin: 0 30px;
+    }
+
+    .copy-url-button {
+      right: 10px;
+    }
+  }
+</style>

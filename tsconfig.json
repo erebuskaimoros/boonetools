@@ -1,0 +1,12 @@
+{
+  "extends": "./jsconfig.json",
+  "compilerOptions": {
+    "verbatimModuleSyntax": true
+  },
+  "include": [
+    "src/**/*.d.ts",
+    "src/**/*.ts",
+    "src/**/*.js",
+    "src/**/*.svelte"
+  ]
+}

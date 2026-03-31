@@ -1,0 +1,24 @@
+[Unit]
+Description=Rapid Swap WebSocket Listener
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/var/www/rapid-swap-listener
+ExecStart=/usr/bin/node scripts/rapid-swap-listener.mjs
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+# Load secrets from env file
+EnvironmentFile=/var/www/rapid-swap-listener/.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=rapid-swap-listener
+
+[Install]
+WantedBy=multi-user.target

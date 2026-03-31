@@ -1,0 +1,379 @@
+/**
+ * Utils index - re-exports all utility functions
+ *
+ * Centralized exports for all RUNE Tools utility modules.
+ * Import from here for cleaner imports throughout the application.
+ *
+ * @module utils
+ *
+ * @example
+ * // Import multiple utilities
+ * import {
+ *   formatNumber,
+ *   formatUSD,
+ *   formatCountdown,
+ *   fromBaseUnit,
+ *   blocksToSeconds,
+ *   getWalletBalances,
+ *   getLPPosition,
+ *   calculateAPY
+ * } from '$lib/utils';
+ *
+ * @example
+ * // Import specific module for documentation
+ * import * as walletUtils from '$lib/utils/wallet';
+ */
+
+// ============================================
+// Formatting utilities
+// ============================================
+export {
+  // Number formatting
+  formatNumber,
+  formatUSD,
+  formatUSDWithDecimals,
+  formatPercentage,
+  formatPercentageNoSign,
+  simplifyNumber,
+  formatPrice,
+  formatCryptoAmount,
+
+  // Basis points formatting
+  basisPointsToPercent,
+  formatBasisPoints,
+  formatMimirBasisPoints,
+
+  // Time/date formatting
+  formatTime,
+  formatDate,
+  formatDateTime,
+
+  // Address formatting
+  shortenAddress,
+  getAddressSuffix,
+
+  // RUNE-specific formatting
+  formatRuneAmount,
+  formatThorAmount,
+
+  // Countdown/duration formatting
+  formatCountdown,
+  formatDuration,
+  formatBlocksCountdown,
+
+  // Compact formatting
+  formatUSDCompact,
+  formatRatio
+} from './formatting.js';
+
+// ============================================
+// Blockchain utilities
+// ============================================
+export {
+  // Constants
+  THOR_BASE,
+  BLOCK_TIME_SECONDS,
+  TIME_CONSTANTS,
+  CHAINS,
+
+  // Unit conversion
+  fromBaseUnit,
+  toBaseUnit,
+
+  // Asset parsing
+  parseAsset,
+  getAssetShortName,
+  getChainFromAsset,
+
+  // Asset validation
+  isNativeAsset,
+  isStablecoin,
+  isValidAssetFormat,
+
+  // Address utilities
+  normalizeAddress,
+  isEVMChain,
+
+  // Asset normalization
+  normalizeAsset,
+  getAssetType,
+
+  // Block time utilities
+  blocksToSeconds,
+  secondsToBlocks,
+  blocksToTimeBreakdown,
+  estimateBlockAtTime,
+  estimateTimeAtBlock
+} from './blockchain.js';
+
+// ============================================
+// Wallet utilities
+// ============================================
+export {
+  // Constants
+  DENOM_TO_ASSET,
+
+  // Denom conversion
+  denomToAsset,
+  assetToDenom,
+
+  // Balance fetching
+  getWalletBalances,
+  getTokenBalance,
+  getRuneBalance,
+  getTcyBalance,
+  getMultipleWalletBalances,
+
+  // Value calculations
+  calculateWalletValue,
+  filterDustBalances,
+  getWalletSummary
+} from './wallet.js';
+
+// ============================================
+// Liquidity Provider utilities
+// ============================================
+export {
+  // Position fetching
+  getLPPosition,
+  getAllLPPositions,
+  getAllLPPositionsParallel,
+
+  // Value calculations
+  calculateLPValue,
+  calculateTotalLPValue,
+
+  // Pool utilities
+  getAvailablePools,
+  getAllPools,
+  getPoolsWithStatus,
+
+  // Position filtering/sorting
+  filterPositionsByValue,
+  sortPositionsByValue,
+
+  // Pool price utilities
+  getPoolAssetPriceInRune,
+  getPoolAssetPriceUSD,
+  convertRuneToAsset,
+  convertAssetToRune,
+  getRuneValueInBTC,
+  buildPoolPriceMap,
+  getPoolDepth,
+  getPoolDepthUSD,
+
+  // Trade asset utilities
+  getTradeUnits,
+  getTradeAssetDepthMap,
+  getTradeAssetDepth,
+  getPoolsWithTradeData,
+  calculateTradePoolRatio
+} from './liquidity.js';
+
+// ============================================
+// Node & Bond utilities
+// ============================================
+export {
+  // Constants
+  NODE_STATUS,
+  LEAVE_STATUS,
+
+  // Node/bond fetching
+  getNodes,
+  getBondsForAddresses,
+  getBondsForAddress,
+  getNodeBondInfo,
+  fetchNodesWithMetadata,
+
+  // Value calculations
+  calculateTotalBondValue,
+  calculateTotalBondAmount,
+  getBondSummary,
+
+  // Node filtering/grouping
+  filterNodesByStatus,
+  getActiveNodes,
+  getActiveNodeAddresses,
+  groupNodesByOperator,
+  calculateConsensusThreshold,
+
+  // Bond filtering/sorting
+  filterBondsByStatus,
+  sortBondsByAmount,
+  groupBondsByNode,
+
+  // Network statistics
+  getNetworkBondStats,
+
+  // Churn utilities
+  calculateNextChurnTime,
+  getSecondsUntilChurn,
+  getChurnInfo,
+  getTimeSinceChurn,
+  getRecentChurns,
+  getLastChurn,
+
+  // Churn prediction utilities
+  getLeaveStatus,
+  calculateNodesLeaving,
+  isLikelyToJoin,
+
+  // Chain observation utilities
+  getMaxChainHeights,
+  getUniqueChains,
+  getNodeChainHeight,
+  formatChainHeightDiff,
+
+  // Node search utilities
+  searchNodes
+} from './nodes.js';
+
+// ============================================
+// Financial calculation utilities
+// ============================================
+export {
+  // APR/APY calculations
+  calculateAPR,
+  calculateAPY,
+  calculateAPRFromDays,
+  calculateYields,
+  calculateWeightedAPY,
+
+  // Reward projections
+  projectRewards,
+  calculateRewardsPer,
+
+  // Pool/price ratio calculations
+  calculatePoolPrice,
+  calculateAssetPriceUSD,
+  runeToAsset,
+  assetToRune,
+
+  // Percentage calculations
+  percentageChange,
+  percentageOf
+} from './calculations.js';
+
+// ============================================
+// Network infrastructure utilities
+// ============================================
+export {
+  // Constants
+  CHAIN_EXPLORERS,
+  CHAIN_NATIVE_TOKENS,
+  CHAIN_ICONS,
+
+  // Inbound address fetching
+  getInboundAddresses,
+  getInboundAddress,
+  getVaultAddress,
+  getRouterAddress,
+  getGasRate,
+  isChainHalted,
+  getActiveChains,
+  clearInboundCache,
+
+  // Outbound fee fetching
+  getOutboundFees,
+  getOutboundFee,
+  getOutboundFeeAmount,
+  getOutboundFeeUSD,
+  getChainOutboundFee,
+  getOutboundFeesByChain,
+
+  // Fee calculations
+  calculateFeeSurplus,
+  calculateTotalFeeSurplus,
+  getDynamicMultiplier,
+  getOutboundFeeDetails,
+  getAllOutboundFeeDetails,
+
+  // Fee formatting
+  formatOutboundFee,
+  formatOutboundFeeWithUSD,
+
+  // Explorer URL helpers
+  getExplorerUrl,
+  getExplorerTxUrl,
+
+  // Chain utilities
+  getNativeToken,
+  getChainIcon,
+  chainHasRouter,
+
+  // Vault utilities
+  VAULT_STATUS,
+  getAsgardVaults,
+  sortVaultsByStatus,
+  formatVaultName,
+  calculateVaultBond,
+  calculateVaultAssetValue,
+  getVaultSummary,
+  getVaultBalanceMap,
+  getVaultAssetBalance,
+  calculateVaultSurplus,
+
+  // Block height utilities
+  getCurrentBlock,
+
+  // RUNE price utilities
+  getRunePrice,
+
+  // Swapper clout utilities
+  getSwapperClout,
+  calculateAvailableClout,
+  calculateSpentClout,
+  formatCloutValue
+} from './network.js';
+
+// ============================================
+// TCY (THORChain Yield) utilities
+// ============================================
+export {
+  // Constants
+  TCY_TOTAL_SUPPLY,
+  TCY_DISTRIBUTION_INTERVAL,
+  TCY_ASSET,
+  TCY_MIMIR_KEYS,
+  TCY_CONSTANT_KEYS,
+
+  // Price fetching (getRunePrice is now in network.js)
+  getTCYPrice,
+  getPrices,
+
+  // Pool data
+  getTCYPool,
+  getTCYLiquidity,
+
+  // Staker data
+  getTCYStakers,
+  getTCYStaker,
+  getRandomTCYStaker,
+  getTotalStakedTCY,
+
+  // Mimir & Constants
+  getTCYMimir,
+  getTCYConstants,
+  checkTCYHalts,
+
+  // Distribution data
+  getTCYDistributionHistory,
+  getTCYStakeModuleBalance,
+
+  // Claims data
+  getTCYClaimers,
+  getRemainingClaimAddresses,
+
+  // Market cap & supply
+  getTCYTotalSupply,
+  getTCYMarketCap,
+  getRuneSupplyAndMarketCap,
+
+  // Block & distribution timing (getCurrentBlock is now in network.js)
+  getNextDistributionBlock,
+  calculateUserDistributionShare,
+
+  // Historical price data
+  getHistoricalRunePrices,
+  getHistoricalPriceForTimestamp
+} from './tcy.js';

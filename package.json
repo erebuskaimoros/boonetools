@@ -1,0 +1,47 @@
+{
+  "name": "svelte",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "vite",
+    "test": "node --test tests/**/*.test.js",
+    "nodeop:deploy:backend": "bash ./scripts/nodeop-backend-deploy.sh"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "^0.0.17",
+    "@sveltejs/kit": "^2.53.3",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
+    "sirv-cli": "^2.0.2",
+    "svelte": "^5.53.5",
+    "svelte-preprocess": "^6.0.2",
+    "typescript": "^5.6.2",
+    "vite": "^7.3.1"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.99.3",
+    "@tcswap/core": "^4.1.17",
+    "@tcswap/helpers": "^4.5.16",
+    "@tcswap/plugins": "^4.2.16",
+    "@tcswap/toolboxes": "^4.3.16",
+    "@tcswap/wallets": "^4.3.17",
+    "axios": "^1.7.7",
+    "chart.js": "^4.4.4",
+    "chartjs-chart-sankey": "^0.14.0",
+    "cookie": "^0.7.0",
+    "date-fns": "^3.6.0",
+    "ethers": "^6.13.4",
+    "klinecharts": "^9.8.12",
+    "postcss": "^8.4.49",
+    "shadcn-svelte": "^0.14.0",
+    "svelte-feather-icons": "^3.3.0",
+    "svelte-routing": "^2.13.0",
+    "svelte-typewriter": "^3.2.3",
+    "tailwindcss": "^3.4.3",
+    "vite-plugin-copy": "^0.1.6",
+    "vite-plugin-node-polyfills": "^0.25.0",
+    "ws": "^8.20.0"
+  }
+}
