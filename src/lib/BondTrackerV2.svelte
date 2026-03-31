@@ -5,7 +5,7 @@
   import { midgard } from '$lib/api/midgard';
   import { formatNumber, simplifyNumber, formatCountdown, getAddressSuffix } from '$lib/utils/formatting';
   import { fromBaseUnit } from '$lib/utils/blockchain';
-  import { getChurnInfo, getLastChurn, getNodes, getLeaveStatus, LEAVE_STATUS } from '$lib/utils/nodes';
+  import { getChurnState, getNodes, getLeaveStatus, LEAVE_STATUS } from '$lib/utils/nodes';
   import { estimateCurrentChurnYields } from '$lib/bond-tracker/apy.js';
   import { calculateAPR, calculateAPY } from '$lib/utils/calculations';
   import { LoadingBar, StatusIndicator, ActionButton, Toast, RefreshIcon, BookmarkIcon, CopyIcon, CurrencySelector } from '$lib/components';
@@ -138,6 +138,40 @@
     updateCountdown();
   };
 
+  const getChurnEstimateInput = (churnState) => {
+    if (!churnState) {
+      return {
+        lastChurnTimestamp: recentChurnTimestamp,
+        churnIntervalSeconds: 0,
+        progressedBlocks: 0,
+        totalBlocks: 0,
+        secondsPerBlock: 0
+      };
+    }
+
+    const lastChurnHeight = Number(churnState.lastChurnHeight || 0);
+    const nextChurnHeight = Number(churnState.nextChurnHeight || 0);
+    const totalBlocks = Math.max(
+      0,
+      nextChurnHeight - lastChurnHeight || Number(churnState.churnIntervalBlocks || 0)
+    );
+    const currentHeight = Number(churnState.currentHeight || 0);
+    const progressedBlocks = totalBlocks > 0
+      ? Math.max(0, Math.min(totalBlocks, currentHeight - lastChurnHeight))
+      : 0;
+    const secondsPerBlock = Number(churnState.secondsPerBlock || 0);
+
+    return {
+      lastChurnTimestamp: Number(churnState.lastChurnTimestamp || 0),
+      churnIntervalSeconds: totalBlocks > 0 && secondsPerBlock > 0
+        ? totalBlocks * secondsPerBlock
+        : 0,
+      progressedBlocks,
+      totalBlocks,
+      secondsPerBlock
+    };
+  };
+
   const updateCountdown = () => {
     const now = Date.now() / 1000;
     const secondsLeft = nextChurnTime - now;
@@ -200,19 +234,17 @@
   const fetchMultiNodeData = async (nodes) => {
     try {
       // Fetch common data first
-      const [lastChurn, runePriceData, btcPoolData, allNodesData] = await Promise.all([
-        getLastChurn(),
+      const [churnState, runePriceData, btcPoolData, allNodesData] = await Promise.all([
+        getChurnState().catch(() => null),
         thornode.getNetwork(),
         thornode.getPool('BTC.BTC'),
         getNodes()
       ]);
 
       allNodes = allNodesData;
-      recentChurnTimestamp = lastChurn?.timestampSec || 0;
+      recentChurnTimestamp = churnState?.lastChurnTimestamp || 0;
       runePriceUSD = fromBaseUnit(runePriceData.rune_price_in_tor);
-      const churnInfoPromise = recentChurnTimestamp > 0
-        ? getChurnInfo(recentChurnTimestamp).catch(() => null)
-        : Promise.resolve(null);
+      const churnEstimate = getChurnEstimateInput(churnState);
 
       const balanceAsset = btcPoolData.balance_asset;
       const balanceRune = btcPoolData.balance_rune;
@@ -258,20 +290,16 @@
         };
       });
 
-      const [churnInfo, resolvedBondNodes] = await Promise.all([
-        churnInfoPromise,
-        Promise.all(nodeDataPromises)
-      ]);
+      const resolvedBondNodes = await Promise.all(nodeDataPromises);
 
-      applyChurnInfo(churnInfo);
+      applyChurnInfo(churnState);
 
       bondNodes = resolvedBondNodes.map((node) => ({
         ...node,
         apy: estimateCurrentChurnYields({
           reward: node.award,
           principal: node.bond,
-          lastChurnTimestamp: recentChurnTimestamp,
-          churnIntervalSeconds: churnInfo?.churnIntervalSeconds
+          ...churnEstimate
         }).apy
       }));
       
@@ -282,8 +310,7 @@
       aggregateAPY = estimateCurrentChurnYields({
         reward: totalAward,
         principal: totalBond,
-        lastChurnTimestamp: recentChurnTimestamp,
-        churnIntervalSeconds: churnInfo?.churnIntervalSeconds
+        ...churnEstimate
       }).apy;
       
       // Update legacy variables for existing reactive statements
@@ -300,9 +327,9 @@
   const fetchData = async () => {
     try {
       // Parallelize independent API calls
-      const [nodeData, lastChurn, runePriceData, allNodesData] = await Promise.all([
+      const [nodeData, churnState, runePriceData, allNodesData] = await Promise.all([
         thornode.fetch(`/thorchain/node/${node_address}`),
-        getLastChurn(),
+        getChurnState().catch(() => null),
         thornode.getNetwork(),
         getNodes()
       ]);
@@ -333,16 +360,13 @@
       my_award = my_bond_ownership_percentage * current_award;
 
       // Process churn data for APY calculation
-      recentChurnTimestamp = lastChurn?.timestampSec || 0;
-      const churnInfo = recentChurnTimestamp > 0
-        ? await getChurnInfo(recentChurnTimestamp).catch(() => null)
-        : null;
-      applyChurnInfo(churnInfo);
+      recentChurnTimestamp = churnState?.lastChurnTimestamp || 0;
+      const churnEstimate = getChurnEstimateInput(churnState);
+      applyChurnInfo(churnState);
       APY = estimateCurrentChurnYields({
         reward: my_award,
         principal: my_bond,
-        lastChurnTimestamp: recentChurnTimestamp,
-        churnIntervalSeconds: churnInfo?.churnIntervalSeconds
+        ...churnEstimate
       }).apy;
 
       // Process price data

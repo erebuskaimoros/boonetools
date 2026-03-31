@@ -3,40 +3,45 @@ import assert from 'node:assert/strict';
 
 import { calculateAPR, calculateAPY } from '../src/lib/utils/calculations.js';
 import {
+  MIN_CHURN_PROGRESS_RATIO,
+  getEffectiveChurnProgress,
   getEffectiveChurnPeriodSeconds,
   estimateCurrentChurnYields
 } from '../src/lib/bond-tracker/apy.js';
 
-test('fresh churn APY uses the full churn interval instead of the first few elapsed seconds', () => {
-  const reward = 250;
+test('block-aware APY projects through the current churn once enough blocks have elapsed', () => {
+  const reward = 200;
   const principal = 10_000;
-  const lastChurnTimestamp = 1_000;
-  const churnIntervalSeconds = 86_400;
-  const now = lastChurnTimestamp + 3_600;
-
-  const oldApy = calculateAPY(calculateAPR(reward, principal, now - lastChurnTimestamp));
   const estimate = estimateCurrentChurnYields({
     reward,
     principal,
-    lastChurnTimestamp,
-    churnIntervalSeconds,
-    now
+    progressedBlocks: 20,
+    totalBlocks: 100,
+    secondsPerBlock: 6
   });
+  const expectedReward = 1_000;
+  const expectedApy = calculateAPY(calculateAPR(expectedReward, principal, 600));
 
-  assert.equal(estimate.effectivePeriodSeconds, churnIntervalSeconds);
-  assert.ok(estimate.apy < oldApy);
+  assert.equal(estimate.projectedReward, expectedReward);
+  assert.equal(estimate.effectiveProgressRatio, 0.2);
+  assert.equal(estimate.apy, expectedApy);
 });
 
-test('mature churn APY falls back to actual elapsed time once the interval has passed', () => {
+test('very fresh churn APY uses a minimum block-progress floor to avoid exploding projections', () => {
   const estimate = estimateCurrentChurnYields({
-    reward: 250,
+    reward: 10,
     principal: 10_000,
-    lastChurnTimestamp: 1_000,
-    churnIntervalSeconds: 3_600,
-    now: 1_000 + 7_200
+    progressedBlocks: 1,
+    totalBlocks: 100,
+    secondsPerBlock: 6
   });
+  const rawBlockApy = calculateAPY(calculateAPR(1_000, 10_000, 600));
+  const conservativeApy = calculateAPY(calculateAPR(10, 10_000, 600));
 
-  assert.equal(estimate.effectivePeriodSeconds, 7_200);
+  assert.equal(estimate.projectedReward, 10 / MIN_CHURN_PROGRESS_RATIO);
+  assert.equal(estimate.effectiveProgressRatio, MIN_CHURN_PROGRESS_RATIO);
+  assert.ok(estimate.apy < rawBlockApy);
+  assert.ok(estimate.apy > conservativeApy);
 });
 
 test('effective churn period falls back to elapsed time when interval metadata is missing', () => {
@@ -47,5 +52,18 @@ test('effective churn period falls back to elapsed time when interval metadata i
       now: 1_000 + 900
     }),
     900
+  );
+});
+
+test('effective churn progress reports both raw and floored progress ratios', () => {
+  assert.deepEqual(
+    getEffectiveChurnProgress({
+      progressedBlocks: 1,
+      totalBlocks: 100
+    }),
+    {
+      progressRatio: 0.01,
+      effectiveProgressRatio: MIN_CHURN_PROGRESS_RATIO
+    }
   );
 });
