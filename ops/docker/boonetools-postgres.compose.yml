@@ -1,0 +1,21 @@
+services:
+  boonetools-postgres:
+    image: postgres:17
+    container_name: ${BOONETOOLS_DB_CONTAINER:-boonetools-postgres}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${BOONETOOLS_DB_NAME:-boonetools}
+      POSTGRES_USER: ${BOONETOOLS_DB_USER:-boonetools}
+      POSTGRES_PASSWORD: ${BOONETOOLS_DB_PASSWORD:?BOONETOOLS_DB_PASSWORD is required}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - boonetools-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${BOONETOOLS_DB_USER:-boonetools} -d ${BOONETOOLS_DB_NAME:-boonetools}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  boonetools-postgres-data:

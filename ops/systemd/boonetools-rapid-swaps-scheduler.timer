@@ -1,0 +1,10 @@
+[Unit]
+Description=Run BooneTools Rapid Swaps Scheduler every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+Unit=boonetools-rapid-swaps-scheduler.service
+
+[Install]
+WantedBy=timers.target

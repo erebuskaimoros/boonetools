@@ -1,4 +1,6 @@
-# Node Operator Backend (Supabase)
+# Node Operator Backend
+
+This document describes the legacy Supabase implementation. The active backend path is now the Hetzner-hosted BooneTools backend described in [boonetools-backend-hetzner.md](./boonetools-backend-hetzner.md).
 
 ## Scope
 This backend powers only `Performance` and `Leaderboard` for the Node Operator dashboard.

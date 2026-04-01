@@ -1,0 +1,37 @@
+themememap.com {
+    reverse_proxy localhost:8080
+}
+
+www.themememap.com {
+    redir https://themememap.com{uri} permanent
+}
+
+boonewheeler.com, www.boonewheeler.com {
+    handle_path /boonetools/* {
+        redir https://boone.tools{uri} permanent
+    }
+    handle /boonetools {
+        redir https://boone.tools/ permanent
+    }
+    handle {
+        redir https://boonewheeler.com/boonetools/ permanent
+    }
+}
+
+boone.tools {
+    route {
+        handle_path /functions/v1/* {
+            reverse_proxy 127.0.0.1:8787
+        }
+
+        handle {
+            root * /var/www/boone-tools
+            try_files {path} /index.html
+            file_server
+        }
+    }
+}
+
+www.boone.tools {
+    redir https://boone.tools{uri} permanent
+}

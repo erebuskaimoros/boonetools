@@ -1,5 +1,7 @@
 # Rapid Swaps Backend
 
+This document describes the legacy Supabase implementation. The active backend path is now the Hetzner-hosted BooneTools backend described in [boonetools-backend-hetzner.md](./boonetools-backend-hetzner.md).
+
 ## Scope
 This backend records recently completed rapid swaps and exposes:
 - `rapid-swaps` (public GET)

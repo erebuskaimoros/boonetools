@@ -1,24 +1,20 @@
 [Unit]
-Description=Rapid Swap WebSocket Listener
+Description=BooneTools API Service
 After=network-online.target docker.service
 Wants=network-online.target docker.service
 
 [Service]
 Type=simple
 User=deploy
-WorkingDirectory=/opt/boonetools-backend
-ExecStart=/usr/bin/node scripts/rapid-swap-listener.mjs
+WorkingDirectory=/opt/boonetools-backend/backend
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/boonetools-backend/backend/.env
+ExecStart=/usr/bin/node src/server.js
 Restart=always
 RestartSec=5
-Environment=NODE_ENV=production
-
-# Load secrets from env file
-EnvironmentFile=/opt/boonetools-backend/backend/.env
-
-# Logging
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=rapid-swap-listener
+SyslogIdentifier=boonetools-api
 
 [Install]
 WantedBy=multi-user.target

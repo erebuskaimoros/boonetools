@@ -7,15 +7,11 @@ Wants=network-online.target docker.service
 Type=simple
 User=deploy
 WorkingDirectory=/opt/boonetools-backend
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/boonetools-backend/backend/.env
 ExecStart=/usr/bin/node scripts/rapid-swap-listener.mjs
 Restart=always
 RestartSec=5
-Environment=NODE_ENV=production
-
-# Load secrets from env file
-EnvironmentFile=/opt/boonetools-backend/backend/.env
-
-# Logging
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=rapid-swap-listener

@@ -1,5 +1,7 @@
 # Deployment Guide
 
+The static site still deploys to Hetzner as before, but the DB-backed API now has a separate Hetzner runtime. See [boonetools-backend-hetzner.md](./boonetools-backend-hetzner.md) for the API/DB/scheduler stack.
+
 RUNE-Tools is deployed as a static site on a Hetzner VPS, served by Caddy.
 
 ## Server

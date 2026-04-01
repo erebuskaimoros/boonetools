@@ -8,6 +8,9 @@
     "preview": "vite preview",
     "start": "vite",
     "test": "node --test tests/**/*.test.js",
+    "backend:test": "npm --prefix ./backend test",
+    "backend:compare": "node ./backend/src/compare-backends.js",
+    "boonetools:deploy:backend": "bash ./scripts/deploy-boonetools-backend.sh",
     "nodeop:deploy:backend": "bash ./scripts/nodeop-backend-deploy.sh"
   },
   "devDependencies": {
