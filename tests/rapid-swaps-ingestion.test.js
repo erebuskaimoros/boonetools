@@ -68,6 +68,38 @@ test('summarizeRapidSwapCanonicalScan seeds catch-up state when the head scan fa
   assert.equal(summary.stats.lagging_started_at !== null, true);
 });
 
+test('summarizeRapidSwapCanonicalScan stays lagging when the head scan stopped early with a continuation cursor', () => {
+  const syncState = {
+    last_scanned_height: 5000,
+    stats_json: {}
+  };
+
+  const plan = buildRapidSwapCanonicalScanPlan({
+    syncState,
+    overlapBlocks: 1800,
+    headMaxPages: 200
+  });
+
+  const summary = summarizeRapidSwapCanonicalScan({
+    syncState,
+    plan,
+    headScan: {
+      highestHeight: 6200,
+      lowestHeight: 5900,
+      reachedStopHeight: false,
+      stoppedEarly: true,
+      nextPageToken: 'cursor-after-known-pages',
+      scannedPages: 3,
+      scannedActions: 150
+    }
+  });
+
+  assert.equal(summary.lastScannedHeight, 5000);
+  assert.equal(summary.lagging, true);
+  assert.equal(summary.stats.catchup_next_page_token, 'cursor-after-known-pages');
+  assert.equal(summary.stats.catchup_stop_below_height, 3200);
+});
+
 test('summarizeRapidSwapCanonicalScan clears lagging after a catch-up scan reaches the floor', () => {
   const syncState = {
     last_scanned_height: 5000,

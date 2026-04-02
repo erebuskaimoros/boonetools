@@ -6,7 +6,11 @@
     fetchRapidSwapsDashboard,
     getRapidSwapsApiConfigError
   } from './rapid-swaps/api.js';
-  import { computeDailyData, toChartDateKey } from './rapid-swaps/charts.js';
+  import {
+    computeDailyData,
+    getChartDateRangeUnixSeconds,
+    toChartDateKey
+  } from './rapid-swaps/charts.js';
   import { midgard } from './api/midgard.js';
   import Chart from 'chart.js/auto';
   import { SankeyController, Flow } from 'chartjs-chart-sankey';
@@ -30,12 +34,17 @@
   let rpcConnected = false;
   let rpcLastBlock = 0;
   let pendingRefreshTimer = null;
+  let midgardHistoryRequestId = 0;
 
   // Tabs
   let activeTab = 'overview';
 
-  // Overview date range filter (defaults to last 7 days inclusive of today)
-  let overviewDateFrom = (() => { const d = new Date(); d.setDate(d.getDate() - 6); return toChartDateKey(d); })();
+  // Overview date range filter (defaults to last 7 local days inclusive of today)
+  let overviewDateFrom = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6);
+    return toChartDateKey(d);
+  })();
   let overviewDateTo = toChartDateKey(new Date());
 
   // Table filters + sorting
@@ -1047,6 +1056,45 @@
     rpcConnected = false;
   }
 
+  async function loadMidgardSwapHistory() {
+    const swaps = dashboard?.all_swaps || [];
+    if (!swaps.length || !overviewDateFrom || !overviewDateTo || overviewDateFrom > overviewDateTo) {
+      midgardSwapHistory = null;
+      return;
+    }
+
+    const range = getChartDateRangeUnixSeconds(overviewDateFrom, overviewDateTo);
+    if (!range) {
+      midgardSwapHistory = null;
+      return;
+    }
+
+    const requestId = ++midgardHistoryRequestId;
+
+    try {
+      const history = await midgard.getSwapHistory({
+        interval: 'hour',
+        from: range.from,
+        to: range.to
+      }, {
+        cache: false
+      });
+
+      if (requestId !== midgardHistoryRequestId) {
+        return;
+      }
+
+      midgardSwapHistory = history;
+    } catch (_) {
+      if (requestId !== midgardHistoryRequestId) {
+        return;
+      }
+
+      // Non-critical — market share charts just won't render
+      midgardSwapHistory = null;
+    }
+  }
+
   // --- Data loading ---
   async function loadData(showLoading = true) {
     if (showLoading) loading = true;
@@ -1060,44 +1108,11 @@
       if (overviewDateTo < today) {
         overviewDateTo = today;
       }
-      // Fetch Midgard swap history covering the same UTC-day range for adoption charts.
-      try {
-        const swaps = dashboard?.all_swaps || [];
-        if (swaps.length) {
-          const dates = swaps.map(r => new Date(r.action_date)).filter(d => Number.isFinite(d.getTime()));
-          if (dates.length) {
-            const minDate = Math.min(...dates);
-            const from = Math.floor(minDate / 1000) - 86400;
-            const to = Math.floor(Date.now() / 1000);
-            midgardSwapHistory = await midgard.getSwapHistory({ interval: 'day', from, to });
-
-            // Midgard daily history is UTC-bucketed.
-            // Fetch today's partial-day aggregate so adoption charts include the current day.
-            const now = new Date();
-            const todayStart = new Date(Date.UTC(
-              now.getUTCFullYear(),
-              now.getUTCMonth(),
-              now.getUTCDate()
-            ));
-            const todayFrom = Math.floor(todayStart.getTime() / 1000);
-            const todayData = await midgard.getSwapHistory({ from: todayFrom, to });
-            if (todayData?.meta) {
-              midgardSwapHistory.intervals = midgardSwapHistory.intervals || [];
-              midgardSwapHistory.intervals.push({
-                startTime: String(todayFrom),
-                endTime: todayData.meta.endTime,
-                totalVolumeUSD: todayData.meta.totalVolumeUSD,
-                totalCount: todayData.meta.totalCount
-              });
-            }
-          }
-        }
-      } catch (_) {
-        // Non-critical — market share charts just won't render
-      }
+      await loadMidgardSwapHistory();
     } catch (err) {
       dashboard = null;
       dashboardError = err?.message || 'Failed to load recorded rapid swaps';
+      midgardSwapHistory = null;
     }
     loading = false;
     refreshing = false;
@@ -1213,9 +1228,9 @@
       <button class="tab-btn" class:tab-active={activeTab === 'paths'} on:click={() => activeTab = 'paths'}>Swap Paths</button>
     </div>
     <div class="date-range">
-      <input type="date" class="date-input" bind:value={overviewDateFrom} />
+      <input type="date" class="date-input" bind:value={overviewDateFrom} on:change={() => loadMidgardSwapHistory()} />
       <span class="date-sep">–</span>
-      <input type="date" class="date-input" bind:value={overviewDateTo} />
+      <input type="date" class="date-input" bind:value={overviewDateTo} on:change={() => loadMidgardSwapHistory()} />
     </div>
   </div>
   </div><!-- /sticky-header -->
@@ -1226,7 +1241,7 @@
     <section class="data-section">
       <div class="section-head">
         <h3>DAILY TRENDS</h3>
-        <span class="section-sub">Grouped by UTC day to match Midgard history</span>
+        <span class="section-sub">Grouped by your local day</span>
       </div>
       {#if loading && !dashboard}
         <div class="empty">Loading...</div>
@@ -1251,7 +1266,7 @@
       <section class="data-section">
         <div class="section-head">
           <h3>ADOPTION</h3>
-          <span class="section-sub">Rapid swaps as percentage of total THORChain activity, grouped by UTC day</span>
+          <span class="section-sub">Rapid swaps as percentage of total THORChain activity, grouped by your local day</span>
         </div>
         <div class="chart-grid">
           <div class="chart-card">
@@ -1290,7 +1305,7 @@
     <section class="data-section">
       <div class="section-head">
         <h3>RAPID SWAPS</h3>
-        <span class="section-sub">Showing {filteredSwaps.length} of {allSwaps.length} swaps</span>
+        <span class="section-sub">Showing {filteredSwaps.length} of {allSwaps.length} swaps · timestamps shown in your local time</span>
       </div>
 
       <div class="table-filters">
@@ -1313,7 +1328,7 @@
           <table>
             <thead>
               <tr>
-                <th class="col-when sortable" class:sort-active={sortColumn === 'date'} on:click={() => toggleSort('date')}>WHEN{sortColumn === 'date' ? (sortAsc ? ' ▲' : ' ▼') : ''}</th>
+                <th class="col-when sortable" class:sort-active={sortColumn === 'date'} on:click={() => toggleSort('date')}>WHEN (LOCAL){sortColumn === 'date' ? (sortAsc ? ' ▲' : ' ▼') : ''}</th>
                 <th class="col-pair sortable" class:sort-active={sortColumn === 'pair'} on:click={() => toggleSort('pair')}>PAIR{sortColumn === 'pair' ? (sortAsc ? ' ▲' : ' ▼') : ''}</th>
                 <th class="col-tx">TX</th>
                 <th class="col-usd right sortable" class:sort-active={sortColumn === 'usd'} on:click={() => toggleSort('usd')}>USD{sortColumn === 'usd' ? (sortAsc ? ' ▲' : ' ▼') : ''}</th>

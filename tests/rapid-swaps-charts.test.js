@@ -27,7 +27,7 @@ function runChartsInTimeZone(timeZone, swaps, midgardHistory) {
   return JSON.parse(stdout.toString());
 }
 
-test('computeDailyData matches rapid swaps to the same UTC day as Midgard history', () => {
+test('computeDailyData groups rapid swaps and Midgard history by the same local day', () => {
   const result = runChartsInTimeZone(
     'America/New_York',
     [
@@ -49,7 +49,7 @@ test('computeDailyData matches rapid swaps to the same UTC day as Midgard histor
     }
   );
 
-  assert.deepEqual(result.labels, ['Mar 29']);
+  assert.deepEqual(result.labels, ['Mar 28']);
   assert.deepEqual(result.volumePct, [100]);
   assert.deepEqual(result.countPct, [10]);
 });
@@ -71,7 +71,7 @@ test('computeDailyData uses both swap legs for non-RUNE adoption volume', () => 
     {
       intervals: [
         {
-          startTime: '1774742400',
+          startTime: '1774785600',
           totalVolumeUSD: '19800',
           totalCount: '10'
         }
@@ -100,7 +100,7 @@ test('computeDailyData keeps RUNE-paired adoption volume single-leg', () => {
     {
       intervals: [
         {
-          startTime: '1774742400',
+          startTime: '1774785600',
           totalVolumeUSD: '10000',
           totalCount: '10'
         }

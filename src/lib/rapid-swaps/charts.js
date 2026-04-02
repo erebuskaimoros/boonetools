@@ -6,7 +6,54 @@ export function toChartDateKey(value) {
     return '';
   }
 
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+export function dateFromChartDateKey(key) {
+  const match = String(key || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day] = match;
+  const date = new Date(Number(year), Number(month) - 1, Number(day));
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+export function getChartDateRangeUnixSeconds(fromKey, toKey, options = {}) {
+  const fromDate = dateFromChartDateKey(fromKey);
+  const toDate = dateFromChartDateKey(toKey);
+  if (!fromDate || !toDate) {
+    return null;
+  }
+
+  const endExclusive = new Date(
+    toDate.getFullYear(),
+    toDate.getMonth(),
+    toDate.getDate() + 1
+  );
+  const nowSec = Math.floor(Date.now() / 1000);
+  const rangeStart = Math.floor(fromDate.getTime() / 1000);
+  const rawRangeEnd = Math.floor(endExclusive.getTime() / 1000);
+  const clampToNow = options.clampToNow !== false;
+  const rangeEnd = clampToNow ? Math.min(rawRangeEnd, nowSec) : rawRangeEnd;
+
+  return {
+    from: rangeStart,
+    to: Math.max(rangeStart, rangeEnd)
+  };
+}
+
+function formatChartLabel(key) {
+  const date = dateFromChartDateKey(key);
+  if (!date) {
+    return '';
+  }
+
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric'
+  });
 }
 
 function getComparableVolumeUsd(row) {
@@ -43,23 +90,25 @@ export function computeDailyData(swaps, midgardHistory) {
   const mgByDay = {};
   if (midgardHistory?.intervals?.length) {
     for (const interval of midgardHistory.intervals) {
-      const key = toChartDateKey(new Date((Number(interval.startTime) + 43200) * 1000));
-      mgByDay[key] = {
-        volume: (Number(interval.totalVolumeUSD) || 0) / 1e2,
-        count: Number(interval.totalCount) || 0
-      };
+      const key = toChartDateKey(new Date(Number(interval.startTime) * 1000));
+      if (!key) {
+        continue;
+      }
+
+      if (!mgByDay[key]) {
+        mgByDay[key] = {
+          volume: 0,
+          count: 0
+        };
+      }
+
+      mgByDay[key].volume += (Number(interval.totalVolumeUSD) || 0) / 1e2;
+      mgByDay[key].count += Number(interval.totalCount) || 0;
     }
   }
 
   const sortedKeys = Object.keys(byDay).sort();
-  const labels = sortedKeys.map((key) => {
-    const [year, month, day] = key.split('-').map(Number);
-    return new Date(Date.UTC(year, month - 1, day, 12)).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      timeZone: 'UTC'
-    });
-  });
+  const labels = sortedKeys.map(formatChartLabel);
 
   const volume = [];
   const cumVolume = [];

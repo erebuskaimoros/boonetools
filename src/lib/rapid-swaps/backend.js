@@ -293,7 +293,7 @@ export async function fetchRapidSwapRows(options = {}) {
 
       if (consecutiveKnownPages >= 3) {
         stoppedEarly = true;
-        continuationToken = '';
+        continuationToken = String(payload.nextPageToken || '');
         break;
       }
     }
