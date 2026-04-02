@@ -4,19 +4,59 @@
  * Midgard provides aggregated and historical data for THORChain.
  * It's better suited for analytics, historical queries, and member data.
  *
- * Endpoint: https://midgard.thorchain.network/v2
+ * Endpoints:
+ * - https://midgard.thorchain.network/v2
+ * - https://midgard.ninerealms.com/v2
  */
 
 /**
  * Midgard API base URL
  */
 export const MIDGARD_BASE = 'https://midgard.thorchain.network/v2';
+export const MIDGARD_FALLBACK_BASE = 'https://midgard.ninerealms.com/v2';
+export const MIDGARD_BASES = [MIDGARD_BASE, MIDGARD_FALLBACK_BASE];
+
+function getPathSearchParams(path) {
+  try {
+    return new URL(path, MIDGARD_BASE).searchParams;
+  } catch (_) {
+    return new URLSearchParams();
+  }
+}
+
+function shouldRetryMidgardResponse(path, data) {
+  const params = getPathSearchParams(path);
+
+  // The thorchain-network Midgard proxy has started returning empty interval buckets
+  // for history queries that should contain data. Retry those requests on the
+  // canonical Ninerealms Midgard origin before treating the response as valid.
+  if (path.startsWith('/history/') && params.has('interval')) {
+    return Array.isArray(data?.intervals) && data.intervals.length === 0 && data?.meta;
+  }
+
+  // Some proxy responses also ignore action paging/limit params. If the response
+  // exceeds a sub-50 requested limit, retry on the fallback origin.
+  const requestedLimit = Number(params.get('limit'));
+  if (
+    path.startsWith('/actions') &&
+    Number.isFinite(requestedLimit) &&
+    requestedLimit >= 0 &&
+    requestedLimit < 50 &&
+    Array.isArray(data?.actions) &&
+    data.actions.length > requestedLimit
+  ) {
+    return true;
+  }
+
+  return false;
+}
 
 /**
  * Midgard API Client class
  */
 class MidgardClient {
-  constructor() {
+  constructor({ bases = MIDGARD_BASES } = {}) {
+    this.bases = bases;
     this.cache = new Map();
     this.cacheTTL = 30000; // 30 seconds (Midgard updates less frequently)
   }
@@ -35,9 +75,16 @@ class MidgardClient {
    * @returns {Promise<any>} Response data
    */
   async fetch(path, options = {}) {
-    const { cache = true, ...fetchOptions } = options;
+    const {
+      cache = true,
+      bases = this.bases,
+      validateResponse = shouldRetryMidgardResponse,
+      ...fetchOptions
+    } = options;
 
-    const cacheKey = path;
+    const baseList = Array.isArray(bases) && bases.length ? bases : [MIDGARD_BASE];
+
+    const cacheKey = `${baseList.join('|')}::${path}`;
 
     // Check cache first
     if (cache && this.cache.has(cacheKey)) {
@@ -48,27 +95,37 @@ class MidgardClient {
       this.cache.delete(cacheKey);
     }
 
-    try {
-      const response = await fetch(`${MIDGARD_BASE}${path}`, {
-        ...fetchOptions
-      });
+    let lastError = null;
 
-      if (!response.ok) {
-        throw new Error(`Midgard error: ${response.status} ${response.statusText}`);
+    for (const base of baseList) {
+      try {
+        const response = await fetch(`${base}${path}`, {
+          ...fetchOptions
+        });
+
+        if (!response.ok) {
+          throw new Error(`Midgard error: ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        const shouldRetry = typeof validateResponse === 'function' && validateResponse(path, data);
+        if (shouldRetry) {
+          throw new Error(`Midgard returned an unusable response for ${path}`);
+        }
+
+        // Cache successful response
+        if (cache) {
+          this.cache.set(cacheKey, { data, timestamp: Date.now() });
+        }
+
+        return data;
+      } catch (error) {
+        lastError = error;
       }
-
-      const data = await response.json();
-
-      // Cache successful response
-      if (cache) {
-        this.cache.set(cacheKey, { data, timestamp: Date.now() });
-      }
-
-      return data;
-    } catch (error) {
-      console.error(`Midgard fetch failed for ${path}:`, error);
-      throw error;
     }
+
+    console.error(`Midgard fetch failed for ${path}:`, lastError);
+    throw lastError;
   }
 
   // ============================================

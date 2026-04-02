@@ -85,6 +85,9 @@
 
   // Daily aggregates for charts (includes market share when midgard data available)
   $: dailyData = computeDailyData(overviewSwaps, midgardSwapHistory);
+  $: hasAdoptionData =
+    dailyData.volumePct.some(value => Number.isFinite(value)) ||
+    dailyData.countPct.some(value => Number.isFinite(value));
   // Distribution data
   $: distributions = computeDistributions(overviewSwaps);
   // Swap path data
@@ -622,7 +625,9 @@
     });
 
     // Market Share charts
-    if (dailyData.volumePct.length) {
+    destroyChart('chart-market-share-volume');
+    destroyChart('chart-market-share-count');
+    if (hasAdoptionData) {
       const marketShareOpts = {
         ...baseChartOptions,
         scales: {
@@ -1268,16 +1273,20 @@
           <h3>ADOPTION</h3>
           <span class="section-sub">Rapid swaps as percentage of total THORChain activity, grouped by your local day</span>
         </div>
-        <div class="chart-grid">
-          <div class="chart-card">
-            <div class="chart-title">% of TC Volume</div>
-            <div class="chart-container"><canvas id="chart-market-share-volume"></canvas></div>
+        {#if hasAdoptionData}
+          <div class="chart-grid">
+            <div class="chart-card">
+              <div class="chart-title">% of TC Volume</div>
+              <div class="chart-container"><canvas id="chart-market-share-volume"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <div class="chart-title">% of TC Swap Count</div>
+              <div class="chart-container"><canvas id="chart-market-share-count"></canvas></div>
+            </div>
           </div>
-          <div class="chart-card">
-            <div class="chart-title">% of TC Swap Count</div>
-            <div class="chart-container"><canvas id="chart-market-share-count"></canvas></div>
-          </div>
-        </div>
+        {:else}
+          <div class="empty">THORChain adoption totals are temporarily unavailable.</div>
+        {/if}
       </section>
     {/if}
 
