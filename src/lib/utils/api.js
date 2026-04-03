@@ -22,7 +22,7 @@
  */
 export const THORNODE_ENDPOINTS = {
   primary: 'https://thornode.thorchain.network',
-  fallback: 'https://thornode.thorchain.liquify.com'
+  fallback: 'https://thornode.ninerealms.com'
 };
 
 /**
@@ -30,7 +30,7 @@ export const THORNODE_ENDPOINTS = {
  */
 export const MIDGARD_ENDPOINTS = {
   primary: 'https://midgard.thorchain.network',
-  fallback: 'https://midgard.liquify.com'
+  fallback: 'https://midgard.ninerealms.com'
 };
 
 // ============================================

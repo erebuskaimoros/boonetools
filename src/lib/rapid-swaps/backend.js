@@ -3,18 +3,20 @@ import {
   normalizeRapidSwapAction
 } from './model.js';
 import {
+  isPlausibleRapidSwapRowMatch,
   normalizeRapidSwapHint,
   pickBestRapidSwapRowMatch
 } from './reconciliation.js';
 
 export const MIDGARD_BASES = [
   'https://midgard.thorchain.network/v2',
+  'https://midgard.ninerealms.com/v2',
   'https://midgard.liquify.com/v2'
 ];
 
 export const THORNODE_BASES = [
   'https://thornode.thorchain.network',
-  'https://thornode.thorchain.liquify.com'
+  'https://thornode.ninerealms.com'
 ];
 
 export const ACTION_PAGE_LIMIT = 50;
@@ -33,6 +35,71 @@ function isChallengeResponse(response) {
   const contentType = (response.headers.get('content-type') || '').toLowerCase();
   const cfMitigated = response.headers.get('cf-mitigated');
   return contentType.includes('text/html') || Boolean(cfMitigated);
+}
+
+function getSearchParams(path) {
+  try {
+    return new URL(path, MIDGARD_BASES[0]).searchParams;
+  } catch (_) {
+    return new URLSearchParams();
+  }
+}
+
+function actionContainsTxId(action, txId) {
+  if (!txId) {
+    return false;
+  }
+
+  const target = String(txId).toUpperCase();
+  const inTxIds = Array.isArray(action?.in) ? action.in.map((item) => String(item?.txID || '').toUpperCase()) : [];
+  const outTxIds = Array.isArray(action?.out) ? action.out.map((item) => String(item?.txID || '').toUpperCase()) : [];
+  return [...inTxIds, ...outTxIds].includes(target);
+}
+
+function isMidgardPayloadInvalid(path, payload) {
+  const params = getSearchParams(path);
+
+  if (path.startsWith('/history/') && params.has('interval')) {
+    const intervals = Array.isArray(payload?.intervals) ? payload.intervals : null;
+    const metaStart = safeNumber(payload?.meta?.startTime, 0);
+    const metaEnd = safeNumber(payload?.meta?.endTime, 0);
+    if (intervals && intervals.length === 0 && metaEnd > metaStart) {
+      return true;
+    }
+  }
+
+  if (!path.startsWith('/actions')) {
+    return false;
+  }
+
+  const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+  const requestedLimit = Math.max(1, Math.trunc(safeNumber(params.get('limit'), ACTION_PAGE_LIMIT)));
+  if (requestedLimit < ACTION_PAGE_LIMIT && actions.length > requestedLimit) {
+    return true;
+  }
+
+  const requestedTxId = String(params.get('txid') || '');
+  if (requestedTxId && actions.length > 0 && !actions.some((action) => actionContainsTxId(action, requestedTxId))) {
+    return true;
+  }
+
+  const requestedNextPageToken = String(params.get('nextPageToken') || '');
+  if (requestedNextPageToken && String(payload?.meta?.nextPageToken || '') === requestedNextPageToken) {
+    return true;
+  }
+
+  const requestedFromHeight = Math.max(0, Math.trunc(safeNumber(params.get('fromHeight'), 0)));
+  if (requestedFromHeight > 0 && actions.length > 0) {
+    const highestReturnedHeight = actions.reduce(
+      (maxHeight, action) => Math.max(maxHeight, Math.max(0, Math.trunc(safeNumber(action?.height, 0)))),
+      0
+    );
+    if (highestReturnedHeight < requestedFromHeight) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function fetchJson(url, headers = {}) {
@@ -56,13 +123,16 @@ async function fetchJson(url, headers = {}) {
 }
 
 async function fetchWithFallback(bases, path, options = {}) {
-  const { startIndex = 0, headers = {} } = options;
+  const { startIndex = 0, headers = {}, validatePayload = null } = options;
   let lastError = null;
 
   for (let i = 0; i < bases.length; i += 1) {
     const idx = (startIndex + i) % bases.length;
     try {
       const payload = await fetchJson(`${bases[idx]}${path}`, headers);
+      if (typeof validatePayload === 'function' && validatePayload(path, payload)) {
+        throw new Error(`Invalid payload for ${bases[idx]}${path}`);
+      }
       return { payload, index: idx };
     } catch (error) {
       lastError = error;
@@ -120,7 +190,8 @@ export async function fetchMidgardActions(options = {}) {
   }
 
   const result = await fetchWithFallback(MIDGARD_BASES, `/actions?${params.toString()}`, {
-    startIndex: activeMidgardIndex
+    startIndex: activeMidgardIndex,
+    validatePayload: isMidgardPayloadInvalid
   });
   activeMidgardIndex = result.index;
 
@@ -198,7 +269,7 @@ export async function resolveRapidSwapHint(hintInput = {}, options = {}) {
 
     const addressRows = normalizeActionsToRows(addressPayload?.actions, { observedAt, priceIndex });
     const addressMatch = pickBestRapidSwapRowMatch(addressRows, hint);
-    if (addressMatch) {
+    if (isPlausibleRapidSwapRowMatch(addressMatch, hint)) {
       return { row: addressMatch, hint, resolvedBy: 'address' };
     }
   }
@@ -214,7 +285,7 @@ export async function resolveRapidSwapHint(hintInput = {}, options = {}) {
     });
 
     const recentMatch = pickBestRapidSwapRowMatch(recentScan.rows, hint);
-    if (recentMatch) {
+    if (isPlausibleRapidSwapRowMatch(recentMatch, hint)) {
       return { row: recentMatch, hint, resolvedBy: 'recent_scan' };
     }
   }

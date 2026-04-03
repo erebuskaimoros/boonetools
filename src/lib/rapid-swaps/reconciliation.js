@@ -71,22 +71,77 @@ function getRowTimestamp(row) {
   return midgardTimestampToMillis(row?.action_date);
 }
 
+function getExactTxIdMatch(row, hint) {
+  return Boolean(
+    hint.tx_id &&
+    safeString(row?.tx_id).toLowerCase() === hint.tx_id.toLowerCase()
+  );
+}
+
+function getMemoMatch(row, hint) {
+  return Boolean(hint.memo && safeString(row?.memo) === hint.memo);
+}
+
+function getSourceAddressMatch(row, hint) {
+  return Boolean(
+    hint.source_address &&
+    safeString(row?.source_address).toLowerCase() === hint.source_address.toLowerCase()
+  );
+}
+
+export function isPlausibleRapidSwapRowMatch(row, hintInput = {}) {
+  const hint = normalizeRapidSwapHint(hintInput);
+  if (!row) {
+    return false;
+  }
+
+  if (getExactTxIdMatch(row, hint)) {
+    return true;
+  }
+
+  const memoMatch = getMemoMatch(row, hint);
+  const addressMatch = getSourceAddressMatch(row, hint);
+  if (!memoMatch && !addressMatch) {
+    return false;
+  }
+
+  const rowHeight = getRowHeight(row);
+  const rowLastHeight = getRowLastHeight(row);
+  const heightDiff = hint.observed_height > 0 && rowHeight > 0
+    ? Math.abs(rowHeight - hint.observed_height)
+    : Number.POSITIVE_INFINITY;
+  const lastHeightDiff = hint.last_height > 0 && rowLastHeight > 0
+    ? Math.abs(rowLastHeight - hint.last_height)
+    : Number.POSITIVE_INFINITY;
+
+  if (lastHeightDiff <= 3 && (memoMatch || addressMatch)) {
+    return true;
+  }
+
+  if (heightDiff <= 6 && (memoMatch || addressMatch)) {
+    return true;
+  }
+
+  if (memoMatch && addressMatch && heightDiff <= 12) {
+    return true;
+  }
+
+  return false;
+}
+
 export function scoreRapidSwapRowMatch(row, hintInput = {}) {
   const hint = normalizeRapidSwapHint(hintInput);
   let score = 0;
 
-  if (hint.tx_id && safeString(row?.tx_id).toLowerCase() === hint.tx_id.toLowerCase()) {
+  if (getExactTxIdMatch(row, hint)) {
     score += 1000;
   }
 
-  if (hint.memo && safeString(row?.memo) === hint.memo) {
+  if (getMemoMatch(row, hint)) {
     score += 400;
   }
 
-  if (
-    hint.source_address &&
-    safeString(row?.source_address).toLowerCase() === hint.source_address.toLowerCase()
-  ) {
+  if (getSourceAddressMatch(row, hint)) {
     score += 250;
   }
 

@@ -1,6 +1,13 @@
 import { getClient, query } from '../db/pool.js';
 import { upsertRows } from '../db/sql.js';
 import { error, isValidThorAddress, json } from '../lib/http.js';
+import {
+  calculateBondHistoryRow,
+  hasBondHistoryValue,
+  isPoisonedBondHistoryRow,
+  isTransientHistoricalFetchError
+} from '../shared/bond-history.js';
+import { fetchMidgardActions, fetchMidgardBond } from '../shared/midgard.js';
 import { fetchStockPrices } from '../shared/stock-prices.js';
 import { fetchChurns, fetchThorchain } from '../shared/thornode.js';
 
@@ -13,13 +20,7 @@ async function fetchNetworkAtHeight(height) {
 }
 
 async function getCurrentNodeAddresses(bondAddress) {
-  const response = await fetch(`https://midgard.thorchain.network/v2/bonds/${bondAddress}`, {
-    headers: { Accept: 'application/json' }
-  });
-  if (!response.ok) {
-    throw new Error(`Midgard bonds failed (${response.status})`);
-  }
-  const data = await response.json();
+  const data = await fetchMidgardBond(bondAddress);
   return (data.nodes || [])
     .filter((node) => Number(node.bond) > 1e8)
     .map((node) => node.address);
@@ -37,16 +38,12 @@ async function getAllNodeAddresses(bondAddress) {
     let hasMore = true;
 
     while (hasMore) {
-      const response = await fetch(
-        `https://midgard.thorchain.network/v2/actions?address=${bondAddress}&type=bond&limit=${limit}&offset=${offset}`,
-        { headers: { Accept: 'application/json' } }
-      );
-
-      if (!response.ok) {
-        break;
-      }
-
-      const data = await response.json();
+      const data = await fetchMidgardActions({
+        address: bondAddress,
+        type: 'bond',
+        limit,
+        offset
+      });
       const actions = data.actions || [];
       for (const action of actions) {
         const nodeAddress = action.metadata?.bond?.nodeAddress;
@@ -120,53 +117,49 @@ async function fetchRatesJson() {
 }
 
 async function processChurn(bondAddress, nodeAddresses, churnHeight, churnTimestamp, ratesJson) {
-  const nodePromises = nodeAddresses.map((address) => (
-    fetchNodeAtHeight(address, churnHeight - 1).catch(() => null)
-  ));
-  const networkPromise = fetchNetworkAtHeight(churnHeight).catch(() => null);
+  const nodePromises = nodeAddresses.map(async (address) => {
+    try {
+      return {
+        ok: true,
+        data: await fetchNodeAtHeight(address, churnHeight - 1)
+      };
+    } catch (fetchError) {
+      return {
+        ok: false,
+        data: null,
+        error: fetchError
+      };
+    }
+  });
+  const networkPromise = fetchNetworkAtHeight(churnHeight)
+    .then((data) => ({ ok: true, data }))
+    .catch((fetchError) => ({
+      ok: false,
+      data: null,
+      error: fetchError
+    }));
 
   const [nodeResults, networkData] = await Promise.all([
     Promise.all(nodePromises),
     networkPromise
   ]);
 
-  let totalUserBond = 0;
-  let totalUserBondOnly = 0;
-
-  for (const nodeData of nodeResults) {
-    if (!nodeData) {
-      continue;
-    }
-
-    const providers = nodeData?.bond_providers?.providers || [];
-    const operatorFee = Number(nodeData?.bond_providers?.node_operator_fee || 0) / 10000;
-    const nodeCurrentAward = Number(nodeData?.current_award || 0) * (1 - operatorFee);
-
-    let userBond = 0;
-    let nodeTotalBond = 0;
-    for (const provider of providers) {
-      if (provider.bond_address === bondAddress) {
-        userBond = Number(provider.bond);
-      }
-      nodeTotalBond += Number(provider.bond);
-    }
-
-    if (userBond > 0 && nodeTotalBond > 0) {
-      totalUserBondOnly += userBond;
-      totalUserBond += userBond + (userBond / nodeTotalBond) * nodeCurrentAward;
-    }
+  const hasTransientNodeFailure = nodeResults.some((result) => (
+    !result.ok && isTransientHistoricalFetchError(result.error)
+  ));
+  const hasTransientNetworkFailure = !networkData.ok && isTransientHistoricalFetchError(networkData.error);
+  if (hasTransientNodeFailure || hasTransientNetworkFailure || !networkData.data) {
+    return null;
   }
 
-  const runePrice = Number(networkData?.rune_price_in_tor || 0) / 1e8;
-
-  return {
-    churn_height: churnHeight,
-    churn_timestamp: churnTimestamp,
-    rune_stack: Math.round(totalUserBond),
-    user_bond: Math.round(totalUserBondOnly),
-    rune_price: runePrice,
-    rates_json: ratesJson
-  };
+  return calculateBondHistoryRow({
+    bondAddress,
+    nodePayloads: nodeResults.map((result) => result?.data).filter(Boolean),
+    networkData: networkData.data,
+    churnHeight,
+    churnTimestamp,
+    ratesJson
+  });
 }
 
 export async function handleBondHistory(_request, url) {
@@ -185,10 +178,10 @@ export async function handleBondHistory(_request, url) {
     [bondAddress]
   );
 
-  const cached = cachedResult.rows || [];
+  const cached = (cachedResult.rows || []).filter((row) => !isPoisonedBondHistoryRow(row));
   const cachedHeights = new Set(
     cached
-      .filter((row) => row.user_bond != null && (!includeHistorical || Number(row.rune_stack) > 0))
+      .filter((row) => row.user_bond != null)
       .map((row) => Number(row.churn_height))
   );
 
@@ -241,12 +234,19 @@ export async function handleBondHistory(_request, url) {
 
   for (const churn of uncached) {
     const result = await processChurn(bondAddress, nodeAddresses, churn.height, churn.timestampSec, ratesJson);
+    if (!result) {
+      console.warn(
+        `[bond-history] stopping historical backfill after transient fetch failure for ${bondAddress} at churn ${churn.height}`
+      );
+      break;
+    }
+
     newRows.push({
       bond_address: bondAddress,
       ...result
     });
 
-    if (result.rune_stack === 0) {
+    if (!hasBondHistoryValue(result)) {
       consecutiveZero += 1;
       if (consecutiveZero >= zeroThreshold) {
         break;

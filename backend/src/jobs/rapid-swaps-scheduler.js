@@ -9,9 +9,11 @@ import {
   resolveRapidSwapHint,
   summarizeRapidSwapCanonicalScan
 } from '../shared/rapid-swaps.js';
+import { mergePendingCandidateBatches } from '../shared/rapid-swap-candidates.js';
 import { upsertRapidSwaps } from '../db/rapid-swaps-store.js';
 
 const SYNC_KEY = 'rapid-swaps-canonical';
+const FRESH_PENDING_CANDIDATE_RATIO = 0.75;
 
 function computeRetryDelaySeconds(attempt) {
   const normalizedAttempt = Math.max(1, Math.trunc(attempt));
@@ -80,21 +82,85 @@ async function saveSyncState(client, payload) {
   });
 }
 
-async function resolvePendingCandidates(client, priceIndex) {
+async function loadPendingCandidates(client) {
   const now = new Date().toISOString();
-  const { rows: candidates } = await client.query(
+  const batchSize = Math.max(1, config.rapidSwapsPendingCandidateBatch);
+  const freshLimit = Math.max(1, Math.ceil(batchSize * FRESH_PENDING_CANDIDATE_RATIO));
+  const agedLimit = Math.max(0, batchSize - freshLimit);
+
+  const { rows: freshRows } = await client.query(
     `select *
      from rapid_swap_candidates
      where status = $1
        and next_retry_at <= $2
-     order by first_seen_at asc
+     order by observed_height desc, last_seen_at desc, first_seen_at desc
      limit $3`,
     [
       'pending',
       now,
-      Math.max(1, config.rapidSwapsPendingCandidateBatch)
+      freshLimit
     ]
   );
+
+  const { rows: agedRows } = agedLimit > 0
+    ? await client.query(
+        `select *
+         from rapid_swap_candidates
+         where status = $1
+           and next_retry_at <= $2
+         order by first_seen_at asc
+         limit $3`,
+        [
+          'pending',
+          now,
+          agedLimit
+        ]
+      )
+    : { rows: [] };
+
+  const selected = mergePendingCandidateBatches([freshRows, agedRows], batchSize);
+  if (selected.length >= batchSize) {
+    return {
+      now,
+      candidates: selected
+    };
+  }
+
+  const excludedHintKeys = selected.map((row) => String(row.hint_key || '')).filter(Boolean);
+  const remainingLimit = Math.max(0, batchSize - selected.length);
+  if (remainingLimit === 0) {
+    return {
+      now,
+      candidates: selected
+    };
+  }
+
+  const fillerQuery = excludedHintKeys.length > 0
+    ? await client.query(
+        `select *
+         from rapid_swap_candidates
+         where status = $1
+           and next_retry_at <= $2
+           and not (hint_key = any($3::text[]))
+         order by observed_height desc, last_seen_at desc, first_seen_at asc
+         limit $4`,
+        [
+          'pending',
+          now,
+          excludedHintKeys,
+          remainingLimit
+        ]
+      )
+    : { rows: [] };
+
+  return {
+    now,
+    candidates: mergePendingCandidateBatches([selected, fillerQuery.rows], batchSize)
+  };
+}
+
+async function resolvePendingCandidates(client, priceIndex) {
+  const { now, candidates } = await loadPendingCandidates(client);
 
   const updates = [];
   const upsertRowsForRapidSwaps = [];

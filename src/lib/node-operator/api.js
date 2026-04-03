@@ -1,6 +1,7 @@
 const API_ENDPOINTS = {
   primary: 'https://thornode.thorchain.network',
-  fallback: 'https://thornode.thorchain.liquify.com',
+  archive: 'https://thornode-archive.ninerealms.com',
+  fallback: 'https://thornode.ninerealms.com',
   midgard: 'https://midgard.thorchain.network'
 };
 
@@ -53,7 +54,7 @@ async function fetchThorchain(endpoint, options = {}) {
     return await fetchFromBase(API_ENDPOINTS.primary, endpoint, mergedOptions);
   } catch (primaryError) {
     if (mergedOptions.historical) {
-      throw primaryError;
+      return fetchFromBase(API_ENDPOINTS.archive, endpoint, mergedOptions);
     }
 
     return fetchFromBase(API_ENDPOINTS.fallback, endpoint, mergedOptions);

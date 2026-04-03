@@ -27,9 +27,10 @@ export const config = Object.freeze({
       || process.env.VITE_RAPID_SWAPS_API_KEY
   ),
   thornodePrimaryUrl: optional(process.env.THORNODE_PRIMARY_URL) || 'https://thornode.thorchain.network',
-  thornodeFallbackUrl: optional(process.env.THORNODE_FALLBACK_URL) || 'https://thornode.thorchain.liquify.com',
+  thornodeArchiveUrl: optional(process.env.THORNODE_ARCHIVE_URL) || 'https://thornode-archive.ninerealms.com',
+  thornodeFallbackUrl: optional(process.env.THORNODE_FALLBACK_URL) || 'https://thornode.ninerealms.com',
   midgardUrl: optional(process.env.MIDGARD_URL) || 'https://midgard.thorchain.network/v2',
-  midgardFallbackUrl: optional(process.env.MIDGARD_FALLBACK_URL) || 'https://midgard.liquify.com/v2',
+  midgardFallbackUrl: optional(process.env.MIDGARD_FALLBACK_URL) || 'https://midgard.ninerealms.com/v2',
   rpcWsUrl: optional(process.env.RPC_WS_URL) || 'wss://rpc.thorchain.network/websocket',
   midgardDelayMs: readInt('MIDGARD_DELAY_MS', 5000),
   rapidSwapsMaxPages: readInt('RAPID_SWAPS_MAX_PAGES', 200),

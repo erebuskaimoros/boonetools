@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { fetchRapidSwapRows } from '../src/lib/rapid-swaps/backend.js';
+import {
+  ACTION_PAGE_LIMIT,
+  MIDGARD_BASES,
+  fetchMidgardActions,
+  fetchRapidSwapRows
+} from '../src/lib/rapid-swaps/backend.js';
 
 function buildRapidAction(txId, height) {
   return {
@@ -87,6 +92,105 @@ test('fetchRapidSwapRows preserves a catch-up cursor when it stops after consecu
     assert.equal(result.scannedPages, 3);
     assert.equal(result.nextPageToken, 'cursor-4');
     assert.equal(result.lowestHeight, 9979);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('fetchMidgardActions falls back when a provider ignores nextPageToken paging', async () => {
+  const originalFetch = global.fetch;
+  const [primaryBase, ...fallbackBases] = MIDGARD_BASES;
+
+  global.fetch = async (url) => {
+    if (url === `${primaryBase}/actions?type=swap&limit=5&nextPageToken=cursor-2`) {
+      return new Response(JSON.stringify({
+        actions: new Array(ACTION_PAGE_LIMIT).fill(null).map((_, index) => buildRapidAction(`primary-${index}`, 20000 - index)),
+        meta: {
+          nextPageToken: 'cursor-2'
+        }
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+
+    if (fallbackBases.some((base) => url === `${base}/actions?type=swap&limit=5&nextPageToken=cursor-2`)) {
+      return new Response(JSON.stringify({
+        actions: [buildRapidAction('fallback-tx', 19900)],
+        meta: {
+          nextPageToken: 'cursor-3'
+        }
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  try {
+    const result = await fetchMidgardActions({
+      limit: 5,
+      nextPageToken: 'cursor-2'
+    });
+
+    assert.equal(result.actions.length, 1);
+    assert.equal(result.actions[0]?.in?.[0]?.txID, 'fallback-tx');
+    assert.equal(result.nextPageToken, 'cursor-3');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('fetchMidgardActions falls back when a provider ignores txid filtering', async () => {
+  const originalFetch = global.fetch;
+  const [primaryBase, ...fallbackBases] = MIDGARD_BASES;
+
+  global.fetch = async (url) => {
+    if (url === `${primaryBase}/actions?type=swap&limit=5&txid=target-tx`) {
+      return new Response(JSON.stringify({
+        actions: [buildRapidAction('wrong-tx', 21000)],
+        meta: {
+          nextPageToken: ''
+        }
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+
+    if (fallbackBases.some((base) => url === `${base}/actions?type=swap&limit=5&txid=target-tx`)) {
+      return new Response(JSON.stringify({
+        actions: [buildRapidAction('target-tx', 20999)],
+        meta: {
+          nextPageToken: ''
+        }
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  try {
+    const result = await fetchMidgardActions({
+      txId: 'target-tx',
+      limit: 5
+    });
+
+    assert.equal(result.actions.length, 1);
+    assert.equal(result.actions[0]?.in?.[0]?.txID, 'target-tx');
   } finally {
     global.fetch = originalFetch;
   }

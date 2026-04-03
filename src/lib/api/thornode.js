@@ -3,7 +3,8 @@
  *
  * Provider Strategy:
  * - THORChain Network (thornode.thorchain.network): Official endpoint, generous rate limits
- * - Liquify (thornode.thorchain.liquify.com): Fallback, updates every 6 seconds
+ * - Nine Realms (thornode.ninerealms.com): Fallback for live requests
+ * - Nine Realms Archive (thornode-archive.ninerealms.com): Historical height-aware fallback
  */
 
 import { fromBaseUnit } from '../utils/blockchain.js';
@@ -19,10 +20,17 @@ export const PROVIDERS = {
     updateFrequency: 6000,
     priority: 1
   },
-  liquify: {
-    name: 'liquify',
-    base: 'https://thornode.thorchain.liquify.com',
-    updateFrequency: 6000,
+  archive: {
+    name: 'archive',
+    base: 'https://thornode-archive.ninerealms.com',
+    supportsBlockHeight: true,
+    updateFrequency: 30000,
+    priority: 2
+  },
+  ninerealms: {
+    name: 'ninerealms',
+    base: 'https://thornode.ninerealms.com',
+    updateFrequency: 60000,
     priority: 2
   }
 };
@@ -34,7 +42,7 @@ class ThorNodeClient {
   constructor() {
     this.failureCount = {
       thorchain: 0,
-      liquify: 0
+      ninerealms: 0
     };
     this.maxFailures = 3;
     this.cache = new Map();
@@ -47,7 +55,7 @@ class ThorNodeClient {
 
   resetFailures() {
     this.failureCount.thorchain = 0;
-    this.failureCount.liquify = 0;
+    this.failureCount.ninerealms = 0;
   }
 
   /**
@@ -80,8 +88,8 @@ class ThorNodeClient {
 
     // Determine providers to try (in order)
     const providers = blockHeight
-      ? [PROVIDERS.thorchain]
-      : [PROVIDERS.thorchain, PROVIDERS.liquify];
+      ? [PROVIDERS.thorchain, PROVIDERS.archive]
+      : [PROVIDERS.thorchain, PROVIDERS.ninerealms];
 
     let lastError = null;
 
@@ -312,5 +320,6 @@ export { ThorNodeClient };
 // Export provider endpoints for direct use if needed
 export const THORNODE_ENDPOINTS = {
   thorchain: PROVIDERS.thorchain.base,
-  liquify: PROVIDERS.liquify.base
+  ninerealms: PROVIDERS.ninerealms.base,
+  archive: PROVIDERS.archive.base
 };

@@ -384,31 +384,53 @@
 
   async function fetchBondTxHashes(address) {
     try {
-      const res = await fetch(`https://midgard.thorchain.network/v2/actions?address=${address}&type=bond&limit=50`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const actions = data.actions || [];
+      const nextBondTxMap = {};
+      const pageSize = 50;
+      let offset = 0;
 
-      // Match each bond action to the churn period it falls within
-      for (const action of actions) {
-        const actionHeight = Number(action.height);
-        const txHash = action.in?.[0]?.txID || action.out?.[0]?.txID;
-        if (!txHash) continue;
+      while (true) {
+        const data = await midgard.getActions({
+          address,
+          type: 'bond',
+          limit: pageSize,
+          offset
+        }, {
+          cache: false
+        });
+        const actions = data.actions || [];
+        if (actions.length === 0) {
+          break;
+        }
 
-        // Find the churn whose period contains this action
-        for (let i = 1; i < churnHistory.length; i++) {
-          const prevHeight = churnHistory[i - 1].height;
-          const thisHeight = churnHistory[i].height;
-          if (actionHeight > prevHeight && actionHeight <= thisHeight) {
-            if (!bondTxMap[thisHeight]) bondTxMap[thisHeight] = [];
-            bondTxMap[thisHeight].push(txHash);
-            break;
+        // Match each bond action to the churn period it falls within
+        for (const action of actions) {
+          const actionHeight = Number(action.height);
+          const txHash = action.in?.[0]?.txID || action.out?.[0]?.txID;
+          if (!txHash) continue;
+
+          // Find the churn whose period contains this action
+          for (let i = 1; i < churnHistory.length; i++) {
+            const prevHeight = churnHistory[i - 1].height;
+            const thisHeight = churnHistory[i].height;
+            if (actionHeight > prevHeight && actionHeight <= thisHeight) {
+              if (!nextBondTxMap[thisHeight]) nextBondTxMap[thisHeight] = [];
+              nextBondTxMap[thisHeight].push(txHash);
+              break;
+            }
           }
         }
+
+        if (actions.length < pageSize) {
+            break;
+        }
+
+        offset += actions.length;
       }
-      bondTxMap = bondTxMap; // trigger reactivity
+
+      bondTxMap = nextBondTxMap;
     } catch (e) {
       // Non-critical — links just won't appear
+      bondTxMap = {};
     }
   }
 

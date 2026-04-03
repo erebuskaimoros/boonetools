@@ -1,10 +1,12 @@
 import { config } from '../lib/config.js';
+import { fetchMidgardChurns } from './midgard.js';
 
 const THORNODE_PRIMARY = config.thornodePrimaryUrl;
+const THORNODE_ARCHIVE = config.thornodeArchiveUrl;
 const THORNODE_FALLBACK = config.thornodeFallbackUrl;
-const MIDGARD_CHURNS = `${config.midgardUrl.replace(/\/$/, '')}/churns`;
 
 let activeThornodeIndex = 0;
+const THORNODE_REQUEST_TIMEOUT_MS = 4000;
 
 function isChallengeResponse(response) {
   const contentType = (response.headers.get('content-type') || '').toLowerCase();
@@ -20,11 +22,20 @@ async function parseResponse(response, responseType) {
 }
 
 async function fetchFromBase(baseUrl, endpoint, responseType) {
-  const response = await fetch(`${baseUrl}${endpoint}`, {
-    headers: {
-      Accept: responseType === 'text' ? 'text/plain' : 'application/json'
-    }
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), THORNODE_REQUEST_TIMEOUT_MS);
+  let response;
+
+  try {
+    response = await fetch(`${baseUrl}${endpoint}`, {
+      headers: {
+        Accept: responseType === 'text' ? 'text/plain' : 'application/json'
+      },
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!response.ok) {
     throw new Error(`Request failed (${response.status}) for ${endpoint}`);
@@ -39,20 +50,33 @@ async function fetchFromBase(baseUrl, endpoint, responseType) {
 
 export async function fetchThorchain(endpoint, options = {}) {
   const responseType = options.responseType || 'json';
+  const bases = options.historical
+    ? [THORNODE_PRIMARY, THORNODE_ARCHIVE, THORNODE_FALLBACK]
+    : (
+        activeThornodeIndex === 1
+          ? [THORNODE_FALLBACK, THORNODE_PRIMARY]
+          : [THORNODE_PRIMARY, THORNODE_FALLBACK]
+      );
+  let lastError = null;
 
-  try {
-    const payload = await fetchFromBase(THORNODE_PRIMARY, endpoint, responseType);
-    activeThornodeIndex = 0;
-    return payload;
-  } catch (primaryError) {
-    if (options.historical) {
-      throw primaryError;
+  for (let index = 0; index < bases.length; index += 1) {
+    const base = bases[index];
+    if (!base) {
+      continue;
     }
 
-    const payload = await fetchFromBase(THORNODE_FALLBACK, endpoint, responseType);
-    activeThornodeIndex = 1;
-    return payload;
+    try {
+      const payload = await fetchFromBase(base, endpoint, responseType);
+      if (!options.historical) {
+        activeThornodeIndex = base === THORNODE_FALLBACK ? 1 : 0;
+      }
+      return payload;
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  throw lastError || new Error(`Unable to fetch ${endpoint}`);
 }
 
 export async function fetchNodes() {
@@ -88,26 +112,7 @@ export async function fetchLastblock() {
 }
 
 export async function fetchChurns() {
-  const response = await fetch(MIDGARD_CHURNS, {
-    headers: {
-      Accept: 'application/json'
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch churns (${response.status})`);
-  }
-
-  if (isChallengeResponse(response)) {
-    throw new Error('Midgard returned challenge response');
-  }
-
-  const payload = await response.json();
-  if (!Array.isArray(payload)) {
-    throw new Error('Invalid Midgard churn response');
-  }
-
-  return payload;
+  return fetchMidgardChurns();
 }
 
 export function extractThorHeight(lastblockRows) {
@@ -206,7 +211,7 @@ export function buildChainSyncRows(node, allNodes) {
 }
 
 export {
+  THORNODE_ARCHIVE,
   THORNODE_PRIMARY,
-  THORNODE_FALLBACK,
-  MIDGARD_CHURNS
+  THORNODE_FALLBACK
 };

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildRapidSwapHintKey,
+  isPlausibleRapidSwapRowMatch,
   normalizeRapidSwapHint,
   pickBestRapidSwapRowMatch,
   scoreRapidSwapRowMatch
@@ -119,4 +120,60 @@ test('scoreRapidSwapRowMatch strongly prefers exact tx id matches', () => {
   };
 
   assert.ok(scoreRapidSwapRowMatch(exact, hint) > scoreRapidSwapRowMatch(memoOnly, hint));
+});
+
+test('isPlausibleRapidSwapRowMatch rejects repeated address+memo matches that are too far from the observed height', () => {
+  const hint = {
+    tx_id: 'new-tx',
+    memo: '=:ETH~ETH:thor1dest:207065091/0/3',
+    source_address: 'thor166n4w5039meulfa3p6ydg60ve6ueac7tlt0jws',
+    observed_height: 25605634,
+    last_height: 25605636
+  };
+
+  const staleRepeat = {
+    tx_id: 'old-repeat',
+    memo: hint.memo,
+    source_address: hint.source_address,
+    action_height: 25605600,
+    raw_action: {
+      metadata: {
+        swap: {
+          streamingSwapMeta: {
+            lastHeight: '25605602'
+          }
+        }
+      }
+    }
+  };
+
+  assert.equal(isPlausibleRapidSwapRowMatch(staleRepeat, hint), false);
+});
+
+test('isPlausibleRapidSwapRowMatch accepts nearby address+memo matches when the height evidence is tight', () => {
+  const hint = {
+    tx_id: 'new-tx',
+    memo: '=:ETH~ETH:thor1dest:207065091/0/3',
+    source_address: 'thor166n4w5039meulfa3p6ydg60ve6ueac7tlt0jws',
+    observed_height: 25605634,
+    last_height: 25605636
+  };
+
+  const nearbyMatch = {
+    tx_id: 'resolved-row',
+    memo: hint.memo,
+    source_address: hint.source_address,
+    action_height: 25605631,
+    raw_action: {
+      metadata: {
+        swap: {
+          streamingSwapMeta: {
+            lastHeight: '25605635'
+          }
+        }
+      }
+    }
+  };
+
+  assert.equal(isPlausibleRapidSwapRowMatch(nearbyMatch, hint), true);
 });
