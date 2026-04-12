@@ -8,11 +8,7 @@ export function hasBondHistoryValue(row) {
 }
 
 export function isPoisonedBondHistoryRow(row) {
-  return (
-    toNumber(row?.rune_stack) === 0 &&
-    toNumber(row?.user_bond) === 0 &&
-    toNumber(row?.rune_price) === 0
-  );
+  return !hasBondHistoryValue(row);
 }
 
 export function calculateBondHistoryRow({

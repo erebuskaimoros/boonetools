@@ -49,6 +49,12 @@ test('isPoisonedBondHistoryRow flags all-zero cached rows', () => {
   }), true);
 
   assert.equal(isPoisonedBondHistoryRow({
+    rune_stack: 0,
+    user_bond: 0,
+    rune_price: 0.4
+  }), true);
+
+  assert.equal(isPoisonedBondHistoryRow({
     rune_stack: 100,
     user_bond: 90,
     rune_price: 0.4

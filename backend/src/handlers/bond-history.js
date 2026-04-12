@@ -241,19 +241,20 @@ export async function handleBondHistory(_request, url) {
       break;
     }
 
-    newRows.push({
-      bond_address: bondAddress,
-      ...result
-    });
-
     if (!hasBondHistoryValue(result)) {
       consecutiveZero += 1;
       if (consecutiveZero >= zeroThreshold) {
         break;
       }
+      continue;
     } else {
       consecutiveZero = 0;
     }
+
+    newRows.push({
+      bond_address: bondAddress,
+      ...result
+    });
   }
 
   if (newRows.length > 0) {
