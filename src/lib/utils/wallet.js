@@ -46,6 +46,13 @@ export const DENOM_TO_ASSET = {
   ruji: 'THOR.RUJI'
 };
 
+function uppercaseAssetSegments(value) {
+  return value
+    .split('.')
+    .map((part) => part.toUpperCase())
+    .join('.');
+}
+
 /**
  * Convert a THORChain denom string to a full asset identifier
  *
@@ -60,6 +67,8 @@ export const DENOM_TO_ASSET = {
  * denomToAsset('rune')  // => 'THOR.RUNE'
  * denomToAsset('tcy')   // => 'THOR.TCY'
  * denomToAsset('ruji')  // => 'THOR.RUJI'
+ * denomToAsset('thor.nami') // => 'THOR.NAMI'
+ * denomToAsset('btc-btc') // => 'THOR.BTC'
  * denomToAsset('OTHER') // => 'THOR.OTHER'
  */
 export function denomToAsset(denom) {
@@ -70,6 +79,22 @@ export function denomToAsset(denom) {
   // Check known mappings first
   if (DENOM_TO_ASSET[lowerDenom]) {
     return DENOM_TO_ASSET[lowerDenom];
+  }
+
+  // THOR-native module denoms can already include the chain prefix.
+  if (lowerDenom.startsWith('thor.')) {
+    return uppercaseAssetSegments(lowerDenom);
+  }
+
+  // Synth bank denoms use the underlying asset twice (e.g. btc-btc => THOR.BTC).
+  const dashParts = lowerDenom.split('-');
+  if (dashParts.length === 2 && dashParts[0] === dashParts[1]) {
+    return `THOR.${dashParts[1].toUpperCase()}`;
+  }
+
+  // Preserve external-chain bank denoms such as eth-usdc-0x... as CHAIN.ASSET.
+  if (dashParts.length >= 2) {
+    return `${dashParts[0].toUpperCase()}.${dashParts.slice(1).join('-').toUpperCase()}`;
   }
 
   // Default: uppercase with THOR chain prefix

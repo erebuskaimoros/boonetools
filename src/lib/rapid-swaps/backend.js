@@ -10,8 +10,7 @@ import {
 
 export const MIDGARD_BASES = [
   'https://midgard.thorchain.network/v2',
-  'https://midgard.ninerealms.com/v2',
-  'https://midgard.liquify.com/v2'
+  'https://gateway.liquify.com/chain/thorchain_midgard/v2'
 ];
 
 export const THORNODE_BASES = [
@@ -175,6 +174,8 @@ export async function fetchMidgardActions(options = {}) {
 
   if (options.nextPageToken) {
     params.set('nextPageToken', String(options.nextPageToken));
+  } else if (!options.txId && !options.address && !options.fromHeight) {
+    params.set('offset', String(Math.max(0, Math.trunc(safeNumber(options.offset, 0)))));
   }
 
   if (options.txId) {

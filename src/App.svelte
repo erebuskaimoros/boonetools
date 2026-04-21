@@ -66,6 +66,14 @@
     description: "Explore vault asset distribution across Asgard vaults"
   };
 
+  const treasuryTrackerApp = {
+    name: "Treasury Tracker",
+    component: () => import("./lib/Treasury.svelte"),
+    icon: "🏦",
+    path: "treasury",
+    description: "Track original and active treasury addresses across THORChain and external chains"
+  };
+
   const limitOrdersApp = {
     name: "Limit Orders",
     component: () => import("./lib/LimitOrders.svelte"),
@@ -78,6 +86,7 @@
     rapidSwapsApp,
     bondTrackerApp,
     vaultExplorerApp,
+    treasuryTrackerApp,
     ...(SHOW_LIMIT_ORDERS ? [limitOrdersApp] : [])
   ];
   const hiddenApps = [];

@@ -8,6 +8,12 @@ import {
   fetchRapidSwapRows
 } from '../src/lib/rapid-swaps/backend.js';
 
+test('rapid swap backend keeps official Midgard first and avoids known bad fallback URL', () => {
+  assert.equal(MIDGARD_BASES[0], 'https://midgard.thorchain.network/v2');
+  assert.equal(MIDGARD_BASES.includes('https://midgard.liquify.com/v2'), false);
+  assert.equal(MIDGARD_BASES.includes('https://gateway.liquify.com/chain/thorchain_midgard/v2'), true);
+});
+
 function buildRapidAction(txId, height) {
   return {
     status: 'success',

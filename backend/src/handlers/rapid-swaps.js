@@ -1,6 +1,14 @@
 import { query } from '../db/pool.js';
 import { json } from '../lib/http.js';
 import { toIsoString } from '../lib/utils.js';
+import {
+  filterRapidSwapsSince,
+  rankRapidSwapsByUsd
+} from '../../../src/lib/rapid-swaps/model.js';
+import {
+  getRapidSwapComparableVolumeUsd,
+  sumRapidSwapComparableVolumeUsd
+} from '../../../src/lib/rapid-swaps/volume.js';
 
 const RAPID_SWAP_COLUMNS = [
   'tx_id',
@@ -41,6 +49,7 @@ function normalizeRapidSwapRow(row) {
     output_amount_base: String(row.output_amount_base || '0'),
     input_estimated_usd: Number(row.input_estimated_usd) || 0,
     output_estimated_usd: Number(row.output_estimated_usd) || 0,
+    comparable_volume_usd: getRapidSwapComparableVolumeUsd(row),
     liquidity_fee_base: String(row.liquidity_fee_base || '0'),
     swap_slip_bps: Number(row.swap_slip_bps) || 0,
     is_limit_order: Boolean(row.is_limit_order),
@@ -58,32 +67,12 @@ export async function handleRapidSwaps() {
   const recentWindowStart = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
   const [
-    recentResult,
-    topResult,
     trackerStartedResult,
     lastRunResult,
     wsListenerResult,
-    countResult,
-    recentCountResult,
-    recentVolumeResult,
-    cumulativeVolumeResult,
     pendingCandidatesResult,
     syncStateResult
   ] = await Promise.all([
-    query(
-      `select ${RAPID_SWAP_COLUMNS}
-       from rapid_swaps
-       where action_date >= $1
-       order by action_date desc
-       limit 500`,
-      [recentWindowStart]
-    ),
-    query(
-      `select ${RAPID_SWAP_COLUMNS}
-       from rapid_swaps
-       order by input_estimated_usd desc, action_date desc
-       limit 20`
-    ),
     query('select min(observed_at) as observed_at from rapid_swaps'),
     query(
       `select finished_at, status, stats_json
@@ -101,20 +90,6 @@ export async function handleRapidSwaps() {
        limit 1`,
       ['rapid-swaps-ws-listener']
     ),
-    query('select count(*)::bigint as count from rapid_swaps'),
-    query(
-      `select count(*)::bigint as count
-       from rapid_swaps
-       where action_date >= $1`,
-      [recentWindowStart]
-    ),
-    query(
-      `select coalesce(sum(input_estimated_usd), 0) as volume
-       from rapid_swaps
-       where action_date >= $1`,
-      [recentWindowStart]
-    ),
-    query('select coalesce(sum(input_estimated_usd), 0) as volume from rapid_swaps'),
     query(
       `select count(*)::bigint as count
        from rapid_swap_candidates
@@ -155,6 +130,10 @@ export async function handleRapidSwaps() {
 
   const trackerStartedAt = trackerStartedResult.rows[0]?.observed_at || null;
   const lastRunAt = lastRunResult.rows[0]?.finished_at || null;
+  const recentRows = filterRapidSwapsSince(allRows, Date.parse(recentWindowStart));
+  const topRows = rankRapidSwapsByUsd(allRows, 20);
+  const cumulativeVolumeUsd = sumRapidSwapComparableVolumeUsd(allRows);
+  const recentVolumeUsd = sumRapidSwapComparableVolumeUsd(recentRows);
   const freshnessSeconds = lastRunAt
     ? Math.max(0, Math.floor((Date.now() - Date.parse(toIsoString(lastRunAt))) / 1000))
     : -1;
@@ -184,16 +163,16 @@ export async function handleRapidSwaps() {
         ? (Date.now() - Date.parse(toIsoString(trackerStartedAt))) >= 24 * 60 * 60 * 1000
         : false,
       recent_window_started_at: recentWindowStart,
-      total_tracked: Number(countResult.rows[0]?.count) || 0,
-      cumulative_volume_usd: Number(cumulativeVolumeResult.rows[0]?.volume) || 0,
+      total_tracked: allRows.length,
+      cumulative_volume_usd: cumulativeVolumeUsd,
       time_saved_seconds: timeSavedSeconds,
       baseline_seconds: baselineSeconds,
       actual_seconds: actualSeconds,
       pct_faster: pctFaster,
-      recent_24h_count: Number(recentCountResult.rows[0]?.count) || 0,
-      recent_24h_volume_usd: Number(recentVolumeResult.rows[0]?.volume) || 0,
-      top_20: topResult.rows.map(normalizeRapidSwapRow),
-      recent_24h: recentResult.rows.map(normalizeRapidSwapRow),
+      recent_24h_count: recentRows.length,
+      recent_24h_volume_usd: recentVolumeUsd,
+      top_20: topRows,
+      recent_24h: recentRows,
       all_swaps: allRows,
       backend: {
         last_run_at: toIsoString(lastRunAt),

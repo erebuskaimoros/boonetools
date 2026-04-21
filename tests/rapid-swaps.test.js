@@ -7,6 +7,7 @@ import {
   normalizeRapidSwapAction,
   rankRapidSwapsByUsd
 } from '../src/lib/rapid-swaps/model.js';
+import { getRapidSwapComparableVolumeUsd } from '../src/lib/rapid-swaps/volume.js';
 
 test('parseStreamingParamsFromMemo reads explicit rapid streaming params', () => {
   const details = parseStreamingParamsFromMemo('=:ETH.ETH:0xabc:2000000000/0/5');
@@ -169,18 +170,62 @@ test('normalizeRapidSwapAction extracts the recorded row shape', () => {
   assert.equal(row.streaming_count, 5);
   assert.equal(row.input_estimated_usd, 80000);
   assert.equal(row.output_estimated_usd, 4000);
+  assert.equal(row.comparable_volume_usd, 84000);
   assert.equal(row.destination_address, '0xdestination');
 });
 
-test('rankRapidSwapsByUsd sorts descending and limits the result', () => {
+test('getRapidSwapComparableVolumeUsd uses two-leg volume for non-RUNE routes', () => {
+  assert.equal(
+    getRapidSwapComparableVolumeUsd({
+      source_asset: 'BTC.BTC',
+      target_asset: 'ETH.ETH',
+      input_estimated_usd: 500,
+      output_estimated_usd: 480
+    }),
+    980
+  );
+
+  assert.equal(
+    getRapidSwapComparableVolumeUsd({
+      source_asset: 'THOR.RUNE',
+      target_asset: 'ETH.ETH',
+      input_estimated_usd: 500,
+      output_estimated_usd: 480
+    }),
+    500
+  );
+});
+
+test('rankRapidSwapsByUsd sorts by comparable route volume and limits the result', () => {
   const rows = [
-    { tx_id: 'small', input_estimated_usd: 100, action_date: '2026-03-19T20:00:00.000Z' },
-    { tx_id: 'large', input_estimated_usd: 500, action_date: '2026-03-19T19:00:00.000Z' },
-    { tx_id: 'medium', input_estimated_usd: 250, action_date: '2026-03-19T18:00:00.000Z' }
+    {
+      tx_id: 'small',
+      source_asset: 'BTC.BTC',
+      target_asset: 'ETH.ETH',
+      input_estimated_usd: 100,
+      output_estimated_usd: 90,
+      action_date: '2026-03-19T20:00:00.000Z'
+    },
+    {
+      tx_id: 'largest-route',
+      source_asset: 'BTC.BTC',
+      target_asset: 'ETH.ETH',
+      input_estimated_usd: 400,
+      output_estimated_usd: 350,
+      action_date: '2026-03-19T19:00:00.000Z'
+    },
+    {
+      tx_id: 'rune-pair',
+      source_asset: 'THOR.RUNE',
+      target_asset: 'ETH.ETH',
+      input_estimated_usd: 500,
+      output_estimated_usd: 490,
+      action_date: '2026-03-19T18:00:00.000Z'
+    }
   ];
 
   assert.deepEqual(
     rankRapidSwapsByUsd(rows, 2).map((row) => row.tx_id),
-    ['large', 'medium']
+    ['largest-route', 'rune-pair']
   );
 });

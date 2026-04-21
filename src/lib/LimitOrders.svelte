@@ -26,6 +26,7 @@
   import { copyToClipboard } from '$lib/utils/formatting.js';
   import ConnectWallet from './components/ConnectWallet.svelte';
   import ThorchainPairChart from './limit-orders/ThorchainPairChart.svelte';
+  import { thorchainChartDataProvider } from './limit-orders/chart-data.js';
   import {
     walletAccounts,
     chainAssignments,
@@ -376,6 +377,11 @@
     return ratio.toExponential(4);
   }
 
+  function formatRateInput(value) {
+    if (!value || !Number.isFinite(value)) return '';
+    return value.toPrecision(6).replace(/\.?0+$/, '');
+  }
+
   function formatHistoryValueUsd(value) {
     if (value == null || !Number.isFinite(Number(value))) return 'N/A';
 
@@ -585,7 +591,13 @@
     return side === 'buy' ? amountValue / priceValue : amountValue * priceValue;
   }
 
-  const DEFAULT_LIMIT_TTL = 14400; // ~24h
+  const TTL_PRESETS = [
+    { label: '1h', blocks: 600 },
+    { label: '6h', blocks: 3600 },
+    { label: '1d', blocks: 14400 },
+    { label: '3d', blocks: 43200 }
+  ];
+  let selectedTTL = 14400; // default 1d
 
   function getAffiliateParams() {
     return {
@@ -701,7 +713,7 @@
         amount: sellAmountAtomic.toString(),
         destination,
         target_out: targetAmountAtomic.toString(),
-        custom_ttl: String(DEFAULT_LIMIT_TTL),
+        custom_ttl: String(selectedTTL),
         ...getAffiliateParams()
       };
 
@@ -916,7 +928,7 @@
         amount: sellAmountAtomic.toString(),
         destination,
         target_out: targetAmountAtomic.toString(),
-        custom_ttl: String(DEFAULT_LIMIT_TTL),
+        custom_ttl: String(selectedTTL),
         ...getAffiliateParams()
       };
       const quote = await fetchLimitQuote(params);
@@ -1012,6 +1024,19 @@
   ));
 
   $: tradeConfig = getTradeConfig(selectedPair, orderSide);
+
+  // Auto-fill target rate with market price when pair changes
+  let lastAutoRatePair = '';
+  $: {
+    const pairKey = selectedPair ? `${selectedPair.sourceAsset}|${selectedPair.targetAsset}` : '';
+    if (pairKey && pairKey !== lastAutoRatePair && marketRatio && !placeOrderPrice) {
+      placeOrderPrice = formatRateInput(marketRatio);
+      lastAutoRatePair = pairKey;
+    } else if (pairKey !== lastAutoRatePair) {
+      lastAutoRatePair = pairKey;
+    }
+  }
+
   $: limitEstimatedReturn = calculateLimitReturn(placeOrderAmount, placeOrderPrice, orderSide);
   $: destinationChain = getDestinationChain(tradeConfig, orderType);
   $: resolvedDestinationAddress = getResolvedDestinationAddress(tradeConfig, orderType);
@@ -1052,6 +1077,24 @@
   // Market ratio for header
   $: marketRatio = selectedPair?.marketPrice ?? null;
   $: marketRatioUSD = selectedPair?.sourcePriceUsd || 0;
+
+  // 24h stats for header
+  let pairStats24h = null;
+  async function load24hStats(pair) {
+    if (!pair?.sourceAsset || !pair?.targetAsset) { pairStats24h = null; return; }
+    try {
+      const series = await thorchainChartDataProvider.getPairSeries(pair, '24H');
+      if (!series?.candles?.length) { pairStats24h = null; return; }
+      const candles = series.candles;
+      const first = candles[0];
+      const last = candles[candles.length - 1];
+      const high = Math.max(...candles.map(c => c.high));
+      const low = Math.min(...candles.map(c => c.low));
+      const change = first.open > 0 ? ((last.close - first.open) / first.open) * 100 : 0;
+      pairStats24h = { high, low, change, lastPrice: last.close };
+    } catch { pairStats24h = null; }
+  }
+  $: if (selectedPair) load24hStats(selectedPair);
   $: orderBookCenterPrice = orderBook?.midPrice ?? marketRatio ?? null;
   $: summaryTotalOrders = Number(summary?.total_limit_swaps ?? 0);
   $: summaryTotalValueUsd = fromBaseUnit(summary?.total_value_usd ?? 0);
@@ -1070,48 +1113,59 @@
 
   <!-- ===== HEADER ===== -->
   <div class="trade__header">
-    <div class="header__left">
-      <!-- Pair Selector -->
-      <button class="pair-selector__trigger" on:click={() => showPairsDrawer = true}>
-        {#if selectedPair}
-          <span class="pair-selector__name">
-            <img class="asset-icon asset-icon--inline" src={getAssetIcon(selectedPair.sourceAsset)} alt={shortAsset(selectedPair.sourceAsset)} />
-            {formatThorAssetLabel(selectedPair.sourceAsset)}
-            <span class="pairs-drawer__separator">/</span>
-            <img class="asset-icon asset-icon--inline" src={getAssetIcon(selectedPair.targetAsset)} alt={shortAsset(selectedPair.targetAsset)} />
-            {formatThorAssetLabel(selectedPair.targetAsset)}
-          </span>
-        {:else}
-          <span class="pair-selector__name pair-selector__name--dim">Select Pair</span>
-        {/if}
-        <svg class="pair-selector__caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
-      </button>
-
-      <!-- Price Display -->
-      {#if selectedPair && marketRatio}
-        <div class="header__price">
-          <span class="header__price-main">
-            <img class="asset-icon asset-icon--price" src={getAssetIcon(selectedPair.targetAsset)} alt={shortAsset(selectedPair.targetAsset)} />
-            {formatQuotedPairPrice(marketRatio, selectedPair.targetAsset)}
-          </span>
-          <span class="header__price-usd">{formatUSD(marketRatioUSD)}</span>
+    <!-- Pair Selector (THORDex-style: two asset buttons with arrow) -->
+    <button class="header__asset-btn" on:click={() => showPairsDrawer = true}>
+      {#if selectedPair}
+        <img class="header__asset-icon" src={getAssetIcon(selectedPair.sourceAsset)} alt="" />
+        <div class="header__asset-info">
+          <span class="header__asset-ticker">{shortAsset(selectedPair.sourceAsset)}</span>
+          <span class="header__asset-chain">{getChainFromAsset(selectedPair.sourceAsset)}</span>
         </div>
+      {:else}
+        <span class="header__asset-ticker">Select</span>
       {/if}
-    </div>
+      <svg class="header__asset-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
 
+    <span class="header__arrow">&#8594;</span>
+
+    <button class="header__asset-btn" on:click={() => showPairsDrawer = true}>
+      {#if selectedPair}
+        <img class="header__asset-icon" src={getAssetIcon(selectedPair.targetAsset)} alt="" />
+        <div class="header__asset-info">
+          <span class="header__asset-ticker">{shortAsset(selectedPair.targetAsset)}</span>
+          <span class="header__asset-chain">{getChainFromAsset(selectedPair.targetAsset)}</span>
+        </div>
+      {:else}
+        <span class="header__asset-ticker">Pair</span>
+      {/if}
+      <svg class="header__asset-caret" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+
+    <!-- 24h Stats -->
     <div class="header__stats">
       {#if selectedPair}
         <div class="header__stat">
-          <span class="header__stat-label">Source</span>
-          <span class="header__stat-val">{formatUSD(getAssetPriceUSD(selectedPair.sourceAsset, priceIndex) || 0)}</span>
+          <span class="header__stat-label">Price</span>
+          <span class="header__stat-val">{marketRatio ? formatRatio(marketRatio) : '-'}</span>
         </div>
         <div class="header__stat">
-          <span class="header__stat-label">Target</span>
-          <span class="header__stat-val">{formatUSD(getAssetPriceUSD(selectedPair.targetAsset, priceIndex) || 0)}</span>
+          <span class="header__stat-label">24h Change</span>
+          {#if pairStats24h}
+            <span class="header__stat-val" class:header__stat-val--positive={pairStats24h.change > 0} class:header__stat-val--negative={pairStats24h.change < 0}>
+              {pairStats24h.change > 0 ? '+' : ''}{pairStats24h.change.toFixed(2)}%
+            </span>
+          {:else}
+            <span class="header__stat-val">-</span>
+          {/if}
         </div>
         <div class="header__stat">
-          <span class="header__stat-label">Orders</span>
-          <span class="header__stat-val header__stat-val--accent">{pairOrders.length}</span>
+          <span class="header__stat-label">24h High</span>
+          <span class="header__stat-val">{pairStats24h ? formatRatio(pairStats24h.high) : '-'}</span>
+        </div>
+        <div class="header__stat">
+          <span class="header__stat-label">24h Low</span>
+          <span class="header__stat-val">{pairStats24h ? formatRatio(pairStats24h.low) : '-'}</span>
         </div>
       {:else if summary}
         <div class="header__stat">
@@ -1119,16 +1173,9 @@
           <span class="header__stat-val header__stat-val--accent">{summaryTotalOrders.toLocaleString()}</span>
         </div>
         <div class="header__stat">
-          <span class="header__stat-label">Total Value</span>
-          <span class="header__stat-val">{formatUSD(summaryTotalValueUsd)}</span>
-        </div>
-        <div class="header__stat">
           <span class="header__stat-label">Pairs</span>
           <span class="header__stat-val">{pairList.length.toLocaleString()}</span>
         </div>
-      {/if}
-      {#if lastUpdated}
-        <span class="header__updated">{timeSince(lastUpdated)}</span>
       {/if}
     </div>
 
@@ -1141,15 +1188,14 @@
         </svg>
       </button>
       <button class="header__wallet" class:connected={$isWalletConnected} on:click={() => showWalletModal = true}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"></rect><path d="M16 14h.01"></path></svg>
         {#if $isWalletConnected}
           {#if selectedTradeOwnerAccount?.address}
-            THOR {selectedTradeOwnerAccount.address.slice(0, 4)}...{selectedTradeOwnerAccount.address.slice(-4)}
+            {selectedTradeOwnerAccount.address.slice(0, 6)}...{selectedTradeOwnerAccount.address.slice(-4)}
           {:else}
-            Wallets {connectedWalletCount}
+            Connected ({connectedWalletCount})
           {/if}
         {:else}
-          Connect
+          Connect Wallet
         {/if}
       </button>
     </div>
@@ -1157,7 +1203,7 @@
 
   <!-- ===== MOBILE TAB NAV ===== -->
   <div class="mobile-tabs">
-    <button class="mobile-tab" class:active={mobilePanel === 'chart'} on:click={() => mobilePanel = 'chart'}>Pairs</button>
+    <button class="mobile-tab" class:active={mobilePanel === 'chart'} on:click={() => mobilePanel = 'chart'}>Chart</button>
     <button class="mobile-tab" class:active={mobilePanel === 'book'} on:click={() => mobilePanel = 'book'}>Book</button>
     <button class="mobile-tab" class:active={mobilePanel === 'form'} on:click={() => mobilePanel = 'form'}>Trade</button>
     <button class="mobile-tab" class:active={mobilePanel === 'orders'} on:click={() => mobilePanel = 'orders'}>Orders</button>
@@ -1327,158 +1373,124 @@
       </div>
     </div>
 
-    <!-- ===== RIGHT COLUMN (Order Form + Trade History) ===== -->
-    <div class="trade__right-column" class:mobile-hidden={mobilePanel !== 'form'}>
-      <!-- ===== ORDER FORM (Right, Top) ===== -->
-      <div class="trade__submit">
-        <div class="panel submit-panel">
-        <!-- Buy / Sell Toggle -->
-        <div class="submit__side-toggle">
-          <button class="submit__side-btn submit__side-btn--buy" class:active={orderSide === 'buy'} on:click={() => orderSide = 'buy'}>Buy</button>
-          <button class="submit__side-btn submit__side-btn--sell" class:active={orderSide === 'sell'} on:click={() => orderSide = 'sell'}>Sell</button>
+    <!-- ===== ORDER FORM (Right Column — THORDex-style) ===== -->
+    <div class="trade__submit" class:mobile-hidden={mobilePanel !== 'form'}>
+      <div class="submit-panel">
+        <!-- Limit / Market tabs -->
+        <div class="submit__tabs">
+          <button class="submit__tab" class:active={orderType === 'limit'} on:click={() => orderType = 'limit'}>Limit</button>
+          <button class="submit__tab" class:active={orderType === 'market'} on:click={() => orderType = 'market'}>Market</button>
         </div>
-
-        <!-- Market / Limit tabs -->
-        <div class="submit__type-tabs">
-          <button class="submit__type-tab" class:active={orderType === 'market'} on:click={() => orderType = 'market'}>Market</button>
-          <button class="submit__type-tab" class:active={orderType === 'limit'} on:click={() => orderType = 'limit'}>Limit</button>
-        </div>
-
-        <!-- Balance -->
-        {#if $isWalletConnected && selectedPair}
-          <div class="submit__balance">
-            <span class="submit__balance-label">Available</span>
-            <span class="submit__balance-val">--</span>
-          </div>
-        {/if}
 
         {#if selectedPair}
-          <!-- Amount Input (shared) -->
-          <div class="submit__field">
-            <label class="submit__label" for="order-amount">Amount <span class="submit__label-asset">{tradeConfig?.sellSymbol}</span></label>
-            <div class="submit__input-wrap">
-              <input id="order-amount" type="text" class="submit__input" placeholder="0.00" bind:value={placeOrderAmount} />
+          <div class="submit__scroll">
+            <!-- You sell -->
+            <div class="submit__bloc-label">You sell</div>
+            <div class="submit__bloc">
+              <div class="submit__bloc-row">
+                <input type="text" class="submit__bloc-input" placeholder="0" bind:value={placeOrderAmount} />
+                <button class="submit__asset-btn" on:click={() => showPairsDrawer = true}>
+                  <img class="submit__asset-icon" src={getAssetIcon(tradeConfig?.sellAsset || selectedPair.sourceAsset)} alt="" />
+                  {tradeConfig?.sellSymbol || shortAsset(selectedPair.sourceAsset)} &#9662;
+                </button>
+              </div>
             </div>
-          </div>
+            <div class="submit__pct-row">
+              <button class="submit__pct-btn" on:click={() => {}}>25%</button>
+              <button class="submit__pct-btn" on:click={() => {}}>50%</button>
+              <button class="submit__pct-btn" on:click={() => {}}>75%</button>
+              <button class="submit__pct-btn" on:click={() => {}}>MAX</button>
+            </div>
 
-          <div class="submit__field">
-            <label class="submit__label" for="order-destination">Destination <span class="submit__label-asset">{destinationChain || tradeConfig?.buySymbol}</span></label>
-            <div class="submit__input-wrap">
+            <!-- Swap direction arrow -->
+            <div class="submit__swap-arrow">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>
+            </div>
+
+            <!-- You receive -->
+            <div class="submit__bloc-label">You receive</div>
+            <div class="submit__bloc">
+              <div class="submit__bloc-row">
+                <input
+                  type="text"
+                  class="submit__bloc-input"
+                  placeholder="0"
+                  value={limitEstimatedReturn ? formatAmount(limitEstimatedReturn) : (marketQuote ? formatAmount(fromBaseUnit(marketQuote.expected_amount_out)) : '')}
+                  disabled
+                />
+                <button class="submit__asset-btn" on:click={() => showPairsDrawer = true}>
+                  <img class="submit__asset-icon" src={getAssetIcon(tradeConfig?.buyAsset || selectedPair.targetAsset)} alt="" />
+                  {tradeConfig?.buySymbol || shortAsset(selectedPair.targetAsset)} &#9662;
+                </button>
+              </div>
+            </div>
+
+            {#if orderType === 'limit'}
+              <!-- Target rate -->
+              <div class="submit__bloc-label">Target rate</div>
+              <div class="submit__bloc">
+                <div class="submit__bloc-row">
+                  <input type="text" class="submit__bloc-input submit__bloc-input--rate" placeholder="0" bind:value={placeOrderPrice} />
+                  <span class="submit__rate-pair">{shortAsset(selectedPair.targetAsset)}/{shortAsset(selectedPair.sourceAsset)}</span>
+                </div>
+              </div>
+
+              <!-- Time to live -->
+              <div class="submit__ttl">
+                <div class="submit__ttl-header">
+                  <span class="submit__bloc-label">Time to live</span>
+                  <span class="submit__ttl-blocks">~{selectedTTL.toLocaleString()} blocks</span>
+                </div>
+                <div class="submit__ttl-row">
+                  {#each TTL_PRESETS as preset}
+                    <button
+                      class="submit__ttl-btn"
+                      class:active={selectedTTL === preset.blocks}
+                      on:click={() => selectedTTL = preset.blocks}
+                    >{preset.label}</button>
+                  {/each}
+                </div>
+              </div>
+            {:else}
+              <!-- MARKET: Slippage -->
+              <div class="submit__bloc">
+                <div class="submit__bloc-label">Slippage Tolerance</div>
+                <div class="submit__pct-row">
+                  {#each [100, 300, 500] as bps}
+                    <button class="submit__pct-btn" class:active={marketSlippage === bps} on:click={() => marketSlippage = bps}>{bps / 100}%</button>
+                  {/each}
+                  <button class="submit__pct-btn" class:active={marketSlippage === 0} on:click={() => marketSlippage = 0}>None</button>
+                </div>
+              </div>
+
+              <!-- Quote display -->
+              {#if marketQuoteLoading}
+                <div class="submit__quote-loading"><div class="spinner tiny"></div> <span>Fetching quote...</span></div>
+              {:else if marketQuote}
+                <div class="submit__quote-result">
+                  {#if marketQuote.fees?.total}
+                    <div class="submit__quote-row"><span>Fees</span><span class="submit__quote-val">{formatAmount(fromBaseUnit(marketQuote.fees.total))}</span></div>
+                  {/if}
+                  {#if marketQuote.slippage_bps != null}
+                    <div class="submit__quote-row"><span>Impact</span><span class="submit__quote-val" class:warn={marketQuote.slippage_bps > 300}>{(marketQuote.slippage_bps / 100).toFixed(2)}%</span></div>
+                  {/if}
+                </div>
+              {:else if marketQuoteError}
+                <div class="submit__msg submit__msg--error">{marketQuoteError}</div>
+              {/if}
+            {/if}
+
+            <!-- Recipient -->
+            <div class="submit__recipient">
+              <div class="submit__bloc-label">Recipient{destinationChain ? ` (${destinationChain})` : ''}</div>
               <input
-                id="order-destination"
                 type="text"
-                class="submit__input"
-                placeholder={destinationChain ? `Enter ${destinationChain} address` : 'Destination address'}
+                class="submit__recipient-input"
+                placeholder={destinationChain ? `${destinationChain} address` : 'Destination address'}
                 bind:value={destinationAddress}
               />
             </div>
           </div>
-
-          {#if orderType === 'limit'}
-            <!-- LIMIT: Price Input -->
-            <div class="submit__field">
-              <label class="submit__label" for="order-price">Price <span class="submit__label-asset">{shortAsset(selectedPair.targetAsset)}/{shortAsset(selectedPair.sourceAsset)}</span></label>
-              <div class="submit__input-wrap">
-                <input id="order-price" type="text" class="submit__input" placeholder="0.00" bind:value={placeOrderPrice} />
-                {#if orderBook}
-                  <div class="submit__quick-prices">
-                    {#if orderSide === 'buy'}
-                      {#if orderBook.bestAsk}
-                        <button class="submit__qp" on:click={() => placeOrderPrice = String(orderBook.bestAsk)}>Ask</button>
-                      {/if}
-                      {#if orderBook.midPrice}
-                        <button class="submit__qp" on:click={() => placeOrderPrice = String(orderBook.midPrice)}>Mid</button>
-                      {/if}
-                      {#if orderBook.bestBid}
-                        <button class="submit__qp" on:click={() => placeOrderPrice = String(orderBook.bestBid)}>Bid</button>
-                      {/if}
-                    {:else}
-                      {#if orderBook.bestBid}
-                        <button class="submit__qp" on:click={() => placeOrderPrice = String(orderBook.bestBid)}>Bid</button>
-                      {/if}
-                      {#if orderBook.midPrice}
-                        <button class="submit__qp" on:click={() => placeOrderPrice = String(orderBook.midPrice)}>Mid</button>
-                      {/if}
-                      {#if orderBook.bestAsk}
-                        <button class="submit__qp" on:click={() => placeOrderPrice = String(orderBook.bestAsk)}>Ask</button>
-                      {/if}
-                    {/if}
-                  </div>
-                {/if}
-              </div>
-            </div>
-          {:else}
-            <!-- MARKET: Slippage Selector -->
-            <div class="submit__field">
-              <div class="submit__label">Slippage Tolerance</div>
-              <div class="submit__slippage">
-                {#each [100, 300, 500] as bps}
-                  <button
-                    class="submit__slip-btn"
-                    class:active={marketSlippage === bps}
-                    on:click={() => marketSlippage = bps}
-                  >{bps / 100}%</button>
-                {/each}
-                <button
-                  class="submit__slip-btn submit__slip-btn--none"
-                  class:active={marketSlippage === 0}
-                  on:click={() => marketSlippage = 0}
-                >No Limit</button>
-              </div>
-            </div>
-
-            <!-- MARKET: Quote Display -->
-            {#if marketQuoteLoading}
-              <div class="submit__quote-loading">
-                <div class="spinner tiny"></div> <span>Fetching quote...</span>
-              </div>
-            {:else if marketQuote}
-              <div class="submit__quote-result">
-                <div class="submit__quote-row">
-                  <span>Expected Output</span>
-                  <span class="submit__quote-val">{formatAmount(fromBaseUnit(marketQuote.expected_amount_out))} {tradeConfig?.buySymbol}</span>
-                </div>
-                {#if marketQuote.fees?.total}
-                  <div class="submit__quote-row">
-                    <span>Fees</span>
-                    <span class="submit__quote-val">{formatAmount(fromBaseUnit(marketQuote.fees.total))}</span>
-                  </div>
-                {/if}
-                {#if marketQuote.slippage_bps != null}
-                  <div class="submit__quote-row">
-                    <span>Price Impact</span>
-                    <span class="submit__quote-val" class:warn={marketQuote.slippage_bps > 300}>{(marketQuote.slippage_bps / 100).toFixed(2)}%</span>
-                  </div>
-                {/if}
-                {#if marketQuote.streaming_swap_seconds}
-                  <div class="submit__quote-row">
-                    <span>Est. Time</span>
-                    <span class="submit__quote-val">{Math.round(marketQuote.streaming_swap_seconds / 60)}m</span>
-                  </div>
-                {/if}
-              </div>
-            {:else if marketQuoteError}
-              <div class="submit__msg submit__msg--error">{marketQuoteError}</div>
-            {/if}
-          {/if}
-
-          <!-- Slider -->
-          <div class="submit__slider-wrap">
-            <input type="range" class="submit__slider" min="0" max="100" step="1" bind:value={amountSlider} />
-            <div class="submit__slider-marks">
-              <span>0%</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span>
-            </div>
-          </div>
-
-          <!-- Estimated Return (Limit only) -->
-          {#if orderType === 'limit' && limitEstimatedReturn}
-            <div class="submit__estimate">
-              <span class="submit__estimate-label">Est. Return</span>
-              <span class="submit__estimate-val">
-                {formatAmount(limitEstimatedReturn)} {tradeConfig?.buySymbol}
-              </span>
-            </div>
-          {/if}
 
           <!-- Error / Success -->
           {#if placeOrderError}
@@ -1488,183 +1500,88 @@
             <div class="submit__msg submit__msg--success">{placeOrderSuccess}</div>
           {/if}
 
-          <!-- Place Order Button -->
-          {#if !$isWalletConnected}
-            <button class="submit__btn submit__btn--connect" on:click={() => showWalletModal = true}>
-              Connect Wallet
-            </button>
-          {:else if submitAssignmentIssue}
-            <div class="submit__msg submit__msg--error">{submitAssignmentIssue}</div>
-            <button class="submit__btn submit__btn--connect" on:click={() => showWalletModal = true}>
-              Assign Wallets
-            </button>
-          {:else}
-            <button
-              class="submit__btn"
-              class:submit__btn--buy={orderSide === 'buy'}
-              class:submit__btn--sell={orderSide === 'sell'}
-              on:click={orderType === 'market' ? handlePlaceMarketOrder : handlePlaceOrder}
-              disabled={placingOrder || !resolvedDestinationAddress || !placeOrderAmount || (orderType === 'limit' && !placeOrderPrice) || (orderType === 'market' && !marketQuote)}
-            >
-              {#if placingOrder}
-                <div class="spinner tiny"></div> Placing...
-              {:else}
-                {orderType === 'market'
-                  ? `${orderSide === 'buy' ? 'Buy' : 'Sell'} ${tradeConfig?.baseSymbol || ''}`
-                  : `Place ${orderSide === 'buy' ? 'Buy' : 'Sell'} Limit Order`}
-              {/if}
-            </button>
-          {/if}
-
-          <!-- Memoless Button -->
-          {#if isMemolessAvailable && !$isWalletConnected}
-            <button
-              class="submit__btn submit__btn--memoless"
-              on:click={handleMemolessOrder}
-              disabled={creatingMemoless || !resolvedDestinationAddress || !placeOrderPrice || !placeOrderAmount}
-            >
-              {#if creatingMemoless}
-                <div class="spinner tiny"></div> Creating Channel...
-              {:else}
-                Place via Memoless
-              {/if}
-            </button>
-          {/if}
-
-          <!-- Memoless Channel Display -->
-          {#if memolessChannel}
-            <div class="submit__memoless" transition:fly={{ y: 10, duration: 150 }}>
-              <div class="submit__memoless-title">Deposit Channel</div>
-              <p class="submit__memoless-desc">Send exactly the amount below to the vault address.</p>
-
-              {#if memolessChannel.qrCodeData}
-                <div class="submit__memoless-qr">
-                  <img src={memolessChannel.qrCodeData} alt="QR" />
-                </div>
-              {/if}
-
-              <div class="submit__memoless-row">
-                <span>Amount</span>
-                <button class="submit__memoless-val" on:click={() => handleCopy(memolessChannel.value, 'amount')}>
-                  {memolessChannel.value} {tradeConfig?.sellSymbol}
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                </button>
-              </div>
-              <div class="submit__memoless-row">
-                <span>Vault</span>
-                <button class="submit__memoless-val" on:click={() => handleCopy(memolessChannel.address, 'vault address')}>
-                  {shortenAddress(memolessChannel.address)}
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                </button>
-              </div>
-              {#if memolessChannel.expiration}
-                <div class="submit__memoless-row">
-                  <span>Expires</span>
-                  <span class="submit__memoless-val">{new Date(memolessChannel.expiration).toLocaleTimeString()}</span>
-                </div>
-              {/if}
-            </div>
-          {/if}
-
-          {#if memolessError}
-            <div class="submit__msg submit__msg--error">{memolessError}</div>
-          {/if}
+          <!-- Action Button -->
+          <div class="submit__footer">
+            {#if !$isWalletConnected}
+              <button class="submit__action-btn" on:click={() => showWalletModal = true}>Connect Wallet</button>
+            {:else if submitAssignmentIssue}
+              <div class="submit__msg submit__msg--error">{submitAssignmentIssue}</div>
+              <button class="submit__action-btn" on:click={() => showWalletModal = true}>Assign Wallets</button>
+            {:else}
+              <button
+                class="submit__action-btn submit__action-btn--active"
+                on:click={orderType === 'market' ? handlePlaceMarketOrder : handlePlaceOrder}
+                disabled={placingOrder || !resolvedDestinationAddress || !placeOrderAmount || (orderType === 'limit' && !placeOrderPrice) || (orderType === 'market' && !marketQuote)}
+              >
+                {#if placingOrder}
+                  <div class="spinner tiny"></div> Placing...
+                {:else}
+                  {orderType === 'market' ? `Swap ${tradeConfig?.sellSymbol || ''} → ${tradeConfig?.buySymbol || ''}` : `Place Limit Order`}
+                {/if}
+              </button>
+            {/if}
+          </div>
         {:else}
           <div class="submit__no-pair">Select a trading pair to place an order</div>
         {/if}
-        </div>
-      </div>
-
-      <!-- ===== MARKET HISTORY (Right, Bottom) ===== -->
-      <div class="trade__history">
-        <div class="panel">
-          <div class="panel__head">
-            <span class="panel__title">TRADE HISTORY
-              <span class="panel__info-icon" data-tip={getTradeHistoryNote(selectedPair)}>
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-              </span>
-            </span>
-          </div>
-
-          <div class="history__cols">
-            <span>Price</span>
-            <span>Amount</span>
-            <span>Value</span>
-          </div>
-
-          <div class="history__list">
-            {#if !selectedPair}
-              <div class="history__empty">No recent trades</div>
-            {:else if loadingPairDetails}
-              <div class="history__empty"><div class="spinner small"></div></div>
-            {:else if marketHistoryRows.length === 0}
-              <div class="history__empty">No recent trades</div>
-            {:else}
-              {#each marketHistoryRows.slice(0, 30) as order}
-                <div class="history__row" class:history__row--buy={order.displaySide === 'buy'} class:history__row--sell={order.displaySide === 'sell'}>
-                  <span class="history__price">{formatRatio(order.displayPrice)}</span>
-                  <span class="history__amount">{formatHistoryAmount(order)}</span>
-                  <span class="history__value">{formatHistoryValueUsd(order.displayValueUsd)}</span>
-                </div>
-              {/each}
-            {/if}
-          </div>
-        </div>
       </div>
     </div>
 
-    <!-- ===== MY ORDERS (Left, Row 3) ===== -->
+    <!-- ===== ORDERS (Full Width, Row 3 — THORDex-style) ===== -->
     <div class="trade__orders" class:mobile-hidden={mobilePanel !== 'orders'}>
-      <div class="panel">
-        <div class="panel__head">
-          <div class="my-orders-tabs">
-            <button class="my-orders-tab" class:active={myOrdersTab === 'open'} on:click={() => myOrdersTab = 'open'}>Open</button>
-            <button class="my-orders-tab" class:active={myOrdersTab === 'filled'} on:click={() => myOrdersTab = 'filled'}>Filled</button>
-            <button class="my-orders-tab" class:active={myOrdersTab === 'history'} on:click={() => myOrdersTab = 'history'}>History</button>
+      <div class="orders__tabs">
+        <button class="orders__tab" class:active={myOrdersTab === 'open'} on:click={() => myOrdersTab = 'open'}>All Orders</button>
+        <button class="orders__tab" class:active={myOrdersTab === 'open'} on:click={() => myOrdersTab = 'open'}>Open Limits</button>
+        <button class="orders__tab" class:active={myOrdersTab === 'filled'} on:click={() => myOrdersTab = 'filled'}>Filled Limits</button>
+        <button class="orders__tab" class:active={myOrdersTab === 'history'} on:click={() => myOrdersTab = 'history'}>Market Swaps</button>
+      </div>
+
+      <div class="orders__body">
+        {#if connectedWalletAddresses.length === 0}
+          <div class="orders__empty">Connect a wallet to see your order history.</div>
+        {:else if !selectedPair}
+          <div class="orders__empty">Select a pair to view orders.</div>
+        {:else if loadingWalletActivity}
+          <div class="orders__empty"><div class="spinner small"></div></div>
+        {:else if visibleOrders.length === 0}
+          <div class="orders__empty">
+            {myOrdersTab === 'open' ? 'No open orders' : myOrdersTab === 'filled' ? 'No filled orders' : 'No market swaps'}
           </div>
-        </div>
-
-        <div class="my-orders__cols">
-          <span>Pair</span>
-          <span>Side</span>
-          <span>Price</span>
-          <span>Amount</span>
-          <span></span>
-        </div>
-
-        <div class="my-orders__list">
-          {#if !selectedPair}
-            <div class="my-orders__empty">Select a pair to view orders</div>
-          {:else if connectedWalletAddresses.length === 0}
-            <div class="my-orders__empty">Connect wallets to view your orders</div>
-          {:else if loadingWalletActivity}
-            <div class="my-orders__empty"><div class="spinner small"></div></div>
-          {:else if visibleOrders.length === 0}
-            <div class="my-orders__empty">
-              {myOrdersTab === 'open' ? 'No open orders' : myOrdersTab === 'filled' ? 'No filled orders' : 'No order history'}
-            </div>
-          {:else}
+        {:else}
+          <div class="orders__cols">
+            <span>Pair</span>
+            <span>Side</span>
+            <span>Price</span>
+            <span>Amount</span>
+            <span>Value</span>
+            <span></span>
+          </div>
+          <div class="orders__list">
             {#each visibleOrders as order}
-              <div class="my-orders__row">
-                <span class="my-orders__pair">{shortAsset(selectedPair.sourceAsset)}/{shortAsset(selectedPair.targetAsset)}</span>
-                <span class="my-orders__side" class:my-orders__side--buy={order.displaySide === 'buy'} class:my-orders__side--sell={order.displaySide === 'sell'}>
-                  {order.displaySide === 'buy' ? 'Buy' : 'Sell'}
+              <div class="orders__row">
+                <span class="orders__cell">
+                  <img class="orders__pair-icon" src={getAssetIcon(selectedPair.sourceAsset)} alt="" />
+                  <img class="orders__pair-icon orders__pair-icon--overlap" src={getAssetIcon(selectedPair.targetAsset)} alt="" />
+                  {shortAsset(selectedPair.sourceAsset)}/{shortAsset(selectedPair.targetAsset)}
                 </span>
-                <span class="my-orders__price">{formatRatio(order.displayPrice)}</span>
-                <span class="my-orders__amount">{formatAmount(order.displayAmount)}</span>
-                <span class="my-orders__actions">
+                <span class="orders__cell">
+                  <span class="orders__side-tag" class:orders__side-tag--buy={order.displaySide === 'buy'} class:orders__side-tag--sell={order.displaySide === 'sell'}>
+                    {order.displaySide === 'buy' ? 'Buy' : 'Sell'}
+                  </span>
+                </span>
+                <span class="orders__cell orders__cell--mono">{formatRatio(order.displayPrice)}</span>
+                <span class="orders__cell orders__cell--mono">{formatAmount(order.displayAmount)}</span>
+                <span class="orders__cell orders__cell--mono orders__cell--dim">
+                  {order.sourceAmountUSD ? formatUSD(order.sourceAmountUSD) : '-'}
+                </span>
+                <span class="orders__cell orders__cell--actions">
                   {#if order.txId}
-                    <a class="my-orders__link" href="https://thorchain.net/tx/{order.txId}" target="_blank" rel="noopener noreferrer" title="View TX">
+                    <a class="orders__link" href="https://thorchain.net/tx/{order.txId}" target="_blank" rel="noopener noreferrer" title="View TX">
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15,3 21,3 21,9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
                     </a>
                   {/if}
                   {#if myOrdersTab === 'open' && isConnectedWalletOrder(order)}
-                    <button
-                      class="my-orders__cancel"
-                      on:click={() => handleCancelOrder(order)}
-                      disabled={cancellingTxId === order.txId}
-                      title="Cancel order"
-                    >
+                    <button class="orders__cancel" on:click={() => handleCancelOrder(order)} disabled={cancellingTxId === order.txId} title="Cancel">
                       {#if cancellingTxId === order.txId}
                         <div class="spinner tiny"></div>
                       {:else}
@@ -1675,8 +1592,8 @@
                 </span>
               </div>
             {/each}
-          {/if}
-        </div>
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -1727,8 +1644,8 @@
      ========================================================= */
   .trade {
     display: grid;
-    grid-template-columns: auto 22rem 23rem;
-    grid-template-rows: 3.25rem minmax(0, 1fr) minmax(9rem, 18vh);
+    grid-template-columns: 1fr 18rem 20rem;
+    grid-template-rows: 3.5rem 1fr auto;
     gap: 1px;
     height: 100dvh;
     background: var(--border);
@@ -1739,19 +1656,19 @@
   }
 
   .trade--no-pair {
-    grid-template-columns: 1fr 22rem 23rem;
+    grid-template-columns: 1fr 18rem 20rem;
   }
 
   .trade__header   { grid-column: 1 / -1; grid-row: 1; }
   .trade__graph    { grid-column: 1; grid-row: 2; }
-  .trade__orders   { grid-column: 1; grid-row: 3; }
-  .trade__book     { grid-column: 2; grid-row: 2 / 4; }
-  .trade__right-column { grid-column: 3; grid-row: 2 / 4; }
+  .trade__book     { grid-column: 2; grid-row: 2; }
+  .trade__submit   { grid-column: 3; grid-row: 2; }
+  .trade__orders   { grid-column: 1 / -1; grid-row: 3; }
 
   /* Loading / error states span full grid */
   .trade__loading {
     grid-column: 1 / -1;
-    grid-row: 2 / 4;
+    grid-row: 2 / 3;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -1784,6 +1701,20 @@
   /* Mobile tabs - hidden on desktop */
   .mobile-tabs {
     display: none;
+  }
+
+  /* =========================================================
+     CHART CLEANUP — Hide chart overlays to match THORDex
+     ========================================================= */
+  .trade__graph :global(.pair-chart__badges) { display: none; }
+  .trade__graph :global(.pair-chart__pair) { display: none; }
+  .trade__graph :global(.pair-chart__stats) { display: none; }
+  .trade__graph :global(.pair-chart__head) {
+    padding: 0.25rem 0.5rem;
+    min-height: unset;
+  }
+  .trade__graph :global(.pair-chart__ranges) {
+    margin-left: auto;
   }
 
   /* =========================================================
@@ -1863,31 +1794,79 @@
   }
 
   /* =========================================================
-     HEADER
+     HEADER (THORDex-style)
      ========================================================= */
   .trade__header {
     display: flex;
     align-items: center;
-    background: var(--bg-surface);
-    border-bottom: 1px solid var(--border);
-    padding: 0 0.75rem;
-    gap: 1rem;
+    background: rgba(20, 20, 25, 0.8);
+    padding: 0 1rem;
+    gap: 0.75rem;
     z-index: 20;
   }
 
-  .header__left {
+  .header__asset-btn {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 0.4rem;
+    padding: 0.35rem 0.6rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.5rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .header__asset-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.15);
+  }
+
+  .header__asset-icon {
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 50%;
+  }
+
+  .header__asset-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    line-height: 1.1;
+  }
+
+  .header__asset-ticker {
+    font-family: var(--font-sans);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .header__asset-chain {
+    font-size: 0.55rem;
+    color: var(--text-muted);
+  }
+
+  .header__asset-caret {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .header__arrow {
+    color: var(--text-muted);
+    font-size: 0.85rem;
     flex-shrink: 0;
   }
 
   .header__stats {
     display: flex;
     align-items: center;
-    gap: 1.25rem;
+    gap: 1.5rem;
     flex: 1;
     overflow: hidden;
+    margin-left: 0.75rem;
   }
 
   .header__stat {
@@ -1899,25 +1878,28 @@
   .header__stat-label {
     font-size: 0.55rem;
     color: var(--text-muted);
-    letter-spacing: 0.06em;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
+    font-family: var(--font-sans);
+    font-weight: 500;
   }
 
   .header__stat-val {
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     font-weight: 600;
-    color: var(--text-secondary);
+    color: var(--text-primary);
   }
 
   .header__stat-val--accent {
     color: var(--buy);
   }
 
-  .header__updated {
-    font-size: 0.6rem;
-    color: var(--text-muted);
-    margin-left: auto;
-    flex-shrink: 0;
+  .header__stat-val--positive {
+    color: var(--buy);
+  }
+
+  .header__stat-val--negative {
+    color: var(--sell);
   }
 
   .header__right {
@@ -1925,13 +1907,14 @@
     align-items: center;
     gap: 0.5rem;
     flex-shrink: 0;
+    margin-left: auto;
   }
 
   .header__refresh {
     background: transparent;
     border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.3rem;
+    border-radius: 0.375rem;
+    padding: 0.35rem;
     cursor: pointer;
     color: var(--text-secondary);
     display: flex;
@@ -1949,46 +1932,26 @@
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    padding: 0.3rem 0.6rem;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
-    font-size: 0.65rem;
+    padding: 0.4rem 0.8rem;
+    background: var(--accent);
+    border: none;
+    border-radius: 0.5rem;
+    color: #0a0a0a;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 600;
     cursor: pointer;
     transition: all 0.15s;
     white-space: nowrap;
   }
 
   .header__wallet:hover {
-    background: var(--bg-elevated);
-    color: var(--text-primary);
+    opacity: 0.9;
   }
 
   .header__wallet.connected {
-    border-color: rgba(96, 251, 208, 0.3);
+    background: rgba(96, 251, 208, 0.15);
     color: var(--buy);
-  }
-
-  .header__price {
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-  }
-
-  .header__price-main {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 1rem;
-    font-weight: 700;
-    color: var(--text-primary);
-  }
-
-  .header__price-usd {
-    font-size: 0.65rem;
-    color: var(--text-muted);
   }
 
   /* =========================================================
@@ -2302,14 +2265,6 @@
     overflow: hidden;
   }
 
-  .trade__right-column {
-    min-height: 0;
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 1px;
-    background: var(--border);
-  }
-
   .book-filters {
     display: flex;
     gap: 0.2rem;
@@ -2486,64 +2441,31 @@
   }
 
   /* =========================================================
-     ORDER FORM (trade__submit)
+     ORDER FORM (THORDex-style)
      ========================================================= */
   .trade__submit {
     overflow-y: auto;
+    min-height: 0;
+    background: #0a0a0f;
   }
 
   .submit-panel {
-    padding: 0;
-    gap: 0;
-  }
-
-  .submit__side-toggle {
     display: flex;
-    flex-shrink: 0;
+    flex-direction: column;
+    height: 100%;
   }
 
-  .submit__side-btn {
-    flex: 1;
-    padding: 0.6rem;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    border: none;
-    cursor: pointer;
-    transition: all 0.15s;
-    background: var(--bg-surface);
-    color: var(--text-muted);
-  }
-
-  .submit__side-btn--buy.active {
-    background: var(--buy);
-    color: #000;
-  }
-
-  .submit__side-btn--sell.active {
-    background: var(--sell);
-    color: #ffffff;
-  }
-
-  .submit__side-btn:not(.active):hover {
-    background: var(--bg-elevated);
-    color: var(--text-secondary);
-  }
-
-  .submit__type-tabs {
+  .submit__tabs {
     display: flex;
-    gap: 0;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
 
-  .submit__type-tab {
+  .submit__tab {
     flex: 1;
-    padding: 0.4rem;
-    font-family: var(--font-mono);
-    font-size: 0.65rem;
+    padding: 0.6rem;
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
     font-weight: 600;
     color: var(--text-muted);
     background: transparent;
@@ -2553,220 +2475,225 @@
     transition: all 0.15s;
   }
 
-  .submit__type-tab.active {
+  .submit__tab.active {
     color: var(--text-primary);
     border-bottom-color: var(--accent);
   }
 
-  .submit__type-tab:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-  }
-
-  .submit__balance {
+  .submit__scroll {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.6rem;
     display: flex;
-    justify-content: space-between;
-    padding: 0.4rem 0.75rem;
-    font-size: 0.65rem;
-    border-bottom: 1px solid var(--border);
+    flex-direction: column;
+    gap: 0.35rem;
   }
 
-  .submit__balance-label {
-    color: var(--text-muted);
+  .submit__bloc {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.75rem;
+    padding: 0.6rem 0.7rem;
   }
 
-  .submit__balance-val {
-    color: var(--text-secondary);
-  }
-
-  .submit__field {
-    padding: 0.5rem 0.75rem 0;
-  }
-
-  .submit__label {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    font-size: 0.6rem;
+  .submit__bloc-label {
+    font-family: var(--font-sans);
+    font-size: 0.7rem;
     font-weight: 600;
     color: var(--text-muted);
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
     margin-bottom: 0.3rem;
   }
 
-  .submit__label-asset {
-    color: var(--text-secondary);
-    font-weight: 400;
-    text-transform: none;
+  .submit__bloc-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
 
-  .submit__input-wrap {
-    position: relative;
-  }
-
-  .submit__input {
-    width: 100%;
-    padding: 0.5rem 0.6rem;
-    background: var(--bg-base);
-    border: 1px solid var(--border);
-    border-radius: 4px;
+  .submit__bloc-input {
+    flex: 1;
+    background: transparent;
+    border: none;
     color: var(--text-primary);
     font-family: var(--font-mono);
-    font-size: 0.85rem;
-    font-weight: 600;
+    font-size: 1.25rem;
+    font-weight: 500;
     outline: none;
-    transition: border-color 0.15s;
-    box-sizing: border-box;
+    min-width: 0;
   }
 
-  .submit__input:focus {
-    border-color: var(--accent);
-  }
+  .submit__bloc-input::placeholder { color: var(--text-muted); }
+  .submit__bloc-input:disabled { opacity: 0.7; }
+  .submit__bloc-input--rate { color: var(--accent); font-size: 1.1rem; }
 
-  .submit__input::placeholder {
-    color: var(--text-muted);
-    font-weight: 400;
-  }
-
-  .submit__quick-prices {
+  .submit__asset-btn {
     display: flex;
-    gap: 0.3rem;
-    margin-top: 0.3rem;
-  }
-
-  .submit__qp {
-    padding: 0.15rem 0.5rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.5rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.5rem;
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
 
-  .submit__qp:hover {
-    background: rgba(102, 126, 234, 0.1);
-    border-color: rgba(102, 126, 234, 0.3);
-    color: var(--accent);
-  }
+  .submit__asset-btn:hover { background: rgba(255, 255, 255, 0.1); }
 
-  /* Slider */
-  .submit__slider-wrap {
-    padding: 0.6rem 0.75rem 0.25rem;
-  }
-
-  .submit__slider {
-    width: 100%;
-    height: 4px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: var(--bg-elevated);
-    border-radius: 2px;
-    outline: none;
-    cursor: pointer;
-  }
-
-  .submit__slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 14px;
-    height: 14px;
+  .submit__asset-icon {
+    width: 1.25rem;
+    height: 1.25rem;
     border-radius: 50%;
-    background: var(--accent);
-    cursor: pointer;
-    border: 2px solid var(--bg-base);
   }
 
-  .submit__slider::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent);
-    cursor: pointer;
-    border: 2px solid var(--bg-base);
-  }
-
-  .submit__slider-marks {
-    display: flex;
-    justify-content: space-between;
-    padding-top: 0.2rem;
-    font-size: 0.5rem;
+  .submit__rate-pair {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
     color: var(--text-muted);
+    flex-shrink: 0;
   }
 
-  .submit__estimate {
+  .submit__pct-row {
     display: flex;
-    justify-content: space-between;
-    padding: 0.35rem 0.75rem;
-    font-size: 0.65rem;
-    background: rgba(255, 255, 255, 0.02);
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    margin-top: 0.3rem;
+    gap: 0.3rem;
+    margin-top: 0.4rem;
   }
 
-  .submit__estimate-label {
+  .submit__pct-btn {
+    padding: 0.15rem 0.3rem;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.2rem;
     color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.12s;
   }
 
-  .submit__estimate-val {
+  .submit__pct-btn:hover {
     color: var(--text-primary);
+  }
+
+  .submit__pct-btn.active {
+    background: rgba(96, 251, 208, 0.12);
+    border-color: rgba(96, 251, 208, 0.3);
+    color: var(--buy);
+  }
+
+  .submit__swap-arrow {
+    display: flex;
+    justify-content: center;
+    padding: 0.1rem;
+    color: var(--text-muted);
+  }
+
+  .submit__ttl-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.4rem;
+  }
+
+  .submit__ttl-blocks {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    color: var(--text-muted);
+  }
+
+  .submit__ttl-row {
+    display: flex;
+    gap: 0.3rem;
+  }
+
+  .submit__ttl-btn {
+    flex: 1;
+    padding: 0.35rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0.375rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.12s;
+    text-align: center;
+  }
+
+  .submit__ttl-btn:hover { border-color: rgba(96, 251, 208, 0.2); }
+
+  .submit__ttl-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #0a0a0a;
     font-weight: 600;
   }
 
-  /* Market Order Slippage */
-  .submit__slippage {
-    display: flex;
-    gap: 0.25rem;
-    padding: 0.25rem 0;
-  }
-
-  .submit__slip-btn {
-    flex: 1;
-    padding: 0.3rem 0.4rem;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    color: var(--text-secondary);
-    font-size: 0.6rem;
+  .submit__recipient-input {
+    width: 100%;
+    padding: 0.5rem 0.6rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.5rem;
+    color: var(--text-primary);
     font-family: var(--font-mono);
+    font-size: 0.7rem;
+    outline: none;
+    margin-top: 0.3rem;
+    box-sizing: border-box;
+  }
+
+  .submit__recipient-input::placeholder { color: var(--text-muted); }
+  .submit__recipient-input:focus { border-color: rgba(96, 251, 208, 0.3); }
+
+  .submit__footer {
+    padding: 0.75rem;
+    flex-shrink: 0;
+  }
+
+  .submit__action-btn {
+    width: 100%;
+    padding: 0.75rem;
+    font-family: var(--font-sans);
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: none;
+    border-radius: 0.5rem;
     cursor: pointer;
-    transition: all 0.12s;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    background: var(--accent);
+    color: #0a0a0f;
   }
 
-  .submit__slip-btn:hover { border-color: rgba(255, 255, 255, 0.15); }
+  .submit__action-btn:hover:not(:disabled) { opacity: 0.9; }
+  .submit__action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  .submit__slip-btn.active {
-    background: rgba(102, 126, 234, 0.12);
-    border-color: rgba(102, 126, 234, 0.4);
-    color: var(--accent);
-  }
-
-  .submit__slip-btn--none.active {
-    background: rgba(229, 57, 53, 0.1);
-    border-color: rgba(229, 57, 53, 0.3);
-    color: var(--sell);
-  }
-
-  /* Market Quote Display */
   .submit__quote-loading {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    padding: 0.5rem 0.75rem;
+    padding: 0.5rem 0;
     color: var(--text-muted);
     font-size: 0.65rem;
   }
 
   .submit__quote-result {
-    margin: 0.3rem 0.75rem 0;
     padding: 0.4rem 0.5rem;
     background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--border);
-    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0.5rem;
   }
 
   .submit__quote-row {
@@ -2777,21 +2704,14 @@
     color: var(--text-muted);
   }
 
-  .submit__quote-val {
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-weight: 500;
-  }
-
-  .submit__quote-val.warn {
-    color: #f59e0b;
-  }
+  .submit__quote-val { color: var(--text-primary); font-family: var(--font-mono); font-weight: 500; }
+  .submit__quote-val.warn { color: #f59e0b; }
 
   .submit__msg {
     padding: 0.4rem 0.75rem;
     font-size: 0.65rem;
     margin: 0.3rem 0.75rem 0;
-    border-radius: 4px;
+    border-radius: 0.375rem;
   }
 
   .submit__msg--error {
@@ -2806,64 +2726,6 @@
     color: var(--buy);
   }
 
-  /* Place Order Buttons */
-  .submit__btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-    width: calc(100% - 1.5rem);
-    margin: 0.5rem 0.75rem 0;
-    padding: 0.65rem;
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .submit__btn--buy {
-    background: var(--buy);
-    color: #000;
-  }
-
-  .submit__btn--buy:hover:not(:disabled) {
-    box-shadow: 0 4px 16px rgba(96, 251, 208, 0.25);
-  }
-
-  .submit__btn--sell {
-    background: var(--sell);
-    color: #ffffff;
-  }
-
-  .submit__btn--sell:hover:not(:disabled) {
-    box-shadow: 0 4px 16px rgba(229, 57, 53, 0.25);
-  }
-
-  .submit__btn--connect {
-    background: var(--accent);
-    color: #ffffff;
-  }
-
-  .submit__btn--connect:hover {
-    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
-  }
-
-  .submit__btn--memoless {
-    background: linear-gradient(135deg, #f59e0b, #d97706);
-    color: #000;
-  }
-
-  .submit__btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-    box-shadow: none;
-  }
-
   .submit__no-pair {
     flex: 1;
     display: flex;
@@ -2875,84 +2737,31 @@
     text-align: center;
   }
 
-  /* Memoless in submit */
-  .submit__memoless {
-    margin: 0.5rem 0.75rem;
-    padding: 0.6rem;
-    background: rgba(245, 158, 11, 0.05);
-    border: 1px solid rgba(245, 158, 11, 0.15);
-    border-radius: 6px;
-  }
-
-  .submit__memoless-title {
-    font-size: 0.7rem;
-    font-weight: 700;
-    color: #f59e0b;
-    margin-bottom: 0.3rem;
-  }
-
-  .submit__memoless-desc {
-    font-size: 0.6rem;
-    color: var(--text-secondary);
-    margin: 0 0 0.5rem;
-  }
-
-  .submit__memoless-qr {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 0.5rem;
-  }
-
-  .submit__memoless-qr img {
-    width: 120px;
-    height: 120px;
-    border-radius: 6px;
-  }
-
-  .submit__memoless-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.25rem 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-    font-size: 0.6rem;
-    color: var(--text-muted);
-  }
-
-  .submit__memoless-val {
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    background: none;
-    border: none;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-  }
-
-  .submit__memoless-val:hover {
-    color: var(--accent);
-  }
-
   /* =========================================================
-     MY ORDERS (trade__orders)
+     ORDERS (Full Width, THORDex-style)
      ========================================================= */
   .trade__orders {
     min-height: 0;
+    max-height: 35vh;
     overflow: hidden;
+    background: #0a0a0f;
+    display: flex;
+    flex-direction: column;
   }
 
-  .my-orders-tabs {
+  .orders__tabs {
     display: flex;
     gap: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 0.75rem;
+    flex-shrink: 0;
   }
 
-  .my-orders-tab {
-    padding: 0.3rem 0.6rem;
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    font-weight: 600;
+  .orders__tab {
+    padding: 0.5rem 1rem;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 500;
     color: var(--text-muted);
     background: transparent;
     border: none;
@@ -2961,108 +2770,124 @@
     transition: all 0.15s;
   }
 
-  .my-orders-tab.active {
+  .orders__tab.active {
     color: var(--text-primary);
     border-bottom-color: var(--accent);
   }
 
-  .my-orders-tab:hover:not(.active) {
+  .orders__tab:hover:not(.active) {
     color: var(--text-secondary);
   }
 
-  .my-orders__cols {
+  .orders__body {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+  }
+
+  .orders__cols {
     display: flex;
-    padding: 0.25rem 0.6rem;
-    font-size: 0.55rem;
+    padding: 0.35rem 1rem;
+    font-size: 0.6rem;
     font-weight: 600;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     color: var(--text-muted);
     text-transform: uppercase;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
 
-  .my-orders__cols span:nth-child(1) { flex: 1; }
-  .my-orders__cols span:nth-child(2) { width: 2.5rem; text-align: center; }
-  .my-orders__cols span:nth-child(3) { width: 5rem; text-align: right; }
-  .my-orders__cols span:nth-child(4) { width: 4.5rem; text-align: right; }
-  .my-orders__cols span:nth-child(5) { width: 3rem; text-align: right; }
+  .orders__cols span { flex: 1; }
+  .orders__cols span:last-child { width: 3rem; flex: 0; }
 
-  .my-orders__list {
-    flex: 1;
+  .orders__list {
     overflow-y: auto;
   }
 
-  .my-orders__empty {
-    padding: 1.5rem;
+  .orders__empty {
+    padding: 2rem;
     text-align: center;
     color: var(--text-muted);
-    font-size: 0.65rem;
+    font-size: 0.75rem;
+    font-family: var(--font-sans);
   }
 
-  .my-orders__row {
+  .orders__row {
     display: flex;
     align-items: center;
-    padding: 0.3rem 0.6rem;
+    padding: 0.35rem 1rem;
     border-bottom: 1px solid rgba(255, 255, 255, 0.03);
     transition: background 0.08s;
   }
 
-  .my-orders__row:hover {
-    background: var(--bg-elevated);
+  .orders__row:hover {
+    background: rgba(255, 255, 255, 0.02);
   }
 
-  .my-orders__pair {
+  .orders__cell {
     flex: 1;
-    font-weight: 600;
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     color: var(--text-primary);
-  }
-
-  .my-orders__side {
-    width: 2.5rem;
-    text-align: center;
-    font-size: 0.6rem;
-    font-weight: 700;
-    text-transform: uppercase;
-  }
-
-  .my-orders__side--buy { color: var(--buy); }
-  .my-orders__side--sell { color: var(--sell); }
-
-  .my-orders__price {
-    width: 5rem;
-    text-align: right;
-    font-size: 0.65rem;
-    color: var(--text-secondary);
-  }
-
-  .my-orders__amount {
-    width: 4.5rem;
-    text-align: right;
-    font-size: 0.65rem;
-    color: var(--text-secondary);
-  }
-
-  .my-orders__actions {
-    width: 3rem;
     display: flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .orders__cell--mono {
+    font-family: var(--font-mono);
+  }
+
+  .orders__cell--dim {
+    color: var(--text-muted);
+  }
+
+  .orders__cell--actions {
+    width: 3rem;
+    flex: 0;
     justify-content: flex-end;
     gap: 0.3rem;
   }
 
-  .my-orders__link {
+  .orders__pair-icon {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+  }
+
+  .orders__pair-icon--overlap {
+    margin-left: -0.35rem;
+  }
+
+  .orders__side-tag {
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 0.25rem;
+    text-transform: uppercase;
+  }
+
+  .orders__side-tag--buy {
+    background: rgba(0, 204, 102, 0.1);
+    color: var(--buy);
+  }
+
+  .orders__side-tag--sell {
+    background: rgba(204, 51, 51, 0.1);
+    color: var(--sell);
+  }
+
+  .orders__link {
     color: var(--text-muted);
     display: flex;
     align-items: center;
     transition: color 0.15s;
   }
 
-  .my-orders__link:hover {
+  .orders__link:hover {
     color: var(--accent);
   }
 
-  .my-orders__cancel {
+  .orders__cancel {
     background: transparent;
     border: none;
     color: var(--sell);
@@ -3074,88 +2899,8 @@
     transition: opacity 0.15s;
   }
 
-  .my-orders__cancel:hover:not(:disabled) {
-    opacity: 1;
-  }
-
-  .my-orders__cancel:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-  }
-
-  /* =========================================================
-     MARKET HISTORY (trade__history)
-     ========================================================= */
-  .trade__history {
-    min-height: 0;
-    overflow: visible;
-  }
-  .trade__history > .panel {
-    overflow: visible;
-  }
-
-  .history__cols {
-    display: flex;
-    padding: 0.25rem 0.6rem;
-    font-size: 0.55rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-
-  .history__cols span:first-child { flex: 1; }
-  .history__cols span:nth-child(2) { width: 5.5rem; text-align: right; }
-  .history__cols span:nth-child(3) { width: 5rem; text-align: right; }
-
-  .history__list {
-    flex: 1;
-    overflow-y: auto;
-  }
-
-  .history__empty {
-    padding: 1.5rem;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 0.65rem;
-  }
-
-  .history__row {
-    display: flex;
-    align-items: center;
-    padding: 0 0.6rem;
-    height: 1.25rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
-    transition: background 0.08s;
-  }
-
-  .history__row:hover {
-    background: var(--bg-elevated);
-  }
-
-  .history__row--buy .history__price { color: var(--buy); }
-  .history__row--sell .history__price { color: var(--sell); }
-
-  .history__price {
-    flex: 1;
-    color: var(--text-secondary);
-    font-weight: 500;
-  }
-
-  .history__amount {
-    width: 5.5rem;
-    text-align: right;
-    color: var(--text-secondary);
-  }
-
-  .history__value {
-    width: 5rem;
-    text-align: right;
-    color: var(--text-muted);
-    font-size: 0.65rem;
-  }
+  .orders__cancel:hover:not(:disabled) { opacity: 1; }
+  .orders__cancel:disabled { opacity: 0.3; cursor: not-allowed; }
 
   /* =========================================================
      SPINNER
@@ -3266,10 +3011,8 @@
 
     .trade__graph,
     .trade__book,
-    .trade__right-column,
     .trade__submit,
-    .trade__orders,
-    .trade__history {
+    .trade__orders {
       flex: 1;
       min-height: 0;
     }
@@ -3290,18 +3033,25 @@
       gap: 0.4rem;
     }
 
-    .pair-selector__trigger {
-      font-size: 0.7rem;
+    .header__asset-btn {
       padding: 0.2rem 0.4rem;
     }
 
-    .header__price-main {
-      font-size: 0.8rem;
+    .header__asset-ticker {
+      font-size: 0.7rem;
+    }
+
+    .header__asset-chain {
+      display: none;
+    }
+
+    .header__arrow {
+      font-size: 0.7rem;
     }
 
     .header__wallet {
-      font-size: 0.55rem;
-      padding: 0.2rem 0.4rem;
+      font-size: 0.6rem;
+      padding: 0.25rem 0.5rem;
     }
 
     .pair-selector__dropdown {
@@ -3316,8 +3066,7 @@
   .pairs-list::-webkit-scrollbar,
   .book__asks::-webkit-scrollbar,
   .book__bids::-webkit-scrollbar,
-  .my-orders__list::-webkit-scrollbar,
-  .history__list::-webkit-scrollbar,
+  .orders__list::-webkit-scrollbar,
   .trade__submit::-webkit-scrollbar,
   .pair-selector__list::-webkit-scrollbar {
     width: 4px;
@@ -3326,8 +3075,7 @@
   .pairs-list::-webkit-scrollbar-track,
   .book__asks::-webkit-scrollbar-track,
   .book__bids::-webkit-scrollbar-track,
-  .my-orders__list::-webkit-scrollbar-track,
-  .history__list::-webkit-scrollbar-track,
+  .orders__list::-webkit-scrollbar-track,
   .trade__submit::-webkit-scrollbar-track,
   .pair-selector__list::-webkit-scrollbar-track {
     background: transparent;
@@ -3336,8 +3084,7 @@
   .pairs-list::-webkit-scrollbar-thumb,
   .book__asks::-webkit-scrollbar-thumb,
   .book__bids::-webkit-scrollbar-thumb,
-  .my-orders__list::-webkit-scrollbar-thumb,
-  .history__list::-webkit-scrollbar-thumb,
+  .orders__list::-webkit-scrollbar-thumb,
   .trade__submit::-webkit-scrollbar-thumb,
   .pair-selector__list::-webkit-scrollbar-thumb {
     background: rgba(255, 255, 255, 0.08);
@@ -3347,8 +3094,7 @@
   .pairs-list::-webkit-scrollbar-thumb:hover,
   .book__asks::-webkit-scrollbar-thumb:hover,
   .book__bids::-webkit-scrollbar-thumb:hover,
-  .my-orders__list::-webkit-scrollbar-thumb:hover,
-  .history__list::-webkit-scrollbar-thumb:hover,
+  .orders__list::-webkit-scrollbar-thumb:hover,
   .trade__submit::-webkit-scrollbar-thumb:hover,
   .pair-selector__list::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.15);

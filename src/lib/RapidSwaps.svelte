@@ -8,9 +8,11 @@
   } from './rapid-swaps/api.js';
   import {
     computeDailyData,
+    getSeriesAxisBounds,
     getChartDateRangeUnixSeconds,
     toChartDateKey
   } from './rapid-swaps/charts.js';
+  import { getRapidSwapComparableVolumeUsd } from './rapid-swaps/volume.js';
   import { midgard } from './api/midgard.js';
   import Chart from 'chart.js/auto';
   import { SankeyController, Flow } from 'chartjs-chart-sankey';
@@ -84,7 +86,16 @@
   });
 
   // Daily aggregates for charts (includes market share when midgard data available)
-  $: dailyData = computeDailyData(overviewSwaps, midgardSwapHistory);
+  $: dailyData = computeDailyData(overviewSwaps, midgardSwapHistory, allSwaps);
+  $: cumulativeVolumeAxisBounds = getSeriesAxisBounds(dailyData.cumVolume, {
+    clampMin: 0,
+    minSpan: 1
+  });
+  $: cumulativeCountAxisBounds = getSeriesAxisBounds(dailyData.cumCount, {
+    clampMin: 0,
+    minSpan: 1,
+    roundToInteger: true
+  });
   $: hasAdoptionData =
     dailyData.volumePct.some(value => Number.isFinite(value)) ||
     dailyData.countPct.some(value => Number.isFinite(value));
@@ -167,6 +178,10 @@
     return `https://thorchain.net/tx/${txId}`;
   }
 
+  function swapVolumeUsd(row) {
+    return getRapidSwapComparableVolumeUsd(row);
+  }
+
   // --- Filtering ---
   function filterSwaps(swaps, pathFilter, minUsd, minSubs) {
     let result = swaps;
@@ -179,7 +194,7 @@
     }
     if (minUsd && Number(minUsd) > 0) {
       const min = Number(minUsd);
-      result = result.filter(row => (Number(row.input_estimated_usd) || 0) >= min);
+      result = result.filter(row => swapVolumeUsd(row) >= min);
     }
     if (minSubs && Number(minSubs) > 0) {
       const min = Number(minSubs);
@@ -220,8 +235,8 @@
           vb = shortPair(b);
           return dir * va.localeCompare(vb);
         case 'usd':
-          va = Number(a.input_estimated_usd) || 0;
-          vb = Number(b.input_estimated_usd) || 0;
+          va = swapVolumeUsd(a);
+          vb = swapVolumeUsd(b);
           break;
         case 'subs':
           va = Number(a.streaming_count) || 0;
@@ -302,7 +317,7 @@
 
     for (const row of swaps) {
       const subs = Number(row.streaming_count) || 0;
-      const usd = Number(row.input_estimated_usd) || 0;
+      const usd = swapVolumeUsd(row);
       const saved = swapTimeSaved(row);
 
       for (let i = 0; i < subBuckets.length; i++) {
@@ -353,8 +368,9 @@
     const flowMap = {};
     for (const row of swaps) {
       const pair = shortPair(row);
+      const usd = swapVolumeUsd(row);
       if (!pathMap[pair]) pathMap[pair] = { volume: 0, count: 0, totalTimeSaved: 0 };
-      pathMap[pair].volume += Number(row.input_estimated_usd) || 0;
+      pathMap[pair].volume += usd;
       pathMap[pair].count++;
       pathMap[pair].totalTimeSaved += swapTimeSaved(row);
 
@@ -362,7 +378,7 @@
       const src = formatAsset(row?.source_asset).split('.').pop() || '?';
       const tgt = formatAsset(row?.target_asset).split('.').pop() || '?';
       const flowKey = `${src}→${tgt}`;
-      flowMap[flowKey] = (flowMap[flowKey] || 0) + (Number(row.input_estimated_usd) || 0);
+      flowMap[flowKey] = (flowMap[flowKey] || 0) + usd;
     }
 
     const byVolume = Object.entries(pathMap)
@@ -510,7 +526,8 @@
             ...baseChartOptions.scales.y,
             position: 'right',
             grid: { drawOnChartArea: false, color: CHART_COLORS.grid },
-            ticks: { ...baseChartOptions.scales.y.ticks, callback: v => formatUSDCompact(v) }
+            ticks: { ...baseChartOptions.scales.y.ticks, callback: v => formatUSDCompact(v) },
+            ...cumulativeVolumeAxisBounds
           }
         }
       }
@@ -566,7 +583,7 @@
             ...baseChartOptions.scales.y,
             position: 'right',
             grid: { drawOnChartArea: false, color: CHART_COLORS.grid },
-            beginAtZero: true
+            ...cumulativeCountAxisBounds
           }
         }
       }
@@ -1206,7 +1223,7 @@
       <div class="metric-sub">{formatTimeSaved(dashboard?.actual_seconds || 0)} actual vs {formatTimeSaved(dashboard?.baseline_seconds || 0)}</div>
     </div>
     <div class="metric metric-largest">
-      <div class="metric-val">{topSwaps[0] ? formatUSDCompact(topSwaps[0]?.input_estimated_usd || 0) : '--'}</div>
+      <div class="metric-val">{topSwaps[0] ? formatUSDCompact(swapVolumeUsd(topSwaps[0])) : '--'}</div>
       <div class="metric-key">LARGEST SWAP</div>
       {#if topSwaps[0]}
         <div class="metric-sub">{shortPair(topSwaps[0])}</div>
@@ -1355,7 +1372,7 @@
                   <td class="col-when mono">{formatDateTime(row.action_date)}</td>
                   <td class="col-pair">{shortPair(row)}</td>
                   <td class="col-tx"><a href={getTxUrl(row.tx_id)} target="_blank" rel="noreferrer">{row.tx_id.slice(0, 10)}...{row.tx_id.slice(-8)}</a></td>
-                  <td class="col-usd mono right accent">{formatUSD(row.input_estimated_usd || 0)}</td>
+                  <td class="col-usd mono right accent">{formatUSD(swapVolumeUsd(row))}</td>
                   <td class="col-subs mono right">{row.streaming_count}</td>
                   <td class="col-blocks mono right">{row.blocks_used || '-'}</td>
                   <td class="col-saved mono right">{#if saved > 0}<span class="amber">{formatTimeSaved(saved)}</span>{:else}<span class="dim">--</span>{/if}</td>

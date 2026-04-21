@@ -75,6 +75,8 @@ That script:
 4. Applies canonical DB migrations
 5. Installs/restarts the backend API, schedulers, backup timer, and listener
 
+It also refuses to run unless the current checkout is the canonical BooneTools repo with `origin` set to `https://github.com/erebuskaimoros/boonetools.git`.
+
 After deploy, install the Caddy config in `ops/caddy/Caddyfile.boone.tools` if the API proxy is not already live.
 
 ## Data Import

@@ -645,18 +645,12 @@
       <div class="cw-header">
         <div class="cw-header-copy">
           <h3>
-            {#if view === 'connect' && selectedWallet}
-              <button class="cw-back" type="button" aria-label="Back" on:click={() => { selectedWallet = null; connectError = ''; }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
-              </button>
-            {:else if view === 'connect'}
+            {#if view === 'connect'}
               <button class="cw-back" type="button" aria-label="Back" on:click={backToManage}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
               </button>
             {/if}
-            {view === 'connect'
-              ? (selectedWallet ? selectedWallet.label : 'Add Wallet')
-              : 'Wallets & Trade Assets'}
+            {view === 'connect' ? 'Connect Wallet' : 'Wallets & Trade Assets'}
           </h3>
           {#if view === 'manage'}
             <p class="cw-subtitle">Manage connected wallets, L1 balances, and THOR trade-account assets.</p>
@@ -681,82 +675,74 @@
       </div>
 
       {#if view === 'connect'}
-        {#if !selectedWallet}
-          <div class="cw-list">
-            {#if installedWallets.length > 0}
-              <div class="cw-group-label">Detected</div>
-              {#each installedWallets as wallet}
-                {#if connectedSet.has(wallet.option)}
-                  <div class="cw-wallet-item connected">
-                    <img src="assets/wallets/{wallet.key}.svg" alt={wallet.label} class="cw-wallet-icon" />
-                    <span class="cw-wallet-name">{wallet.label}</span>
-                    <span class="cw-badge connected-badge">Connected</span>
-                    <button class="cw-disconnect-btn" type="button" on:click={() => handleDisconnect(wallet.option)}>
-                      Disconnect
-                    </button>
-                  </div>
-                {:else}
-                  <button class="cw-wallet-item" type="button" on:click={() => pickWallet(wallet)}>
-                    <img src="assets/wallets/{wallet.key}.svg" alt={wallet.label} class="cw-wallet-icon" />
-                    <span class="cw-wallet-name">{wallet.label}</span>
-                    <span class="cw-badge chain-count">{((walletMod?.supportedChains || {})[wallet.option] || []).length} chains</span>
-                  </button>
-                {/if}
-              {/each}
-            {/if}
-
-            {#if otherWallets.length > 0}
-              <div class="cw-group-label">Other Wallets</div>
-              {#each otherWallets as wallet}
-                <button class="cw-wallet-item unavailable" type="button" on:click={() => pickWallet(wallet)}>
-                  <img src="assets/wallets/{wallet.key}.svg" alt={wallet.label} class="cw-wallet-icon" />
-                  <span class="cw-wallet-name">{wallet.label}</span>
-                  <span class="cw-badge">{wallet.type === 'hardware' ? 'Hardware' : 'Not detected'}</span>
-                </button>
-              {/each}
-            {/if}
-          </div>
-        {:else}
-          <div class="cw-chain-select">
-            <div class="cw-chain-header">
-              <span>Approve Chains</span>
-              <button class="cw-select-all" type="button" on:click={() => {
-                const all = (walletMod?.supportedChains || {})[selectedWallet.option] || [];
-                selectedWalletChains = selectedWalletChains.length === all.length ? [] : [...all];
-              }}>
-                {selectedWalletChains.length === ((walletMod?.supportedChains || {})[selectedWallet.option] || []).length ? 'Deselect All' : 'Select All'}
-              </button>
-            </div>
-
-            <div class="cw-note cw-note--connect">
-              Choose the chains you want this wallet to expose. Multichain wallets only connect the chains you explicitly approve here.
-            </div>
-
-            <div class="cw-chains-grid">
-              {#each ((walletMod?.supportedChains || {})[selectedWallet.option] || []) as chain}
-                <button class="cw-chain-item" type="button" class:selected={selectedWalletChains.includes(chain)} on:click={() => toggleChain(chain)}>
-                  <span class="cw-chain-name">{chain}</span>
-                  {#if selectedWalletChains.includes(chain)}
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00cc66" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        <div class="cw-connect-split">
+          <!-- Left: Wallet Providers -->
+          <div class="cw-providers">
+            {#each wallets as wallet}
+              {@const isInstalled = installedWallets.some(w => w.option === wallet.option)}
+              {@const isConnected = connectedSet.has(wallet.option)}
+              <button
+                class="cw-provider-row"
+                class:selected={selectedWallet?.option === wallet.option}
+                class:connected={isConnected}
+                type="button"
+                on:click={() => {
+                  if (isConnected) {
+                    handleDisconnect(wallet.option);
+                  } else {
+                    pickWallet(wallet);
+                  }
+                }}
+              >
+                <img src="assets/wallets/{wallet.key}.svg" alt={wallet.label} class="cw-provider-row-icon" />
+                <div class="cw-provider-row-info">
+                  <span class="cw-provider-row-name">{wallet.label}</span>
+                  {#if isConnected}
+                    <span class="cw-provider-row-status cw-provider-row-status--connected">Connected</span>
+                  {:else if isInstalled}
+                    <span class="cw-provider-row-status cw-provider-row-status--detected">Detected</span>
+                  {:else if wallet.type === 'hardware'}
+                    <span class="cw-provider-row-status cw-provider-row-status--hw">Hardware</span>
                   {/if}
-                </button>
-              {/each}
-            </div>
-
-            {#if connectError}
-              <div class="cw-error">{connectError}</div>
-            {/if}
-
-            <button class="cw-connect-btn" type="button" on:click={handleConnect} disabled={connecting || selectedWalletChains.length === 0}>
-              {#if connecting}
-                <div class="cw-spinner"></div>
-                Connecting...
-              {:else}
-                Connect {selectedWallet.label}
-              {/if}
-            </button>
+                </div>
+              </button>
+            {/each}
           </div>
-        {/if}
+
+          <!-- Right: Chain Selection -->
+          <div class="cw-chain-panel">
+            {#if selectedWallet}
+              <div class="cw-chain-panel-head">
+                <span class="cw-group-label">Select Chain</span>
+              </div>
+              <div class="cw-chains-grid">
+                {#each ((walletMod?.supportedChains || {})[selectedWallet.option] || []) as chain}
+                  <button class="cw-chain-item" type="button" class:selected={selectedWalletChains.includes(chain)} on:click={() => toggleChain(chain)}>
+                    <img src="assets/chains/{chain}.svg" alt={chain} class="cw-chain-icon" on:error={(e) => e.target.style.display='none'} />
+                    <span class="cw-chain-name">{chain}</span>
+                  </button>
+                {/each}
+              </div>
+
+              {#if connectError}
+                <div class="cw-error">{connectError}</div>
+              {/if}
+
+              <button class="cw-connect-btn" type="button" on:click={handleConnect} disabled={connecting || selectedWalletChains.length === 0}>
+                {#if connecting}
+                  <div class="cw-spinner"></div>
+                  Connecting...
+                {:else}
+                  Connect {selectedWallet.label}
+                {/if}
+              </button>
+            {:else}
+              <div class="cw-chain-panel-empty">
+                Select a wallet to see supported chains
+              </div>
+            {/if}
+          </div>
+        </div>
       {:else}
         <div class="cw-manage">
           <div class="cw-wallets">
@@ -1199,6 +1185,10 @@
     color: #041a0d;
   }
 
+  .cw-chain-panel .cw-connect-btn {
+    margin-top: auto;
+  }
+
   .cw-add-wallet:hover,
   .cw-refresh:hover,
   .cw-close:hover,
@@ -1222,11 +1212,117 @@
     cursor: not-allowed;
   }
 
-  .cw-manage,
-  .cw-list,
-  .cw-chain-select {
+  .cw-manage {
     padding: 1rem 1.1rem 1.1rem;
     overflow: auto;
+  }
+
+  /* THORDex-style two-column connect layout */
+  .cw-connect-split {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .cw-providers {
+    width: 16rem;
+    flex-shrink: 0;
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+    overflow-y: auto;
+    padding: 0.75rem 0;
+  }
+
+  .cw-provider-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.85rem 1.1rem;
+    background: transparent;
+    border: none;
+    border-left: 3px solid transparent;
+    color: #e0e0e0;
+    cursor: pointer;
+    transition: all 0.12s;
+    text-align: left;
+  }
+
+  .cw-provider-row:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .cw-provider-row.selected {
+    background: rgba(255, 255, 255, 0.06);
+    border-left-color: #00cc66;
+  }
+
+  .cw-provider-row.connected {
+    border-left-color: rgba(0, 204, 102, 0.4);
+  }
+
+  .cw-provider-row-icon {
+    width: 2rem;
+    height: 2rem;
+    object-fit: contain;
+    flex-shrink: 0;
+  }
+
+  .cw-provider-row-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .cw-provider-row-name {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #f0f0f0;
+  }
+
+  .cw-provider-row-status {
+    font-size: 0.65rem;
+    font-weight: 500;
+  }
+
+  .cw-provider-row-status--detected {
+    color: #00cc66;
+  }
+
+  .cw-provider-row-status--connected {
+    color: #00cc66;
+  }
+
+  .cw-provider-row-status--hw {
+    color: #777;
+  }
+
+  .cw-chain-panel {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .cw-chain-panel-head {
+    margin-bottom: 0.75rem;
+  }
+
+  .cw-chain-panel-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #555;
+    font-size: 0.8rem;
+  }
+
+  .cw-chain-icon {
+    width: 1.35rem;
+    height: 1.35rem;
+    border-radius: 50%;
+    object-fit: contain;
   }
 
   .cw-wallets {
@@ -1623,26 +1719,33 @@
 
   .cw-chains-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+    grid-template-columns: repeat(2, 1fr);
     gap: 0.55rem;
   }
 
   .cw-chain-item {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.6rem;
     background: #131313;
     color: #cbcbcb;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 0.7rem;
-    padding: 0.75rem;
+    padding: 0.65rem 0.85rem;
     cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: all 0.12s;
+  }
+
+  .cw-chain-item:hover {
+    border-color: rgba(255, 255, 255, 0.15);
   }
 
   .cw-chain-item.selected {
-    border-color: rgba(0, 204, 102, 0.35);
-    background: rgba(0, 204, 102, 0.08);
+    border-color: rgba(0, 204, 102, 0.5);
+    background: rgba(0, 204, 102, 0.1);
+    color: #f0f0f0;
   }
 
   .cw-error,

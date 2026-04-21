@@ -20,9 +20,17 @@
 /**
  * THORNode API endpoints with fallback
  */
+const DEV_THORNODE_ENDPOINTS = {
+  primary: '/__thornode_primary'
+};
+
 export const THORNODE_ENDPOINTS = {
-  primary: 'https://thornode.thorchain.network',
-  fallback: 'https://thornode.ninerealms.com'
+  primary: import.meta.env.DEV
+    ? DEV_THORNODE_ENDPOINTS.primary
+    : 'https://thornode.thorchain.network',
+  fallback: import.meta.env.DEV
+    ? '/__thornode_fallback'
+    : 'https://gateway.liquify.com/chain/thorchain_api'
 };
 
 /**
@@ -73,6 +81,11 @@ export async function fetchWithFallback(endpoint, options = {}, endpoints = THOR
     }
     throw new Error(`Primary endpoint failed: ${response.status}`);
   } catch (error) {
+    if (fallbackUrl === primaryUrl) {
+      console.error(`Primary endpoint failed for ${endpoint}:`, error);
+      throw error;
+    }
+
     console.warn(`Primary endpoint failed, trying fallback: ${error.message}`);
 
     try {

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/require-canonical-boonetools-repo.sh"
+
+ROOT="$BOONETOOLS_CANONICAL_ROOT"
 SERVER="${SERVER:-root@178.156.211.181}"
 DEST="${DEST:-/opt/boonetools-backend}"
 BACKEND_DEST="$DEST/backend"
@@ -16,9 +20,9 @@ fi
 PUBLIC_API_KEY_VALUE="${PUBLIC_API_KEY:-${VITE_NODEOP_API_KEY:-${VITE_RAPID_SWAPS_API_KEY:-}}}"
 THORNODE_PRIMARY_VALUE="${THORNODE_PRIMARY_URL:-https://thornode.thorchain.network}"
 THORNODE_ARCHIVE_VALUE="${THORNODE_ARCHIVE_URL:-https://thornode-archive.ninerealms.com}"
-THORNODE_FALLBACK_VALUE="${THORNODE_FALLBACK_URL:-https://thornode.ninerealms.com}"
+THORNODE_FALLBACK_VALUE="${THORNODE_FALLBACK_URL:-https://gateway.liquify.com/chain/thorchain_api}"
 MIDGARD_URL_VALUE="${MIDGARD_URL:-https://midgard.thorchain.network/v2}"
-MIDGARD_FALLBACK_VALUE="${MIDGARD_FALLBACK_URL:-https://midgard.ninerealms.com/v2}"
+MIDGARD_FALLBACK_VALUE="${MIDGARD_FALLBACK_URL:-https://gateway.liquify.com/chain/thorchain_midgard/v2}"
 
 echo "==> Preparing remote directories..."
 ssh "$SERVER" "mkdir -p $BACKEND_DEST $DEST/scripts $DEST/src/lib/rapid-swaps $DEST/src/lib/utils $DEST/ops/caddy $DEST/ops/docker $DEST/ops/systemd"
@@ -59,9 +63,9 @@ API_KEY_VALUE="${PUBLIC_API_KEY_VALUE:-${PUBLIC_API_KEY:-$(openssl rand -hex 24)
 DATABASE_URL_VALUE="${DATABASE_URL:-postgresql://$DB_USER_VALUE:$DB_PASSWORD_VALUE@127.0.0.1:5433/$DB_NAME_VALUE}"
 THORNODE_PRIMARY_URL_VALUE="${THORNODE_PRIMARY_VALUE:-${THORNODE_PRIMARY_URL:-https://thornode.thorchain.network}}"
 THORNODE_ARCHIVE_URL_VALUE="${THORNODE_ARCHIVE_VALUE:-${THORNODE_ARCHIVE_URL:-https://thornode-archive.ninerealms.com}}"
-THORNODE_FALLBACK_URL_VALUE="${THORNODE_FALLBACK_VALUE:-${THORNODE_FALLBACK_URL:-https://thornode.ninerealms.com}}"
+THORNODE_FALLBACK_URL_VALUE="${THORNODE_FALLBACK_VALUE:-${THORNODE_FALLBACK_URL:-https://gateway.liquify.com/chain/thorchain_api}}"
 MIDGARD_URL_FINAL="${MIDGARD_URL_VALUE:-${MIDGARD_URL:-https://midgard.thorchain.network/v2}}"
-MIDGARD_FALLBACK_URL_FINAL="${MIDGARD_FALLBACK_VALUE:-${MIDGARD_FALLBACK_URL:-https://midgard.ninerealms.com/v2}}"
+MIDGARD_FALLBACK_URL_FINAL="${MIDGARD_FALLBACK_VALUE:-${MIDGARD_FALLBACK_URL:-https://gateway.liquify.com/chain/thorchain_midgard/v2}}"
 RPC_WS_URL_VALUE="${RPC_WS_URL:-wss://rpc.thorchain.network/websocket}"
 MIDGARD_DELAY_MS_VALUE="${MIDGARD_DELAY_MS:-5000}"
 RAPID_SWAPS_MAX_PAGES_VALUE="${RAPID_SWAPS_MAX_PAGES:-200}"

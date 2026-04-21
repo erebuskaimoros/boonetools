@@ -1,4 +1,5 @@
 import { fromBaseUnit, normalizeAsset } from '../utils/blockchain.js';
+import { getRapidSwapComparableVolumeUsd } from './volume.js';
 
 function safeNumber(value, fallback = 0) {
   const numeric = Number(value);
@@ -281,6 +282,10 @@ export function normalizeRapidSwapAction(action, options = {}) {
   const streaming = getRapidSwapStreamingDetails(action);
   const observedAt = options.observedAt || new Date().toISOString();
   const actionDate = toIsoOrEmpty(action?.date) || observedAt;
+  const sourceAsset = String(inputCoin?.asset || '');
+  const targetAsset = String(outputCoin?.asset || '') || targetAssetFromMemo(action?.metadata?.swap?.memo);
+  const inputEstimatedUsd = roundUsd(estimateCoinUsd(inputCoin, options.priceIndex));
+  const outputEstimatedUsd = roundUsd(estimateCoinUsd(outputCoin, options.priceIndex));
   const primaryOutLeg = Array.isArray(action?.out)
     ? action.out.find((leg) => !leg?.affiliate && Array.isArray(leg?.coins) && leg.coins[0])
     : null;
@@ -293,12 +298,18 @@ export function normalizeRapidSwapAction(action, options = {}) {
     memo: String(action?.metadata?.swap?.memo || ''),
     status: 'completed',
     tx_status: String(action?.status || ''),
-    source_asset: String(inputCoin?.asset || ''),
-    target_asset: String(outputCoin?.asset || '') || targetAssetFromMemo(action?.metadata?.swap?.memo),
+    source_asset: sourceAsset,
+    target_asset: targetAsset,
     input_amount_base: String(inputCoin?.amount || '0'),
     output_amount_base: String(outputCoin?.amount || '0'),
-    input_estimated_usd: roundUsd(estimateCoinUsd(inputCoin, options.priceIndex)),
-    output_estimated_usd: roundUsd(estimateCoinUsd(outputCoin, options.priceIndex)),
+    input_estimated_usd: inputEstimatedUsd,
+    output_estimated_usd: outputEstimatedUsd,
+    comparable_volume_usd: getRapidSwapComparableVolumeUsd({
+      source_asset: sourceAsset,
+      target_asset: targetAsset,
+      input_estimated_usd: inputEstimatedUsd,
+      output_estimated_usd: outputEstimatedUsd
+    }),
     liquidity_fee_base: String(action?.metadata?.swap?.liquidityFee || '0'),
     swap_slip_bps: safeNumber(action?.metadata?.swap?.swapSlip, 0),
     is_limit_order: String(action?.metadata?.swap?.memo || '').startsWith('=<') || action?.txType === 'limitOrder',
@@ -316,7 +327,7 @@ export function normalizeRapidSwapAction(action, options = {}) {
 export function rankRapidSwapsByUsd(rows, limit = 20) {
   return [...(Array.isArray(rows) ? rows : [])]
     .sort((left, right) => {
-      const usdDiff = safeNumber(right?.input_estimated_usd, 0) - safeNumber(left?.input_estimated_usd, 0);
+      const usdDiff = getRapidSwapComparableVolumeUsd(right) - getRapidSwapComparableVolumeUsd(left);
       if (usdDiff !== 0) {
         return usdDiff;
       }

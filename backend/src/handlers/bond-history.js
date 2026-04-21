@@ -7,9 +7,9 @@ import {
   isPoisonedBondHistoryRow,
   isTransientHistoricalFetchError
 } from '../shared/bond-history.js';
-import { fetchMidgardActions, fetchMidgardBond } from '../shared/midgard.js';
+import { fetchMidgardActions } from '../shared/midgard.js';
 import { fetchStockPrices } from '../shared/stock-prices.js';
-import { fetchChurns, fetchThorchain } from '../shared/thornode.js';
+import { fetchChurns, fetchNodes, fetchThorchain } from '../shared/thornode.js';
 
 async function fetchNodeAtHeight(nodeAddress, height) {
   return fetchThorchain(`/thorchain/node/${nodeAddress}?height=${height}`, { historical: true });
@@ -20,10 +20,20 @@ async function fetchNetworkAtHeight(height) {
 }
 
 async function getCurrentNodeAddresses(bondAddress) {
-  const data = await fetchMidgardBond(bondAddress);
-  return (data.nodes || [])
-    .filter((node) => Number(node.bond) > 1e8)
-    .map((node) => node.address);
+  const target = String(bondAddress || '').toLowerCase();
+  const nodes = await fetchNodes();
+  const nodeAddresses = [];
+
+  for (const node of nodes || []) {
+    const provider = (node?.bond_providers?.providers || []).find((candidate) => (
+      String(candidate?.bond_address || '').toLowerCase() === target
+    ));
+    if (provider && Number(provider.bond || 0) > 1e8 && node?.node_address) {
+      nodeAddresses.push(String(node.node_address));
+    }
+  }
+
+  return nodeAddresses;
 }
 
 async function getAllNodeAddresses(bondAddress) {
@@ -116,6 +126,52 @@ async function fetchRatesJson() {
   }
 }
 
+function normalizeHistoryRows(rows) {
+  return (rows || []).map((row) => ({
+    churn_height: Number(row.churn_height),
+    churn_timestamp: Number(row.churn_timestamp),
+    rune_stack: Number(row.rune_stack),
+    user_bond: row.user_bond == null ? null : Number(row.user_bond),
+    rune_price: Number(row.rune_price),
+    rates_json: row.rates_json || null
+  }));
+}
+
+function filterCachedHistoryRows(rows, minHeight) {
+  return (rows || []).filter((row) => (
+    Number(row.rune_stack) > 0 && Number(row.churn_height) >= minHeight
+  ));
+}
+
+function cachedHistoryResponse({
+  bondAddress,
+  cachedRows,
+  hasHistorical,
+  minHeight,
+  stale = false,
+  warning = ''
+}) {
+  const filtered = filterCachedHistoryRows(cachedRows, minHeight);
+  const payload = {
+    bond_address: bondAddress,
+    history: normalizeHistoryRows(filtered),
+    has_historical: hasHistorical,
+    fetched: 0,
+    total: filtered.length
+  };
+
+  if (stale) {
+    payload.stale = true;
+  }
+  if (warning) {
+    payload.warning = warning;
+  }
+
+  return json(payload, 200, {
+    'Cache-Control': stale ? 'public, max-age=15' : 'public, max-age=30'
+  });
+}
+
 async function processChurn(bondAddress, nodeAddresses, churnHeight, churnTimestamp, ratesJson) {
   const nodePromises = nodeAddresses.map(async (address) => {
     try {
@@ -193,7 +249,27 @@ export async function handleBondHistory(_request, url) {
     return error('No active bonds found for this address', 404);
   }
 
-  const allChurns = await fetchChurns();
+  let allChurns = [];
+  try {
+    allChurns = await fetchChurns();
+  } catch (churnError) {
+    if (cached.length > 0 && isTransientHistoricalFetchError(churnError)) {
+      console.warn(
+        `[bond-history] serving cached history after transient churn fetch failure for ${bondAddress}: ${churnError.message}`
+      );
+      const minHeight = includeHistorical ? 0 : currentNodesSinceHeight;
+      return cachedHistoryResponse({
+        bondAddress,
+        cachedRows: cached,
+        hasHistorical,
+        minHeight,
+        stale: true,
+        warning: 'Served cached bond history after transient upstream churn fetch failure'
+      });
+    }
+
+    throw churnError;
+  }
   const churns = allChurns.map((churn) => ({
     height: Number(churn.height),
     timestampSec: Math.floor(Number(churn.date) / 1e9)
@@ -202,28 +278,12 @@ export async function handleBondHistory(_request, url) {
   const uncached = churns.filter((churn) => !cachedHeights.has(churn.height));
   if (uncached.length === 0) {
     const minHeight = includeHistorical ? 0 : currentNodesSinceHeight;
-    const filtered = cached.filter((row) => Number(row.rune_stack) > 0 && Number(row.churn_height) >= minHeight);
-
-    return json(
-      {
-        bond_address: bondAddress,
-        history: filtered.map((row) => ({
-          churn_height: Number(row.churn_height),
-          churn_timestamp: Number(row.churn_timestamp),
-          rune_stack: Number(row.rune_stack),
-          user_bond: row.user_bond == null ? null : Number(row.user_bond),
-          rune_price: Number(row.rune_price),
-          rates_json: row.rates_json || null
-        })),
-        has_historical: hasHistorical,
-        fetched: 0,
-        total: filtered.length
-      },
-      200,
-      {
-        'Cache-Control': 'public, max-age=30'
-      }
-    );
+    return cachedHistoryResponse({
+      bondAddress,
+      cachedRows: cached,
+      hasHistorical,
+      minHeight
+    });
   }
 
   uncached.sort((left, right) => right.height - left.height);
@@ -291,14 +351,7 @@ export async function handleBondHistory(_request, url) {
 
   const history = Array.from(byHeight.values())
     .sort((left, right) => Number(left.churn_height) - Number(right.churn_height))
-    .map((row) => ({
-      churn_height: Number(row.churn_height),
-      churn_timestamp: Number(row.churn_timestamp),
-      rune_stack: Number(row.rune_stack),
-      user_bond: row.user_bond == null ? null : Number(row.user_bond),
-      rune_price: Number(row.rune_price),
-      rates_json: row.rates_json || null
-    }));
+    .map((row) => normalizeHistoryRows([row])[0]);
 
   while (history.length > 0 && history[0].rune_stack === 0) {
     history.shift();

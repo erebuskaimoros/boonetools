@@ -1,4 +1,4 @@
-import { normalizeAsset } from '../utils/blockchain.js';
+import { getRapidSwapComparableVolumeUsd } from './volume.js';
 
 export function toChartDateKey(value) {
   const date = typeof value === 'string' ? new Date(value) : value;
@@ -56,24 +56,53 @@ function formatChartLabel(key) {
   });
 }
 
-function getComparableVolumeUsd(row) {
-  const inputUsd = Number(row?.input_estimated_usd) || 0;
-  const outputUsd = Number(row?.output_estimated_usd) || 0;
-  const sourceAsset = normalizeAsset(row?.source_asset || '');
-  const targetAsset = normalizeAsset(row?.target_asset || '');
+export function getSeriesAxisBounds(values, options = {}) {
+  const {
+    paddingRatio = 0.08,
+    minSpan = 1,
+    clampMin = null,
+    clampMax = null,
+    roundToInteger = false
+  } = options;
 
-  if (sourceAsset === 'THOR.RUNE' || targetAsset === 'THOR.RUNE') {
-    return inputUsd || outputUsd;
+  const numericValues = values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+
+  if (!numericValues.length) {
+    return {};
   }
 
-  if (inputUsd > 0 && outputUsd > 0) {
-    return inputUsd + outputUsd;
+  const minValue = Math.min(...numericValues);
+  const maxValue = Math.max(...numericValues);
+  const span = maxValue - minValue;
+  const paddingBase = span > 0 ? span : Math.abs(maxValue || minValue || 0);
+  const padding = Math.max(paddingBase * paddingRatio, minSpan);
+
+  let min = minValue - padding;
+  let max = maxValue + padding;
+
+  if (clampMin != null) {
+    min = Math.max(clampMin, min);
   }
 
-  return inputUsd || outputUsd;
+  if (clampMax != null) {
+    max = Math.min(clampMax, max);
+  }
+
+  if (roundToInteger) {
+    min = Math.floor(min);
+    max = Math.ceil(max);
+  }
+
+  if (!(max > min)) {
+    max = min + (roundToInteger ? 1 : minSpan);
+  }
+
+  return { min, max };
 }
 
-export function computeDailyData(swaps, midgardHistory) {
+export function computeDailyData(swaps, midgardHistory, allSwaps = swaps) {
   if (!swaps.length) {
     return { labels: [], volume: [], cumVolume: [], count: [], cumCount: [], efficiency: [], pctFaster: [], volumePct: [], countPct: [] };
   }
@@ -108,6 +137,7 @@ export function computeDailyData(swaps, midgardHistory) {
   }
 
   const sortedKeys = Object.keys(byDay).sort();
+  const firstVisibleKey = sortedKeys[0];
   const labels = sortedKeys.map(formatChartLabel);
 
   const volume = [];
@@ -121,9 +151,18 @@ export function computeDailyData(swaps, midgardHistory) {
   let cumulativeVolume = 0;
   let cumulativeCount = 0;
 
+  for (const row of allSwaps) {
+    const date = new Date(row.action_date);
+    if (!Number.isFinite(date.getTime())) continue;
+    const key = toChartDateKey(date);
+    if (!key || key >= firstVisibleKey) continue;
+    cumulativeVolume += getRapidSwapComparableVolumeUsd(row);
+    cumulativeCount += 1;
+  }
+
   for (const key of sortedKeys) {
     const rows = byDay[key];
-    const dayVolume = rows.reduce((sum, row) => sum + (Number(row.input_estimated_usd) || 0), 0);
+    const dayVolume = rows.reduce((sum, row) => sum + getRapidSwapComparableVolumeUsd(row), 0);
     cumulativeVolume += dayVolume;
     volume.push(dayVolume);
     cumVolume.push(cumulativeVolume);
@@ -142,7 +181,7 @@ export function computeDailyData(swaps, midgardHistory) {
     efficiency.push(totalBlocks > 0 ? +(totalSubs / totalBlocks).toFixed(2) : 1);
     pctFaster.push(totalSubs > 0 ? +((1 - totalBlocks / totalSubs) * 100).toFixed(1) : 0);
 
-    const comparableVolume = rows.reduce((sum, row) => sum + getComparableVolumeUsd(row), 0);
+    const comparableVolume = rows.reduce((sum, row) => sum + getRapidSwapComparableVolumeUsd(row), 0);
     const midgard = mgByDay[key];
     volumePct.push(midgard && midgard.volume > 0 ? +((comparableVolume / midgard.volume) * 100).toFixed(2) : null);
     countPct.push(midgard && midgard.count > 0 ? +((rows.length / midgard.count) * 100).toFixed(2) : null);

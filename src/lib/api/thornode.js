@@ -3,8 +3,7 @@
  *
  * Provider Strategy:
  * - THORChain Network (thornode.thorchain.network): Official endpoint, generous rate limits
- * - Nine Realms (thornode.ninerealms.com): Fallback for live requests
- * - Nine Realms Archive (thornode-archive.ninerealms.com): Historical height-aware fallback
+ * - Liquify Gateway (gateway.liquify.com/chain/thorchain_api): Public fallback with archive coverage
  */
 
 import { fromBaseUnit } from '../utils/blockchain.js';
@@ -12,25 +11,28 @@ import { fromBaseUnit } from '../utils/blockchain.js';
 /**
  * API Provider configurations
  */
+const DEV_THORNODE_BASES = {
+  primary: '/__thornode_primary',
+  fallback: '/__thornode_fallback'
+};
+
 export const PROVIDERS = {
   thorchain: {
     name: 'thorchain',
-    base: 'https://thornode.thorchain.network',
+    base: import.meta.env.DEV
+      ? DEV_THORNODE_BASES.primary
+      : 'https://thornode.thorchain.network',
     supportsBlockHeight: true,
     updateFrequency: 6000,
     priority: 1
   },
-  archive: {
-    name: 'archive',
-    base: 'https://thornode-archive.ninerealms.com',
+  fallback: {
+    name: 'fallback',
+    base: import.meta.env.DEV
+      ? DEV_THORNODE_BASES.fallback
+      : 'https://gateway.liquify.com/chain/thorchain_api',
     supportsBlockHeight: true,
     updateFrequency: 30000,
-    priority: 2
-  },
-  ninerealms: {
-    name: 'ninerealms',
-    base: 'https://thornode.ninerealms.com',
-    updateFrequency: 60000,
     priority: 2
   }
 };
@@ -42,7 +44,7 @@ class ThorNodeClient {
   constructor() {
     this.failureCount = {
       thorchain: 0,
-      ninerealms: 0
+      fallback: 0
     };
     this.maxFailures = 3;
     this.cache = new Map();
@@ -55,7 +57,7 @@ class ThorNodeClient {
 
   resetFailures() {
     this.failureCount.thorchain = 0;
-    this.failureCount.ninerealms = 0;
+    this.failureCount.fallback = 0;
   }
 
   /**
@@ -87,9 +89,7 @@ class ThorNodeClient {
     }
 
     // Determine providers to try (in order)
-    const providers = blockHeight
-      ? [PROVIDERS.thorchain, PROVIDERS.archive]
-      : [PROVIDERS.thorchain, PROVIDERS.ninerealms];
+    const providers = [PROVIDERS.thorchain, PROVIDERS.fallback];
 
     let lastError = null;
 
@@ -320,6 +320,5 @@ export { ThorNodeClient };
 // Export provider endpoints for direct use if needed
 export const THORNODE_ENDPOINTS = {
   thorchain: PROVIDERS.thorchain.base,
-  ninerealms: PROVIDERS.ninerealms.base,
-  archive: PROVIDERS.archive.base
+  fallback: PROVIDERS.fallback.base
 };

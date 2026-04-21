@@ -1,172 +1,81 @@
-# Deployment Guide
+# BooneTools Frontend Deployment
 
-The static site still deploys to Hetzner as before, but the DB-backed API now has a separate Hetzner runtime. See [boonetools-backend-hetzner.md](./boonetools-backend-hetzner.md) for the API/DB/scheduler stack.
+The BooneTools frontend is served from [boone.tools](https://boone.tools/). The DB-backed API is deployed separately; see [boonetools-backend-hetzner.md](./boonetools-backend-hetzner.md).
 
-RUNE-Tools is deployed as a static site on a Hetzner VPS, served by Caddy.
+## Canonical Repo
+
+Deploy the frontend only from this repo checkout:
+
+- repo root: `/Users/boonewheeler/Desktop/Projects/THORChain/boonetools/website`
+- expected `origin`: `https://github.com/erebuskaimoros/boonetools.git`
+
+Do not deploy BooneTools from the outer THORChain workspace repo. The guarded deploy scripts will now fail if the repo root or `origin` does not match the canonical BooneTools repo.
 
 ## Server
 
 | Property | Value |
 |----------|-------|
 | Provider | Hetzner Cloud |
-| Server Type | CPX31 (4 vCPU, 8GB RAM, 160GB SSD) |
-| IP | 178.156.211.181 |
-| OS | Ubuntu 22.04 LTS |
-| URL | https://boonewheeler.com/boonetools/ |
-| Also serves | https://themememap.com (separate project) |
+| Host | `boone.tools` |
+| SSH | `root@boone.tools` |
+| Static dir | `/var/www/boone-tools/` |
+| Public URL | [https://boone.tools/](https://boone.tools/) |
+| Legacy redirect | `https://boonewheeler.com/boonetools/*` forwards to the equivalent `https://boone.tools/*` path |
 
-## SSH Access
+## Deploy
 
-```bash
-# Root access
-ssh root@178.156.211.181
-
-# Deploy user (limited permissions)
-ssh deploy@178.156.211.181
-```
-
-## Architecture
-
-```
-Internet
-  │
-  ▼
-Caddy (systemd, ports 80/443)
-  │  - Auto HTTPS via Let's Encrypt
-  │  - Handles boonewheeler.com AND themememap.com
-  │
-  ├── /boonetools/*  →  static files from /var/www/boonetools/
-  │                      (uri strip_prefix, try_files → index.html)
-  │
-  └── themememap.com →  reverse_proxy localhost:8080
-                        (Docker stack: nginx → Clojure API → Postgres)
-```
-
-## DNS
-
-Domain `boonewheeler.com` is registered at **Spaceship** using Spaceship nameservers.
-
-| Record | Type | Value |
-|--------|------|-------|
-| @ | A | 178.156.211.181 |
-| www | A | 178.156.211.181 |
-
-Root `/` redirects to `/boonetools/`.
-
-## File Locations on Server
-
-| Path | Contents |
-|------|----------|
-| `/var/www/boonetools/` | Built static files (dist/) |
-| `/etc/caddy/Caddyfile` | Caddy reverse proxy + static file config |
-
-## How to Deploy
-
-### 1. Build with correct base path
-
-The app must be built with `base: '/boonetools/'` so asset URLs resolve correctly under the subpath.
+Run the guarded frontend deploy script:
 
 ```bash
-cd RUNE-Tools
-npx vite build --base=/boonetools/
+npm run boonetools:deploy:frontend
 ```
 
-### 2. Sync to server
+That script:
+
+1. Verifies the current repo is the canonical BooneTools checkout
+2. Prints the current branch, `HEAD`, `origin`, and any local worktree changes
+3. Builds the frontend with `npm run build`
+4. Syncs `dist/` to `/var/www/boone-tools/`
+5. Verifies the public URL responds after deploy
+
+Optional overrides:
 
 ```bash
-rsync -avz --delete dist/ root@178.156.211.181:/var/www/boonetools/
+SERVER=root@boone.tools
+DEST=/var/www/boone-tools
+VERIFY_URL=https://boone.tools/
 ```
 
-The `--delete` flag removes old files that are no longer in the build output.
-
-### 3. Done
-
-No server restart needed. Caddy serves static files directly -- new files are picked up immediately.
-
-## Caddy Configuration
-
-The Caddyfile at `/etc/caddy/Caddyfile`:
-
-```
-themememap.com {
-    reverse_proxy localhost:8080
-}
-
-www.themememap.com {
-    redir https://themememap.com{uri} permanent
-}
-
-boonewheeler.com, www.boonewheeler.com {
-    handle /boonetools/* {
-        root * /var/www/boonetools
-        uri strip_prefix /boonetools
-        file_server
-        try_files {path} /index.html
-    }
-    handle /boonetools {
-        redir /boonetools/ permanent
-    }
-    handle {
-        redir /boonetools/ permanent
-    }
-}
-```
-
-### Key Caddy directives
-
-- **`uri strip_prefix /boonetools`** -- removes `/boonetools` from the path before looking up files, so `/boonetools/assets/foo.js` maps to `/var/www/boonetools/assets/foo.js`
-- **`try_files {path} /index.html`** -- serves `index.html` for any path that doesn't match a real file (required for SPA client-side routing)
-- **`file_server`** -- serves static files from the `root` directory
-
-### Modifying Caddy config
+Example:
 
 ```bash
-# Edit
-ssh root@178.156.211.181
-nano /etc/caddy/Caddyfile
-
-# Validate before applying
-caddy validate --config /etc/caddy/Caddyfile
-
-# Reload (no downtime)
-systemctl reload caddy
-
-# Check status
-systemctl status caddy
-
-# View logs
-journalctl -u caddy -f
+SERVER=root@boone.tools DEST=/var/www/boone-tools VERIFY_URL=https://boone.tools/ npm run boonetools:deploy:frontend
 ```
 
-## HTTPS / Certificates
+## Manual Sync
 
-Caddy automatically obtains and renews Let's Encrypt certificates. No manual certificate management is needed. Certificates are stored at `/var/lib/caddy/.local/share/caddy/`.
+Manual `rsync` is still possible, but it is no longer the recommended path. Use the guarded script unless you intentionally need a one-off deploy flow and have verified the repo source yourself.
 
 ## Troubleshooting
 
-### Site not loading after deploy
+If the deploy script refuses to run:
+
+- make sure you are inside the BooneTools repo, not the outer THORChain workspace repo
+- check `git remote get-url origin`
+- check `git rev-parse --show-toplevel`
+
+If the site looks stale after deploy:
+
+- hard refresh the browser so it picks up the latest hashed assets
+- verify the current asset list on the server:
+
 ```bash
-# Check files are on server
-ssh root@178.156.211.181 "ls -la /var/www/boonetools/"
-
-# Check Caddy is running
-ssh root@178.156.211.181 "systemctl status caddy"
-
-# Check Caddy logs
-ssh root@178.156.211.181 "journalctl -u caddy --since '5 min ago'"
+ssh root@boone.tools 'ls -la /var/www/boone-tools/assets | tail -n 20'
 ```
 
-### Assets returning 404
-The Vite build `base` must match the Caddy path. If you change the URL path, update both:
-1. `npx vite build --base=/new-path/`
-2. The Caddyfile `handle` and `uri strip_prefix` directives
+If Caddy appears unhealthy:
 
-### DNS not resolving
 ```bash
-# Check what Spaceship nameservers return
-dig +short boonewheeler.com @launch1.spaceship.net
-
-# Check propagation from your machine
-dig +short boonewheeler.com
+ssh root@boone.tools 'systemctl status caddy'
+ssh root@boone.tools 'journalctl -u caddy --since "10 min ago"'
 ```
-DNS changes propagate within 30 minutes (TTL) but can take longer for cached resolvers.

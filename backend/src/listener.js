@@ -29,6 +29,7 @@ let heartbeatTimer = null;
 let ws = null;
 let reconnectAttempt = 0;
 let pingTimer = null;
+let activeRpcWsIndex = 0;
 
 async function getCachedPriceIndex() {
   const now = Date.now();
@@ -223,12 +224,37 @@ function scheduleReconnect() {
   setTimeout(connect, delay);
 }
 
+function getRpcWsUrls() {
+  return Array.isArray(config.rpcWsUrls) && config.rpcWsUrls.length > 0
+    ? config.rpcWsUrls
+    : [config.rpcWsUrl];
+}
+
+function getActiveRpcWsUrl() {
+  const urls = getRpcWsUrls();
+  return urls[activeRpcWsIndex % urls.length];
+}
+
+function rotateRpcWsUrl() {
+  const urls = getRpcWsUrls();
+  if (urls.length > 1) {
+    activeRpcWsIndex = (activeRpcWsIndex + 1) % urls.length;
+  }
+}
+
 function connect() {
-  log(`Connecting to ${config.rpcWsUrl}...`);
-  ws = new WebSocket(config.rpcWsUrl);
+  const rpcWsUrl = getActiveRpcWsUrl();
+  let opened = false;
+  log(`Connecting to ${rpcWsUrl}...`);
+  ws = new WebSocket(rpcWsUrl, {
+    headers: {
+      'x-client-id': 'RuneTools'
+    }
+  });
 
   ws.on('open', () => {
     log('Connected. Subscribing to NewBlock events...');
+    opened = true;
     reconnectAttempt = 0;
 
     ws.send(JSON.stringify({
@@ -260,6 +286,9 @@ function connect() {
     log(`WebSocket closed: ${code} ${reason || ''}`);
     clearInterval(pingTimer);
     stopHeartbeat();
+    if (!opened) {
+      rotateRpcWsUrl();
+    }
     scheduleReconnect();
   });
 
@@ -289,7 +318,7 @@ export function startRapidSwapListener() {
   });
 
   log('Rapid Swap WebSocket Listener starting');
-  log(`RPC: ${config.rpcWsUrl}`);
+  log(`RPC URLs: ${getRpcWsUrls().join(', ')}`);
   log(`Midgard delay: ${config.midgardDelayMs}ms`);
   connect();
 }

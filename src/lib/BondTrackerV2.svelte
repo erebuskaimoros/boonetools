@@ -178,6 +178,31 @@
     countdown = formatCountdown(secondsLeft, { zeroText: 'Now!' });
   };
 
+  function getBondProviderForAddress(node, bondAddress) {
+    const target = String(bondAddress || '').toLowerCase();
+    return (node?.bond_providers?.providers || []).find((provider) => (
+      String(provider?.bond_address || '').toLowerCase() === target
+    ));
+  }
+
+  function getBondNodesFromThorNodes(nodes, bondAddress) {
+    return (Array.isArray(nodes) ? nodes : [])
+      .map((node) => {
+        const provider = getBondProviderForAddress(node, bondAddress);
+        const bond = Number(provider?.bond || 0);
+        if (!provider || bond <= 1e8) {
+          return null;
+        }
+
+        return {
+          address: node.node_address,
+          bond: String(provider.bond || '0'),
+          status: node.status || ''
+        };
+      })
+      .filter(Boolean);
+  }
+
   const fetchBtcPoolData = async () => {
     try {
       const btcPoolData = await thornode.getPool('BTC.BTC');
@@ -195,11 +220,15 @@
       isLoading = true;
       showContent = false;
 
-      // Fetch bond data from midgard
-      const bondData = await midgard.fetch(`/bonds/${my_bond_address}`);
-      
-      // Filter nodes with bond > 1 RUNE (1e8 base units)
-      const nodesWithBond = bondData.nodes.filter(node => Number(node.bond) > 1e8);
+      // Discover current bond nodes from THORNode instead of Midgard /bonds,
+      // which has been intermittently returning 500s in browser traffic.
+      const allNodesData = await getNodes({ cache: false });
+      allNodes = allNodesData;
+      const nodesWithBond = getBondNodesFromThorNodes(allNodesData, my_bond_address);
+
+      if (nodesWithBond.length === 0) {
+        throw new Error('No active bonds found for this address');
+      }
       
       if (nodesWithBond.length === 1) {
         // Single node - use existing UI
@@ -207,11 +236,11 @@
         const singleNode = nodesWithBond[0];
         node_address = singleNode.address;
         nodeAddressSuffix = getAddressSuffix(node_address, 4);
-        await fetchData();
+        await fetchData(allNodesData);
       } else if (nodesWithBond.length > 1) {
         // Multiple nodes - use new UI
         isMultiNode = true;
-        await fetchMultiNodeData(nodesWithBond);
+        await fetchMultiNodeData(nodesWithBond, allNodesData);
       }
       
       // Data loaded, start transition
@@ -228,17 +257,20 @@
       console.error("Error fetching bond data:", error);
       isLoading = false;
       showContent = true;
+      if (!historyLoaded && !historyLoading) {
+        fetchBondHistory();
+      }
     }
   };
 
-  const fetchMultiNodeData = async (nodes) => {
+  const fetchMultiNodeData = async (nodes, preloadedAllNodes = null) => {
     try {
       // Fetch common data first
       const [churnState, runePriceData, btcPoolData, allNodesData] = await Promise.all([
         getChurnState().catch(() => null),
         thornode.getNetwork(),
         thornode.getPool('BTC.BTC'),
-        getNodes()
+        preloadedAllNodes || getNodes()
       ]);
 
       allNodes = allNodesData;
@@ -324,14 +356,14 @@
     }
   };
 
-  const fetchData = async () => {
+  const fetchData = async (preloadedAllNodes = null) => {
     try {
       // Parallelize independent API calls
       const [nodeData, churnState, runePriceData, allNodesData] = await Promise.all([
         thornode.fetch(`/thorchain/node/${node_address}`),
         getChurnState().catch(() => null),
         thornode.getNetwork(),
-        getNodes()
+        preloadedAllNodes || getNodes()
       ]);
 
       allNodes = allNodesData;

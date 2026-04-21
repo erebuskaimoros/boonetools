@@ -68,6 +68,7 @@ export function isTransientHistoricalFetchError(error) {
     message.includes('challenge response') ||
     message.includes('fetch failed') ||
     message.includes('timed out') ||
+    message.includes('aborted') ||
     message.includes('econn') ||
     message.includes('socket hang up')
   );

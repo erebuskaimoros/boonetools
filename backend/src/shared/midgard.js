@@ -3,7 +3,7 @@ import { config } from '../lib/config.js';
 const MIDGARD_PRIMARY = config.midgardUrl.replace(/\/$/, '');
 const MIDGARD_NINEREALMS = 'https://midgard.ninerealms.com/v2';
 const MIDGARD_FALLBACK = config.midgardFallbackUrl.replace(/\/$/, '');
-const MIDGARD_REQUEST_TIMEOUT_MS = 4000;
+const MIDGARD_REQUEST_TIMEOUT_MS = 10000;
 
 const MIDGARD_BASES = Array.from(
   new Set([MIDGARD_PRIMARY, MIDGARD_NINEREALMS, MIDGARD_FALLBACK].filter(Boolean))
