@@ -8,6 +8,7 @@ Type=simple
 User=deploy
 WorkingDirectory=/opt/boonetools-backend/backend
 Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--dns-result-order=ipv4first
 EnvironmentFile=/opt/boonetools-backend/backend/.env
 ExecStart=/usr/bin/node src/server.js
 Restart=always
