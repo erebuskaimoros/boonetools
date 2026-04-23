@@ -154,11 +154,6 @@ export function getRapidSwapRateLimitCooldownMs(error, fallbackMs = 60 * 60 * 10
 
   const retryAfterMs = Math.max(0, Math.trunc(safeNumber(error?.retryAfterSeconds, 0))) * 1000;
   const baseCooldownMs = Math.max(60 * 1000, Math.trunc(safeNumber(fallbackMs, 60 * 60 * 1000)));
-  const message = `${error?.message || ''} ${error?.body || ''}`;
-
-  if (/daily request limit/i.test(message)) {
-    return Math.max(baseCooldownMs, 12 * 60 * 60 * 1000);
-  }
 
   return Math.max(baseCooldownMs, retryAfterMs);
 }

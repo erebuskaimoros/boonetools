@@ -24,7 +24,7 @@ test('rapid swap backend recognizes provider rate limits and daily cooldowns', (
   };
 
   assert.equal(isRapidSwapRateLimitError(error), true);
-  assert.equal(getRapidSwapRateLimitCooldownMs(error, 60 * 60 * 1000), 12 * 60 * 60 * 1000);
+  assert.equal(getRapidSwapRateLimitCooldownMs(error, 60 * 60 * 1000), 60 * 60 * 1000);
 });
 
 function buildRapidAction(txId, height) {
