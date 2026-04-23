@@ -50,6 +50,11 @@ export const config = Object.freeze({
   midgardDelayMs: readInt('MIDGARD_DELAY_MS', 5000),
   rapidSwapsMaxPages: readInt('RAPID_SWAPS_MAX_PAGES', 200),
   rapidSwapsCatchupMaxPages: readInt('RAPID_SWAPS_CATCHUP_MAX_PAGES', 200),
+  rapidSwapsCanonicalScanIntervalMs: readInt('RAPID_SWAPS_CANONICAL_SCAN_INTERVAL_SECONDS', 15 * 60) * 1000,
+  rapidSwapsNormalHeadPages: readInt('RAPID_SWAPS_NORMAL_HEAD_PAGES', 4),
+  rapidSwapsLaggingHeadPages: readInt('RAPID_SWAPS_LAGGING_HEAD_PAGES', 2),
+  rapidSwapsCatchupPages: readInt('RAPID_SWAPS_CATCHUP_PAGES', 2),
+  rapidSwapsRateLimitCooldownMs: readInt('RAPID_SWAPS_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000,
   rapidSwapsHeightOverlapBlocks: readInt('RAPID_SWAPS_HEIGHT_OVERLAP_BLOCKS', 1800),
   rapidSwapsMaxCandidateAttempts: readInt('RAPID_SWAPS_MAX_CANDIDATE_ATTEMPTS', 12),
   rapidSwapsPendingCandidateBatch: readInt('RAPID_SWAPS_PENDING_CANDIDATE_BATCH', 100)

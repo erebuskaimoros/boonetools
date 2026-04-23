@@ -5,13 +5,26 @@ import {
   ACTION_PAGE_LIMIT,
   MIDGARD_BASES,
   fetchMidgardActions,
-  fetchRapidSwapRows
+  fetchRapidSwapRows,
+  getRapidSwapRateLimitCooldownMs,
+  isRapidSwapRateLimitError
 } from '../src/lib/rapid-swaps/backend.js';
 
 test('rapid swap backend keeps official Midgard first and avoids known bad fallback URL', () => {
   assert.equal(MIDGARD_BASES[0], 'https://midgard.thorchain.network/v2');
   assert.equal(MIDGARD_BASES.includes('https://midgard.liquify.com/v2'), false);
   assert.equal(MIDGARD_BASES.includes('https://gateway.liquify.com/chain/thorchain_midgard/v2'), true);
+});
+
+test('rapid swap backend recognizes provider rate limits and daily cooldowns', () => {
+  const error = {
+    status: 429,
+    retryAfterSeconds: 60,
+    body: 'Slow down you have hit your daily request limit'
+  };
+
+  assert.equal(isRapidSwapRateLimitError(error), true);
+  assert.equal(getRapidSwapRateLimitCooldownMs(error, 60 * 60 * 1000), 12 * 60 * 60 * 1000);
 });
 
 function buildRapidAction(txId, height) {

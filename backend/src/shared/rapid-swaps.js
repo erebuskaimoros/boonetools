@@ -5,6 +5,8 @@ export {
   fetchRapidSwapPriceIndex,
   fetchRapidSwapRows,
   fetchThorchainTx,
+  getRapidSwapRateLimitCooldownMs,
+  isRapidSwapRateLimitError,
   resolveRapidSwapHint,
   enrichRapidSwapHint
 } from '../../../src/lib/rapid-swaps/backend.js';

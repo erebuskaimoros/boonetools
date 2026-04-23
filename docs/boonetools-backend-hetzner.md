@@ -50,7 +50,18 @@ THORNODE_PRIMARY_URL=https://thornode.thorchain.network
 THORNODE_FALLBACK_URL=https://thornode.thorchain.liquify.com
 MIDGARD_URL=https://midgard.thorchain.network/v2
 MIDGARD_FALLBACK_URL=https://midgard.liquify.com/v2
+RAPID_SWAPS_CANONICAL_SCAN_INTERVAL_SECONDS=900
+RAPID_SWAPS_NORMAL_HEAD_PAGES=4
+RAPID_SWAPS_LAGGING_HEAD_PAGES=2
+RAPID_SWAPS_CATCHUP_PAGES=2
+RAPID_SWAPS_RATE_LIMIT_COOLDOWN_SECONDS=3600
 ```
+
+Rapid Swap scheduler page budgets are intentionally much smaller than the legacy
+`RAPID_SWAPS_MAX_PAGES` ceiling. The listener records candidates in real time,
+while the canonical Midgard scan acts as a bounded reconciliation path; provider
+`429` responses store a cooldown in `rapid_swap_sync_state` so timer runs skip
+without burning more quota.
 
 The server env also carries the dedicated Postgres container settings:
 

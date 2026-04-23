@@ -5,6 +5,8 @@ import {
   buildRapidSwapCanonicalScanPlan,
   fetchRapidSwapPriceIndex,
   fetchRapidSwapRows,
+  getRapidSwapRateLimitCooldownMs,
+  isRapidSwapRateLimitError,
   mergeRapidSwapRowsByTxId,
   resolveRapidSwapHint,
   summarizeRapidSwapCanonicalScan
@@ -159,6 +161,21 @@ async function loadPendingCandidates(client) {
   };
 }
 
+async function countReadyPendingCandidates(client) {
+  const { rows } = await client.query(
+    `select count(*)::bigint as count
+     from rapid_swap_candidates
+     where status = $1
+       and next_retry_at <= $2`,
+    [
+      'pending',
+      new Date().toISOString()
+    ]
+  );
+
+  return Number(rows[0]?.count) || 0;
+}
+
 async function resolvePendingCandidates(client, priceIndex) {
   const { now, candidates } = await loadPendingCandidates(client);
 
@@ -248,6 +265,7 @@ async function resolvePendingCandidates(client, priceIndex) {
 export async function runRapidSwapsScheduler() {
   return withAdvisoryLock('boonetools:rapid-swaps-scheduler', async (client) => {
     let jobId = '';
+    let syncState = null;
 
     try {
       jobId = await insertJobRun(client, {
@@ -255,10 +273,44 @@ export async function runRapidSwapsScheduler() {
         status: 'running'
       });
 
-      const [syncState, priceIndex] = await Promise.all([
-        loadSyncState(client),
-        fetchRapidSwapPriceIndex()
-      ]);
+      syncState = await loadSyncState(client);
+      const scanPlan = buildRapidSwapCanonicalScanPlan({
+        syncState,
+        overlapBlocks: config.rapidSwapsHeightOverlapBlocks,
+        headMaxPages: config.rapidSwapsMaxPages,
+        catchupMaxPages: config.rapidSwapsCatchupMaxPages,
+        normalHeadPages: config.rapidSwapsNormalHeadPages,
+        laggingHeadPages: config.rapidSwapsLaggingHeadPages,
+        catchupPages: config.rapidSwapsCatchupPages,
+        scanIntervalMs: config.rapidSwapsCanonicalScanIntervalMs
+      });
+
+      const readyPendingCount = scanPlan.skipReason === 'rate_limited'
+        ? 0
+        : await countReadyPendingCandidates(client);
+
+      if (!scanPlan.shouldScan && readyPendingCount === 0) {
+        const payload = {
+          job_name: 'rapid-swaps-recent-actions',
+          finished_at: new Date().toISOString(),
+          status: 'success',
+          stats_json: {
+            skipped: true,
+            skip_reason: scanPlan.skipReason,
+            next_scan_at: scanPlan.nextScanAt,
+            pending_candidates_ready: readyPendingCount
+          }
+        };
+
+        await completeJobRun(client, jobId, payload);
+
+        return {
+          ok: true,
+          stats: payload.stats_json
+        };
+      }
+
+      const priceIndex = await fetchRapidSwapPriceIndex();
 
       const { rows: recentRows } = await client.query(
         `select tx_id
@@ -269,21 +321,17 @@ export async function runRapidSwapsScheduler() {
       const knownTxIds = new Set((recentRows || []).map((row) => String(row.tx_id || '')));
 
       const pendingResolution = await resolvePendingCandidates(client, priceIndex);
-      const scanPlan = buildRapidSwapCanonicalScanPlan({
-        syncState,
-        overlapBlocks: config.rapidSwapsHeightOverlapBlocks,
-        headMaxPages: config.rapidSwapsMaxPages,
-        catchupMaxPages: config.rapidSwapsCatchupMaxPages
-      });
 
-      const headScan = await fetchRapidSwapRows({
-        maxPages: scanPlan.head.maxPages,
-        knownTxIds,
-        stopBelowHeight: scanPlan.head.stopBelowHeight,
-        priceIndex
-      });
+      const headScan = scanPlan.shouldScan
+        ? await fetchRapidSwapRows({
+            maxPages: scanPlan.head.maxPages,
+            knownTxIds,
+            stopBelowHeight: scanPlan.head.stopBelowHeight,
+            priceIndex
+          })
+        : null;
 
-      const catchupScan = scanPlan.catchup && !headScan.reachedStopHeight
+      const catchupScan = scanPlan.catchup && headScan && !headScan.reachedStopHeight && !headScan.stoppedEarly
         ? await fetchRapidSwapRows({
             maxPages: scanPlan.catchup.maxPages,
             nextPageToken: scanPlan.catchup.nextPageToken,
@@ -294,23 +342,27 @@ export async function runRapidSwapsScheduler() {
 
       const rowsToUpsert = mergeRapidSwapRowsByTxId(
         pendingResolution.upsertRows,
-        headScan.rows,
+        headScan?.rows || [],
         catchupScan?.rows || []
       );
       await upsertRapidSwaps(client, rowsToUpsert);
 
-      const scanSummary = summarizeRapidSwapCanonicalScan({
-        syncState,
-        plan: scanPlan,
-        headScan,
-        catchupScan
-      });
+      const scanSummary = headScan
+        ? summarizeRapidSwapCanonicalScan({
+            syncState,
+            plan: scanPlan,
+            headScan,
+            catchupScan
+          })
+        : null;
 
-      await saveSyncState(client, {
-        last_scanned_height: Number(scanSummary.lastScannedHeight || 0),
-        last_scanned_at: new Date().toISOString(),
-        stats_json: scanSummary.stats
-      });
+      if (scanSummary) {
+        await saveSyncState(client, {
+          last_scanned_height: Number(scanSummary.lastScannedHeight || 0),
+          last_scanned_at: new Date().toISOString(),
+          stats_json: scanSummary.stats
+        });
+      }
 
       const { rows: pendingCountRows } = await client.query(
         `select count(*)::bigint as count
@@ -330,19 +382,24 @@ export async function runRapidSwapsScheduler() {
           candidates_deferred: pendingResolution.deferred,
           candidates_errored: pendingResolution.errored,
           pending_candidates_remaining: pendingCount,
-          scan_stop_below_height: scanPlan.head.stopBelowHeight,
-          scan_reached_floor: Boolean(headScan.reachedStopHeight),
-          scan_lagging: Boolean(scanSummary.lagging),
-          highest_height_seen: headScan.highestHeight,
-          lowest_height_seen: headScan.lowestHeight,
-          next_page_token: scanSummary.stats.next_page_token || '',
-          scanned_pages: Number(headScan.scannedPages || 0) + Number(catchupScan?.scannedPages || 0),
-          scanned_actions: Number(headScan.scannedActions || 0) + Number(catchupScan?.scannedActions || 0),
+          skipped: !scanPlan.shouldScan,
+          skip_reason: scanPlan.skipReason,
+          next_scan_at: scanPlan.nextScanAt,
+          scan_stop_below_height: scanPlan.head?.stopBelowHeight || 0,
+          scan_head_budget_pages: scanPlan.head?.maxPages || 0,
+          scan_catchup_budget_pages: scanPlan.catchup?.maxPages || 0,
+          scan_reached_floor: Boolean(headScan?.reachedStopHeight),
+          scan_lagging: Boolean(scanSummary?.lagging),
+          highest_height_seen: headScan?.highestHeight || 0,
+          lowest_height_seen: headScan?.lowestHeight || 0,
+          next_page_token: scanSummary?.stats?.next_page_token || '',
+          scanned_pages: Number(headScan?.scannedPages || 0) + Number(catchupScan?.scannedPages || 0),
+          scanned_actions: Number(headScan?.scannedActions || 0) + Number(catchupScan?.scannedActions || 0),
           catchup_scanned_pages: Number(catchupScan?.scannedPages || 0),
           catchup_scanned_actions: Number(catchupScan?.scannedActions || 0),
           rapid_swaps_upserted: rowsToUpsert.length,
-          observed_at: headScan.observedAt,
-          stopped_early: Boolean(headScan.stoppedEarly),
+          observed_at: headScan?.observedAt || '',
+          stopped_early: Boolean(headScan?.stoppedEarly),
           catchup_active: Boolean(scanPlan.catchup),
           catchup_reached_floor: Boolean(catchupScan?.reachedStopHeight)
         }
@@ -355,6 +412,47 @@ export async function runRapidSwapsScheduler() {
         stats: payload.stats_json
       };
     } catch (error) {
+      if (isRapidSwapRateLimitError(error)) {
+        const cooldownMs = getRapidSwapRateLimitCooldownMs(error, config.rapidSwapsRateLimitCooldownMs);
+        const rateLimitedAt = new Date().toISOString();
+        const rateLimitedUntil = new Date(Date.now() + cooldownMs).toISOString();
+        const previousStats = syncState?.stats_json && typeof syncState.stats_json === 'object'
+          ? syncState.stats_json
+          : {};
+
+        await saveSyncState(client, {
+          last_scanned_height: Number(syncState?.last_scanned_height || 0),
+          last_scanned_at: syncState?.last_scanned_at || rateLimitedAt,
+          stats_json: {
+            ...previousStats,
+            rate_limited_at: rateLimitedAt,
+            rate_limited_until: rateLimitedUntil,
+            rate_limit_error: error.message || 'Rapid swap provider rate limit'
+          }
+        }).catch(() => {});
+
+        const payload = {
+          finished_at: rateLimitedAt,
+          status: 'rate_limited',
+          error: error.message || 'Rapid swap provider rate limit',
+          stats_json: {
+            skipped: true,
+            skip_reason: 'rate_limited',
+            rate_limited_until: rateLimitedUntil,
+            cooldown_seconds: Math.round(cooldownMs / 1000)
+          }
+        };
+
+        if (jobId) {
+          await completeJobRun(client, jobId, payload).catch(() => {});
+        }
+
+        return {
+          ok: true,
+          stats: payload.stats_json
+        };
+      }
+
       if (jobId) {
         await completeJobRun(client, jobId, {
           finished_at: new Date().toISOString(),

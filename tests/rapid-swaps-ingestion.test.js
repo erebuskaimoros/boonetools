@@ -11,27 +11,76 @@ test('buildRapidSwapCanonicalScanPlan loads the saved catch-up cursor when laggi
   const plan = buildRapidSwapCanonicalScanPlan({
     syncState: {
       last_scanned_height: 5000,
+      last_scanned_at: '2026-04-01T00:00:00.000Z',
       stats_json: {
         lagging: true,
         catchup_next_page_token: 'cursor-123',
         catchup_stop_below_height: 3200
       }
     },
+    nowMs: Date.parse('2026-04-01T00:20:00.000Z'),
     overlapBlocks: 1800,
     headMaxPages: 200,
-    catchupMaxPages: 80
+    catchupMaxPages: 80,
+    normalHeadPages: 4,
+    laggingHeadPages: 2,
+    catchupPages: 3,
+    scanIntervalMs: 15 * 60 * 1000
   });
 
   assert.deepEqual(plan, {
+    shouldScan: true,
+    skipReason: '',
+    nextScanAt: '',
     head: {
-      maxPages: 200,
+      maxPages: 2,
       stopBelowHeight: 3200
     },
     catchup: {
-      maxPages: 80,
+      maxPages: 3,
       nextPageToken: 'cursor-123',
       stopBelowHeight: 3200
     }
+  });
+});
+
+test('buildRapidSwapCanonicalScanPlan skips until the scan interval elapses', () => {
+  const plan = buildRapidSwapCanonicalScanPlan({
+    syncState: {
+      last_scanned_height: 5000,
+      last_scanned_at: '2026-04-01T00:00:00.000Z',
+      stats_json: {}
+    },
+    nowMs: Date.parse('2026-04-01T00:05:00.000Z'),
+    scanIntervalMs: 15 * 60 * 1000
+  });
+
+  assert.deepEqual(plan, {
+    shouldScan: false,
+    skipReason: 'scan_interval',
+    nextScanAt: '2026-04-01T00:15:00.000Z',
+    head: null,
+    catchup: null
+  });
+});
+
+test('buildRapidSwapCanonicalScanPlan skips during provider cooldown', () => {
+  const plan = buildRapidSwapCanonicalScanPlan({
+    syncState: {
+      last_scanned_height: 5000,
+      stats_json: {
+        rate_limited_until: '2026-04-01T02:00:00.000Z'
+      }
+    },
+    nowMs: Date.parse('2026-04-01T01:00:00.000Z')
+  });
+
+  assert.deepEqual(plan, {
+    shouldScan: false,
+    skipReason: 'rate_limited',
+    nextScanAt: '2026-04-01T02:00:00.000Z',
+    head: null,
+    catchup: null
   });
 });
 
@@ -68,7 +117,7 @@ test('summarizeRapidSwapCanonicalScan seeds catch-up state when the head scan fa
   assert.equal(summary.stats.lagging_started_at !== null, true);
 });
 
-test('summarizeRapidSwapCanonicalScan stays lagging when the head scan stopped early with a continuation cursor', () => {
+test('summarizeRapidSwapCanonicalScan treats known-page early stop as caught up', () => {
   const syncState = {
     last_scanned_height: 5000,
     stats_json: {}
@@ -94,10 +143,10 @@ test('summarizeRapidSwapCanonicalScan stays lagging when the head scan stopped e
     }
   });
 
-  assert.equal(summary.lastScannedHeight, 5000);
-  assert.equal(summary.lagging, true);
-  assert.equal(summary.stats.catchup_next_page_token, 'cursor-after-known-pages');
-  assert.equal(summary.stats.catchup_stop_below_height, 3200);
+  assert.equal(summary.lastScannedHeight, 6200);
+  assert.equal(summary.lagging, false);
+  assert.equal(summary.stats.catchup_next_page_token, '');
+  assert.equal(summary.stats.catchup_stop_below_height, 0);
 });
 
 test('summarizeRapidSwapCanonicalScan clears lagging after a catch-up scan reaches the floor', () => {

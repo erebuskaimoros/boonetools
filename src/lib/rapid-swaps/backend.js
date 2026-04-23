@@ -25,6 +25,17 @@ export const RECENT_SCAN_HEIGHT_BUFFER = 80;
 let activeMidgardIndex = 0;
 let activeThornodeIndex = 0;
 
+export class RapidSwapProviderError extends Error {
+  constructor(message, details = {}) {
+    super(message);
+    this.name = 'RapidSwapProviderError';
+    this.status = details.status || 0;
+    this.url = details.url || '';
+    this.retryAfterSeconds = details.retryAfterSeconds || 0;
+    this.body = details.body || '';
+  }
+}
+
 function safeNumber(value, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -111,7 +122,14 @@ async function fetchJson(url, headers = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status} for ${url}`);
+    const retryAfterSeconds = Math.max(0, Math.trunc(safeNumber(response.headers.get('retry-after'), 0)));
+    const body = await response.text().catch(() => '');
+    throw new RapidSwapProviderError(`HTTP ${response.status} for ${url}`, {
+      status: response.status,
+      url,
+      retryAfterSeconds,
+      body: body.slice(0, 240)
+    });
   }
 
   if (isChallengeResponse(response)) {
@@ -119,6 +137,30 @@ async function fetchJson(url, headers = {}) {
   }
 
   return response.json();
+}
+
+export function isRapidSwapRateLimitError(error) {
+  return Boolean(
+    error?.status === 429 ||
+    /HTTP 429|Too Many Requests|daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.message || '')) ||
+    /daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.body || ''))
+  );
+}
+
+export function getRapidSwapRateLimitCooldownMs(error, fallbackMs = 60 * 60 * 1000) {
+  if (!isRapidSwapRateLimitError(error)) {
+    return 0;
+  }
+
+  const retryAfterMs = Math.max(0, Math.trunc(safeNumber(error?.retryAfterSeconds, 0))) * 1000;
+  const baseCooldownMs = Math.max(60 * 1000, Math.trunc(safeNumber(fallbackMs, 60 * 60 * 1000)));
+  const message = `${error?.message || ''} ${error?.body || ''}`;
+
+  if (/daily request limit/i.test(message)) {
+    return Math.max(baseCooldownMs, 12 * 60 * 60 * 1000);
+  }
+
+  return Math.max(baseCooldownMs, retryAfterMs);
 }
 
 async function fetchWithFallback(bases, path, options = {}) {

@@ -7,30 +7,89 @@ function safeString(value) {
   return String(value || '');
 }
 
+function safeBoolean(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  return ['1', 'true', 'yes'].includes(String(value || '').toLowerCase());
+}
+
 function safeStats(syncState) {
   return syncState?.stats_json && typeof syncState.stats_json === 'object'
     ? syncState.stats_json
     : {};
 }
 
+function safeTimestampMs(value, fallback = 0) {
+  const timestamp = Date.parse(String(value || ''));
+  return Number.isFinite(timestamp) ? timestamp : fallback;
+}
+
+function clampPageBudget(value, fallback, maxValue) {
+  const normalized = Math.max(1, Math.trunc(safeNumber(value, fallback)));
+  const ceiling = Math.max(1, Math.trunc(safeNumber(maxValue, normalized)));
+  return Math.min(normalized, ceiling);
+}
+
 export function buildRapidSwapCanonicalScanPlan(options = {}) {
   const syncState = options.syncState || null;
-  const headMaxPages = Math.max(1, Math.trunc(safeNumber(options.headMaxPages || options.maxPages, 200)));
-  const catchupMaxPages = Math.max(1, Math.trunc(safeNumber(options.catchupMaxPages || headMaxPages, headMaxPages)));
+  const nowMs = safeNumber(options.nowMs, Date.now());
+  const requestedHeadMaxPages = Math.max(1, Math.trunc(safeNumber(options.headMaxPages || options.maxPages, 200)));
+  const requestedCatchupMaxPages = Math.max(1, Math.trunc(safeNumber(options.catchupMaxPages || requestedHeadMaxPages, requestedHeadMaxPages)));
   const overlapBlocks = Math.max(0, Math.trunc(safeNumber(options.overlapBlocks, 0)));
   const lastScannedHeight = Math.max(0, Math.trunc(safeNumber(syncState?.last_scanned_height, 0)));
   const stopBelowHeight = lastScannedHeight > 0
     ? Math.max(0, lastScannedHeight - overlapBlocks)
     : 0;
   const stats = safeStats(syncState);
+  const rateLimitedUntilMs = safeTimestampMs(stats.rate_limited_until);
+  if (rateLimitedUntilMs > nowMs) {
+    return {
+      shouldScan: false,
+      skipReason: 'rate_limited',
+      nextScanAt: new Date(rateLimitedUntilMs).toISOString(),
+      head: null,
+      catchup: null
+    };
+  }
+
+  const scanIntervalMs = Math.max(0, Math.trunc(safeNumber(options.scanIntervalMs, 0)));
+  const lastScannedAtMs = safeTimestampMs(syncState?.last_scanned_at);
+  if (
+    scanIntervalMs > 0 &&
+    lastScannedAtMs > 0 &&
+    nowMs - lastScannedAtMs < scanIntervalMs &&
+    !safeBoolean(options.force)
+  ) {
+    return {
+      shouldScan: false,
+      skipReason: 'scan_interval',
+      nextScanAt: new Date(lastScannedAtMs + scanIntervalMs).toISOString(),
+      head: null,
+      catchup: null
+    };
+  }
+
   const catchupNextPageToken = safeString(stats.catchup_next_page_token || stats.next_page_token);
   const catchupStopBelowHeight = Math.max(
     0,
     Math.trunc(safeNumber(stats.catchup_stop_below_height || stats.stop_below_height, stopBelowHeight))
   );
   const lagging = Boolean(stats.lagging);
+  const headMaxPages = lagging
+    ? clampPageBudget(options.laggingHeadPages, Math.min(2, requestedHeadMaxPages), requestedHeadMaxPages)
+    : clampPageBudget(options.normalHeadPages, Math.min(4, requestedHeadMaxPages), requestedHeadMaxPages);
+  const catchupMaxPages = clampPageBudget(
+    options.catchupPages,
+    Math.min(2, requestedCatchupMaxPages),
+    requestedCatchupMaxPages
+  );
 
   return {
+    shouldScan: true,
+    skipReason: '',
+    nextScanAt: '',
     head: {
       maxPages: headMaxPages,
       stopBelowHeight
@@ -59,8 +118,10 @@ export function summarizeRapidSwapCanonicalScan(options = {}) {
   const previousStats = safeStats(syncState);
   const headStopBelowHeight = Math.max(0, Math.trunc(safeNumber(plan?.head?.stopBelowHeight, 0)));
   const headHighestHeight = Math.max(0, Math.trunc(safeNumber(headScan.highestHeight, 0)));
+  const headReachedKnownRows = Boolean(headScan.stoppedEarly);
   const headLagging = headStopBelowHeight > 0
     && !Boolean(headScan.reachedStopHeight)
+    && !headReachedKnownRows
     && Boolean(headScan.nextPageToken);
 
   const activeCatchupStopBelowHeight = Math.max(
@@ -98,6 +159,7 @@ export function summarizeRapidSwapCanonicalScan(options = {}) {
 
   const canAdvanceWatermark = headStopBelowHeight === 0
     || Boolean(headScan.reachedStopHeight)
+    || headReachedKnownRows
     || (headLagging && catchupReachedFloor);
 
   return {
