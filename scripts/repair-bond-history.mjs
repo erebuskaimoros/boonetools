@@ -177,7 +177,7 @@ async function flushRecoveredRows(client, rows, summary) {
   }
 
   await upsertRows(client, 'bond_history', rows, {
-    conflictColumns: ['bond_address', 'churn_height'],
+    conflictColumns: ['bond_address', 'scope', 'churn_height'],
     jsonColumns: ['rates_json']
   });
 
@@ -227,7 +227,10 @@ log('starting repair run', {
 
 const targetAddresses = Array.from(rowsByAddress.keys());
 const existingPairsResult = await query(
-  'select bond_address, churn_height from bond_history where bond_address = any($1::text[])',
+  `select bond_address, churn_height
+   from bond_history
+   where bond_address = any($1::text[])
+     and scope = 'historical'`,
   [targetAddresses]
 );
 const existingPairs = new Set(
@@ -314,6 +317,7 @@ try {
           if (hasBondHistoryValue(computed)) {
             pendingRows.push({
               bond_address: bondAddress,
+              scope: 'historical',
               ...computed
             });
             existingPairs.add(pairKey);

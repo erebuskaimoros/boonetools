@@ -31,7 +31,7 @@ const tables = [
   { name: 'rapid_swaps', conflictColumns: ['tx_id'] },
   { name: 'rapid_swap_candidates', conflictColumns: ['hint_key'], jsonColumns: ['raw_hint'] },
   { name: 'rapid_swap_sync_state', conflictColumns: ['sync_key'], jsonColumns: ['stats_json'] },
-  { name: 'bond_history', conflictColumns: ['bond_address', 'churn_height'], jsonColumns: ['rates_json'] }
+  { name: 'bond_history', conflictColumns: ['bond_address', 'scope', 'churn_height'], jsonColumns: ['rates_json'] }
 ];
 
 async function fetchSupabasePage(tableName, offset) {
@@ -86,14 +86,17 @@ try {
       if (!Array.isArray(rows) || rows.length === 0) {
         break;
       }
+      const importRows = table.name === 'bond_history'
+        ? rows.map((row) => ({ ...row, scope: row.scope || 'legacy' }))
+        : rows;
 
-      await upsertRows(client, table.name, rows, {
+      await upsertRows(client, table.name, importRows, {
         conflictColumns: table.conflictColumns,
         jsonColumns: table.jsonColumns
       });
 
-      imported += rows.length;
-      offset += rows.length;
+      imported += importRows.length;
+      offset += importRows.length;
       console.log(`${table.name}: imported ${imported}`);
 
       if (rows.length < pageSize) {
