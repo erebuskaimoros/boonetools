@@ -112,6 +112,43 @@ test('fetchMidgardActions falls back when the primary returns invalid JSON', asy
   }
 });
 
+test('fetchMidgardActions stops when the primary is rate-limited', async () => {
+  const originalFetch = globalThis.fetch;
+  const [primary] = MIDGARD_BASES;
+  const calls = [];
+
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+
+    if (url === `${primary}/actions?address=thor1test&type=bond&limit=50&offset=0`) {
+      return createResponse({
+        body: 'Slow down you have hit your daily request limit',
+        status: 429,
+        statusText: 'Too Many Requests'
+      });
+    }
+
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  try {
+    await assert.rejects(
+      () => fetchMidgardActions({
+        address: 'thor1test',
+        type: 'bond',
+        limit: 50,
+        offset: 0
+      }),
+      /429|Too Many Requests/
+    );
+    assert.deepEqual(calls, [
+      `${primary}/actions?address=thor1test&type=bond&limit=50&offset=0`
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('fetchMidgardChurns falls back when the primary returns malformed JSON', async () => {
   const originalFetch = globalThis.fetch;
   const [primary, fallback] = MIDGARD_BASES;

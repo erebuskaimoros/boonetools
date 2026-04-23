@@ -6,14 +6,14 @@
  *
  * Endpoints:
  * - https://midgard.thorchain.network/v2
- * - https://midgard.ninerealms.com/v2
+ * - https://gateway.liquify.com/chain/thorchain_midgard/v2
  */
 
 /**
  * Midgard API base URL
  */
 export const MIDGARD_BASE = 'https://midgard.thorchain.network/v2';
-export const MIDGARD_FALLBACK_BASE = 'https://midgard.ninerealms.com/v2';
+export const MIDGARD_FALLBACK_BASE = 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
 export const MIDGARD_BASES = [MIDGARD_BASE, MIDGARD_FALLBACK_BASE];
 
 function getPathSearchParams(path) {
@@ -49,6 +49,19 @@ function shouldRetryMidgardResponse(path, data) {
   }
 
   return false;
+}
+
+function createMidgardError(message, details = {}) {
+  const error = new Error(message);
+  error.status = details.status || 0;
+  return error;
+}
+
+export function isMidgardRateLimitError(error) {
+  return Boolean(
+    error?.status === 429 ||
+    /HTTP 429|Too Many Requests|daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.message || ''))
+  );
 }
 
 /**
@@ -104,7 +117,9 @@ class MidgardClient {
         });
 
         if (!response.ok) {
-          throw new Error(`Midgard error: ${response.status} ${response.statusText}`);
+          throw createMidgardError(`Midgard error: ${response.status} ${response.statusText}`, {
+            status: response.status
+          });
         }
 
         const data = await response.json();
@@ -121,6 +136,9 @@ class MidgardClient {
         return data;
       } catch (error) {
         lastError = error;
+        if (isMidgardRateLimitError(error)) {
+          throw error;
+        }
       }
     }
 

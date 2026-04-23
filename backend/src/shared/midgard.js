@@ -1,12 +1,11 @@
 import { config } from '../lib/config.js';
 
 const MIDGARD_PRIMARY = config.midgardUrl.replace(/\/$/, '');
-const MIDGARD_NINEREALMS = 'https://midgard.ninerealms.com/v2';
 const MIDGARD_FALLBACK = config.midgardFallbackUrl.replace(/\/$/, '');
 const MIDGARD_REQUEST_TIMEOUT_MS = 10000;
 
 const MIDGARD_BASES = Array.from(
-  new Set([MIDGARD_PRIMARY, MIDGARD_NINEREALMS, MIDGARD_FALLBACK].filter(Boolean))
+  new Set([MIDGARD_PRIMARY, MIDGARD_FALLBACK].filter(Boolean))
 );
 
 function isChallengeResponse(response) {
@@ -54,6 +53,22 @@ async function parseJsonResponse(response, url) {
   }
 }
 
+function createMidgardError(message, details = {}) {
+  const error = new Error(message);
+  error.status = details.status || 0;
+  error.url = details.url || '';
+  error.body = details.body || '';
+  return error;
+}
+
+export function isMidgardRateLimitError(error) {
+  return Boolean(
+    error?.status === 429 ||
+    /HTTP 429|Too Many Requests|daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.message || '')) ||
+    /daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.body || ''))
+  );
+}
+
 export async function fetchMidgard(path, options = {}) {
   const {
     bases = MIDGARD_BASES,
@@ -74,7 +89,12 @@ export async function fetchMidgard(path, options = {}) {
       });
 
       if (!response.ok) {
-        throw new Error(`Midgard error: ${response.status} ${response.statusText} for ${path}`);
+        const body = await response.text().catch(() => '');
+        throw createMidgardError(`Midgard error: ${response.status} ${response.statusText} for ${path}`, {
+          status: response.status,
+          url,
+          body: body.slice(0, 240)
+        });
       }
 
       if (isChallengeResponse(response)) {
@@ -90,6 +110,9 @@ export async function fetchMidgard(path, options = {}) {
       return payload;
     } catch (error) {
       lastError = error;
+      if (isMidgardRateLimitError(error)) {
+        throw error;
+      }
     } finally {
       clearTimeout(timeoutId);
     }
@@ -125,9 +148,19 @@ export async function fetchMidgardChurns() {
   return payload;
 }
 
+export async function fetchMidgardSwapHistory(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const path = query ? `/history/swaps?${query}` : '/history/swaps';
+
+  return fetchMidgard(path, {
+    validateResponse: (candidatePath, data) => (
+      shouldRetryMidgardResponse(candidatePath, data) || !Array.isArray(data?.intervals)
+    )
+  });
+}
+
 export {
   MIDGARD_BASES,
   MIDGARD_FALLBACK,
-  MIDGARD_NINEREALMS,
   MIDGARD_PRIMARY
 };

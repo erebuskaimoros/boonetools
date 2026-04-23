@@ -2,7 +2,6 @@
   import { onMount, onDestroy } from "svelte";
   import Chart from 'chart.js/auto';
   import { thornode } from '$lib/api';
-  import { midgard } from '$lib/api/midgard';
   import { formatNumber, simplifyNumber, formatCountdown, getAddressSuffix } from '$lib/utils/formatting';
   import { fromBaseUnit } from '$lib/utils/blockchain';
   import { getChurnState, getNodes, getLeaveStatus, LEAVE_STATUS } from '$lib/utils/nodes';
@@ -411,60 +410,8 @@
     }
   };
 
-  // Map churn height → array of Midgard tx hashes for bond/unbond events in that period
+  // Map churn height → array of bond/unbond tx hashes from the backend cache.
   let bondTxMap = {};
-
-  async function fetchBondTxHashes(address) {
-    try {
-      const nextBondTxMap = {};
-      const pageSize = 50;
-      let offset = 0;
-
-      while (true) {
-        const data = await midgard.getActions({
-          address,
-          type: 'bond',
-          limit: pageSize,
-          offset
-        }, {
-          cache: false
-        });
-        const actions = data.actions || [];
-        if (actions.length === 0) {
-          break;
-        }
-
-        // Match each bond action to the churn period it falls within
-        for (const action of actions) {
-          const actionHeight = Number(action.height);
-          const txHash = action.in?.[0]?.txID || action.out?.[0]?.txID;
-          if (!txHash) continue;
-
-          // Find the churn whose period contains this action
-          for (let i = 1; i < churnHistory.length; i++) {
-            const prevHeight = churnHistory[i - 1].height;
-            const thisHeight = churnHistory[i].height;
-            if (actionHeight > prevHeight && actionHeight <= thisHeight) {
-              if (!nextBondTxMap[thisHeight]) nextBondTxMap[thisHeight] = [];
-              nextBondTxMap[thisHeight].push(txHash);
-              break;
-            }
-          }
-        }
-
-        if (actions.length < pageSize) {
-            break;
-        }
-
-        offset += actions.length;
-      }
-
-      bondTxMap = nextBondTxMap;
-    } catch (e) {
-      // Non-critical — links just won't appear
-      bondTxMap = {};
-    }
-  }
 
   const BOND_HISTORY_API = {
     base: (import.meta.env.VITE_NODEOP_API_BASE || '').replace(/\/$/, ''),
@@ -480,7 +427,7 @@
 
       // Call the edge function — it handles caching, archive queries, everything
       const histParam = includeHistorical ? '&include_historical=true' : '';
-      const url = `${BOND_HISTORY_API.base}/bond-history?bond_address=${encodeURIComponent(my_bond_address)}${histParam}`;
+      const url = `${BOND_HISTORY_API.base}/bond-history?bond_address=${encodeURIComponent(my_bond_address)}${histParam}&include_bond_txs=true`;
       const res = await fetch(url, {
         headers: {
           'apikey': BOND_HISTORY_API.key,
@@ -496,6 +443,7 @@
       const data = await res.json();
       const history = data.history || [];
       hasHistoricalNodes = data.has_historical || false;
+      bondTxMap = data.bond_tx_map || {};
 
       // Transform into chart-ready format
       const results = history.map(row => ({
@@ -534,9 +482,6 @@
 
       historyLoaded = true;
       historyLoading = false;
-
-      // Fetch bond/unbond tx hashes from Midgard and match to churn periods
-      fetchBondTxHashes(my_bond_address);
 
       // Pre-fetch historical rates for current currency if not USD
       const curr = get(currentCurrency);

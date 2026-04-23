@@ -14,6 +14,9 @@ import { fetchChurns, fetchNodes, fetchThorchain } from '../shared/thornode.js';
 const BOND_HISTORY_SCOPE_CURRENT = 'current';
 const BOND_HISTORY_SCOPE_HISTORICAL = 'historical';
 const BOND_HISTORY_SCOPE_LEGACY = 'legacy';
+const BOND_TX_EVENT_SYNC_TTL_MS = 6 * 60 * 60 * 1000;
+const BOND_TX_EVENT_PAGE_SIZE = 50;
+const BOND_TX_EVENT_MAX_PAGES = 20;
 
 async function fetchNodeAtHeight(nodeAddress, height) {
   return fetchThorchain(`/thorchain/node/${nodeAddress}?height=${height}`, { historical: true });
@@ -40,6 +43,189 @@ async function getCurrentNodeAddresses(bondAddress) {
   return nodeAddresses;
 }
 
+function normalizeBondTxEvent(bondAddress, action) {
+  const actionHeight = Number(action?.height);
+  const txId = String(action?.in?.[0]?.txID || action?.out?.[0]?.txID || '');
+  const nodeAddress = String(action?.metadata?.bond?.nodeAddress || '');
+  if (!txId || !Number.isFinite(actionHeight) || actionHeight <= 0) {
+    return null;
+  }
+
+  return {
+    bond_address: bondAddress,
+    tx_id: txId,
+    action_height: Math.trunc(actionHeight),
+    node_address: nodeAddress.startsWith('thor1') ? nodeAddress : '',
+    action_type: String(action?.type || 'bond'),
+    raw_action: action || {},
+    updated_at: new Date().toISOString()
+  };
+}
+
+async function loadBondTxEvents(bondAddress) {
+  const { rows } = await query(
+    `select bond_address, tx_id, action_height, node_address, action_type, raw_action
+     from bond_tx_events
+     where bond_address = $1
+     order by action_height asc`,
+    [bondAddress]
+  );
+
+  return rows || [];
+}
+
+async function loadBondTxEventSyncState(bondAddress) {
+  const { rows } = await query(
+    `select synced_at, complete, error
+     from bond_tx_event_sync_state
+     where bond_address = $1
+     limit 1`,
+    [bondAddress]
+  );
+
+  return rows[0] || null;
+}
+
+function isFreshBondTxSync(syncState) {
+  const syncedAtMs = Date.parse(String(syncState?.synced_at || ''));
+  return Number.isFinite(syncedAtMs) && Date.now() - syncedAtMs < BOND_TX_EVENT_SYNC_TTL_MS;
+}
+
+async function saveBondTxEventSyncState(client, bondAddress, payload) {
+  await client.query(
+    `insert into bond_tx_event_sync_state (bond_address, synced_at, complete, error)
+     values ($1, now(), $2, $3)
+     on conflict (bond_address)
+     do update set
+       synced_at = excluded.synced_at,
+       complete = excluded.complete,
+       error = excluded.error`,
+    [
+      bondAddress,
+      Boolean(payload.complete),
+      payload.error || ''
+    ]
+  );
+}
+
+async function scanAndCacheBondTxEvents(bondAddress) {
+  const rowsByKey = new Map();
+  let offset = 0;
+  let complete = false;
+  let errorMessage = '';
+
+  for (let page = 0; page < BOND_TX_EVENT_MAX_PAGES; page += 1) {
+    const data = await fetchMidgardActions({
+      address: bondAddress,
+      type: 'bond',
+      limit: BOND_TX_EVENT_PAGE_SIZE,
+      offset
+    });
+    const actions = data.actions || [];
+
+    for (const action of actions) {
+      const row = normalizeBondTxEvent(bondAddress, action);
+      if (!row) {
+        continue;
+      }
+      rowsByKey.set(`${row.tx_id}:${row.action_height}`, row);
+    }
+
+    if (actions.length < BOND_TX_EVENT_PAGE_SIZE) {
+      complete = true;
+      break;
+    }
+
+    offset += actions.length;
+  }
+
+  if (!complete) {
+    errorMessage = `Bond action scan reached ${BOND_TX_EVENT_MAX_PAGES} pages`;
+  }
+
+  const rows = [...rowsByKey.values()];
+  const dbClient = await getClient();
+  try {
+    await upsertRows(dbClient, 'bond_tx_events', rows, {
+      conflictColumns: ['bond_address', 'tx_id', 'action_height'],
+      jsonColumns: ['raw_action']
+    });
+    await saveBondTxEventSyncState(dbClient, bondAddress, {
+      complete,
+      error: errorMessage
+    });
+  } finally {
+    dbClient.release();
+  }
+
+  return {
+    events: await loadBondTxEvents(bondAddress),
+    complete,
+    error: errorMessage
+  };
+}
+
+async function getBondTxEvents(bondAddress) {
+  const [cachedEvents, syncState] = await Promise.all([
+    loadBondTxEvents(bondAddress),
+    loadBondTxEventSyncState(bondAddress)
+  ]);
+
+  if (isFreshBondTxSync(syncState)) {
+    return {
+      events: cachedEvents,
+      complete: Boolean(syncState.complete),
+      error: syncState.error || ''
+    };
+  }
+
+  try {
+    return await scanAndCacheBondTxEvents(bondAddress);
+  } catch (scanError) {
+    if (cachedEvents.length > 0) {
+      return {
+        events: cachedEvents,
+        complete: false,
+        error: scanError.message || 'Unable to refresh bond action cache'
+      };
+    }
+    throw scanError;
+  }
+}
+
+function buildBondTxMap(events, historyRows) {
+  const heights = (historyRows || [])
+    .map((row) => Number(row.churn_height))
+    .filter((height) => Number.isFinite(height) && height > 0)
+    .sort((left, right) => left - right);
+  const map = {};
+
+  for (const event of events || []) {
+    const actionHeight = Number(event.action_height);
+    const txId = String(event.tx_id || '');
+    if (!txId || !Number.isFinite(actionHeight) || actionHeight <= 0) {
+      continue;
+    }
+
+    for (let i = 1; i < heights.length; i += 1) {
+      const previousHeight = heights[i - 1];
+      const churnHeight = heights[i];
+      if (actionHeight > previousHeight && actionHeight <= churnHeight) {
+        const key = String(churnHeight);
+        if (!map[key]) {
+          map[key] = [];
+        }
+        if (!map[key].includes(txId)) {
+          map[key].push(txId);
+        }
+        break;
+      }
+    }
+  }
+
+  return map;
+}
+
 async function getAllNodeAddresses(bondAddress) {
   const currentNodes = await getCurrentNodeAddresses(bondAddress);
   const currentSet = new Set(currentNodes);
@@ -47,39 +233,26 @@ async function getAllNodeAddresses(bondAddress) {
   let earliestCurrentBondHeight = Infinity;
   let discoveryComplete = true;
   let discoveryError = '';
+  let bondTxEvents = [];
 
   try {
-    let offset = 0;
-    const limit = 50;
-    let hasMore = true;
+    const eventResult = await getBondTxEvents(bondAddress);
+    bondTxEvents = eventResult.events || [];
+    discoveryComplete = Boolean(eventResult.complete);
+    discoveryError = eventResult.error || '';
 
-    while (hasMore) {
-      const data = await fetchMidgardActions({
-        address: bondAddress,
-        type: 'bond',
-        limit,
-        offset
-      });
-      const actions = data.actions || [];
-      for (const action of actions) {
-        const nodeAddress = action.metadata?.bond?.nodeAddress;
-        if (!nodeAddress || !nodeAddress.startsWith('thor1')) {
-          continue;
-        }
-
-        nodeSet.add(nodeAddress);
-        if (currentSet.has(nodeAddress)) {
-          const height = Number(action.height);
-          if (height > 0 && height < earliestCurrentBondHeight) {
-            earliestCurrentBondHeight = height;
-          }
-        }
+    for (const event of bondTxEvents) {
+      const nodeAddress = event.node_address;
+      if (!nodeAddress || !nodeAddress.startsWith('thor1')) {
+        continue;
       }
 
-      if (actions.length < limit) {
-        hasMore = false;
-      } else {
-        offset += limit;
+      nodeSet.add(nodeAddress);
+      if (currentSet.has(nodeAddress)) {
+        const height = Number(event.action_height);
+        if (height > 0 && height < earliestCurrentBondHeight) {
+          earliestCurrentBondHeight = height;
+        }
       }
     }
   } catch (scanError) {
@@ -92,6 +265,7 @@ async function getAllNodeAddresses(bondAddress) {
     current: currentNodes,
     all: Array.from(nodeSet),
     currentNodesSinceHeight: earliestCurrentBondHeight === Infinity ? 0 : earliestCurrentBondHeight,
+    bondTxEvents,
     discoveryComplete,
     discoveryError
   };
@@ -192,6 +366,8 @@ function cachedHistoryResponse({
   cachedRows,
   hasHistorical,
   minHeight,
+  bondTxEvents = [],
+  includeBondTxs = false,
   stale = false,
   warning = ''
 }) {
@@ -203,6 +379,10 @@ function cachedHistoryResponse({
     fetched: 0,
     total: filtered.length
   };
+
+  if (includeBondTxs) {
+    payload.bond_tx_map = buildBondTxMap(bondTxEvents, filtered);
+  }
 
   if (stale) {
     payload.stale = true;
@@ -265,6 +445,7 @@ async function processChurn(bondAddress, nodeAddresses, churnHeight, churnTimest
 export async function handleBondHistory(_request, url) {
   const bondAddress = (url.searchParams.get('bond_address') || '').trim().toLowerCase();
   const includeHistorical = url.searchParams.get('include_historical') === 'true';
+  const includeBondTxs = url.searchParams.get('include_bond_txs') === 'true';
   const scope = getHistoryScope(includeHistorical);
 
   if (!isValidThorAddress(bondAddress)) {
@@ -315,6 +496,7 @@ export async function handleBondHistory(_request, url) {
   const {
     current: currentNodes,
     all: allNodes,
+    bondTxEvents,
     discoveryComplete,
     discoveryError
   } = await getAllNodeAddresses(bondAddress);
@@ -332,6 +514,8 @@ export async function handleBondHistory(_request, url) {
       cachedRows: fallbackRows,
       hasHistorical: true,
       minHeight: 0,
+      bondTxEvents,
+      includeBondTxs,
       stale: true,
       warning: `Served cached historical bond rows after degraded node discovery: ${discoveryError}`
     });
@@ -368,6 +552,8 @@ export async function handleBondHistory(_request, url) {
         cachedRows: cached,
         hasHistorical: effectiveHasHistorical,
         minHeight: 0,
+        bondTxEvents,
+        includeBondTxs,
         stale: true,
         warning: 'Served cached bond history after transient upstream churn fetch failure'
       });
@@ -386,7 +572,9 @@ export async function handleBondHistory(_request, url) {
       bondAddress,
       cachedRows: cached,
       hasHistorical: effectiveHasHistorical,
-      minHeight: 0
+      minHeight: 0,
+      bondTxEvents,
+      includeBondTxs
     });
   }
 
@@ -466,14 +654,20 @@ export async function handleBondHistory(_request, url) {
     legacyRows: legacyCached
   });
 
+  const payload = {
+    bond_address: bondAddress,
+    history,
+    has_historical: responseHasHistorical,
+    fetched: newRows.length,
+    total: history.length
+  };
+
+  if (includeBondTxs) {
+    payload.bond_tx_map = buildBondTxMap(bondTxEvents, history);
+  }
+
   return json(
-    {
-      bond_address: bondAddress,
-      history,
-      has_historical: responseHasHistorical,
-      fetched: newRows.length,
-      total: history.length
-    },
+    payload,
     200,
     {
       'Cache-Control': 'public, max-age=30'

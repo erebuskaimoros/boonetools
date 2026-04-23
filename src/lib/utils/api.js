@@ -38,7 +38,7 @@ export const THORNODE_ENDPOINTS = {
  */
 export const MIDGARD_ENDPOINTS = {
   primary: 'https://midgard.thorchain.network',
-  fallback: 'https://midgard.ninerealms.com'
+  fallback: 'https://gateway.liquify.com/chain/thorchain_midgard'
 };
 
 // ============================================
@@ -70,17 +70,25 @@ export const MIDGARD_ENDPOINTS = {
  * });
  */
 export async function fetchWithFallback(endpoint, options = {}, endpoints = THORNODE_ENDPOINTS) {
+  const { stopOnRateLimit = false, ...fetchOptions } = options;
   const primaryUrl = `${endpoints.primary}${endpoint}`;
   const fallbackUrl = `${endpoints.fallback}${endpoint}`;
 
   try {
     // Try primary endpoint first
-    const response = await fetch(primaryUrl, options);
+    const response = await fetch(primaryUrl, fetchOptions);
     if (response.ok) {
       return response;
     }
+    if (stopOnRateLimit && response.status === 429) {
+      throw new Error(`Primary endpoint rate limited: ${response.status}`);
+    }
     throw new Error(`Primary endpoint failed: ${response.status}`);
   } catch (error) {
+    if (stopOnRateLimit && /rate limited|429/i.test(String(error?.message || ''))) {
+      throw error;
+    }
+
     if (fallbackUrl === primaryUrl) {
       console.error(`Primary endpoint failed for ${endpoint}:`, error);
       throw error;
@@ -90,7 +98,7 @@ export async function fetchWithFallback(endpoint, options = {}, endpoints = THOR
 
     try {
       // Try fallback endpoint
-      const fallbackResponse = await fetch(fallbackUrl, options);
+      const fallbackResponse = await fetch(fallbackUrl, fetchOptions);
       if (fallbackResponse.ok) {
         console.log(`Using fallback endpoint for: ${endpoint}`);
         return fallbackResponse;
@@ -155,7 +163,7 @@ export async function fetchTextWithFallback(endpoint, options = {}, endpoints = 
  * const pools = await response.json();
  */
 export async function fetchMidgard(endpoint, options = {}) {
-  return fetchWithFallback(endpoint, options, MIDGARD_ENDPOINTS);
+  return fetchWithFallback(endpoint, { ...options, stopOnRateLimit: true }, MIDGARD_ENDPOINTS);
 }
 
 /**

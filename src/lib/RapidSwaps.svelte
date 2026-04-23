@@ -4,6 +4,7 @@
   import { fromBaseUnit, normalizeAsset } from '$lib/utils/blockchain';
   import {
     fetchRapidSwapsDashboard,
+    fetchRapidSwapsSwapHistory,
     getRapidSwapsApiConfigError
   } from './rapid-swaps/api.js';
   import {
@@ -13,7 +14,6 @@
     toChartDateKey
   } from './rapid-swaps/charts.js';
   import { getRapidSwapComparableVolumeUsd } from './rapid-swaps/volume.js';
-  import { midgard } from './api/midgard.js';
   import Chart from 'chart.js/auto';
   import { SankeyController, Flow } from 'chartjs-chart-sankey';
   Chart.register(SankeyController, Flow);
@@ -57,7 +57,7 @@
   let sortColumn = 'date';
   let sortAsc = false;
 
-  // Midgard total swap history (for market share charts)
+  // Backend-cached total swap history (for market share charts)
   let midgardSwapHistory = null;
 
   // Chart instances (for cleanup)
@@ -1094,12 +1094,10 @@
     const requestId = ++midgardHistoryRequestId;
 
     try {
-      const history = await midgard.getSwapHistory({
+      const history = await fetchRapidSwapsSwapHistory({
         interval: 'hour',
         from: range.from,
         to: range.to
-      }, {
-        cache: false
       });
 
       if (requestId !== midgardHistoryRequestId) {

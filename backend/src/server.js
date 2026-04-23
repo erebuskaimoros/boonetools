@@ -15,6 +15,7 @@ import { handleNodeopLeaderboard } from './handlers/nodeop-leaderboard.js';
 import { handleNodeopMeta } from './handlers/nodeop-meta.js';
 import { handleNodeopPerformance } from './handlers/nodeop-performance.js';
 import { handleRapidSwaps } from './handlers/rapid-swaps.js';
+import { handleRapidSwapsSwapHistory } from './handlers/rapid-swaps-swap-history.js';
 import { handleStockPrices } from './handlers/stock-prices.js';
 
 const routes = new Map([
@@ -24,6 +25,7 @@ const routes = new Map([
   ['/nodeop-leaderboard', { auth: 'public', handler: handleNodeopLeaderboard }],
   ['/nodeop-meta', { auth: 'public', handler: handleNodeopMeta }],
   ['/rapid-swaps', { auth: 'public', handler: handleRapidSwaps }],
+  ['/rapid-swaps-swap-history', { auth: 'public', handler: handleRapidSwapsSwapHistory }],
   ['/bond-history', { auth: 'public', handler: handleBondHistory }],
   ['/stock-prices', { auth: 'public', handler: handleStockPrices }]
 ]);

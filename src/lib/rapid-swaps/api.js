@@ -85,6 +85,50 @@ export async function fetchRapidSwapsDashboard(options = {}) {
   return response.json();
 }
 
+export async function fetchRapidSwapsSwapHistory(params = {}) {
+  const configError = getConfigError();
+  if (configError) {
+    throw new Error(configError);
+  }
+
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, String(value));
+    }
+  }
+
+  const url = `${RAPID_SWAPS_API.base}/rapid-swaps-swap-history${query.toString() ? `?${query.toString()}` : ''}`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      apikey: RAPID_SWAPS_API.key,
+      Authorization: `Bearer ${RAPID_SWAPS_API.key}`
+    }
+  });
+
+  if (!response.ok) {
+    let message = `Rapid swaps history request failed (${response.status})`;
+
+    try {
+      const payload = await response.json();
+      if (payload?.error) {
+        message = payload.error;
+      }
+    } catch (_) {
+      // Ignore JSON parse issues for error payloads.
+    }
+
+    throw new Error(message);
+  }
+
+  if (isChallengeResponse(response)) {
+    throw new Error('Rapid swaps history backend returned challenge response');
+  }
+
+  return response.json();
+}
+
 export async function fetchLiveRapidSwaps() {
   const [network, pools, streamingSwaps] = await Promise.all([
     thornode.getNetwork(),
