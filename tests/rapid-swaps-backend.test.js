@@ -7,7 +7,8 @@ import {
   fetchMidgardActions,
   fetchRapidSwapRows,
   getRapidSwapRateLimitCooldownMs,
-  isRapidSwapRateLimitError
+  isRapidSwapRateLimitError,
+  resolveRapidSwapHint
 } from '../src/lib/rapid-swaps/backend.js';
 
 test('rapid swap backend keeps official Midgard first and avoids known bad fallback URL', () => {
@@ -210,6 +211,252 @@ test('fetchMidgardActions falls back when a provider ignores txid filtering', as
 
     assert.equal(result.actions.length, 1);
     assert.equal(result.actions[0]?.in?.[0]?.txID, 'target-tx');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('fetchMidgardActions re-probes official Midgard first after a fallback success', async () => {
+  const originalFetch = global.fetch;
+  const [primaryBase, ...fallbackBases] = MIDGARD_BASES;
+  const urls = [];
+
+  global.fetch = async (url) => {
+    urls.push(url);
+
+    if (url === `${primaryBase}/actions?type=swap&limit=5&txid=fallback-first`) {
+      return new Response(JSON.stringify({
+        actions: [buildRapidAction('wrong-tx', 22000)],
+        meta: {
+          nextPageToken: ''
+        }
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+
+    if (fallbackBases.some((base) => url === `${base}/actions?type=swap&limit=5&txid=fallback-first`)) {
+      return new Response(JSON.stringify({
+        actions: [buildRapidAction('fallback-first', 21999)],
+        meta: {
+          nextPageToken: ''
+        }
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+
+    if (url === `${primaryBase}/actions?type=swap&limit=5&txid=official-recovered`) {
+      return new Response(JSON.stringify({
+        actions: [buildRapidAction('official-recovered', 21998)],
+        meta: {
+          nextPageToken: ''
+        }
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+
+    if (fallbackBases.some((base) => url === `${base}/actions?type=swap&limit=5&txid=official-recovered`)) {
+      return new Response(JSON.stringify({
+        error: 'Slow down you have hit your daily request limit',
+        status: 429
+      }), {
+        status: 429,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  try {
+    const fallbackResult = await fetchMidgardActions({
+      txId: 'fallback-first',
+      limit: 5
+    });
+    assert.equal(fallbackResult.actions[0]?.in?.[0]?.txID, 'fallback-first');
+
+    const recoveredResult = await fetchMidgardActions({
+      txId: 'official-recovered',
+      limit: 5
+    });
+    assert.equal(recoveredResult.actions[0]?.in?.[0]?.txID, 'official-recovered');
+    assert.deepEqual(urls, [
+      `${primaryBase}/actions?type=swap&limit=5&txid=fallback-first`,
+      `${fallbackBases[0]}/actions?type=swap&limit=5&txid=fallback-first`,
+      `${primaryBase}/actions?type=swap&limit=5&txid=official-recovered`
+    ]);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('fetchMidgardActions stops on rate limits instead of probing every fallback', async () => {
+  const originalFetch = global.fetch;
+  const urls = [];
+
+  global.fetch = async (url) => {
+    urls.push(url);
+    return new Response(JSON.stringify({
+      error: 'your rune pouch is empty',
+      status: 429
+    }), {
+      status: 429,
+      headers: {
+        'content-type': 'application/json'
+      }
+    });
+  };
+
+  try {
+    await assert.rejects(
+      () => fetchMidgardActions({ limit: 1, offset: 0 }),
+      /HTTP 429/
+    );
+    assert.equal(urls.length, 1);
+    assert.match(urls[0], /\/actions\?type=swap&limit=1&offset=0$/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('resolveRapidSwapHint resolves directly from thornode tx data without querying Midgard actions', async () => {
+  const originalFetch = global.fetch;
+  const requestedUrls = [];
+
+  global.fetch = async (url) => {
+    requestedUrls.push(url);
+
+    if (url === 'https://thornode.thorchain.network/thorchain/tx/target-tx') {
+      return new Response(JSON.stringify({
+        consensus_height: 100,
+        observed_tx: {
+          tx: {
+            id: 'target-tx',
+            from_address: 'bc1source',
+            memo: '=:ETH.ETH:0xdestination:0/0/5',
+            coins: [
+              {
+                asset: 'BTC.BTC',
+                amount: '100000000'
+              }
+            ]
+          }
+        }
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  try {
+    const result = await resolveRapidSwapHint({
+      tx_id: 'target-tx',
+      last_height: 104,
+      deposit: '100000000 BTC.BTC',
+      in: '95000000 BTC.BTC',
+      out: '200000000 ETH.ETH',
+      raw_hint: {
+        interval: 0,
+        quantity: 10,
+        count: 10
+      }
+    }, {
+      observedAt: '2026-04-02T12:00:00.000Z',
+      priceIndex: {
+        prices: new Map([
+          ['BTC.BTC', 80000],
+          ['ETH.ETH', 2000]
+        ]),
+        runePriceUsd: 0
+      }
+    });
+
+    assert.equal(result.resolvedBy, 'thornode_tx');
+    assert.equal(result.row?.tx_id, 'target-tx');
+    assert.equal(result.row?.blocks_used, 5);
+    assert.equal(result.row?.input_estimated_usd, 76000);
+    assert.equal(result.row?.output_estimated_usd, 4000);
+    assert.equal(requestedUrls.some((url) => url.includes('/actions?')), false);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('resolveRapidSwapHint marks non-rapid listener candidates as terminal without Midgard retries', async () => {
+  const originalFetch = global.fetch;
+
+  global.fetch = async (url) => {
+    if (url === 'https://thornode.thorchain.network/thorchain/tx/not-rapid') {
+      return new Response(JSON.stringify({
+        consensus_height: 100,
+        observed_tx: {
+          tx: {
+            id: 'not-rapid',
+            from_address: 'thor1source',
+            memo: '=:ETH.ETH:0xdestination:0/0/2',
+            coins: [
+              {
+                asset: 'THOR.RUNE',
+                amount: '100000000'
+              }
+            ]
+          }
+        }
+      }), {
+        status: 200,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+    }
+
+    throw new Error(`Unexpected URL ${url}`);
+  };
+
+  try {
+    const result = await resolveRapidSwapHint({
+      tx_id: 'not-rapid',
+      last_height: 101,
+      deposit: '100000000 THOR.RUNE',
+      in: '100000000 THOR.RUNE',
+      out: '200000000 ETH.ETH',
+      raw_hint: {
+        interval: 0,
+        quantity: 2,
+        count: 2
+      }
+    }, {
+      observedAt: '2026-04-02T12:00:00.000Z',
+      priceIndex: {
+        prices: new Map([
+          ['THOR.RUNE', 1],
+          ['ETH.ETH', 2000]
+        ]),
+        runePriceUsd: 1
+      }
+    });
+
+    assert.equal(result.row, null);
+    assert.equal(result.terminal, true);
+    assert.equal(result.resolvedBy, 'not_rapid');
   } finally {
     global.fetch = originalFetch;
   }

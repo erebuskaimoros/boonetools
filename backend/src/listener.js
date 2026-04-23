@@ -122,7 +122,7 @@ function parseStreamingSwapEvents(events) {
   return rapidSwaps;
 }
 
-async function processRapidSwap(detected, blockHeight) {
+async function processRapidSwap(detected, blockHeight, blockTime) {
   const initialHint = normalizeRapidSwapHint({
     source: 'ws',
     tx_id: detected.tx_id,
@@ -150,7 +150,8 @@ async function processRapidSwap(detected, blockHeight) {
   await sleep(config.midgardDelayMs);
 
   const resolution = await resolveRapidSwapHint(hint, {
-    priceIndex: await getCachedPriceIndex()
+    priceIndex: await getCachedPriceIndex(),
+    observedAt: blockTime || new Date().toISOString()
   }).catch((error) => ({
     row: null,
     hint,
@@ -161,11 +162,18 @@ async function processRapidSwap(detected, blockHeight) {
   const updateClient = await getClient();
   try {
     if (!resolution.row) {
+      const terminalStatus = resolution.terminal
+        ? RAPID_SWAP_CANDIDATE_STATUS.ERROR
+        : RAPID_SWAP_CANDIDATE_STATUS.PENDING;
       await upsertRapidSwapCandidate(updateClient, resolution.hint || hint, {
-        status: RAPID_SWAP_CANDIDATE_STATUS.PENDING,
+        status: terminalStatus,
         last_error: resolution.error?.message || 'Deferred to scheduler reconciliation'
       });
-      log(`  Deferred ${reference} to scheduler reconciliation`);
+      if (resolution.terminal) {
+        log(`  Ignored ${reference}: ${resolution.error?.message || 'not a rapid swap after THORNode reconciliation'}`);
+      } else {
+        log(`  Deferred ${reference} to scheduler reconciliation`);
+      }
       return;
     }
 
@@ -194,6 +202,7 @@ function handleMessage(message) {
   }
 
   const blockHeight = Number(data.block?.header?.height) || 0;
+  const blockTime = String(data.block?.header?.time || '');
   if (blockHeight > 0) {
     lastBlockHeight = blockHeight;
     blocksProcessed += 1;
@@ -208,7 +217,7 @@ function handleMessage(message) {
       continue;
     }
     seen.add(detected.tx_id);
-    processRapidSwap(detected, blockHeight).catch((error) => {
+    processRapidSwap(detected, blockHeight, blockTime).catch((error) => {
       log(`Error processing ${detected.tx_id}: ${error.message}`);
     });
   }

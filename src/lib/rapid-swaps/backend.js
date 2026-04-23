@@ -1,6 +1,8 @@
 import {
   buildAssetUsdIndex,
-  normalizeRapidSwapAction
+  buildRapidSwapSyntheticAction,
+  normalizeRapidSwapAction,
+  normalizeRapidSwapHintAction
 } from './model.js';
 import {
   isPlausibleRapidSwapRowMatch,
@@ -22,7 +24,6 @@ export const ACTION_PAGE_LIMIT = 50;
 export const DIRECT_RESOLUTION_HEIGHT_BUFFER = 40;
 export const RECENT_SCAN_HEIGHT_BUFFER = 80;
 
-let activeMidgardIndex = 0;
 let activeThornodeIndex = 0;
 
 export class RapidSwapProviderError extends Error {
@@ -172,6 +173,9 @@ async function fetchWithFallback(bases, path, options = {}) {
       return { payload, index: idx };
     } catch (error) {
       lastError = error;
+      if (isRapidSwapRateLimitError(error)) {
+        throw error;
+      }
     }
   }
 
@@ -228,10 +232,9 @@ export async function fetchMidgardActions(options = {}) {
   }
 
   const result = await fetchWithFallback(MIDGARD_BASES, `/actions?${params.toString()}`, {
-    startIndex: activeMidgardIndex,
+    startIndex: 0,
     validatePayload: isMidgardPayloadInvalid
   });
-  activeMidgardIndex = result.index;
 
   return {
     actions: Array.isArray(result.payload?.actions) ? result.payload.actions : [],
@@ -273,6 +276,7 @@ function normalizeActionsToRows(actions, { observedAt, priceIndex }) {
 export async function resolveRapidSwapHint(hintInput = {}, options = {}) {
   const observedAt = options.observedAt || new Date().toISOString();
   const priceIndex = options.priceIndex || await fetchRapidSwapPriceIndex();
+  const allowMidgardLookup = Boolean(options.allowMidgardLookup);
   const addressSearchWindowBlocks = Math.max(
     1,
     Math.trunc(options.addressSearchWindowBlocks || DIRECT_RESOLUTION_HEIGHT_BUFFER)
@@ -284,6 +288,29 @@ export async function resolveRapidSwapHint(hintInput = {}, options = {}) {
   const recentScanMaxPages = Math.max(1, Math.trunc(options.recentScanMaxPages || 6));
 
   const hint = await enrichRapidSwapHint(hintInput);
+  const syntheticAction = buildRapidSwapSyntheticAction(hint, hint?.raw_hint?.observed_tx || null, {
+    observedAt
+  });
+  const directRow = normalizeRapidSwapHintAction(hint, hint?.raw_hint?.observed_tx || null, {
+    observedAt,
+    priceIndex
+  });
+  if (directRow) {
+    return { row: directRow, hint, resolvedBy: 'thornode_tx' };
+  }
+  if (syntheticAction) {
+    return {
+      row: null,
+      hint,
+      resolvedBy: 'not_rapid',
+      terminal: true,
+      error: new Error('Direct THORNode reconciliation shows this swap is not rapid')
+    };
+  }
+
+  if (!allowMidgardLookup) {
+    return { row: null, hint, resolvedBy: '' };
+  }
 
   if (hint.tx_id) {
     const directPayload = await fetchMidgardActions({

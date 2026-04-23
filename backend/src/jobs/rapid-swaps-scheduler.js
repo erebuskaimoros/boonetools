@@ -9,6 +9,7 @@ import {
   isRapidSwapRateLimitError,
   mergeRapidSwapRowsByTxId,
   resolveRapidSwapHint,
+  shouldSkipRapidSwapCanonicalScanForHealthyListener,
   summarizeRapidSwapCanonicalScan
 } from '../shared/rapid-swaps.js';
 import { mergePendingCandidateBatches } from '../shared/rapid-swap-candidates.js';
@@ -16,6 +17,8 @@ import { upsertRapidSwaps } from '../db/rapid-swaps-store.js';
 
 const SYNC_KEY = 'rapid-swaps-canonical';
 const FRESH_PENDING_CANDIDATE_RATIO = 0.75;
+const LISTENER_HEARTBEAT_GRACE_MS = 3 * 60 * 1000;
+const LISTENER_STABLE_UPTIME_MS = 10 * 60 * 1000;
 
 function computeRetryDelaySeconds(attempt) {
   const normalizedAttempt = Math.max(1, Math.trunc(attempt));
@@ -81,6 +84,48 @@ async function saveSyncState(client, payload) {
   ], {
     conflictColumns: ['sync_key'],
     jsonColumns: ['stats_json']
+  });
+}
+
+async function loadWsListenerState(client) {
+  const { rows } = await client.query(
+    `select finished_at, status, stats_json
+     from rapid_swap_job_runs
+     where job_name = $1
+     order by started_at desc
+     limit 1`,
+    ['rapid-swaps-ws-listener']
+  );
+
+  return rows[0] || null;
+}
+
+function buildSchedulerScanPlan(syncState, wsListenerState) {
+  const nowMs = Date.now();
+  if (shouldSkipRapidSwapCanonicalScanForHealthyListener(wsListenerState, {
+    nowMs,
+    heartbeatGraceMs: LISTENER_HEARTBEAT_GRACE_MS,
+    stableUptimeMs: LISTENER_STABLE_UPTIME_MS
+  })) {
+    return {
+      shouldScan: false,
+      skipReason: 'listener_healthy',
+      nextScanAt: new Date(nowMs + config.rapidSwapsCanonicalScanIntervalMs).toISOString(),
+      head: null,
+      catchup: null
+    };
+  }
+
+  return buildRapidSwapCanonicalScanPlan({
+    syncState,
+    nowMs,
+    overlapBlocks: config.rapidSwapsHeightOverlapBlocks,
+    headMaxPages: config.rapidSwapsMaxPages,
+    catchupMaxPages: config.rapidSwapsCatchupMaxPages,
+    normalHeadPages: 1,
+    laggingHeadPages: 1,
+    catchupPages: 1,
+    scanIntervalMs: config.rapidSwapsCanonicalScanIntervalMs
   });
 }
 
@@ -188,7 +233,8 @@ async function resolvePendingCandidates(client, priceIndex) {
   for (const candidate of candidates || []) {
     const attempts = Number(candidate.attempts || 0) + 1;
     const result = await resolveRapidSwapHint(candidate, {
-      priceIndex
+      priceIndex,
+      observedAt: candidate.first_seen_at || now
     }).catch((resolveError) => ({
       row: null,
       hint: candidate,
@@ -216,6 +262,27 @@ async function resolvePendingCandidates(client, priceIndex) {
         raw_hint: hint.raw_hint || candidate.raw_hint || {}
       });
       resolved += 1;
+      continue;
+    }
+
+    if (result.terminal) {
+      updates.push({
+        hint_key: candidate.hint_key,
+        status: 'error',
+        attempts,
+        tx_id: hint.tx_id || candidate.tx_id || '',
+        memo: hint.memo || candidate.memo || '',
+        source_address: hint.source_address || candidate.source_address || '',
+        observed_height: Number(hint.observed_height || candidate.observed_height || 0),
+        last_height: Number(hint.last_height || candidate.last_height || 0),
+        last_seen_at: now,
+        next_retry_at: now,
+        resolved_tx_id: String(candidate.resolved_tx_id || ''),
+        resolved_at: candidate.resolved_at || null,
+        last_error: result.error?.message || 'Direct THORNode reconciliation shows this swap is not rapid',
+        raw_hint: hint.raw_hint || candidate.raw_hint || {}
+      });
+      errored += 1;
       continue;
     }
 
@@ -274,20 +341,10 @@ export async function runRapidSwapsScheduler() {
       });
 
       syncState = await loadSyncState(client);
-      const scanPlan = buildRapidSwapCanonicalScanPlan({
-        syncState,
-        overlapBlocks: config.rapidSwapsHeightOverlapBlocks,
-        headMaxPages: config.rapidSwapsMaxPages,
-        catchupMaxPages: config.rapidSwapsCatchupMaxPages,
-        normalHeadPages: config.rapidSwapsNormalHeadPages,
-        laggingHeadPages: config.rapidSwapsLaggingHeadPages,
-        catchupPages: config.rapidSwapsCatchupPages,
-        scanIntervalMs: config.rapidSwapsCanonicalScanIntervalMs
-      });
+      const wsListenerState = await loadWsListenerState(client);
+      const scanPlan = buildSchedulerScanPlan(syncState, wsListenerState);
 
-      const readyPendingCount = scanPlan.skipReason === 'rate_limited'
-        ? 0
-        : await countReadyPendingCandidates(client);
+      const readyPendingCount = await countReadyPendingCandidates(client);
 
       if (!scanPlan.shouldScan && readyPendingCount === 0) {
         const payload = {
@@ -321,6 +378,7 @@ export async function runRapidSwapsScheduler() {
       const knownTxIds = new Set((recentRows || []).map((row) => String(row.tx_id || '')));
 
       const pendingResolution = await resolvePendingCandidates(client, priceIndex);
+      await upsertRapidSwaps(client, pendingResolution.upsertRows);
 
       const headScan = scanPlan.shouldScan
         ? await fetchRapidSwapRows({
@@ -340,12 +398,11 @@ export async function runRapidSwapsScheduler() {
           })
         : null;
 
-      const rowsToUpsert = mergeRapidSwapRowsByTxId(
-        pendingResolution.upsertRows,
+      const canonicalRowsToUpsert = mergeRapidSwapRowsByTxId(
         headScan?.rows || [],
         catchupScan?.rows || []
       );
-      await upsertRapidSwaps(client, rowsToUpsert);
+      await upsertRapidSwaps(client, canonicalRowsToUpsert);
 
       const scanSummary = headScan
         ? summarizeRapidSwapCanonicalScan({
@@ -397,7 +454,7 @@ export async function runRapidSwapsScheduler() {
           scanned_actions: Number(headScan?.scannedActions || 0) + Number(catchupScan?.scannedActions || 0),
           catchup_scanned_pages: Number(catchupScan?.scannedPages || 0),
           catchup_scanned_actions: Number(catchupScan?.scannedActions || 0),
-          rapid_swaps_upserted: rowsToUpsert.length,
+          rapid_swaps_upserted: pendingResolution.upsertRows.length + canonicalRowsToUpsert.length,
           observed_at: headScan?.observedAt || '',
           stopped_early: Boolean(headScan?.stoppedEarly),
           catchup_active: Boolean(scanPlan.catchup),

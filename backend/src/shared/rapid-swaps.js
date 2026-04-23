@@ -14,6 +14,7 @@ export {
 export {
   buildRapidSwapCanonicalScanPlan,
   mergeRapidSwapRowsByTxId,
+  shouldSkipRapidSwapCanonicalScanForHealthyListener,
   summarizeRapidSwapCanonicalScan
 } from '../../../src/lib/rapid-swaps/ingestion.js';
 

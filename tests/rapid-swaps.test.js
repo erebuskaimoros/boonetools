@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   parseStreamingParamsFromMemo,
   isRapidSwapAction,
+  normalizeRapidSwapHintAction,
   normalizeRapidSwapAction,
   rankRapidSwapsByUsd
 } from '../src/lib/rapid-swaps/model.js';
@@ -171,6 +172,57 @@ test('normalizeRapidSwapAction extracts the recorded row shape', () => {
   assert.equal(row.input_estimated_usd, 80000);
   assert.equal(row.output_estimated_usd, 4000);
   assert.equal(row.comparable_volume_usd, 84000);
+  assert.equal(row.destination_address, '0xdestination');
+});
+
+test('normalizeRapidSwapHintAction builds a rapid swap row from listener hints and a thornode tx', () => {
+  const row = normalizeRapidSwapHintAction({
+    tx_id: 'ABC123',
+    deposit: '100000000 BTC.BTC',
+    in: '95000000 BTC.BTC',
+    out: '200000000 ETH.ETH',
+    last_height: 104,
+    raw_hint: {
+      interval: 0,
+      quantity: 10,
+      count: 10
+    }
+  }, {
+    consensus_height: 100,
+    observed_tx: {
+      tx: {
+        id: 'ABC123',
+        from_address: 'bc1source',
+        memo: '=:ETH.ETH:0xdestination:0/0/5',
+        coins: [
+          {
+            asset: 'BTC.BTC',
+            amount: '100000000'
+          }
+        ]
+      }
+    }
+  }, {
+    observedAt: '2026-03-19T20:00:00.000Z',
+    priceIndex: {
+      prices: new Map([
+        ['BTC.BTC', 80000],
+        ['ETH.ETH', 2000]
+      ])
+    }
+  });
+
+  assert.equal(row.tx_id, 'ABC123');
+  assert.equal(row.action_height, 100);
+  assert.equal(row.blocks_used, 5);
+  assert.equal(row.source_asset, 'BTC.BTC');
+  assert.equal(row.target_asset, 'ETH.ETH');
+  assert.equal(row.input_amount_base, '95000000');
+  assert.equal(row.output_amount_base, '200000000');
+  assert.equal(row.input_estimated_usd, 76000);
+  assert.equal(row.output_estimated_usd, 4000);
+  assert.equal(row.streaming_quantity, 10);
+  assert.equal(row.streaming_count, 10);
   assert.equal(row.destination_address, '0xdestination');
 });
 

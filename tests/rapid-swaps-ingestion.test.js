@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildRapidSwapCanonicalScanPlan,
   mergeRapidSwapRowsByTxId,
+  shouldSkipRapidSwapCanonicalScanForHealthyListener,
   summarizeRapidSwapCanonicalScan
 } from '../src/lib/rapid-swaps/ingestion.js';
 
@@ -82,6 +83,36 @@ test('buildRapidSwapCanonicalScanPlan skips during provider cooldown', () => {
     head: null,
     catchup: null
   });
+});
+
+test('shouldSkipRapidSwapCanonicalScanForHealthyListener skips canonical scans while the websocket listener is stable', () => {
+  assert.equal(shouldSkipRapidSwapCanonicalScanForHealthyListener({
+    finished_at: '2026-04-01T00:19:30.000Z',
+    status: 'running',
+    stats_json: {
+      uptime_seconds: 1200,
+      blocks_processed: 400
+    }
+  }, {
+    nowMs: Date.parse('2026-04-01T00:20:00.000Z'),
+    heartbeatGraceMs: 3 * 60 * 1000,
+    stableUptimeMs: 10 * 60 * 1000
+  }), true);
+});
+
+test('shouldSkipRapidSwapCanonicalScanForHealthyListener allows recovery scans after listener restarts', () => {
+  assert.equal(shouldSkipRapidSwapCanonicalScanForHealthyListener({
+    finished_at: '2026-04-01T00:19:30.000Z',
+    status: 'running',
+    stats_json: {
+      uptime_seconds: 45,
+      blocks_processed: 12
+    }
+  }, {
+    nowMs: Date.parse('2026-04-01T00:20:00.000Z'),
+    heartbeatGraceMs: 3 * 60 * 1000,
+    stableUptimeMs: 10 * 60 * 1000
+  }), false);
 });
 
 test('summarizeRapidSwapCanonicalScan seeds catch-up state when the head scan falls behind', () => {

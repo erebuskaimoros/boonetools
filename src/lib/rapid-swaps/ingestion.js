@@ -104,6 +104,25 @@ export function buildRapidSwapCanonicalScanPlan(options = {}) {
   };
 }
 
+export function shouldSkipRapidSwapCanonicalScanForHealthyListener(wsListenerState, options = {}) {
+  if (!wsListenerState || String(wsListenerState.status || '') !== 'running') {
+    return false;
+  }
+
+  const nowMs = safeNumber(options.nowMs, Date.now());
+  const heartbeatGraceMs = Math.max(1000, Math.trunc(safeNumber(options.heartbeatGraceMs, 3 * 60 * 1000)));
+  const stableUptimeMs = Math.max(0, Math.trunc(safeNumber(options.stableUptimeMs, 10 * 60 * 1000)));
+  const finishedAtMs = safeTimestampMs(wsListenerState.finished_at);
+  if (finishedAtMs <= 0 || nowMs - finishedAtMs > heartbeatGraceMs) {
+    return false;
+  }
+
+  const uptimeMs = Math.max(0, Math.trunc(safeNumber(wsListenerState?.stats_json?.uptime_seconds, 0))) * 1000;
+  const blocksProcessed = Math.max(0, Math.trunc(safeNumber(wsListenerState?.stats_json?.blocks_processed, 0)));
+
+  return uptimeMs >= stableUptimeMs && blocksProcessed > 0;
+}
+
 export function summarizeRapidSwapCanonicalScan(options = {}) {
   const syncState = options.syncState || null;
   const plan = options.plan || buildRapidSwapCanonicalScanPlan({

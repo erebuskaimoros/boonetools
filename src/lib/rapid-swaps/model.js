@@ -6,6 +6,10 @@ function safeNumber(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+function safeString(value) {
+  return String(value || '').trim();
+}
+
 function toIsoOrEmpty(value) {
   const millis = midgardTimestampToMillis(value);
   if (!millis) return '';
@@ -173,6 +177,28 @@ export function getRapidSwapOutputCoin(action) {
   );
 }
 
+export function parseRapidSwapCoinString(value) {
+  const text = safeString(value);
+  if (!text) {
+    return null;
+  }
+
+  const firstSpace = text.indexOf(' ');
+  if (firstSpace <= 0 || firstSpace >= text.length - 1) {
+    return null;
+  }
+
+  return {
+    amount: text.slice(0, firstSpace).trim(),
+    asset: text.slice(firstSpace + 1).trim()
+  };
+}
+
+export function getRapidSwapDestinationAddressFromMemo(memo) {
+  const parts = String(memo || '').split(':');
+  return safeString(parts[2]);
+}
+
 function setAssetPrice(prices, asset, usdPrice) {
   if (!asset || !Number.isFinite(usdPrice) || usdPrice <= 0) {
     return;
@@ -270,6 +296,106 @@ function computeBlocksUsed(action) {
     return outHeight - startHeight + 1;
   }
   return 0;
+}
+
+function getObservedTxPrimaryCoin(observedTx) {
+  const coin = Array.isArray(observedTx?.observed_tx?.tx?.coins)
+    ? observedTx.observed_tx.tx.coins[0]
+    : null;
+
+  if (!coin?.asset || coin?.amount == null) {
+    return null;
+  }
+
+  return {
+    asset: String(coin.asset),
+    amount: String(coin.amount)
+  };
+}
+
+export function buildRapidSwapSyntheticAction(hintInput = {}, observedTx = {}, options = {}) {
+  const tx = observedTx?.observed_tx?.tx || {};
+  const memo = safeString(tx.memo || hintInput.memo);
+  const txId = safeString(tx.id || hintInput.tx_id);
+  if (!memo || !txId) {
+    return null;
+  }
+
+  const rawHint = hintInput?.raw_hint && typeof hintInput.raw_hint === 'object'
+    ? hintInput.raw_hint
+    : {};
+  const interval = safeNumber(rawHint.interval ?? hintInput.interval, 0);
+  const quantity = safeNumber(rawHint.quantity ?? hintInput.quantity, 0);
+  const count = safeNumber(rawHint.count ?? hintInput.count, 0);
+  const actionHeight = Math.max(
+    0,
+    Math.trunc(safeNumber(observedTx?.consensus_height, safeNumber(hintInput.action_height, 0)))
+  );
+  const lastHeight = Math.max(
+    actionHeight,
+    Math.trunc(
+      safeNumber(
+        hintInput.last_height,
+        safeNumber(rawHint.last_height, safeNumber(observedTx?.finalised_height, actionHeight))
+      )
+    )
+  );
+  const sourceAddress = safeString(tx.from_address || hintInput.source_address);
+  const destinationAddress = getRapidSwapDestinationAddressFromMemo(memo);
+  const depositedCoin = parseRapidSwapCoinString(hintInput.deposit) || getObservedTxPrimaryCoin(observedTx);
+  const inputCoin = parseRapidSwapCoinString(hintInput.in) || depositedCoin || getObservedTxPrimaryCoin(observedTx);
+  const outputCoin = parseRapidSwapCoinString(hintInput.out);
+  const observedAt = options.observedAt || new Date().toISOString();
+
+  return {
+    date: observedAt,
+    height: String(actionHeight || lastHeight || 0),
+    status: 'success',
+    txType: 'swap',
+    in: [
+      {
+        address: sourceAddress,
+        txID: txId,
+        coins: inputCoin ? [inputCoin] : []
+      }
+    ],
+    out: outputCoin
+      ? [
+          {
+            address: destinationAddress,
+            coins: [outputCoin],
+            height: String(lastHeight || actionHeight || 0)
+          }
+        ]
+      : [],
+    metadata: {
+      swap: {
+        memo,
+        liquidityFee: '0',
+        swapSlip: '0',
+        affiliateAddress: '',
+        txType: 'swap',
+        streamingSwapMeta: {
+          interval: String(interval),
+          quantity: String(quantity),
+          count: String(count),
+          lastHeight: String(lastHeight || 0),
+          depositedCoin,
+          inCoin: inputCoin,
+          outCoin: outputCoin
+        }
+      }
+    }
+  };
+}
+
+export function normalizeRapidSwapHintAction(hintInput = {}, observedTx = {}, options = {}) {
+  const syntheticAction = buildRapidSwapSyntheticAction(hintInput, observedTx, options);
+  if (!syntheticAction) {
+    return null;
+  }
+
+  return normalizeRapidSwapAction(syntheticAction, options);
 }
 
 export function normalizeRapidSwapAction(action, options = {}) {
