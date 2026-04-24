@@ -156,7 +156,7 @@
     );
     const currentHeight = Number(churnState.currentHeight || 0);
     const progressedBlocks = totalBlocks > 0
-      ? Math.max(0, Math.min(totalBlocks, currentHeight - lastChurnHeight))
+      ? Math.max(0, currentHeight - lastChurnHeight)
       : 0;
     const secondsPerBlock = Number(churnState.secondsPerBlock || 0);
 

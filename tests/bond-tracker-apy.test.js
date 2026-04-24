@@ -44,6 +44,25 @@ test('very fresh churn APY uses a minimum block-progress floor to avoid explodin
   assert.ok(estimate.apy > conservativeApy);
 });
 
+test('prolonged churn APY annualizes over actual elapsed blocks instead of nominal churn interval', () => {
+  const estimate = estimateCurrentChurnYields({
+    reward: 300,
+    principal: 10_000,
+    progressedBlocks: 150,
+    totalBlocks: 100,
+    secondsPerBlock: 6
+  });
+  const nominalApy = calculateAPY(calculateAPR(300, 10_000, 600));
+  const expectedApy = calculateAPY(calculateAPR(300, 10_000, 900));
+
+  assert.equal(estimate.projectedReward, 300);
+  assert.equal(estimate.progressRatio, 1.5);
+  assert.equal(estimate.effectivePeriodSeconds, 900);
+  assert.equal(estimate.isProlonged, true);
+  assert.equal(estimate.apy, expectedApy);
+  assert.ok(estimate.apy < nominalApy);
+});
+
 test('effective churn period falls back to elapsed time when interval metadata is missing', () => {
   assert.equal(
     getEffectiveChurnPeriodSeconds({

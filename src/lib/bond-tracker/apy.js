@@ -24,10 +24,7 @@ export function getEffectiveChurnProgress({
   minProgressRatio = MIN_CHURN_PROGRESS_RATIO
 }) {
   const normalizedTotalBlocks = Math.max(0, toFiniteNumber(totalBlocks, 0));
-  const normalizedProgressedBlocks = Math.max(
-    0,
-    Math.min(normalizedTotalBlocks, toFiniteNumber(progressedBlocks, 0))
-  );
+  const normalizedProgressedBlocks = Math.max(0, toFiniteNumber(progressedBlocks, 0));
   const progressRatio = normalizedTotalBlocks > 0
     ? normalizedProgressedBlocks / normalizedTotalBlocks
     : 0;
@@ -63,10 +60,29 @@ export function estimateCurrentChurnYields({
     minProgressRatio
   });
   const normalizedTotalBlocks = Math.max(0, toFiniteNumber(totalBlocks, 0));
+  const normalizedProgressedBlocks = Math.max(0, toFiniteNumber(progressedBlocks, 0));
   const normalizedSecondsPerBlock = Math.max(0, toFiniteNumber(secondsPerBlock, 0));
   const blockPeriodSeconds = normalizedTotalBlocks > 0 && normalizedSecondsPerBlock > 0
     ? normalizedTotalBlocks * normalizedSecondsPerBlock
     : 0;
+  const elapsedBlockPeriodSeconds = normalizedProgressedBlocks > 0 && normalizedSecondsPerBlock > 0
+    ? normalizedProgressedBlocks * normalizedSecondsPerBlock
+    : 0;
+
+  if (progress.progressRatio > 1 && elapsedBlockPeriodSeconds > 0) {
+    const apr = calculateAPR(normalizedReward, principal, elapsedBlockPeriodSeconds);
+    const apy = calculateAPY(apr, compoundingPeriods);
+
+    return {
+      apr,
+      apy,
+      projectedReward: normalizedReward,
+      progressRatio: progress.progressRatio,
+      effectiveProgressRatio: progress.effectiveProgressRatio,
+      effectivePeriodSeconds: elapsedBlockPeriodSeconds,
+      isProlonged: true
+    };
+  }
 
   if (progress.effectiveProgressRatio > 0 && blockPeriodSeconds > 0) {
     const projectedReward = normalizedReward / progress.effectiveProgressRatio;
@@ -79,7 +95,8 @@ export function estimateCurrentChurnYields({
       projectedReward,
       progressRatio: progress.progressRatio,
       effectiveProgressRatio: progress.effectiveProgressRatio,
-      effectivePeriodSeconds: blockPeriodSeconds
+      effectivePeriodSeconds: blockPeriodSeconds,
+      isProlonged: false
     };
   }
 
@@ -98,6 +115,7 @@ export function estimateCurrentChurnYields({
     projectedReward: normalizedReward,
     progressRatio: progress.progressRatio,
     effectiveProgressRatio: progress.effectiveProgressRatio,
-    effectivePeriodSeconds
+    effectivePeriodSeconds,
+    isProlonged: false
   };
 }
