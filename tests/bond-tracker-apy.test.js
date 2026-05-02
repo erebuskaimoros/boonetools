@@ -9,7 +9,7 @@ import {
   estimateCurrentChurnYields
 } from '../src/lib/bond-tracker/apy.js';
 
-test('block-aware APY projects through the current churn once enough blocks have elapsed', () => {
+test('block-aware APY annualizes current award over the nominal churn period before churn is due', () => {
   const reward = 200;
   const principal = 10_000;
   const estimate = estimateCurrentChurnYields({
@@ -19,15 +19,14 @@ test('block-aware APY projects through the current churn once enough blocks have
     totalBlocks: 100,
     secondsPerBlock: 6
   });
-  const expectedReward = 1_000;
-  const expectedApy = calculateAPY(calculateAPR(expectedReward, principal, 600));
+  const expectedApy = calculateAPY(calculateAPR(reward, principal, 600));
 
-  assert.equal(estimate.projectedReward, expectedReward);
+  assert.equal(estimate.projectedReward, reward);
   assert.equal(estimate.effectiveProgressRatio, 0.2);
   assert.equal(estimate.apy, expectedApy);
 });
 
-test('very fresh churn APY uses a minimum block-progress floor to avoid exploding projections', () => {
+test('very fresh churn APY uses the nominal churn period to avoid exploding projections', () => {
   const estimate = estimateCurrentChurnYields({
     reward: 10,
     principal: 10_000,
@@ -35,13 +34,14 @@ test('very fresh churn APY uses a minimum block-progress floor to avoid explodin
     totalBlocks: 100,
     secondsPerBlock: 6
   });
-  const rawBlockApy = calculateAPY(calculateAPR(1_000, 10_000, 600));
-  const conservativeApy = calculateAPY(calculateAPR(10, 10_000, 600));
+  const elapsedBlockApy = calculateAPY(calculateAPR(10, 10_000, 6));
+  const nominalApy = calculateAPY(calculateAPR(10, 10_000, 600));
 
-  assert.equal(estimate.projectedReward, 10 / MIN_CHURN_PROGRESS_RATIO);
+  assert.equal(estimate.projectedReward, 10);
   assert.equal(estimate.effectiveProgressRatio, MIN_CHURN_PROGRESS_RATIO);
-  assert.ok(estimate.apy < rawBlockApy);
-  assert.ok(estimate.apy > conservativeApy);
+  assert.equal(estimate.effectivePeriodSeconds, 600);
+  assert.equal(estimate.apy, nominalApy);
+  assert.ok(estimate.apy < elapsedBlockApy);
 });
 
 test('prolonged churn APY annualizes over actual elapsed blocks instead of nominal churn interval', () => {

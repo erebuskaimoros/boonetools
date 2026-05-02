@@ -69,8 +69,9 @@ export function estimateCurrentChurnYields({
     ? normalizedProgressedBlocks * normalizedSecondsPerBlock
     : 0;
 
-  if (progress.progressRatio > 1 && elapsedBlockPeriodSeconds > 0) {
-    const apr = calculateAPR(normalizedReward, principal, elapsedBlockPeriodSeconds);
+  if ((blockPeriodSeconds > 0 || elapsedBlockPeriodSeconds > 0) && normalizedReward > 0) {
+    const effectivePeriodSeconds = Math.max(blockPeriodSeconds, elapsedBlockPeriodSeconds);
+    const apr = calculateAPR(normalizedReward, principal, effectivePeriodSeconds);
     const apy = calculateAPY(apr, compoundingPeriods);
 
     return {
@@ -79,24 +80,8 @@ export function estimateCurrentChurnYields({
       projectedReward: normalizedReward,
       progressRatio: progress.progressRatio,
       effectiveProgressRatio: progress.effectiveProgressRatio,
-      effectivePeriodSeconds: elapsedBlockPeriodSeconds,
-      isProlonged: true
-    };
-  }
-
-  if (progress.effectiveProgressRatio > 0 && blockPeriodSeconds > 0) {
-    const projectedReward = normalizedReward / progress.effectiveProgressRatio;
-    const apr = calculateAPR(projectedReward, principal, blockPeriodSeconds);
-    const apy = calculateAPY(apr, compoundingPeriods);
-
-    return {
-      apr,
-      apy,
-      projectedReward,
-      progressRatio: progress.progressRatio,
-      effectiveProgressRatio: progress.effectiveProgressRatio,
-      effectivePeriodSeconds: blockPeriodSeconds,
-      isProlonged: false
+      effectivePeriodSeconds,
+      isProlonged: elapsedBlockPeriodSeconds > blockPeriodSeconds
     };
   }
 
