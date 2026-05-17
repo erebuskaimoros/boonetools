@@ -23,6 +23,7 @@
   const RECONNECT_BASE_MS = 2000;
   const RECONNECT_MAX_MS = 30000;
   const REFRESH_DEBOUNCE_MS = 8000;
+  const TABLE_RELOAD_DEBOUNCE_MS = 350;
   const PAGE_SIZE = 20;
 
   // --- State ---
@@ -36,6 +37,8 @@
   let rpcConnected = false;
   let rpcLastBlock = 0;
   let pendingRefreshTimer = null;
+  let tableReloadTimer = null;
+  let dashboardRequestId = 0;
   let midgardHistoryRequestId = 0;
 
   // Tabs
@@ -63,7 +66,9 @@
   // Chart instances (for cleanup)
   let chartInstances = {};
 
-  $: allSwaps = dashboard?.all_swaps || dashboard?.recent_24h || [];
+  $: allSwaps = dashboard?.chart_swaps || dashboard?.all_swaps || dashboard?.recent_24h || [];
+  $: tableSwaps = dashboard?.all_swaps || [];
+  $: paginationMeta = dashboard?.pagination || {};
   $: topSwaps = dashboard?.top_20 || [];
   $: recentSwaps = dashboard?.recent_24h || [];
   $: trackerStart = dashboard?.tracker_started_at || null;
@@ -71,13 +76,14 @@
   $: backendConfigError = getRapidSwapsApiConfigError();
 
   // Filtered + sorted + paginated table data
-  $: filteredSwaps = filterSwaps(allSwaps, filterPath, filterMinUsd, filterMinSubs);
-  $: sortedSwaps = sortSwaps(filteredSwaps, sortColumn, sortAsc);
-  $: totalPages = Math.max(1, Math.ceil(sortedSwaps.length / PAGE_SIZE));
+  $: filteredSwaps = tableSwaps;
+  $: sortedSwaps = tableSwaps;
+  $: tableTotal = Number(paginationMeta.total) || tableSwaps.length;
+  $: totalPages = Math.max(1, Number(paginationMeta.total_pages) || Math.ceil(tableTotal / PAGE_SIZE));
   $: {
     if (currentPage > totalPages) currentPage = 1;
   }
-  $: pagedSwaps = sortedSwaps.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  $: pagedSwaps = tableSwaps;
 
   // Filter swaps by overview date range
   $: overviewSwaps = allSwaps.filter(s => {
@@ -86,7 +92,11 @@
   });
 
   // Daily aggregates for charts (includes market share when midgard data available)
-  $: dailyData = computeDailyData(overviewSwaps, midgardSwapHistory, allSwaps);
+  $: dailyData = computeDailyData(overviewSwaps, midgardSwapHistory, allSwaps, {
+    useCumulativeSeeds: Boolean(dashboard?.chart),
+    cumulativeCountBefore: dashboard?.chart?.cumulative_count_before || 0,
+    cumulativeVolumeBefore: dashboard?.chart?.cumulative_volume_usd_before || 0
+  });
   $: cumulativeVolumeAxisBounds = getSeriesAxisBounds(dailyData.cumVolume, {
     clampMin: 0,
     minSpan: 1
@@ -156,6 +166,11 @@
     const s = Number(seconds) || 0;
     if (s < 60) return `${s}s`;
     if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+    if (s >= 86400) {
+      const d = Math.floor(s / 86400);
+      const h = Math.floor((s % 86400) / 3600);
+      return h > 0 ? `${d}d ${h}h` : `${d}d`;
+    }
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
     return m > 0 ? `${h}h ${m}m` : `${h}h`;
@@ -208,6 +223,7 @@
     filterMinUsd = '';
     filterMinSubs = '';
     currentPage = 1;
+    loadData(false, { reloadHistory: false });
   }
 
   function toggleSort(col) {
@@ -218,6 +234,25 @@
       sortAsc = col === 'date' ? false : col === 'pair' ? true : false;
     }
     currentPage = 1;
+    loadData(false, { reloadHistory: false });
+  }
+
+  function scheduleTableReload() {
+    currentPage = 1;
+    clearTimeout(tableReloadTimer);
+    tableReloadTimer = setTimeout(() => {
+      loadData(false, { reloadHistory: false });
+    }, TABLE_RELOAD_DEBOUNCE_MS);
+  }
+
+  function goToPage(page) {
+    const nextPage = Math.min(totalPages, Math.max(1, Number(page) || 1));
+    if (nextPage === currentPage) {
+      return;
+    }
+
+    currentPage = nextPage;
+    loadData(false, { reloadHistory: false });
   }
 
   function sortSwaps(swaps, col, asc) {
@@ -1079,7 +1114,7 @@
   }
 
   async function loadMidgardSwapHistory() {
-    const swaps = dashboard?.all_swaps || [];
+    const swaps = allSwaps;
     if (!swaps.length || !overviewDateFrom || !overviewDateTo || overviewDateFrom > overviewDateTo) {
       midgardSwapHistory = null;
       return;
@@ -1115,27 +1150,74 @@
     }
   }
 
+  function buildDashboardParams() {
+    const params = {
+      include_all: 'false',
+      limit: PAGE_SIZE,
+      offset: Math.max(0, (currentPage - 1) * PAGE_SIZE),
+      sort: sortColumn,
+      order: sortAsc ? 'asc' : 'desc'
+    };
+
+    if (filterPath.trim()) {
+      params.path = filterPath.trim();
+    }
+
+    if (Number(filterMinUsd) > 0) {
+      params.min_usd = Number(filterMinUsd);
+    }
+
+    if (Number(filterMinSubs) > 0) {
+      params.min_subs = Number(filterMinSubs);
+    }
+
+    const chartRange = getChartDateRangeUnixSeconds(overviewDateFrom, overviewDateTo);
+    if (chartRange) {
+      params.chart_from = chartRange.from;
+      params.chart_to = chartRange.to;
+    }
+
+    return params;
+  }
+
   // --- Data loading ---
-  async function loadData(showLoading = true) {
+  async function loadData(showLoading = true, options = {}) {
     if (showLoading) loading = true;
     else refreshing = true;
+    const requestId = ++dashboardRequestId;
     try {
-      dashboard = await fetchRapidSwapsDashboard();
-      dashboardError = '';
-
       // Keep date range end pinned to today (handles midnight rollover)
       const today = toChartDateKey(new Date());
       if (overviewDateTo < today) {
         overviewDateTo = today;
       }
-      await loadMidgardSwapHistory();
+
+      const nextDashboard = await fetchRapidSwapsDashboard({
+        params: buildDashboardParams()
+      });
+      if (requestId !== dashboardRequestId) {
+        return;
+      }
+      dashboard = nextDashboard;
+      dashboardError = '';
+      await tick();
+
+      if (options.reloadHistory !== false) {
+        await loadMidgardSwapHistory();
+      }
     } catch (err) {
+      if (requestId !== dashboardRequestId) {
+        return;
+      }
       dashboard = null;
       dashboardError = err?.message || 'Failed to load recorded rapid swaps';
       midgardSwapHistory = null;
+    } finally {
+      if (requestId === dashboardRequestId) {
+        loading = false;
+        refreshing = false;
+      }
     }
-    loading = false;
-    refreshing = false;
   }
 
   onMount(() => {
@@ -1145,6 +1227,7 @@
     return () => {
       clearInterval(refreshInterval);
       clearTimeout(pendingRefreshTimer);
+      clearTimeout(tableReloadTimer);
       disconnectRpcWs();
       Object.keys(chartInstances).forEach(destroyChart);
     };
@@ -1248,9 +1331,9 @@
       <button class="tab-btn" class:tab-active={activeTab === 'paths'} on:click={() => activeTab = 'paths'}>Swap Paths</button>
     </div>
     <div class="date-range">
-      <input type="date" class="date-input" bind:value={overviewDateFrom} on:change={() => loadMidgardSwapHistory()} />
+      <input type="date" class="date-input" bind:value={overviewDateFrom} on:change={() => loadData(false)} />
       <span class="date-sep">–</span>
-      <input type="date" class="date-input" bind:value={overviewDateTo} on:change={() => loadMidgardSwapHistory()} />
+      <input type="date" class="date-input" bind:value={overviewDateTo} on:change={() => loadData(false)} />
     </div>
   </div>
   </div><!-- /sticky-header -->
@@ -1329,13 +1412,13 @@
     <section class="data-section">
       <div class="section-head">
         <h3>RAPID SWAPS</h3>
-        <span class="section-sub">Showing {filteredSwaps.length} of {allSwaps.length} swaps · timestamps shown in your local time</span>
+        <span class="section-sub">Showing {pagedSwaps.length} of {tableTotal} matching swaps · {formatNumber(dashboard?.total_tracked || 0, { maximumFractionDigits: 0 })} total · timestamps shown in your local time</span>
       </div>
 
       <div class="table-filters">
-        <input type="text" class="filter-input" placeholder="Filter by swap path" bind:value={filterPath} on:input={() => currentPage = 1} />
-        <input type="number" class="filter-input filter-num" placeholder="Min USD volume" bind:value={filterMinUsd} on:input={() => currentPage = 1} />
-        <input type="number" class="filter-input filter-num" placeholder="Min sub-swaps" bind:value={filterMinSubs} on:input={() => currentPage = 1} />
+        <input type="text" class="filter-input" placeholder="Filter by swap path" bind:value={filterPath} on:input={scheduleTableReload} />
+        <input type="number" class="filter-input filter-num" placeholder="Min USD volume" bind:value={filterMinUsd} on:input={scheduleTableReload} />
+        <input type="number" class="filter-input filter-num" placeholder="Min sub-swaps" bind:value={filterMinSubs} on:input={scheduleTableReload} />
         {#if filterPath || filterMinUsd || filterMinSubs}
           <button class="filter-clear" on:click={clearFilters}>Clear Filters</button>
         {/if}
@@ -1345,7 +1428,7 @@
         <div class="empty">Loading...</div>
       {:else if dashboardError}
         <div class="empty err-text">{dashboardError}</div>
-      {:else if filteredSwaps.length === 0}
+      {:else if tableTotal === 0}
         <div class="empty">No rapid swaps match the current filters.</div>
       {:else}
         <div class="table-wrap">
@@ -1384,17 +1467,17 @@
         <!-- Pagination -->
         {#if totalPages > 1}
           <div class="pagination">
-            <button class="page-btn" disabled={currentPage <= 1} on:click={() => currentPage--}>Prev</button>
+            <button class="page-btn" disabled={currentPage <= 1} on:click={() => goToPage(currentPage - 1)}>Prev</button>
             {#each Array(totalPages) as _, i}
               {#if totalPages <= 7 || i === 0 || i === totalPages - 1 || Math.abs(i + 1 - currentPage) <= 1}
-                <button class="page-btn" class:page-active={currentPage === i + 1} on:click={() => currentPage = i + 1}>{i + 1}</button>
+                <button class="page-btn" class:page-active={currentPage === i + 1} on:click={() => goToPage(i + 1)}>{i + 1}</button>
               {:else if i === 1 && currentPage > 3}
                 <span class="page-dots">...</span>
               {:else if i === totalPages - 2 && currentPage < totalPages - 2}
                 <span class="page-dots">...</span>
               {/if}
             {/each}
-            <button class="page-btn" disabled={currentPage >= totalPages} on:click={() => currentPage++}>Next</button>
+            <button class="page-btn" disabled={currentPage >= totalPages} on:click={() => goToPage(currentPage + 1)}>Next</button>
           </div>
         {/if}
       {/if}

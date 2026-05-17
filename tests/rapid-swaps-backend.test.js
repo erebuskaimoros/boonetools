@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   ACTION_PAGE_LIMIT,
   MIDGARD_BASES,
+  THORNODE_BASES,
   fetchMidgardActions,
   fetchRapidSwapRows,
   getRapidSwapRateLimitCooldownMs,
@@ -15,6 +16,12 @@ test('rapid swap backend keeps official Midgard first and avoids known bad fallb
   assert.equal(MIDGARD_BASES[0], 'https://midgard.thorchain.network/v2');
   assert.equal(MIDGARD_BASES.includes('https://midgard.liquify.com/v2'), false);
   assert.equal(MIDGARD_BASES.includes('https://gateway.liquify.com/chain/thorchain_midgard/v2'), true);
+});
+
+test('rapid swap backend uses the configured non-Nine-Realms THORNode fallback', () => {
+  assert.equal(THORNODE_BASES[0], 'https://thornode.thorchain.network');
+  assert.equal(THORNODE_BASES.includes('https://thornode.ninerealms.com'), false);
+  assert.equal(THORNODE_BASES.includes('https://gateway.liquify.com/chain/thorchain_api'), true);
 });
 
 test('rapid swap backend recognizes provider rate limits and daily cooldowns', () => {
@@ -211,6 +218,39 @@ test('fetchMidgardActions falls back when a provider ignores txid filtering', as
 
     assert.equal(result.actions.length, 1);
     assert.equal(result.actions[0]?.in?.[0]?.txID, 'target-tx');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('fetchMidgardActions can anchor scans before a timestamp without offset paging', async () => {
+  const originalFetch = global.fetch;
+  const [primaryBase] = MIDGARD_BASES;
+
+  global.fetch = async (url) => {
+    assert.equal(url, `${primaryBase}/actions?type=swap&limit=5&timestamp=1777852800`);
+    return new Response(JSON.stringify({
+      actions: [buildRapidAction('timestamp-tx', 21999)],
+      meta: {
+        nextPageToken: 'cursor-before-timestamp'
+      }
+    }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json'
+      }
+    });
+  };
+
+  try {
+    const result = await fetchMidgardActions({
+      timestamp: 1777852800,
+      limit: 5
+    });
+
+    assert.equal(result.actions.length, 1);
+    assert.equal(result.actions[0]?.in?.[0]?.txID, 'timestamp-tx');
+    assert.equal(result.nextPageToken, 'cursor-before-timestamp');
   } finally {
     global.fetch = originalFetch;
   }

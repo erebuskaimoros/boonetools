@@ -29,6 +29,29 @@ function runChartsInTimeZone(timeZone, swaps, midgardHistory, allSwaps = swaps) 
   return JSON.parse(stdout.toString());
 }
 
+function runChartsWithOptionsInTimeZone(timeZone, swaps, midgardHistory, allSwaps, options) {
+  const script = `
+    import { computeDailyData } from './src/lib/rapid-swaps/charts.js';
+
+    const swaps = ${JSON.stringify(swaps)};
+    const midgardHistory = ${JSON.stringify(midgardHistory)};
+    const allSwaps = ${JSON.stringify(allSwaps)};
+    const options = ${JSON.stringify(options)};
+
+    console.log(JSON.stringify(computeDailyData(swaps, midgardHistory, allSwaps, options)));
+  `;
+
+  const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: websiteRoot,
+    env: {
+      ...process.env,
+      TZ: timeZone
+    }
+  });
+
+  return JSON.parse(stdout.toString());
+}
+
 test('computeDailyData groups rapid swaps and Midgard history by the same local day', () => {
   const result = runChartsInTimeZone(
     'America/New_York',
@@ -54,6 +77,44 @@ test('computeDailyData groups rapid swaps and Midgard history by the same local 
   assert.deepEqual(result.labels, ['Mar 28']);
   assert.deepEqual(result.volumePct, [100]);
   assert.deepEqual(result.countPct, [10]);
+});
+
+test('computeDailyData aggregates hourly Midgard buckets into recent local adoption days', () => {
+  const result = runChartsInTimeZone(
+    'America/New_York',
+    [
+      {
+        action_date: '2026-05-10T16:30:00.000Z',
+        input_estimated_usd: 50,
+        streaming_count: 4,
+        blocks_used: 2
+      },
+      {
+        action_date: '2026-05-11T16:30:00.000Z',
+        input_estimated_usd: 75,
+        streaming_count: 4,
+        blocks_used: 2
+      }
+    ],
+    {
+      intervals: [
+        {
+          startTime: '1778428800',
+          totalVolumeUSD: '5000',
+          totalCount: '5'
+        },
+        {
+          startTime: '1778515200',
+          totalVolumeUSD: '15000',
+          totalCount: '3'
+        }
+      ]
+    }
+  );
+
+  assert.deepEqual(result.labels, ['May 10', 'May 11']);
+  assert.deepEqual(result.volumePct, [100, 50]);
+  assert.deepEqual(result.countPct, [20, 33.33]);
 });
 
 test('computeDailyData uses both swap legs for non-RUNE adoption volume', () => {
@@ -146,6 +207,44 @@ test('computeDailyData seeds cumulative totals from swaps before the visible win
   ];
 
   const result = runChartsInTimeZone('UTC', allSwaps.slice(1), null, allSwaps);
+
+  assert.deepEqual(result.count, [1, 1]);
+  assert.deepEqual(result.cumCount, [2, 3]);
+  assert.deepEqual(result.volume, [100, 298]);
+  assert.deepEqual(result.cumVolume, [199, 497]);
+});
+
+test('computeDailyData can seed cumulative totals from backend aggregates', () => {
+  const result = runChartsWithOptionsInTimeZone(
+    'UTC',
+    [
+      {
+        action_date: '2026-03-28T12:00:00.000Z',
+        source_asset: 'THOR.RUNE',
+        target_asset: 'ETH.ETH',
+        input_estimated_usd: 100,
+        output_estimated_usd: 99,
+        streaming_count: 4,
+        blocks_used: 2
+      },
+      {
+        action_date: '2026-03-29T12:00:00.000Z',
+        source_asset: 'BTC.BTC',
+        target_asset: 'ETH.ETH',
+        input_estimated_usd: 150,
+        output_estimated_usd: 148,
+        streaming_count: 6,
+        blocks_used: 3
+      }
+    ],
+    null,
+    [],
+    {
+      useCumulativeSeeds: true,
+      cumulativeCountBefore: 1,
+      cumulativeVolumeBefore: 99
+    }
+  );
 
   assert.deepEqual(result.count, [1, 1]);
   assert.deepEqual(result.cumCount, [2, 3]);

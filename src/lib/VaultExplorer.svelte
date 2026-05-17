@@ -16,8 +16,10 @@
   import { fetchVaultExplorerData } from './vault-explorer/data.js';
 
   let loading = true;
+  let refreshing = false;
   let error = null;
   let data = null;
+  let lastUpdated = null;
   let activeTab = 'overview';
 
   // Crosshair hover state
@@ -29,6 +31,7 @@
   let showAssetBalances = false;
   let toastMessage = '';
   let showToast = false;
+  const FALLBACK_ICON = '/assets/coins/fallback-logo.svg';
 
   const chainExplorers = {
     ...CHAIN_EXPLORERS,
@@ -37,13 +40,44 @@
     'THOR': 'https://thorchain.net/address/'
   };
 
-  onMount(async () => {
+  async function loadVaultData(initial = false) {
+    if (refreshing) return;
+    if (initial) {
+      loading = true;
+      error = null;
+    } else {
+      refreshing = true;
+    }
+
     try {
       data = await fetchVaultExplorerData();
+      lastUpdated = new Date();
+      error = null;
     } catch (e) {
-      error = e.message;
+      const message = e?.message || 'Unable to load vault data';
+      if (!data) {
+        error = message;
+      } else {
+        toastMessage = `Refresh failed: ${message}`;
+        showToast = true;
+      }
+    } finally {
+      loading = false;
+      refreshing = false;
     }
-    loading = false;
+  }
+
+  function formatLastUpdated(date) {
+    if (!date) return '';
+    return date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  }
+
+  onMount(() => {
+    loadVaultData(true);
   });
 
   function handleCellEnter(e, poolIdx, rowIdx, colIdx) {
@@ -97,6 +131,29 @@
   function openExplorer(chain, address) {
     const explorerUrl = chainExplorers[chain];
     if (explorerUrl) window.open(explorerUrl + address, '_blank');
+  }
+
+  function getChainIcon(chain) {
+    return CHAIN_ICONS[chain] || FALLBACK_ICON;
+  }
+
+  function handleIconError(event) {
+    const image = event.currentTarget;
+    if (!image) return;
+
+    if (image.dataset.fallbackApplied === 'true' || image.getAttribute('src') === FALLBACK_ICON) {
+      image.style.visibility = 'hidden';
+      return;
+    }
+
+    image.dataset.fallbackApplied = 'true';
+    image.src = FALLBACK_ICON;
+  }
+
+  function getVisibleVaultCoins(vault) {
+    return [...(vault.coins || [])]
+      .filter(coin => data.prices[coin.asset] && Number(coin.amount) > 0)
+      .sort((a, b) => (fromBaseUnit(b.amount) * data.prices[b.asset]) - (fromBaseUnit(a.amount) * data.prices[a.asset]));
   }
 
   function calculateVaultBondUSD(bondInRune) {
@@ -154,6 +211,13 @@
     <div class="tab-bar">
       <button class="tab-btn" class:tab-active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}>Overview</button>
       <button class="tab-btn" class:tab-active={activeTab === 'details'} on:click={() => activeTab = 'details'}>Vault Details</button>
+      <div class="tab-spacer"></div>
+      {#if lastUpdated}
+        <span class="last-updated">Updated {formatLastUpdated(lastUpdated)}</span>
+      {/if}
+      <button class="refresh-btn" on:click={() => loadVaultData(false)} disabled={refreshing}>
+        {refreshing ? 'Refreshing...' : 'Refresh'}
+      </button>
     </div>
     </div><!-- /sticky-header -->
 
@@ -257,7 +321,7 @@
     {:else if activeTab === 'details'}
       <!-- Vault Details (ported from Vaults.svelte) -->
       <div class="vaults-grid">
-        {#each data.rawVaults as vault}
+        {#each data.rawVaults as vault (vault.pub_key)}
           <div class="vault-card">
             <div class="vault-card-header" class:retiring={vault.status === 'RetiringVault'}>
               <div class="vault-name-row">
@@ -278,16 +342,17 @@
 
             <div class="vault-card-body">
               <div class="vault-section-title">CHAIN ADDRESSES</div>
-              {#each vault.addresses as addr}
+              {#each vault.addresses as addr (`${addr.chain}:${addr.address}`)}
+                {@const chain = addr.chain.split('.')[0]}
                 <div class="addr-row">
-                  <img src={CHAIN_ICONS[addr.chain.split('.')[0]]} alt={addr.chain} class="addr-chain-icon"
-                       on:error={(e) => { e.target.src = '/assets/coins/fallback-logo.svg'; }} />
-                  <span class="addr-chain">{addr.chain.split('.')[0]}</span>
+                  <img src={getChainIcon(chain)} alt={addr.chain} class="addr-chain-icon"
+                       on:error={handleIconError} loading="eager" decoding="async" />
+                  <span class="addr-chain">{chain}</span>
                   <button class="addr-val" on:click={() => copyToClipboard(addr.address, `${addr.chain} address`)}>
                     {shortenAddress(addr.address, 20)}
                   </button>
-                  {#if chainExplorers[addr.chain.split('.')[0]]}
-                    <button class="addr-explorer" on:click={() => openExplorer(addr.chain.split('.')[0], addr.address)} title="View on explorer">
+                  {#if chainExplorers[chain]}
+                    <button class="addr-explorer" on:click={() => openExplorer(chain, addr.address)} title="View on explorer">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                         <polyline points="15,3 21,3 21,9"></polyline>
@@ -336,18 +401,18 @@
 
               {#if showAssetBalances}
                 <div class="asset-list" transition:slide={{ duration: 200 }}>
-                  {#each vault.coins
-                    .filter(coin => data.prices[coin.asset])
-                    .sort((a, b) => (fromBaseUnit(b.amount) * data.prices[b.asset]) - (fromBaseUnit(a.amount) * data.prices[a.asset]))
-                  as coin}
+                  {#each getVisibleVaultCoins(vault) as coin (coin.asset)}
                     {@const logo = getAssetLogo(coin.asset)}
                     {@const name = getAssetDisplayName(coin.asset)}
                     <div class="asset-row">
                       <div class="asset-id">
                         {#if logo}
-                          <img src={logo} alt={name} class="asset-logo" on:error={(e) => { e.target.src = '/assets/coins/fallback-logo.svg'; }} />
+                          <img src={logo} alt={name} class="asset-logo" on:error={handleIconError} loading="eager" decoding="async" />
                         {/if}
                         <span>{name}</span>
+                        {#if coin.balance_source === 'eth_chain'}
+                          <span class="asset-source">ETH chain</span>
+                        {/if}
                       </div>
                       <div class="asset-vals">
                         <span class="asset-amount">{formatAssetAmount(fromBaseUnit(coin.amount))}</span>
@@ -442,6 +507,7 @@
   /* ---- TAB BAR ---- */
   .tab-bar {
     display: flex;
+    align-items: center;
     gap: 0;
     background: #0a0a0a;
     border-bottom: 1px solid #1a1a1a;
@@ -464,6 +530,46 @@
 
   .tab-btn:hover { color: #999; }
   .tab-active { color: #00cc66; border-bottom-color: #00cc66; }
+
+  .tab-spacer {
+    flex: 1;
+  }
+
+  .last-updated {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #555;
+    margin-right: 10px;
+    white-space: nowrap;
+  }
+
+  .refresh-btn {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #00cc66;
+    background: rgba(0, 204, 102, 0.08);
+    border: 1px solid rgba(0, 204, 102, 0.35);
+    border-radius: 4px;
+    padding: 6px 10px;
+    cursor: pointer;
+    text-transform: uppercase;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+
+  .refresh-btn:hover:not(:disabled) {
+    background: rgba(0, 204, 102, 0.14);
+    border-color: rgba(0, 204, 102, 0.6);
+    color: #66ffaa;
+  }
+
+  .refresh-btn:disabled {
+    color: #555;
+    border-color: #222;
+    background: #111;
+    cursor: wait;
+  }
 
   /* ---- POOL SECTIONS ---- */
   .pools-grid {
@@ -801,6 +907,8 @@
   .addr-chain-icon {
     width: 16px;
     height: 16px;
+    flex: 0 0 16px;
+    object-fit: contain;
   }
 
   .addr-chain {
@@ -932,7 +1040,22 @@
   .asset-logo {
     width: 16px;
     height: 16px;
+    flex: 0 0 16px;
     border-radius: 50%;
+    object-fit: contain;
+  }
+
+  .asset-source {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #00cc66;
+    background: rgba(0, 204, 102, 0.1);
+    border: 1px solid rgba(0, 204, 102, 0.25);
+    border-radius: 3px;
+    padding: 1px 4px;
+    text-transform: uppercase;
   }
 
   .asset-vals {
@@ -994,6 +1117,18 @@
     .tab-btn {
       font-size: 10px;
       padding: 8px 12px;
+    }
+
+    .tab-bar {
+      flex-wrap: wrap;
+      gap: 4px;
+      padding: 0 12px 8px;
+    }
+
+    .last-updated {
+      order: 3;
+      width: 100%;
+      margin: 0;
     }
   }
 </style>

@@ -1,720 +1,438 @@
-# RUNE Tools UI Style Research
+# BOONE Tools UI Style Reference
 
-This document serves as the source of truth for UI styling patterns, observations, and decisions for the RUNE Tools application.
+Long-form reference for the **terminal aesthetic** that the boone.tools site
+uses today. The compact agent-facing contract lives in
+[`../DESIGN.md`](../DESIGN.md); runtime tokens live in
+`src/lib/styles/variables.css` (terminal palette under the `--term-*` prefix).
+
+> **History note (2026-05).** The site previously used an indigo/purple
+> gradient theme with system fonts and `PageHeader`/`--gradient-card` patterns.
+> That system is now legacy. The current home page (`App.svelte`) and the
+> reference dashboards (`BondTrackerV2`, `AppLayerBaseLayerDashboard`) all use
+> the terminal aesthetic documented below. The old gradient tokens and
+> components are preserved in `variables.css` and `$lib/components/` so legacy
+> tools keep rendering, but **do not use them in new work**.
 
 ---
 
 ## Table of Contents
 
-1. [Component Inventory](#component-inventory)
-2. [Font Analysis](#font-analysis)
-3. [Container Widths](#container-widths)
-4. [Color Systems](#color-systems)
-5. [Shared Patterns](#shared-patterns)
-6. [Component Library Structure](#component-library-structure)
-7. [Migration Status](#migration-status)
-8. [Observations & Notes](#observations--notes)
+1. [Aesthetic In One Sentence](#aesthetic-in-one-sentence)
+2. [Reference Files](#reference-files)
+3. [Color Palette](#color-palette)
+4. [Typography](#typography)
+5. [Layout & Containers](#layout--containers)
+6. [Component Vocabulary](#component-vocabulary)
+7. [Motion](#motion)
+8. [Chart.js Styling](#chartjs-styling)
+9. [Legacy System](#legacy-system)
+10. [Migration Notes](#migration-notes)
 
 ---
 
-## Component Inventory
+## Aesthetic In One Sentence
 
-### Reference Components (Favorites)
+Brutalist Bloomberg-terminal — dense, mono-typed, hard-edged, dark; closer to
+a Linux TUI than a marketing site. Every new screen should read as a terminal
+session first and a web page second.
 
-These are the best-designed components to use as reference when building new features:
+## Reference Files
 
-| Component | Description | Key Strengths |
-|-----------|-------------|---------------|
-| **BondTracker.svelte** | Bond tracking dashboard | Best card patterns, uses shared components, proper store integration |
-| **Version.svelte** | Network version status | Great visual hierarchy, efficient space usage, compact grids |
-| **Vaults.svelte** | Asgard vault viewer | Good card patterns, expandable sections, toast notifications |
-| **TCY.svelte** | TCY staking tracker | Form patterns, alert system, distribution table |
-| **Nodes.svelte** | Node explorer | Complex table styling, sticky headers, row highlighting |
+These are the canonical examples of the live style. When the docs and the
+code disagree, the code wins.
 
-### Shared Components Currently Available
+| File | Role |
+| --- | --- |
+| `src/App.svelte` (`terminal-home`, `terminal-hero`, `nav-row` blocks) | Welcome screen — sets the entire visual language. |
+| `src/lib/BondTrackerV2.svelte` | Fully-built terminal tool with mono Chart.js, tables, alerts. |
+| `src/lib/AppLayerBaseLayerDashboard.svelte` | Most recent dashboard; structural reference for new tools. |
 
-Located in `src/lib/components/`:
+## Color Palette
 
-| Component | Used By | Purpose |
-|-----------|---------|---------|
-| `LoadingBar.svelte` | BondTracker, Version | Shimmer loading animation |
-| `StatusIndicator.svelte` | BondTracker | Status dot with pulse animation |
-| `ActionButton.svelte` | BondTracker | Icon buttons with color variants |
-| `PageHeader.svelte` | Version | Section header with gradient |
-| `LinkOutIcon.svelte` | Version | External link icon |
+The palette is intentionally narrow.
 
----
+### Surface
 
-## Font Analysis
+| Token | Hex | Use |
+| --- | --- | --- |
+| `--term-bg` | `#080808` | Page background. |
+| `--term-surface` | `#0a0a0a` | Panels, blocks, sticky table headers. |
+| `--term-surface-hover` | `#0d0d0d` | Hover state for rows and metric cells. |
+| `--term-surface-deep` | `#050505` | Inset surfaces inside cards (pill backgrounds). |
+| `--term-surface-inset` | `#060606` | Subtle inset rows (target lines inside flow nodes). |
 
-### Current State (Inconsistent)
+### Borders
 
-| Component | Font Family | Notes |
-|-----------|-------------|-------|
-| BondTracker.svelte | `-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif` | System fonts |
-| Version.svelte | System fonts | Same as BondTracker |
-| Vaults.svelte | System fonts | Same as BondTracker |
-| **TCY.svelte** | `'Exo', sans-serif` | **Different** |
-| **Nodes.svelte** | `'Exo', sans-serif` | **Different** |
+| Token | Hex | Use |
+| --- | --- | --- |
+| `--term-border-faint` | `#111111` | Internal row separators in tables. |
+| `--term-border` | `#1a1a1a` | Default border on cards, blocks, metric cells. |
+| `--term-border-soft` | `#141414` | Dashed/soft dividers between block sections. |
 
-### Recommendation
+### Text Ramp
 
-Standardize on system fonts for most components. The 'Exo' font in TCY and Nodes appears to be legacy and should be migrated unless there's a specific branding reason.
+| Token | Hex | Use |
+| --- | --- | --- |
+| `--term-text-strong` | `#ffffff` | Almost never — reserved for hot states. |
+| `--term-text` | `#e8e8e8` | Display titles, primary metric values. |
+| `--term-text-body` | `#c8c8c8` | Body text, default table cells. |
+| `--term-text-2` | `#888888` | Secondary text, status text, table mono content. |
+| `--term-text-3` | `#666666` | Labels, chart ticks, descriptive prose. |
+| `--term-text-4` | `#555555` | Sub-labels, foot text, dim metadata. |
+| `--term-text-5` | `#444444` | Inactive icons, very dim labels. |
+| `--term-text-6` | `#333333` | Bracket characters, separators, timeline indices. |
+| `--term-text-7` | `#222222` | The dimmest UI ink (arrow placeholders, etc). |
 
-**Standard Font Stack:**
-```css
-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+Use the dim end aggressively — that ramp is what makes the screen read as a
+terminal.
+
+### Accents
+
+| Token | Hex | Use |
+| --- | --- | --- |
+| `--term-accent` | `#00cc66` | Terminal green. Status dots, highlighted path, hover names, `$` prompts, blinking cursor, accent numeric columns. |
+| `--term-accent-soft` | `rgba(0,204,102,0.07)` | Primary card vertical fade. |
+| `--term-accent-edge` | `rgba(0,204,102,0.4)` | Primary card border, primary pill border. |
+| `--term-accent-glow` | `0 0 6px rgba(0,204,102,0.4)` | Status-dot glow only. |
+| `--term-amber` | `#d4a017` | Reserve/destination cards, event labels in timelines, currency line on charts, `WRN` tag. |
+| `--term-amber-soft` | `rgba(212,160,23,0.06)` | Reserve card vertical fade. |
+| `--term-error` | `#dc3545` | Error alert borders/labels. |
+| `--term-info` | `#5588cc` | Informational chart series only. |
+
+Do not introduce a new dominant hue for a one-off feature.
+
+## Typography
+
+Two fonts. No others.
+
+### Loading
+
+Both fonts are loaded once in `App.svelte`'s `<svelte:head>`:
+
+```html
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 ```
 
-**Fallback (if Exo is intentional):**
-```css
-font-family: 'Exo', sans-serif;
+`:global(*)` defaults to `'DM Sans'`, so **mono must be set explicitly** on
+every terminal element.
+
+### Usage map
+
+| Font | Used for |
+| --- | --- |
+| `'JetBrains Mono'` | Page titles, section h2s, all numbers, all labels, status pills, indices, addresses, hashes, bracketed metadata, table contents, inline code, command-line headers, timeline dates and events. |
+| `'DM Sans'` | Descriptive prose only — block ledes, card role copy, explanatory paragraphs. |
+
+### Size scale
+
+| Token | Size | Use |
+| --- | --- | --- |
+| display | 30px / 800 | Page title (e.g. `APP LAYER → BASE LAYER_`). |
+| metric | 24px / 800 | Primary metric values inside metric cards. |
+| h2 | 13px / 700 / `0.08em` upper | Block headings. |
+| body | 13px / 400 | Default body, descriptive paragraphs. |
+| body-small | 12px / 400 | Block ledes, foot prose. |
+| number | 11px / 600 | Mono numbers and addresses in cells. |
+| label | 10px / 600 / `0.12em` upper | Metric labels, foot tags. |
+| label-micro | 9px / 700 / `0.18em` upper | Column heads, queue mini-labels, status pills. |
+
+Display titles use `letter-spacing: 0.06em`. Uppercase mono labels typically
+sit between `0.08em` and `0.18em`. Never use negative tracking.
+
+## Layout & Containers
+
+| Width | Use |
+| --- | --- |
+| 600–650px | Single-focus trackers. |
+| 800–900px | Moderate dashboards. |
+| 1200–1400px | Wide explorers, multi-column tables. |
+| Full width | Data tables with many columns. |
+
+- Page padding: `24px 0 56px` on desktop, tighter on mobile.
+- Metric grids: flush 4-up (`grid-template-columns: repeat(4, 1fr)`, `gap: 0`)
+  inside a single `1px solid #1a1a1a` outer border. Internal cells use
+  `border-right: 1px solid #1a1a1a` and drop the right border on the last
+  cell.
+- Sections (`.block`): square, `1px solid #1a1a1a`, `#0a0a0a` background,
+  ~20px padding. `▌` green title marker + h2 + right-aligned `[meta]`.
+- Do not nest cards inside cards. Sections group; cards represent repeated
+  items or focused metrics.
+
+## Component Vocabulary
+
+These are the patterns you should reach for first.
+
+### Command-line head
+
+Tool header rendered as a shell prompt.
+
+```svelte
+<div class="head-top">
+  <div class="head-left">
+    <span class="prompt">$</span>
+    <span class="cmd">track</span>
+    <span class="arg">--app-layer → --base-layer</span>
+  </div>
+  <div class="head-right">
+    <span class="status">
+      <span class="dot ok"></span> LIVE
+    </span>
+    <span class="sep">│</span>
+    <button class="refresh">
+      <span class="bracket">[</span><span class="key">R</span><span class="bracket">]</span>
+      refresh
+    </button>
+  </div>
+</div>
+<h1 class="title">APP LAYER <span class="arrow">→</span> BASE LAYER<span class="cursor">_</span></h1>
+<p class="lede">{description in DM Sans}</p>
+<div class="rule"></div>
 ```
 
----
+Key details:
+- `$` is `--term-accent` and bold. `cmd` is `text-body` semibold. `arg` is
+  `text-3`.
+- Status dot pulses 2s when live. Sep `│` is `text-6` dim.
+- Bracket button: bracket chars `text-6`, key letter `accent`, action text
+  lowercase, border-color flips to accent on hover.
+- Title uppercase mono 30/800, arrows green, `_` cursor blinks 1s.
+- Section `rule` is a 1px gradient: `accent 0% → border 14% → border 100%`.
 
-## Container Widths
+### Block (general section)
 
-### Current State
-
-| Component | Max Width | Use Case |
-|-----------|-----------|----------|
-| BondTracker | 650px | Single-focus dashboard |
-| TCY | 600px | Single-focus dashboard |
-| Version | 900px | Multi-section layout |
-| Vaults | 1400px | Wide grid layout (3-column) |
-| Nodes | Full width | Data table with many columns |
-
-### Recommended Standard Widths
-
-| Width | Use Case |
-|-------|----------|
-| 600-650px | Single-focus dashboards, trackers |
-| 800-900px | Multi-section layouts, moderate grids |
-| 1200-1400px | Wide grids, data tables |
-| Full width | Complex tables with many columns |
-
----
-
-## Color Systems
-
-### Primary Palette (from CLAUDE.md)
-
-```css
-/* Backgrounds */
---bg-main: #1a1a1a;
---bg-card: #2c2c2c;
---bg-card-hover: #3a3a3a;
-
-/* Text */
---text-primary: #ffffff;
---text-secondary: #c0c0c0;
---text-muted: #a0a0a0;
-
-/* Accent Gradients */
---gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
---gradient-card: linear-gradient(145deg, #2c2c2c 0%, #3a3a3a 100%);
-
-/* Links */
---color-link: #4A90E2;
-
-/* Status Colors */
---color-success: #28a745;
---color-warning: #ff9800;
---color-error: #dc3545;
---color-info: #6366f1;
+```svelte
+<section class="block">
+  <div class="block-head">
+    <div class="block-title">
+      <span class="title-marker">▌</span>
+      <h2>observed reserve payments</h2>
+    </div>
+    <div class="block-meta">[apr 30 → may 15]</div>
+  </div>
+  <p class="block-lede">{description}</p>
+  <!-- ...content... -->
+</section>
 ```
 
-### TCY-Specific Colors
+### Metric grid (4-up)
 
-TCY uses a unique teal accent color for branding:
+Flush, indexed, hoverable.
 
-```css
-/* TCY Accent */
---tcy-accent: #28f4af;
---tcy-accent-hover: rgba(40, 244, 175, 0.2);
---tcy-border-hover: rgba(40, 244, 175, 0.1);
---tcy-gradient: linear-gradient(90deg, #28f4af 0%, #1eebeb 100%);
+```svelte
+<div class="metric-grid">
+  <article class="metric">
+    <div class="metric-head">
+      <span class="metric-idx">01</span>
+      <span class="metric-label">paid to tc reserve</span>
+    </div>
+    <strong class="metric-value">$1,638.65</strong>
+    <small class="metric-foot">2,970.39 RUNE observed</small>
+  </article>
+  ...
+</div>
 ```
 
-### Hover/Focus States
+### Alerts
 
-```css
-/* Card Hover */
---hover-glow: rgba(99, 102, 241, 0.3);
---hover-border: rgba(99, 102, 241, 0.6);
---hover-transform: translateY(-3px);
---hover-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+One-line, three-letter tag.
 
-/* Focus States */
---focus-ring: 0 0 0 3px rgba(99, 102, 241, 0.2);
---focus-border: rgba(99, 102, 241, 0.6);
+```svelte
+<div class="alert err">
+  <span class="alert-tag">ERR</span>
+  <span>artifact data — {message}</span>
+</div>
 ```
 
----
+Tag colors: `ERR` = `--term-error`, `WRN` = `--term-amber`, `INF` =
+`--term-info`. Border + background are tinted 0.4 / 0.06 opacity of the same
+hue.
 
-## Shared Patterns
+### Tables
 
-### 1. Card Pattern (120px Fixed Height)
+Mono throughout. Sticky `surface` header. 9px label-style header cells.
+1px `border-faint` row separators. Right-aligned numeric columns. The
+accent-colored "primary value" column uses `--term-accent`.
 
-Used in: BondTracker, TCY, Version
-
-```css
-.card {
-  background: linear-gradient(145deg, #2c2c2c 0%, #3a3a3a 100%);
-  border-radius: 12px;
-  padding: 16px;
-  height: 120px;
-  position: relative;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.card:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
-  border-color: rgba(99, 102, 241, 0.6);
-}
-
-/* Title at top */
-.card h3 {
-  font-size: 12px;
-  margin: 0 0 6px 0;
-  color: #a0a0a0;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-/* Main value centered */
-.card .main-value {
-  font-size: 24px;
-  font-weight: 800;
-  color: #ffffff;
-  position: absolute;
-  top: 50%;
-  left: 16px;
-  right: 16px;
-  transform: translateY(-50%);
-  text-align: center;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-}
-
-/* Sub values at bottom */
-.card .sub-values {
-  display: flex;
-  justify-content: space-between;
-  font-size: 12px;
-  color: #c0c0c0;
-  position: absolute;
-  bottom: 16px;
-  left: 16px;
-  right: 16px;
-}
+```svelte
+<table>
+  <thead>
+    <tr>
+      <th>denom</th>
+      <th>amount</th>
+      <th>est. usd</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="mono">{denom}</td>
+      <td class="num">{amount}</td>
+      <td class="num accent">{usd}</td>
+    </tr>
+  </tbody>
+</table>
 ```
 
-**Mobile Adaptation:**
-```css
-@media (max-width: 600px) {
-  .card {
-    height: auto;
-    min-height: 110px;
+### Flow board
+
+3-column "collector → queue → destination" layout. Highlighted path uses
+green left-border + soft green fill on rows. Reserve cards use amber
+treatment.
+
+```svelte
+<div class="flow">
+  <div class="flow-col">
+    <div class="col-head">app collectors</div>
+    <article class="node">
+      <div class="node-head">
+        <span class="node-idx">01</span>
+        <strong>RUJI Trade</strong>
+        <span class="node-pill hot">50% → base</span>
+      </div>
+      <p class="node-role">Orderbook revenue collector</p>
+      <div class="targets">
+        <div class="target on-base">
+          <span class="target-arrow">→</span>
+          <span class="target-name">Base Layer Collector</span>
+          <b class="target-pct">50%</b>
+        </div>
+      </div>
+    </article>
+  </div>
+  ...
+</div>
+```
+
+### Timeline
+
+Vertical list with mono index + square accent node + dashed connector.
+
+```svelte
+<ol class="timeline">
+  <li>
+    <div class="t-idx">01</div>
+    <div class="t-rail">
+      <span class="t-node"></span>
+      <span class="t-line"></span>
+    </div>
+    <div class="t-body">
+      <span class="t-date">2025-06-02</span>
+      <strong class="t-collector">Base Layer Collector</strong>
+      <b class="t-event">Initialized on code 6</b>
+      <p class="t-flow">RUNE target pointed directly to the TC Reserve module</p>
+    </div>
+  </li>
+</ol>
+```
+
+Date is `--term-accent`. Event label is `--term-amber`. Node is an 8px square
+with a 1px accent border.
+
+### Status pills
+
+```svelte
+<span class="node-pill hot">50% → base</span>
+<span class="node-pill code">code 159</span>
+<span class="node-pill amber">RESERVE memo</span>
+```
+
+9px uppercase mono, 2px×7px, `border-default` → accent/amber on variant.
+Status pills are the **only** place full pill rounding (`border-radius: 999px`)
+is acceptable.
+
+### Inline code
+
+```svelte
+<span class="inline-code">rujira-revenue</span>
+```
+
+Mono 11px, `#111` background, `#1a1a1a` border, accent text.
+
+## Motion
+
+Motion is functional, never decorative.
+
+| Animation | Purpose | Spec |
+| --- | --- | --- |
+| `pulse-dot` | Live status indicator. | 2s infinite, opacity 1 → 0.45 → 1. |
+| `blink` | Title cursor `_`. | 1s steps(1), 50/50 on/off. |
+| `marquee` | Chart/data loading. | 1.2s steps(5), opacity 0.3 → 1 → 0.3. |
+| hover row | Table/metric hover. | 0.15s ease, background only. |
+
+Do not add page-load staggered reveals, hover-scale transforms, shimmer
+sweeps, or scroll-triggered effects.
+
+## Chart.js Styling
+
+See `renderPaymentChart` in `AppLayerBaseLayerDashboard.svelte` for a complete
+example. Quick recipe:
+
+```js
+{
+  legend: { labels: { color: '#888', font: { family: "'JetBrains Mono', monospace", size: 10 } } },
+  tooltip: {
+    backgroundColor: '#0a0a0a',
+    borderColor: '#1a1a1a',
+    borderWidth: 1,
+    titleColor: '#00cc66',
+    bodyColor: '#c8c8c8',
+    titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
+    bodyFont: { family: "'JetBrains Mono', monospace", size: 11 }
+  },
+  scales: {
+    x: {
+      grid: { color: '#111', drawBorder: false },
+      border: { color: '#1a1a1a' },
+      ticks: { color: '#666', font: { family: "'JetBrains Mono', monospace", size: 10 } }
+    },
+    y: {
+      grid: { color: '#111' },
+      border: { color: '#1a1a1a' },
+      ticks: { color: '#00cc66', font: { family: "'JetBrains Mono', monospace", size: 10 } }
+    }
   }
-  .card .main-value {
-    position: static;
-    transform: none;
-    margin: 8px 0;
-    font-size: 22px;
-  }
-  .card .sub-values {
-    position: static;
-    margin-top: 8px;
-  }
 }
 ```
 
-### 2. Section Pattern
-
-Used in: Version
-
-```css
-section {
-  background: linear-gradient(145deg, #2c2c2c 0%, #3a3a3a 100%);
-  border-radius: 16px;
-  padding: 1.25rem;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-}
-```
-
-### 3. Stat Card Pattern (Compact)
-
-Used in: Version (timing-grid)
-
-```css
-.stat-card {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 10px;
-  padding: 0.75rem;
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.stat-label {
-  color: #a0a0a0;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.stat-value {
-  color: #ffffff;
-  font-size: 15px;
-  font-weight: 700;
-}
-```
-
-### 4. Progress Bar Pattern
-
-Used in: Version
-
-```css
-.progress-bar {
-  position: relative;
-  width: 100%;
-  height: 6px;
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 3px;
-  overflow: visible;
-}
-
-.progress {
-  height: 100%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 3px;
-  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Optional threshold marker */
-.threshold-marker {
-  position: absolute;
-  top: -4px;
-  right: 34%; /* Position at threshold */
-  width: 2px;
-  height: calc(100% + 8px);
-  background-color: #ffffff;
-  opacity: 0.8;
-}
-```
-
-### 5. Toast Notification Pattern
-
-Used in: BondTracker, Vaults
-
-```css
-.toast {
-  position: fixed;
-  bottom: 60px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: linear-gradient(135deg, #4A90E2 0%, #357abd 100%);
-  color: #ffffff;
-  padding: 12px 24px;
-  border-radius: 10px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  font-weight: 600;
-  z-index: 1000;
-  font-size: 14px;
-  max-width: 80%;
-  text-align: center;
-}
-```
-
-### 6. Form Input Pattern
-
-Used in: BondTracker, TCY
-
-```css
-input {
-  padding: 16px 20px;
-  border-radius: 12px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  background: linear-gradient(145deg, #2c2c2c 0%, #3a3a3a 100%);
-  color: #ffffff;
-  font-size: 16px;
-  font-weight: 500;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
-}
-
-input:focus {
-  outline: none;
-  border-color: rgba(99, 102, 241, 0.6);
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2),
-              0 0 0 3px rgba(99, 102, 241, 0.2),
-              0 0 20px rgba(99, 102, 241, 0.3);
-  transform: translateY(-2px);
-}
-
-input::placeholder {
-  color: #888888;
-}
-```
-
-### 7. Table Pattern (Nodes)
-
-Used in: Nodes
-
-```css
-.table-container {
-  overflow-x: auto;
-  max-height: calc(100vh - 180px);
-  overflow-y: auto;
-  border-radius: 8px;
-  background-color: #2c2c2c;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-}
-
-/* Custom Scrollbar */
-.table-container::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-.table-container::-webkit-scrollbar-track {
-  background: #1a1a1a;
-  border-radius: 4px;
-}
-
-.table-container::-webkit-scrollbar-thumb {
-  background: #4a4a4a;
-  border-radius: 4px;
-}
-
-/* Sticky Header */
-thead {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-
-th {
-  background-color: #1a1a1a;
-  color: #888;
-  font-weight: 500;
-  padding: 8px;
-  text-align: center;
-  border-bottom: 1px solid #3a3a3c;
-  font-size: 0.8125rem;
-  letter-spacing: 0.3px;
-  white-space: nowrap;
-}
-```
-
-### 8. Alert Pattern
-
-Used in: TCY
-
-```css
-.alerts-section {
-  background-color: rgba(255, 193, 7, 0.1);
-  border: 1px solid rgba(255, 193, 7, 0.2);
-  border-radius: 12px;
-  padding: 12px;
-  margin: 0 20px 20px 20px;
-}
-
-.alert-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #ffc107;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.warning-icon {
-  flex-shrink: 0;
-  color: #ffc107;
-}
-```
-
-### 9. Loading Shimmer Animation
-
-```css
-.loading-bar {
-  background: linear-gradient(90deg, #3a3a3a 25%, #5a5a5a 50%, #3a3a3a 75%);
-  background-size: 200% 100%;
-  border-radius: 4px;
-  animation: shimmer 1.5s infinite ease-in-out;
-}
-
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-```
-
-### 10. Header Shimmer Effect
-
-Used in: BondTracker, Vaults
-
-```css
-h2 {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 16px;
-  padding: 20px;
-  color: #ffffff;
-  font-size: 26px;
-  font-weight: 800;
-  text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-  position: relative;
-  overflow: hidden;
-}
-
-h2::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-  animation: shimmer 5s infinite;
-}
-
-@keyframes shimmer {
-  0% { left: -100%; }
-  100% { left: 100%; }
-}
-```
-
----
-
-## Component Library Structure
-
-### Proposed Directory Structure
-
-```
-src/lib/components/
-├── primitives/
-│   ├── Card.svelte           # 120px fixed card with slots
-│   ├── StatCard.svelte       # Compact stat display
-│   ├── ProgressBar.svelte    # With threshold marker option
-│   ├── Badge.svelte          # Status/percentage badges
-│   └── Toast.svelte          # Notification system
-├── layout/
-│   ├── PageHeader.svelte     # (exists) Section header
-│   ├── Section.svelte        # Gradient wrapper
-│   ├── Grid.svelte           # 2-col, 3-col, auto-fit
-│   └── Container.svelte      # Max-width wrapper
-├── forms/
-│   ├── FormInput.svelte      # With paste button option
-│   ├── SearchInput.svelte    # With clear button
-│   └── FormSelect.svelte     # Dropdown select
-├── data/
-│   ├── DataTable.svelte      # Sticky headers, expandable
-│   └── DistributionTable.svelte # TCY-style history table
-├── feedback/
-│   ├── LoadingBar.svelte     # (exists) Shimmer animation
-│   ├── StatusIndicator.svelte # (exists) Status dot
-│   ├── Alert.svelte          # Warning/info boxes
-│   └── Skeleton.svelte       # Loading placeholders
-└── buttons/
-    ├── ActionButton.svelte   # (exists) Icon buttons
-    └── Button.svelte         # Standard button variants
-```
-
----
-
-## Migration Status
-
-### Components Using Shared Components
-
-| Component | LoadingBar | StatusIndicator | ActionButton | PageHeader | Toast | CSS Vars | Shared Utils |
-|-----------|:----------:|:---------------:|:------------:|:----------:|:-----:|:--------:|:------------:|
-| BondTracker | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ |
-| Version | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ | ✅ |
-| **Vaults** | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ |
-| TCY | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Nodes | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-
-### Migration Log
-
-| Date | Component | Change | Status |
-|------|-----------|--------|--------|
-| 2024-01 | DataCard.svelte | Updated to use CSS variables | ✅ Tested |
-| 2024-01 | Toast.svelte | Created new shared component | ✅ Tested |
-| 2024-01 | Vaults.svelte | Migrated inline toast to Toast component | ✅ Tested |
-| 2025-01 | Vaults.svelte | Full migration: CSS variables, LoadingBar, shared utils (formatting.js), shared constants (assets.js), removed ~70 lines of duplicate code | ✅ Tested |
-| 2025-01 | BondTracker.svelte | Full migration: CSS variables, Toast component (was inline), simplified toast logic | ✅ Tested |
-| 2025-01 | Version.svelte | CSS variables migration (already had LoadingBar, PageHeader, shared utils) | ✅ Tested |
-| 2025-01 | LinkOutIcon.svelte | Moved from lib root to components folder, updated imports in Version, Feed, WhaleWatching | ✅ Tested |
-
-### Migration Priority
-
-1. ~~**High Priority**: Create shared Toast component, migrate BondTracker & Vaults~~ ✅ DONE
-2. **Medium Priority**: Migrate TCY to use shared components
-3. **Medium Priority**: Migrate Feed & WhaleWatching (have local assetIcons mappings)
-4. **Low Priority**: Nodes (complex, requires careful handling)
-
----
-
-## Observations & Notes
-
-### 2024-01 Research Session
-
-1. **BondTracker is the gold standard** for card-based layouts. It properly uses:
-   - Shared components (LoadingBar, StatusIndicator, ActionButton)
-   - Currency store for multi-currency support
-   - Proper loading states with content transitions
-
-2. **TCY and Nodes use 'Exo' font** while all other components use system fonts. This creates visual inconsistency. Need to decide:
-   - Standardize to system fonts (recommended)
-   - Or keep Exo as intentional branding
-
-3. **TCY has unique accent color (#28f4af)** - This appears intentional for TCY product branding. Consider keeping this as a theme variant rather than standardizing.
-
-4. ~~**Toast notifications are duplicated** in BondTracker and Vaults. Should extract to shared component.~~ ✅ DONE - Toast component created, both now use it.
-
-5. **Nodes.svelte is delicate** - It has:
-   - Complex table with 14+ columns
-   - Row color coding based on node status
-   - ISP logo and country emoji mapping
-   - Expandable bond provider sections
-   - Vault color mapping
-   - Changes here require extra care
-
-6. **Version.svelte demonstrates good patterns**:
-   - Uses PageHeader with actions slot
-   - Clean grid layouts (upgrade-info-grid, timing-grid)
-   - Compact stat cards
-   - Good mobile responsive stacking
-
-### Testing Environment
-
-- **Default browser**: Brave
-- **Testing browser**: Google Chrome (Claude Code Chrome Extension is installed here)
-- **Dev URL**: `http://localhost:5173` (or similar from `npm run dev`)
-- **Prod URL**: `https://rune.tools`
-
-### Migration Checklist
-
-When migrating a component, check ALL of the following:
-
-#### 1. CSS Variables
-- [ ] Add `@import '$lib/styles/variables.css';` at top of `<style>` block
-- [ ] Replace hardcoded colors with variables (`#1a1a1a` → `var(--bg-main)`)
-- [ ] Replace hardcoded spacing with variables (`16px` → `var(--space-lg)`)
-- [ ] Replace font-family with `var(--font-system)`
-- [ ] Replace font sizes/weights with variables (`--text-lg`, `--font-semibold`)
-- [ ] Replace shadows with variables (`--shadow-card`, `--shadow-elevated`)
-- [ ] Replace transitions with variables (`--transition-smooth`)
-- [ ] Replace gradients with variables (`--gradient-card`, `--gradient-primary`)
-
-#### 2. Shared Components (from `$lib/components`)
-- [ ] `LoadingBar` - Replace "Loading..." text or custom loading bars
-- [ ] `Toast` - Replace inline toast notifications
-- [ ] `ActionButton` - Replace custom icon buttons
-- [ ] `StatusIndicator` - Replace custom status dots
-- [ ] `PageHeader` - Replace custom section headers
-- [ ] `DataCard` - Replace custom card containers
-- [ ] `LinkOutIcon` - Replace inline external link SVGs
-- [ ] `CopyIcon` - Replace inline copy/clipboard SVGs (12+ occurrences in codebase)
-- [ ] `RefreshIcon` - Replace inline refresh/reload SVGs
-- [ ] `BookmarkIcon` - Replace inline bookmark SVGs
-- [ ] Other common SVGs - Check for any repeated inline SVG patterns
-
-#### 3. Shared Utilities (from `$lib/utils/formatting`)
-- [ ] `formatNumber()` - Replace custom number formatting
-- [ ] `formatUSD()` - Replace custom USD formatting
-- [ ] `formatThorAmount()` - Replace custom RUNE amount formatting
-- [ ] `shortenAddress()` - Replace custom address truncation
-- [ ] `copyToClipboard()` - Replace custom clipboard logic
-
-#### 4. Shared Constants (from `$lib/constants`)
-- [ ] `getAssetLogo()` - Replace local `assetLogos` or `assetIcons` mappings
-- [ ] `getAssetDisplayName()` - Replace local `formatAssetName()` functions
-- [ ] `ASSET_LOGOS` - Remove duplicate logo path definitions
-
-#### 5. Blockchain Utilities (from `$lib/utils/blockchain`)
-- [ ] `fromBaseUnit()` - Replace `/ 1e8` divisions
-- [ ] `BLOCK_TIME_SECONDS` - Replace hardcoded block times
-
-#### 6. Component Consolidation
-- [ ] Move any local reusable components to `$lib/components/`
-- [ ] Add new shared components to `$lib/components/index.js`
-- [ ] Update all files that import the moved component
-- [ ] Delete the old local component file
-
-#### 7. API & Data
-- [ ] Use `thornode` from `$lib/api` instead of raw fetch calls
-- [ ] Use `midgard` from `$lib/api/midgard` for Midgard endpoints
-- [ ] Use shared node utilities from `$lib/utils/nodes`
-- [ ] Use shared network utilities from `$lib/utils/network`
-
-#### 8. Stores
-- [ ] Use currency store from `$lib/stores/currency` for multi-currency support
-- [ ] Check for local state that could be shared across components
-
-#### 9. Cleanup
-- [ ] Remove unused imports
-- [ ] Remove migration breadcrumb comments before committing
-- [ ] Remove duplicate CSS that's now handled by variables
-- [ ] Remove local helper functions that duplicate shared utilities
-- [ ] Run `npm run build` to verify no errors
-- [ ] Test visually on dev server
-
-### Migration Best Practices
-
-Learnings from migrating components to use shared utilities:
-
-1. **Avoid helpers with implicit behavior** - Don't create wrapper functions with magic value checks. Example: a `formatVaultUSD(amount, price)` that treated `price === 1` as "already in USD" created confusing semantics. Use explicit calls like `formatUSD(fromBaseUnit(amount) * price)` instead.
-
-2. **Use `{@const}` in templates** - When calling the same function multiple times in a Svelte template, use `{@const}` to avoid repeated function calls:
-   ```svelte
-   {#each items as item}
-     {@const logo = getAssetLogo(item.asset)}
-     {@const name = getAssetDisplayName(item.asset)}
-     <img src={logo} alt={name} />
-     <span>{name}</span>
-   {/each}
-   ```
-
-3. **Add error handlers to images** - Asset icons should have `on:error` handlers to fall back gracefully:
-   ```svelte
-   <img
-     src={assetLogo}
-     alt={assetName}
-     on:error={(e) => {
-       e.target.onerror = null;
-       e.target.src = '/assets/coins/fallback-logo.svg';
-     }}
-   />
-   ```
-
-4. **Remove migration breadcrumb comments** - Comments like `// formatVaultName is now imported from network.js` are useful during migration but should be removed before committing.
-
-5. **CSS imports pattern** - Each component imports `@import '$lib/styles/variables.css';` at the top of its `<style>` block. This is the current per-component pattern.
-
-### Future Considerations
-
-- [x] Create CSS variables file (`src/lib/styles/variables.css`) - **DONE**
-- [x] Create base styles file (`src/lib/styles/base.css`) - **DONE**
-- [x] Create index.css entry point (`src/lib/styles/index.css`) - **DONE**
-- [ ] Consider CSS-in-JS or CSS modules for better scoping
-- [ ] Add Storybook for component documentation
-- [ ] Create theme system for TCY-specific colors
-- [ ] Consider global CSS variables import vs per-component imports
-
----
-
-*Last updated: 2025-01*
+Bar series: `#00cc66` border + `rgba(0,204,102,0.55)` fill, `borderRadius: 0`.
+Line series for cumulative/secondary: `#d4a017`. Point border `#080808` for
+crisp contrast against the dark surface.
+
+## Legacy System
+
+Some older tools (`TCY.svelte`, `Nodes.svelte`, `LPChecker.svelte`,
+`Treasury.svelte`, etc.) still use the pre-terminal aesthetic:
+
+- System font stack (`-apple-system, BlinkMacSystemFont, ...`).
+- `--gradient-card`, `--gradient-primary`, `--bg-main`, etc. tokens.
+- `PageHeader`, `DataCard`, `ActionButton`, `ErrorDisplay` shared components.
+- 12px rounded corners, drop shadows, indigo/purple `#667eea → #764ba2`
+  gradient headers.
+
+Those tools render fine and we are not actively migrating them. If you have
+to touch one, you can stay in the legacy style for that file. **New tools
+must use the terminal aesthetic.**
+
+When you do migrate a legacy tool to terminal style:
+
+1. Drop the `@import '$lib/styles/variables.css'` block and stop using
+   `--gradient-*` / `--bg-card` tokens. Use `--term-*` instead.
+2. Replace `PageHeader` with the command-line head pattern.
+3. Replace `DataCard` with `.metric` cells in a flush `.metric-grid`.
+4. Replace `ErrorDisplay` with `.alert err|warn|info` rows.
+5. Replace any `'-apple-system'` font-family with the JetBrains Mono / DM
+   Sans pair from this doc.
+
+## Migration Notes
+
+- The shared `$lib/components/` components were built against the legacy
+  system. They will not be deleted, but new terminal-style work should write
+  the small mono markup inline (or extract into
+  `$lib/components/terminal/` if a pattern is genuinely reused 3+ times).
+- `src/lib/styles/variables.css` retains the legacy `--bg-*`,
+  `--gradient-*`, `--text-*` tokens for compatibility. The new `--term-*`
+  tokens documented above are the canonical palette for new work.
+- `App.svelte` does not import `variables.css` — its terminal styles are
+  written inline. That is intentional and the recommended pattern for new
+  terminal tools.
+
+*Last updated: 2026-05-17 — full rewrite for terminal aesthetic.*

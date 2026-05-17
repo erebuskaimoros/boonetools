@@ -102,7 +102,7 @@ export function getSeriesAxisBounds(values, options = {}) {
   return { min, max };
 }
 
-export function computeDailyData(swaps, midgardHistory, allSwaps = swaps) {
+export function computeDailyData(swaps, midgardHistory, allSwaps = swaps, options = {}) {
   if (!swaps.length) {
     return { labels: [], volume: [], cumVolume: [], count: [], cumCount: [], efficiency: [], pctFaster: [], volumePct: [], countPct: [] };
   }
@@ -148,16 +148,18 @@ export function computeDailyData(swaps, midgardHistory, allSwaps = swaps) {
   const pctFaster = [];
   const volumePct = [];
   const countPct = [];
-  let cumulativeVolume = 0;
-  let cumulativeCount = 0;
+  let cumulativeVolume = Number(options.cumulativeVolumeBefore) || 0;
+  let cumulativeCount = Number(options.cumulativeCountBefore) || 0;
 
-  for (const row of allSwaps) {
-    const date = new Date(row.action_date);
-    if (!Number.isFinite(date.getTime())) continue;
-    const key = toChartDateKey(date);
-    if (!key || key >= firstVisibleKey) continue;
-    cumulativeVolume += getRapidSwapComparableVolumeUsd(row);
-    cumulativeCount += 1;
+  if (!options.useCumulativeSeeds) {
+    for (const row of allSwaps) {
+      const date = new Date(row.action_date);
+      if (!Number.isFinite(date.getTime())) continue;
+      const key = toChartDateKey(date);
+      if (!key || key >= firstVisibleKey) continue;
+      cumulativeVolume += getRapidSwapComparableVolumeUsd(row);
+      cumulativeCount += 1;
+    }
   }
 
   for (const key of sortedKeys) {

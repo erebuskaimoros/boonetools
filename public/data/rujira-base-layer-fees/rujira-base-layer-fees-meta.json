@@ -1,0 +1,25 @@
+{
+  "generatedAt": "2026-05-17T15:17:57.719Z",
+  "eventCount": 505,
+  "actionCount": 520,
+  "reserveCollector": "thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr",
+  "reserveTarget": "thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt",
+  "targetDenoms": [
+    [
+      "rune",
+      "926000"
+    ]
+  ],
+  "targetAddresses": [
+    [
+      "thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt",
+      1
+    ]
+  ],
+  "sourceMidgard": "https://gateway.liquify.com/chain/thorchain_midgard",
+  "sourceThornode": "https://thornode.thorchain.network",
+  "sourceRpc": [
+    "https://gateway.liquify.com/chain/thorchain_rpc",
+    "https://rpc.thorchain.network"
+  ]
+}

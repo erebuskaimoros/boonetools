@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="76" fill="#0B1A11"/>
+
+  <!-- BT Monogram — Elder Futhark Runes -->
+  <g stroke="#00E85E" stroke-width="26" stroke-linecap="butt" fill="none">
+    <!-- Berkana (ᛒ): vertical stave + two triangular lobes -->
+    <line x1="100" y1="108" x2="100" y2="388"/>
+    <polyline points="100,108 196,178 100,248" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    <polyline points="100,248 196,318 100,388" stroke-linejoin="miter" stroke-miterlimit="4"/>
+
+    <!-- Tiwaz (ᛏ): vertical stave + arrow diagonals from top -->
+    <line x1="348" y1="108" x2="348" y2="388"/>
+    <line x1="348" y1="108" x2="252" y2="155"/>
+    <line x1="348" y1="108" x2="444" y2="155"/>
+  </g>
+</svg>

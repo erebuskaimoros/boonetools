@@ -102,9 +102,13 @@ async function loadWsListenerState(client) {
 
 function buildSchedulerScanPlan(syncState, wsListenerState) {
   const nowMs = Date.now();
-  if (shouldSkipRapidSwapCanonicalScanForHealthyListener(wsListenerState, {
+  const hasCanonicalState = Number(syncState?.last_scanned_height || 0) > 0;
+  const canonicalLagging = Boolean(syncState?.stats_json?.lagging);
+
+  if (hasCanonicalState && !canonicalLagging && shouldSkipRapidSwapCanonicalScanForHealthyListener(wsListenerState, {
     nowMs,
     heartbeatGraceMs: LISTENER_HEARTBEAT_GRACE_MS,
+    blockProgressGraceMs: config.rapidSwapsListenerBlockStallMs,
     stableUptimeMs: LISTENER_STABLE_UPTIME_MS
   })) {
     return {

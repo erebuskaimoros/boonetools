@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rujira App Layer Base Layer Payments</title>
+  <style>
+    body {
+      margin: 0;
+      background: #f7f4ed;
+      color: #111827;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(1440px, calc(100vw - 32px));
+      margin: 24px auto;
+    }
+    .chart {
+      overflow-x: auto;
+      border: 1px solid #ded8cc;
+      background: #f7f4ed;
+    }
+    svg {
+      display: block;
+      max-width: none;
+    }
+    table {
+      width: 100%;
+      margin-top: 18px;
+      border-collapse: collapse;
+      font-size: 13px;
+      background: #fffdf8;
+    }
+    th, td {
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5dfd4;
+      text-align: right;
+      white-space: nowrap;
+    }
+    th:first-child, td:first-child {
+      text-align: left;
+    }
+    th {
+      color: #374151;
+      font-weight: 720;
+    }
+    caption {
+      text-align: left;
+      color: #4b5563;
+      padding: 0 0 8px;
+      font-weight: 650;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="chart"><svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820" role="img" aria-labelledby="title desc">
+  <title id="title">Observed Rujira Base Layer collector reserve deposits</title>
+  <desc id="desc">Weekly USD bars and cumulative USD line for observed Rujira Base Layer revenue collector reserve payments.</desc>
+  <style>
+    :root { color-scheme: light; }
+    svg { background: #f7f4ed; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .title { fill: #111827; font-size: 34px; font-weight: 760; letter-spacing: 0; }
+    .subtitle { fill: #4b5563; font-size: 15px; }
+    .metric-label { fill: #6b7280; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; }
+    .metric-value { fill: #111827; font-size: 23px; font-weight: 740; }
+    .axis-label { fill: #6b7280; font-size: 12px; }
+    .axis-title { fill: #374151; font-size: 13px; font-weight: 680; }
+    .grid { stroke: #ded8cc; stroke-width: 1; }
+    .axis { stroke: #9ca3af; stroke-width: 1.2; }
+    .bar { fill: #18a999; }
+    .line { fill: none; stroke: #253858; stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+    .dot { fill: #253858; }
+    .note { fill: #6b7280; font-size: 12px; }
+    .legend { fill: #111827; font-size: 13px; font-weight: 650; }
+  </style>
+  <text x="118" y="48" class="title">Observed Rujira Base Layer collector reserve deposits</text>
+  <text x="118" y="76" class="subtitle">Actual final reserve deposits from the Base Layer collector (thor1txum04w...) grouped by UTC week and priced with Midgard weekly RUNE/USD.</text>
+
+  <text x="118" y="106" class="metric-label">Cumulative paid</text>
+  <text x="118" y="135" class="metric-value">$1,639</text>
+  <text x="348" y="106" class="metric-label">Cumulative RUNE</text>
+  <text x="348" y="135" class="metric-value">2,970 RUNE</text>
+  <text x="578" y="106" class="metric-label">Reserve deposits</text>
+  <text x="578" y="135" class="metric-value">505</text>
+  <text x="808" y="106" class="metric-label">Range</text>
+  <text x="808" y="135" class="metric-value">2026-04-27 to 2026-05-18</text>
+
+  <g>
+    <line x1="118" y1="710" x2="1284" y2="710" class="grid"/><text x="102" y="715" class="axis-label" text-anchor="end">$0</text>
+<line x1="118" y1="604" x2="1284" y2="604" class="grid"/><text x="102" y="609" class="axis-label" text-anchor="end">$160</text>
+<line x1="118" y1="498" x2="1284" y2="498" class="grid"/><text x="102" y="503" class="axis-label" text-anchor="end">$320</text>
+<line x1="118" y1="392" x2="1284" y2="392" class="grid"/><text x="102" y="397" class="axis-label" text-anchor="end">$480</text>
+<line x1="118" y1="286" x2="1284" y2="286" class="grid"/><text x="102" y="291" class="axis-label" text-anchor="end">$640</text>
+<line x1="118" y1="180" x2="1284" y2="180" class="grid"/><text x="102" y="185" class="axis-label" text-anchor="end">$800</text>
+    <line x1="118" y1="710" x2="1284" y2="710" class="axis"/>
+    <line x1="118" y1="180" x2="118" y2="710" class="axis"/>
+    <line x1="1284" y1="180" x2="1284" y2="710" class="axis"/>
+    <text x="1300" y="715" class="axis-label" text-anchor="start">$0</text>
+<text x="1300" y="609" class="axis-label" text-anchor="start">$400</text>
+<text x="1300" y="503" class="axis-label" text-anchor="start">$800</text>
+<text x="1300" y="397" class="axis-label" text-anchor="start">$1,200</text>
+<text x="1300" y="291" class="axis-label" text-anchor="start">$1,600</text>
+<text x="1300" y="185" class="axis-label" text-anchor="start">$2,000</text>
+    <rect x="118" y="475.10385766572085" width="385.6666666666667" height="234.89614233427915" rx="2" class="bar"><title>2026-04-27 to 2026-05-04: $355 (698 RUNE)</title></rect>
+<rect x="506.6666666666667" y="208.47497435570875" width="385.6666666666667" height="501.52502564429125" rx="2" class="bar"><title>2026-05-04 to 2026-05-11: $757 (1,372 RUNE)</title></rect>
+<rect x="895.3333333333334" y="360.81594957126487" width="385.6666666666667" height="349.18405042873513" rx="2" class="bar"><title>2026-05-11 to 2026-05-18: $527 (900 RUNE)</title></rect>
+    <polyline points="310.83333333333337,616.0415430662883 699.5,415.43153280857183 1088.1666666666667,275.7579126370778" class="line"/>
+    <circle cx="310.83333333333337" cy="616.0415430662883" r="4.5" class="dot"><title>2026-04-27: cumulative $355</title></circle>
+<circle cx="699.5" cy="415.43153280857183" r="4.5" class="dot"><title>2026-05-04: cumulative $1,112</title></circle>
+<circle cx="1088.1666666666667" cy="275.7579126370778" r="4.5" class="dot"><title>2026-05-11: cumulative $1,639</title></circle>
+    <text x="310.83333333333337" y="752" class="axis-label" text-anchor="middle">04-27</text>
+<text x="699.5" y="752" class="axis-label" text-anchor="middle">05-04</text>
+<text x="1088.1666666666667" y="752" class="axis-label" text-anchor="middle">05-11</text>
+    <text x="118" y="162" class="axis-title">Weekly payment, USD</text>
+    <text x="1284" y="162" class="axis-title" text-anchor="end">Cumulative payment, USD</text>
+    <rect x="118" y="782" width="14" height="14" class="bar"/>
+    <text x="140" y="794" class="legend">Weekly paid</text>
+    <line x1="248" y1="788" x2="286" y2="788" class="line"/>
+    <text x="296" y="794" class="legend">Cumulative paid</text>
+    <text x="478" y="794" class="note">Generated 2026-05-17T15:17:57.719Z; reserve target thor1dheycde...</text>
+  </g>
+</svg>
+</div>
+    <table>
+      <caption>Weekly source data</caption>
+      <thead>
+        <tr>
+          <th>Week</th>
+          <th>Payments</th>
+          <th>Paid RUNE</th>
+          <th>RUNE/USD</th>
+          <th>Paid USD</th>
+          <th>Cumulative USD</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </main>
+  <script>
+    const rows = [{"week_start":"2026-04-27","week_end":"2026-05-04","payments":118,"payment_rune":698.04658,"rune_price_usd":0.5079320277512068,"payment_usd":354.560214844195,"cumulative_rune":698.04658,"cumulative_usd":354.560214844195},{"week_start":"2026-05-04","week_end":"2026-05-11","payments":232,"payment_rune":1372.2394000000002,"rune_price_usd":0.5516667912558788,"payment_usd":757.0189066328925,"cumulative_rune":2070.28598,"cumulative_usd":1111.5791214770875},{"week_start":"2026-05-11","week_end":"2026-05-18","payments":155,"payment_rune":900.0997799999999,"rune_price_usd":0.5855687075027292,"payment_usd":527.0702647980908,"cumulative_rune":2970.38576,"cumulative_usd":1638.6493862751781}];
+    const fmtUsd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+    const fmtRune = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+    const fmtPrice = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 4 });
+    document.getElementById("rows").innerHTML = rows.map((row) => `
+      <tr>
+        <td>${row.week_start} to ${row.week_end}</td>
+        <td>${row.payments}</td>
+        <td>${fmtRune.format(row.payment_rune)}</td>
+        <td>${fmtPrice.format(row.rune_price_usd)}</td>
+        <td>${fmtUsd.format(row.payment_usd)}</td>
+        <td>${fmtUsd.format(row.cumulative_usd)}</td>
+      </tr>`).join("");
+  </script>
+</body>
+</html>

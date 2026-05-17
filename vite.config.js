@@ -2,9 +2,18 @@ import { defineConfig } from 'vite'
 import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import path from 'path'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 
 const THORNODE_PRIMARY = 'https://thornode.thorchain.network'
 const THORNODE_FALLBACK = 'https://gateway.liquify.com/chain/thorchain_api'
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const RUJIRA_BASE_LAYER_DATA_DIR = path.resolve(__dirname, '../docs/rujira-base-layer-fees')
+const RUJIRA_BASE_LAYER_DATA_FILES = new Map([
+  ['rujira-base-layer-fees.csv', 'text/csv; charset=utf-8'],
+  ['rujira-base-layer-fees-events.json', 'application/json; charset=utf-8'],
+  ['rujira-base-layer-fees-meta.json', 'application/json; charset=utf-8']
+])
 const COINGECKO_NETWORK_BY_CHAIN = {
   ETH: 'ethereum',
   BSC: 'binance-smart-chain',
@@ -270,12 +279,50 @@ function createTreasuryLpProxy() {
   }
 }
 
+function createRujiraBaseLayerDataProxy() {
+  return {
+    name: 'rujira-base-layer-data',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        if (!req.url?.startsWith('/__rujira_base_layer_data/')) {
+          return next()
+        }
+
+        const fileName = decodeURIComponent(
+          req.url.replace('/__rujira_base_layer_data/', '').split('?')[0]
+        )
+        const contentType = RUJIRA_BASE_LAYER_DATA_FILES.get(fileName)
+
+        if (!contentType) {
+          res.statusCode = 404
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: 'Unknown Rujira base layer data file' }))
+          return
+        }
+
+        try {
+          const body = await readFile(path.join(RUJIRA_BASE_LAYER_DATA_DIR, fileName))
+          res.statusCode = 200
+          res.setHeader('Content-Type', contentType)
+          res.setHeader('Cache-Control', 'no-store')
+          res.end(body)
+        } catch (error) {
+          res.statusCode = 500
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify({ error: error.message }))
+        }
+      })
+    }
+  }
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     svelte(),
     nodePolyfills({ include: ['buffer', 'crypto', 'stream', 'process'] }),
-    createTreasuryLpProxy()
+    createTreasuryLpProxy(),
+    createRujiraBaseLayerDataProxy()
   ],
   base: '',
   server: {

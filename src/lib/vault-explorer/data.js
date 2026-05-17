@@ -10,6 +10,7 @@ import { fetchJSONWithFallback } from '$lib/utils/api';
 import { fromBaseUnit, getAssetType, normalizeAsset } from '$lib/utils/blockchain';
 import { getNodes } from '$lib/utils/nodes';
 import { getAssetDisplayName } from '$lib/constants';
+import { hydrateEthOnChainBalances } from './eth-balances.js';
 
 /**
  * Fetch and process all vault explorer data.
@@ -26,7 +27,12 @@ export async function fetchVaultExplorerData() {
     fetchJSONWithFallback('/thorchain/inbound_addresses').catch(() => [])
   ]);
 
-  const vaults = sortVaultsByStatus(rawVaults);
+  let vaults = sortVaultsByStatus(rawVaults);
+  try {
+    vaults = sortVaultsByStatus(await hydrateEthOnChainBalances(vaults, poolsData, inboundAddresses));
+  } catch (error) {
+    console.warn('Failed to hydrate Vault Explorer ETH balances from Ethereum RPC:', error);
+  }
   const activeVaults = vaults.filter(v => v.status === VAULT_STATUS.ACTIVE);
   const runePrice = fromBaseUnit(networkData.rune_price_in_tor);
 

@@ -1,19 +1,75 @@
 /**
- * RUNE Tools CSS Variables
+ * BOONE Tools CSS Variables
  *
- * Centralized design tokens for consistent styling across all components.
- * Import this file in your global styles or individual components.
+ * Two palettes live here:
  *
- * Usage:
- *   @import '$lib/styles/variables.css';
+ *   1. --term-*   The terminal aesthetic used by App.svelte, BondTrackerV2,
+ *                 AppLayerBaseLayerDashboard, and all NEW tools. See
+ *                 ../../DESIGN.md and ../../docs/style.md.
  *
- *   .my-element {
- *     background: var(--bg-card);
- *     color: var(--text-primary);
- *   }
+ *   2. --bg-*, --gradient-*, --text-*, etc.
+ *                 The LEGACY purple-gradient system. Older tools (TCY, Nodes,
+ *                 LPChecker, Treasury, ...) still depend on these tokens, so
+ *                 they remain here for backwards compatibility. Do NOT use
+ *                 these for new work.
+ *
+ * App.svelte does not import this file — its terminal styles are written
+ * inline. New terminal tools should follow the same inline approach or
+ * reference the --term-* tokens below.
  */
 
 :root {
+  /* ============================================================
+     TERMINAL PALETTE (canonical — use for new work)
+     ============================================================ */
+
+  /* Surfaces */
+  --term-bg: #080808;
+  --term-surface: #0a0a0a;
+  --term-surface-hover: #0d0d0d;
+  --term-surface-deep: #050505;
+  --term-surface-inset: #060606;
+
+  /* Borders */
+  --term-border-faint: #111111;
+  --term-border: #1a1a1a;
+  --term-border-soft: #141414;
+
+  /* Text ramp (use the dim end aggressively) */
+  --term-text-strong: #ffffff;
+  --term-text: #e8e8e8;
+  --term-text-body: #c8c8c8;
+  --term-text-2: #888888;
+  --term-text-3: #666666;
+  --term-text-4: #555555;
+  --term-text-5: #444444;
+  --term-text-6: #333333;
+  --term-text-7: #222222;
+
+  /* Accents */
+  --term-accent: #00cc66;
+  --term-accent-soft: rgba(0, 204, 102, 0.07);
+  --term-accent-edge: rgba(0, 204, 102, 0.4);
+  --term-accent-glow: 0 0 6px rgba(0, 204, 102, 0.4);
+
+  --term-amber: #d4a017;
+  --term-amber-soft: rgba(212, 160, 23, 0.06);
+  --term-amber-edge: rgba(212, 160, 23, 0.4);
+
+  --term-error: #dc3545;
+  --term-info: #5588cc;
+
+  /* Fonts */
+  --term-font-mono: 'JetBrains Mono', monospace;
+  --term-font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Motion */
+  --term-transition: 0.15s ease;
+
+  /* ============================================================
+     LEGACY PALETTE (older tools — do NOT use for new work)
+     ============================================================ */
+
   /* ========================================
      COLORS - Backgrounds
      ======================================== */

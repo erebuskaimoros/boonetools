@@ -20,16 +20,20 @@ const RECONNECT_MAX_MS = 30000;
 const PING_INTERVAL_MS = 30000;
 const PRICE_INDEX_TTL_MS = 60000;
 const HEARTBEAT_INTERVAL_MS = 60000;
+const STALL_CHECK_INTERVAL_MS = 30000;
 
 let cachedPriceIndex = null;
 let cachedPriceIndexAt = 0;
 let lastBlockHeight = 0;
+let lastBlockReceivedAt = 0;
 let blocksProcessed = 0;
 let heartbeatTimer = null;
+let stallCheckTimer = null;
 let ws = null;
 let reconnectAttempt = 0;
 let pingTimer = null;
 let activeRpcWsIndex = 0;
+let connectedAt = 0;
 
 async function getCachedPriceIndex() {
   const now = Date.now();
@@ -43,12 +47,27 @@ async function getCachedPriceIndex() {
 }
 
 async function sendHeartbeat() {
+  const now = Date.now();
+  const hasSeenBlock = lastBlockHeight > 0 && lastBlockReceivedAt > 0;
+  const blockStallSeconds = hasSeenBlock
+    ? Math.max(0, Math.floor((now - lastBlockReceivedAt) / 1000))
+    : null;
+  const streamFresh = hasSeenBlock && (now - lastBlockReceivedAt) <= config.rapidSwapsListenerBlockStallMs;
+  const streamStatus = !hasSeenBlock
+    ? 'starting'
+    : streamFresh
+      ? 'running'
+      : 'stalled';
+
   await writeRapidSwapListenerHeartbeat({
     started_at: new Date().toISOString(),
     finished_at: new Date().toISOString(),
     status: 'running',
     stats_json: {
       last_block: lastBlockHeight,
+      last_block_received_at: lastBlockReceivedAt > 0 ? new Date(lastBlockReceivedAt).toISOString() : null,
+      block_stall_seconds: blockStallSeconds,
+      stream_status: streamStatus,
       blocks_processed: blocksProcessed,
       uptime_seconds: Math.floor(process.uptime())
     }
@@ -62,6 +81,35 @@ function startHeartbeat() {
 
 function stopHeartbeat() {
   clearInterval(heartbeatTimer);
+}
+
+function isBlockStreamStalled() {
+  if (!connectedAt) {
+    return false;
+  }
+
+  const referenceMs = lastBlockReceivedAt || connectedAt;
+  return Date.now() - referenceMs > config.rapidSwapsListenerBlockStallMs;
+}
+
+function startStallWatchdog() {
+  clearInterval(stallCheckTimer);
+  stallCheckTimer = setInterval(() => {
+    if (ws?.readyState !== WebSocket.OPEN || !isBlockStreamStalled()) {
+      return;
+    }
+
+    const lastSeen = lastBlockReceivedAt > 0
+      ? new Date(lastBlockReceivedAt).toISOString()
+      : 'never';
+    log(`WebSocket block stream stalled; last block ${lastBlockHeight || 'none'} seen ${lastSeen}. Reconnecting...`);
+    rotateRpcWsUrl();
+    ws.terminate();
+  }, STALL_CHECK_INTERVAL_MS);
+}
+
+function stopStallWatchdog() {
+  clearInterval(stallCheckTimer);
 }
 
 function tryDecode(value) {
@@ -205,6 +253,7 @@ function handleMessage(message) {
   const blockTime = String(data.block?.header?.time || '');
   if (blockHeight > 0) {
     lastBlockHeight = blockHeight;
+    lastBlockReceivedAt = Date.now();
     blocksProcessed += 1;
   }
 
@@ -264,6 +313,7 @@ function connect() {
   ws.on('open', () => {
     log('Connected. Subscribing to NewBlock events...');
     opened = true;
+    connectedAt = Date.now();
     reconnectAttempt = 0;
 
     ws.send(JSON.stringify({
@@ -274,6 +324,7 @@ function connect() {
     }));
 
     startHeartbeat();
+    startStallWatchdog();
 
     clearInterval(pingTimer);
     pingTimer = setInterval(() => {
@@ -295,6 +346,8 @@ function connect() {
     log(`WebSocket closed: ${code} ${reason || ''}`);
     clearInterval(pingTimer);
     stopHeartbeat();
+    stopStallWatchdog();
+    connectedAt = 0;
     if (!opened) {
       rotateRpcWsUrl();
     }
@@ -310,6 +363,7 @@ export function shutdownRapidSwapListener(signal) {
   log(`Received ${signal}, shutting down...`);
   clearInterval(pingTimer);
   stopHeartbeat();
+  stopStallWatchdog();
   if (ws) {
     ws.removeAllListeners();
     ws.close();

@@ -10,15 +10,23 @@ import {
   pickBestRapidSwapRowMatch
 } from './reconciliation.js';
 
-export const MIDGARD_BASES = [
-  'https://midgard.thorchain.network/v2',
-  'https://gateway.liquify.com/chain/thorchain_midgard/v2'
-];
+function readEnv(name) {
+  return typeof process !== 'undefined' ? String(process.env?.[name] || '').trim() : '';
+}
 
-export const THORNODE_BASES = [
-  'https://thornode.thorchain.network',
-  'https://thornode.ninerealms.com'
-];
+function uniqueBases(values) {
+  return [...new Set(values.map((value) => String(value || '').replace(/\/$/, '')).filter(Boolean))];
+}
+
+export const MIDGARD_BASES = uniqueBases([
+  readEnv('MIDGARD_URL') || 'https://midgard.thorchain.network/v2',
+  readEnv('MIDGARD_FALLBACK_URL') || 'https://gateway.liquify.com/chain/thorchain_midgard/v2'
+]);
+
+export const THORNODE_BASES = uniqueBases([
+  readEnv('THORNODE_PRIMARY_URL') || 'https://thornode.thorchain.network',
+  readEnv('THORNODE_FALLBACK_URL') || 'https://gateway.liquify.com/chain/thorchain_api'
+]);
 
 export const ACTION_PAGE_LIMIT = 50;
 export const DIRECT_RESOLUTION_HEIGHT_BUFFER = 40;
@@ -215,7 +223,7 @@ export async function fetchMidgardActions(options = {}) {
 
   if (options.nextPageToken) {
     params.set('nextPageToken', String(options.nextPageToken));
-  } else if (!options.txId && !options.address && !options.fromHeight) {
+  } else if (!options.txId && !options.address && !options.fromHeight && !options.timestamp && !options.fromTimestamp) {
     params.set('offset', String(Math.max(0, Math.trunc(safeNumber(options.offset, 0)))));
   }
 
@@ -229,6 +237,14 @@ export async function fetchMidgardActions(options = {}) {
 
   if (options.fromHeight) {
     params.set('fromHeight', String(Math.max(0, Math.trunc(options.fromHeight))));
+  }
+
+  if (options.timestamp) {
+    params.set('timestamp', String(Math.max(0, Math.trunc(options.timestamp))));
+  }
+
+  if (options.fromTimestamp) {
+    params.set('fromTimestamp', String(Math.max(0, Math.trunc(options.fromTimestamp))));
   }
 
   const result = await fetchWithFallback(MIDGARD_BASES, `/actions?${params.toString()}`, {

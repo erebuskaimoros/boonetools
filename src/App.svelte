@@ -13,7 +13,6 @@
   import Banner from './lib/Banner.svelte';
   
   const BASE_PATH = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
-
   function stripBase(pathname) {
     return BASE_PATH && pathname.startsWith(BASE_PATH)
       ? pathname.slice(BASE_PATH.length) || '/'
@@ -82,12 +81,21 @@
     description: "Browse and place THORChain limit orders with full wallet support"
   };
 
+  const appLayerBaseLayerApp = {
+    name: "App Layer to Base Layer",
+    component: () => import("./lib/AppLayerBaseLayerDashboard.svelte"),
+    icon: "/assets/coins/RUJI.svg",
+    path: "app-layer-base-layer",
+    description: "Track observed Rujira fee sharing into the THORChain Reserve"
+  };
+
   const apps = [
     rapidSwapsApp,
     bondTrackerApp,
     vaultExplorerApp,
     treasuryTrackerApp,
-    ...(SHOW_LIMIT_ORDERS ? [limitOrdersApp] : [])
+    ...(SHOW_LIMIT_ORDERS ? [limitOrdersApp] : []),
+    appLayerBaseLayerApp
   ];
   const hiddenApps = [];
 
@@ -149,7 +157,18 @@
 
   async function selectApp(app) {
     if (app.externalUrl) {
-      window.open(app.externalUrl, '_blank');
+      if (typeof gtag !== 'undefined') {
+        gtag('event', 'open_app', {
+          app_name: app.name,
+          app_path: app.path
+        });
+      }
+
+      if (app.externalTarget === '_self') {
+        window.location.assign(app.externalUrl);
+      } else {
+        window.open(app.externalUrl, app.externalTarget || '_blank');
+      }
     } else {
       // Clear old component and show loading state immediately
       loadedComponent = null;
@@ -567,7 +586,13 @@
               {#each apps as app, i}
                 <button class="nav-row" on:click={() => selectApp(app)}>
                   <span class="nav-index">{i + 1}</span>
-                  <span class="nav-icon">{app.icon}</span>
+                  <span class="nav-icon">
+                    {#if typeof app.icon === 'string' && app.icon.startsWith('/')}
+                      <img src={app.icon} alt="" />
+                    {:else}
+                      {app.icon}
+                    {/if}
+                  </span>
                   <div class="nav-info">
                     <span class="nav-name">{app.name}</span>
                     <span class="nav-desc">{app.description}</span>
@@ -1194,8 +1219,18 @@
 
   .nav-icon {
     font-size: 20px;
-    min-width: 24px;
+    min-width: 34px;
     text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nav-icon img {
+    width: 33px;
+    height: 33px;
+    object-fit: contain;
+    display: block;
   }
 
   .nav-info {

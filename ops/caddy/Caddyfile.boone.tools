@@ -24,6 +24,9 @@ boone.tools {
             reverse_proxy 127.0.0.1:8787
         }
 
+        @private_thorstore path /store /store/* /merch /merch/* /thorstore /thorstore/* /ThorStore /ThorStore/*
+        respond @private_thorstore 404
+
         handle {
             root * /var/www/boone-tools
             try_files {path} /index.html

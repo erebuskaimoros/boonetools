@@ -111,9 +111,15 @@ export function shouldSkipRapidSwapCanonicalScanForHealthyListener(wsListenerSta
 
   const nowMs = safeNumber(options.nowMs, Date.now());
   const heartbeatGraceMs = Math.max(1000, Math.trunc(safeNumber(options.heartbeatGraceMs, 3 * 60 * 1000)));
+  const blockProgressGraceMs = Math.max(1000, Math.trunc(safeNumber(options.blockProgressGraceMs, heartbeatGraceMs)));
   const stableUptimeMs = Math.max(0, Math.trunc(safeNumber(options.stableUptimeMs, 10 * 60 * 1000)));
   const finishedAtMs = safeTimestampMs(wsListenerState.finished_at);
   if (finishedAtMs <= 0 || nowMs - finishedAtMs > heartbeatGraceMs) {
+    return false;
+  }
+
+  const lastBlockReceivedAtMs = safeTimestampMs(wsListenerState?.stats_json?.last_block_received_at);
+  if (lastBlockReceivedAtMs <= 0 || nowMs - lastBlockReceivedAtMs > blockProgressGraceMs) {
     return false;
   }
 
