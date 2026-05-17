@@ -598,6 +598,18 @@
     return pieces.join(' · ') || 'no all-time receipts found';
   }
 
+  function targetRouteRevenue(summary, target) {
+    return (summary.distributionRoutes || []).find((route) => route.recipient === target.address);
+  }
+
+  function targetRouteRevenueDisplay(summary, target) {
+    if (artifactsLoading) return '—';
+    const route = targetRouteRevenue(summary, target);
+    if (route?.pricedUsd > 0) return usd2.format(route.pricedUsd);
+    if (route?.unpricedAssetCount > 0) return 'unpriced';
+    return '$0.00';
+  }
+
   function formatUnpricedAssets(assets) {
     const unpriced = (assets || [])
       .filter((asset) => asset.priceUsd === 0 && asset.amount > 0)
@@ -847,7 +859,10 @@
                     target="_blank"
                     rel="noopener noreferrer"
                     title={target.address}
-                  >{target.label}</a>
+                  >
+                    {target.label}
+                    <span class="target-usd">{targetRouteRevenueDisplay(collector.revenueSummary, target)}</span>
+                  </a>
                   <b class="target-pct">{target.percent.toFixed(0)}%</b>
                 </div>
               {/each}
@@ -1732,9 +1747,19 @@
   }
 
   .target-name {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: baseline;
     color: inherit;
     min-width: 0;
     overflow-wrap: anywhere;
+  }
+
+  .target-usd {
+    color: #c8c8c8;
+    font-weight: 700;
+    white-space: nowrap;
   }
 
   .target-pct {
@@ -1753,6 +1778,10 @@
   }
 
   .target.on-base .target-pct {
+    color: #00cc66;
+  }
+
+  .target.on-base .target-usd {
     color: #00cc66;
   }
 

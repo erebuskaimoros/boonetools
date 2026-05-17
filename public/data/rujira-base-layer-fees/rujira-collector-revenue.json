@@ -1,7 +1,7 @@
 {
-  "generatedAt": "2026-05-17T16:17:56.697Z",
+  "generatedAt": "2026-05-17T19:17:38.910Z",
   "startHeight": 25900000,
-  "latestHeight": 26216125,
+  "latestHeight": 26217884,
   "basis": "all-time net collected: collector distributions plus current residual balances",
   "pricing": "current THORNode pool asset_tor_price; stable denoms at $1; unpriced denoms excluded from pricedUsd",
   "runePriceUsd": 0.58564129,
@@ -10,9 +10,461 @@
       "key": "trade",
       "name": "RUJI Trade",
       "address": "thor1gm8q2gr25nzzsxzdp2mpja4hyvyhjlr4s6krcsgv2y953uu0js3qhwpus7",
-      "latestHeight": 26216125,
+      "latestHeight": 26217884,
       "distributionTxCount": 1,
       "distributionTransferCount": 48,
+      "distributionRoutes": [
+        {
+          "recipient": "thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr",
+          "transferCount": 24,
+          "pricedUsd": 10831.961403826572,
+          "pricedAssetCount": 21,
+          "unpricedAssetCount": 3,
+          "assets": [
+            {
+              "denom": "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount": 3695.82515006,
+              "distributedAmount": 3695.82515006,
+              "currentAmount": 0,
+              "priceUsd": 0.99996509,
+              "usd": 3695.6961288040116,
+              "transferCount": 1
+            },
+            {
+              "denom": "tcy",
+              "amount": 31299.61103347,
+              "distributedAmount": 31299.61103347,
+              "currentAmount": 0,
+              "priceUsd": 0.11544519,
+              "usd": 3613.3895426850404,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ruji",
+              "amount": 4083.23593072,
+              "distributedAmount": 4083.23593072,
+              "currentAmount": 0,
+              "priceUsd": 0.37962934,
+              "usd": 1550.1161614435193,
+              "transferCount": 1
+            },
+            {
+              "denom": "btc-btc",
+              "amount": 0.01214052,
+              "distributedAmount": 0.01214052,
+              "currentAmount": 0,
+              "priceUsd": 81806.60394769,
+              "usd": 993.1747113590095,
+              "transferCount": 1
+            },
+            {
+              "denom": "rune",
+              "amount": 1004.34099711,
+              "distributedAmount": 1004.34099711,
+              "currentAmount": 0,
+              "priceUsd": 0.58564129,
+              "usd": 588.1835571473866,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-eth",
+              "amount": 0.11023858,
+              "distributedAmount": 0.11023858,
+              "currentAmount": 0,
+              "priceUsd": 2265.44103484,
+              "usd": 249.73900275449216,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-wbtc-0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+              "amount": 0.00059258,
+              "distributedAmount": 0.00059258,
+              "currentAmount": 0,
+              "priceUsd": 80703.81794079,
+              "usd": 47.82346843535334,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
+              "amount": 23.24526233,
+              "distributedAmount": 23.24526233,
+              "currentAmount": 0,
+              "priceUsd": 1.00003489,
+              "usd": 23.246073357202693,
+              "transferCount": 1
+            },
+            {
+              "denom": "bch-bch",
+              "amount": 0.03830589,
+              "distributedAmount": 0.03830589,
+              "currentAmount": 0,
+              "priceUsd": 438.00114462,
+              "usd": 16.77802366568781,
+              "transferCount": 1
+            },
+            {
+              "denom": "doge-doge",
+              "amount": 121.53419694,
+              "distributedAmount": 121.53419694,
+              "currentAmount": 0,
+              "priceUsd": 0.11501189,
+              "usd": 13.977877689701618,
+              "transferCount": 1
+            },
+            {
+              "denom": "ltc-ltc",
+              "amount": 0.22953616,
+              "distributedAmount": 0.22953616,
+              "currentAmount": 0,
+              "priceUsd": 59.21154228,
+              "usd": 13.591190042628845,
+              "transferCount": 1
+            },
+            {
+              "denom": "bsc-bnb",
+              "amount": 0.0133515,
+              "distributedAmount": 0.0133515,
+              "currentAmount": 0,
+              "priceUsd": 687.55675654,
+              "usd": 9.179914034943812,
+              "transferCount": 1
+            },
+            {
+              "denom": "gaia-atom",
+              "amount": 3.74686816,
+              "distributedAmount": 3.74686816,
+              "currentAmount": 0,
+              "priceUsd": 2.02200284,
+              "usd": 7.5761780606255735,
+              "transferCount": 1
+            },
+            {
+              "denom": "avax-avax",
+              "amount": 0.54710604,
+              "distributedAmount": 0.54710604,
+              "currentAmount": 0,
+              "priceUsd": 9.82800044,
+              "usd": 5.376958401846657,
+              "transferCount": 1
+            },
+            {
+              "denom": "xrp-xrp",
+              "amount": 1.29019923,
+              "distributedAmount": 1.29019923,
+              "currentAmount": 0,
+              "priceUsd": 1.48924763,
+              "usd": 1.9214261455053248,
+              "transferCount": 1
+            },
+            {
+              "denom": "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+              "amount": 0.70364777,
+              "distributedAmount": 0.70364777,
+              "currentAmount": 0,
+              "priceUsd": 1.00010047,
+              "usd": 0.7037184654914519,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd",
+              "amount": 0.5894825,
+              "distributedAmount": 0.5894825,
+              "currentAmount": 0,
+              "priceUsd": 1.00219898,
+              "usd": 0.59077876022785,
+              "transferCount": 1
+            },
+            {
+              "denom": "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+              "amount": 0.39269761,
+              "distributedAmount": 0.39269761,
+              "currentAmount": 0,
+              "priceUsd": 1.0003898,
+              "usd": 0.392850683528378,
+              "transferCount": 1
+            },
+            {
+              "denom": "base-eth",
+              "amount": 0.00014894,
+              "distributedAmount": 0.00014894,
+              "currentAmount": 0,
+              "priceUsd": 2264.81828472,
+              "usd": 0.3373220353261968,
+              "transferCount": 1
+            },
+            {
+              "denom": "bsc-usdt-0x55d398326f99059ff775485246999027b3197955",
+              "amount": 0.14729176,
+              "distributedAmount": 0.14729176,
+              "currentAmount": 0,
+              "priceUsd": 0.99923254,
+              "usd": 0.14717871946587038,
+              "transferCount": 1
+            },
+            {
+              "denom": "bsc-usdc-0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+              "amount": 0.01935118,
+              "distributedAmount": 0.01935118,
+              "currentAmount": 0,
+              "priceUsd": 0.99948094,
+              "usd": 0.0193411355765092,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/brune",
+              "amount": 1518.72448282,
+              "distributedAmount": 1518.72448282,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            },
+            {
+              "denom": "thor.auto",
+              "amount": 297.88527078,
+              "distributedAmount": 297.88527078,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            },
+            {
+              "denom": "thor.nami",
+              "amount": 3.40329128,
+              "distributedAmount": 3.40329128,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            }
+          ]
+        },
+        {
+          "recipient": "thor1mcy9jtp4kzl8q2lvdgfgsl8jvqrf504uphkf0pz2p9wud8tsntesjvccew",
+          "transferCount": 24,
+          "pricedUsd": 10831.95976741603,
+          "pricedAssetCount": 21,
+          "unpricedAssetCount": 3,
+          "assets": [
+            {
+              "denom": "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount": 3695.82515006,
+              "distributedAmount": 3695.82515006,
+              "currentAmount": 0,
+              "priceUsd": 0.99996509,
+              "usd": 3695.6961288040116,
+              "transferCount": 1
+            },
+            {
+              "denom": "tcy",
+              "amount": 31299.61103347,
+              "distributedAmount": 31299.61103347,
+              "currentAmount": 0,
+              "priceUsd": 0.11544519,
+              "usd": 3613.3895426850404,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ruji",
+              "amount": 4083.23593072,
+              "distributedAmount": 4083.23593072,
+              "currentAmount": 0,
+              "priceUsd": 0.37962934,
+              "usd": 1550.1161614435193,
+              "transferCount": 1
+            },
+            {
+              "denom": "btc-btc",
+              "amount": 0.01214051,
+              "distributedAmount": 0.01214051,
+              "currentAmount": 0,
+              "priceUsd": 81806.60394769,
+              "usd": 993.17389329297,
+              "transferCount": 1
+            },
+            {
+              "denom": "rune",
+              "amount": 1004.3409971,
+              "distributedAmount": 1004.3409971,
+              "currentAmount": 0,
+              "priceUsd": 0.58564129,
+              "usd": 588.1835571415302,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-eth",
+              "amount": 0.11023858,
+              "distributedAmount": 0.11023858,
+              "currentAmount": 0,
+              "priceUsd": 2265.44103484,
+              "usd": 249.73900275449216,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-wbtc-0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+              "amount": 0.00059257,
+              "distributedAmount": 0.00059257,
+              "currentAmount": 0,
+              "priceUsd": 80703.81794079,
+              "usd": 47.82266139717394,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
+              "amount": 23.24526232,
+              "distributedAmount": 23.24526232,
+              "currentAmount": 0,
+              "priceUsd": 1.00003489,
+              "usd": 23.246073347202344,
+              "transferCount": 1
+            },
+            {
+              "denom": "bch-bch",
+              "amount": 0.03830588,
+              "distributedAmount": 0.03830588,
+              "currentAmount": 0,
+              "priceUsd": 438.00114462,
+              "usd": 16.778019285676365,
+              "transferCount": 1
+            },
+            {
+              "denom": "doge-doge",
+              "amount": 121.53419694,
+              "distributedAmount": 121.53419694,
+              "currentAmount": 0,
+              "priceUsd": 0.11501189,
+              "usd": 13.977877689701618,
+              "transferCount": 1
+            },
+            {
+              "denom": "ltc-ltc",
+              "amount": 0.22953616,
+              "distributedAmount": 0.22953616,
+              "currentAmount": 0,
+              "priceUsd": 59.21154228,
+              "usd": 13.591190042628845,
+              "transferCount": 1
+            },
+            {
+              "denom": "bsc-bnb",
+              "amount": 0.01335149,
+              "distributedAmount": 0.01335149,
+              "currentAmount": 0,
+              "priceUsd": 687.55675654,
+              "usd": 9.179907159376246,
+              "transferCount": 1
+            },
+            {
+              "denom": "gaia-atom",
+              "amount": 3.74686816,
+              "distributedAmount": 3.74686816,
+              "currentAmount": 0,
+              "priceUsd": 2.02200284,
+              "usd": 7.5761780606255735,
+              "transferCount": 1
+            },
+            {
+              "denom": "avax-avax",
+              "amount": 0.54710604,
+              "distributedAmount": 0.54710604,
+              "currentAmount": 0,
+              "priceUsd": 9.82800044,
+              "usd": 5.376958401846657,
+              "transferCount": 1
+            },
+            {
+              "denom": "xrp-xrp",
+              "amount": 1.29019922,
+              "distributedAmount": 1.29019922,
+              "currentAmount": 0,
+              "priceUsd": 1.48924763,
+              "usd": 1.9214261306128486,
+              "transferCount": 1
+            },
+            {
+              "denom": "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+              "amount": 0.70364776,
+              "distributedAmount": 0.70364776,
+              "currentAmount": 0,
+              "priceUsd": 1.00010047,
+              "usd": 0.7037184554904472,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd",
+              "amount": 0.5894825,
+              "distributedAmount": 0.5894825,
+              "currentAmount": 0,
+              "priceUsd": 1.00219898,
+              "usd": 0.59077876022785,
+              "transferCount": 1
+            },
+            {
+              "denom": "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+              "amount": 0.39269761,
+              "distributedAmount": 0.39269761,
+              "currentAmount": 0,
+              "priceUsd": 1.0003898,
+              "usd": 0.392850683528378,
+              "transferCount": 1
+            },
+            {
+              "denom": "base-eth",
+              "amount": 0.00014894,
+              "distributedAmount": 0.00014894,
+              "currentAmount": 0,
+              "priceUsd": 2264.81828472,
+              "usd": 0.3373220353261968,
+              "transferCount": 1
+            },
+            {
+              "denom": "bsc-usdt-0x55d398326f99059ff775485246999027b3197955",
+              "amount": 0.14729175,
+              "distributedAmount": 0.14729175,
+              "currentAmount": 0,
+              "priceUsd": 0.99923254,
+              "usd": 0.147178709473545,
+              "transferCount": 1
+            },
+            {
+              "denom": "bsc-usdc-0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d",
+              "amount": 0.01935118,
+              "distributedAmount": 0.01935118,
+              "currentAmount": 0,
+              "priceUsd": 0.99948094,
+              "usd": 0.0193411355765092,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/brune",
+              "amount": 1518.72448282,
+              "distributedAmount": 1518.72448282,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            },
+            {
+              "denom": "thor.auto",
+              "amount": 297.88527078,
+              "distributedAmount": 297.88527078,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            },
+            {
+              "denom": "thor.nami",
+              "amount": 3.40329127,
+              "distributedAmount": 3.40329127,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            }
+          ]
+        }
+      ],
       "pricedUsd": 21663.921171242597,
       "pricedAssetCount": 21,
       "unpricedAssetCount": 4,
@@ -248,9 +700,605 @@
       "key": "core",
       "name": "Other Core Apps",
       "address": "thor1jduxxzpyyvrgzx7zcnl7e5cdj34tnq5jxy00a4wp86szye25dndq575c0y",
-      "latestHeight": 26216125,
+      "latestHeight": 26217884,
       "distributionTxCount": 1,
       "distributionTransferCount": 64,
+      "distributionRoutes": [
+        {
+          "recipient": "thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr",
+          "transferCount": 32,
+          "pricedUsd": 8436.624137721155,
+          "pricedAssetCount": 29,
+          "unpricedAssetCount": 3,
+          "assets": [
+            {
+              "denom": "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount": 5865.68475142,
+              "distributedAmount": 5865.68475142,
+              "currentAmount": 0,
+              "priceUsd": 0.99996509,
+              "usd": 5865.479980365328,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ruji",
+              "amount": 6053.47270011,
+              "distributedAmount": 6053.47270011,
+              "currentAmount": 0,
+              "priceUsd": 0.37962934,
+              "usd": 2298.075845850777,
+              "transferCount": 1
+            },
+            {
+              "denom": "tcy",
+              "amount": 605.39027714,
+              "distributedAmount": 605.39027714,
+              "currentAmount": 0,
+              "priceUsd": 0.11544519,
+              "usd": 69.88939556857996,
+              "transferCount": 1
+            },
+            {
+              "denom": "btc-btc",
+              "amount": 0.00084994,
+              "distributedAmount": 0.00084994,
+              "currentAmount": 0,
+              "priceUsd": 81806.60394769,
+              "usd": 69.53070495929964,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-eth",
+              "amount": 0.02559417,
+              "distributedAmount": 0.02559417,
+              "currentAmount": 0,
+              "priceUsd": 2265.44103484,
+              "usd": 57.98208297067089,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount": 32.01661373,
+              "distributedAmount": 32.01661373,
+              "currentAmount": 0,
+              "priceUsd": 0.99996509,
+              "usd": 32.01549603001469,
+              "transferCount": 1
+            },
+            {
+              "denom": "rune",
+              "amount": 46.70060962,
+              "distributedAmount": 46.70060962,
+              "currentAmount": 0,
+              "priceUsd": 0.58564129,
+              "usd": 27.34980526164321,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
+              "amount": 4.85611579,
+              "distributedAmount": 4.85611579,
+              "currentAmount": 0,
+              "priceUsd": 1.00003489,
+              "usd": 4.856285219879913,
+              "transferCount": 1
+            },
+            {
+              "denom": "doge-doge",
+              "amount": 27.03549497,
+              "distributedAmount": 27.03549497,
+              "currentAmount": 0,
+              "priceUsd": 0.11501189,
+              "usd": 3.1094033735851934,
+              "transferCount": 1
+            },
+            {
+              "denom": "bsc-bnb",
+              "amount": 0.00292645,
+              "distributedAmount": 0.00292645,
+              "currentAmount": 0,
+              "priceUsd": 687.55675654,
+              "usd": 2.0121004701764833,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/btc-btc",
+              "amount": 0.00001869,
+              "distributedAmount": 0.00001869,
+              "currentAmount": 0,
+              "priceUsd": 81806.60394769,
+              "usd": 1.5289654277823261,
+              "transferCount": 1
+            },
+            {
+              "denom": "gaia-atom",
+              "amount": 0.73199742,
+              "distributedAmount": 0.73199742,
+              "currentAmount": 0,
+              "priceUsd": 2.02200284,
+              "usd": 1.4801008621126728,
+              "transferCount": 1
+            },
+            {
+              "denom": "bch-bch",
+              "amount": 0.00287497,
+              "distributedAmount": 0.00287497,
+              "currentAmount": 0,
+              "priceUsd": 438.00114462,
+              "usd": 1.2592401507481614,
+              "transferCount": 1
+            },
+            {
+              "denom": "ltc-ltc",
+              "amount": 0.01895159,
+              "distributedAmount": 0.01895159,
+              "currentAmount": 0,
+              "priceUsd": 59.21154228,
+              "usd": 1.1221528725582253,
+              "transferCount": 1
+            },
+            {
+              "denom": "avax-avax",
+              "amount": 0.05601069,
+              "distributedAmount": 0.05601069,
+              "currentAmount": 0,
+              "priceUsd": 9.82800044,
+              "usd": 0.5504730859647037,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/eth-eth",
+              "amount": 0.00013341,
+              "distributedAmount": 0.00013341,
+              "currentAmount": 0,
+              "priceUsd": 2265.44103484,
+              "usd": 0.30223248845800443,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
+              "amount": 0.05369421,
+              "distributedAmount": 0.05369421,
+              "currentAmount": 0,
+              "priceUsd": 1.00003489,
+              "usd": 0.0536960833909869,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/eth-wbtc-0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+              "amount": 1.3e-7,
+              "distributedAmount": 1.3e-7,
+              "currentAmount": 0,
+              "priceUsd": 80703.81794079,
+              "usd": 0.0104914963323027,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/tcy",
+              "amount": 0.0632554,
+              "distributedAmount": 0.0632554,
+              "currentAmount": 0,
+              "priceUsd": 0.11544519,
+              "usd": 0.007302531671526001,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/avax-avax",
+              "amount": 0.00063719,
+              "distributedAmount": 0.00063719,
+              "currentAmount": 0,
+              "priceUsd": 9.82800044,
+              "usd": 0.0062623036003636,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/x/ruji",
+              "amount": 0.00212543,
+              "distributedAmount": 0.00212543,
+              "currentAmount": 0,
+              "priceUsd": 0.37962934,
+              "usd": 0.0008068755881162,
+              "transferCount": 1
+            },
+            {
+              "denom": "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+              "amount": 0.00079367,
+              "distributedAmount": 0.00079367,
+              "currentAmount": 0,
+              "priceUsd": 1.00010047,
+              "usd": 0.0007937497400249,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/xrp-xrp",
+              "amount": 0.00020942,
+              "distributedAmount": 0.00020942,
+              "currentAmount": 0,
+              "priceUsd": 1.48924763,
+              "usd": 0.0003118782386746,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/ltc-ltc",
+              "amount": 0.00000185,
+              "distributedAmount": 0.00000185,
+              "currentAmount": 0,
+              "priceUsd": 59.21154228,
+              "usd": 0.00010954135321800002,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/bch-bch",
+              "amount": 1.2e-7,
+              "distributedAmount": 1.2e-7,
+              "currentAmount": 0,
+              "priceUsd": 438.00114462,
+              "usd": 0.000052560137354399994,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/gaia-atom",
+              "amount": 0.00001667,
+              "distributedAmount": 0.00001667,
+              "currentAmount": 0,
+              "priceUsd": 2.02200284,
+              "usd": 0.0000337067873428,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/doge-doge",
+              "amount": 0.00010152,
+              "distributedAmount": 0.00010152,
+              "currentAmount": 0,
+              "priceUsd": 0.11501189,
+              "usd": 0.0000116760070728,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd",
+              "amount": 3.3e-7,
+              "distributedAmount": 3.3e-7,
+              "currentAmount": 0,
+              "priceUsd": 1.00219898,
+              "usd": 3.307256634e-7,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+              "amount": 3e-8,
+              "distributedAmount": 3e-8,
+              "currentAmount": 0,
+              "priceUsd": 1.00010047,
+              "usd": 3.00030141e-8,
+              "transferCount": 1
+            },
+            {
+              "denom": "thor.auto",
+              "amount": 8309.19828263,
+              "distributedAmount": 8309.19828263,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            },
+            {
+              "denom": "thor.nami",
+              "amount": 4738.66893933,
+              "distributedAmount": 4738.66893933,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/rune",
+              "amount": 0.00470014,
+              "distributedAmount": 0.00470014,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            }
+          ]
+        },
+        {
+          "recipient": "thor1mcy9jtp4kzl8q2lvdgfgsl8jvqrf504uphkf0pz2p9wud8tsntesjvccew",
+          "transferCount": 32,
+          "pricedUsd": 8436.62332110328,
+          "pricedAssetCount": 29,
+          "unpricedAssetCount": 3,
+          "assets": [
+            {
+              "denom": "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount": 5865.68475142,
+              "distributedAmount": 5865.68475142,
+              "currentAmount": 0,
+              "priceUsd": 0.99996509,
+              "usd": 5865.479980365328,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ruji",
+              "amount": 6053.4727001,
+              "distributedAmount": 6053.4727001,
+              "currentAmount": 0,
+              "priceUsd": 0.37962934,
+              "usd": 2298.075845846981,
+              "transferCount": 1
+            },
+            {
+              "denom": "tcy",
+              "amount": 605.39027713,
+              "distributedAmount": 605.39027713,
+              "currentAmount": 0,
+              "priceUsd": 0.11544519,
+              "usd": 69.8893955674255,
+              "transferCount": 1
+            },
+            {
+              "denom": "btc-btc",
+              "amount": 0.00084994,
+              "distributedAmount": 0.00084994,
+              "currentAmount": 0,
+              "priceUsd": 81806.60394769,
+              "usd": 69.53070495929964,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-eth",
+              "amount": 0.02559417,
+              "distributedAmount": 0.02559417,
+              "currentAmount": 0,
+              "priceUsd": 2265.44103484,
+              "usd": 57.98208297067089,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount": 32.01661373,
+              "distributedAmount": 32.01661373,
+              "currentAmount": 0,
+              "priceUsd": 0.99996509,
+              "usd": 32.01549603001469,
+              "transferCount": 1
+            },
+            {
+              "denom": "rune",
+              "amount": 46.70060962,
+              "distributedAmount": 46.70060962,
+              "currentAmount": 0,
+              "priceUsd": 0.58564129,
+              "usd": 27.34980526164321,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
+              "amount": 4.85611579,
+              "distributedAmount": 4.85611579,
+              "currentAmount": 0,
+              "priceUsd": 1.00003489,
+              "usd": 4.856285219879913,
+              "transferCount": 1
+            },
+            {
+              "denom": "doge-doge",
+              "amount": 27.03549497,
+              "distributedAmount": 27.03549497,
+              "currentAmount": 0,
+              "priceUsd": 0.11501189,
+              "usd": 3.1094033735851934,
+              "transferCount": 1
+            },
+            {
+              "denom": "bsc-bnb",
+              "amount": 0.00292645,
+              "distributedAmount": 0.00292645,
+              "currentAmount": 0,
+              "priceUsd": 687.55675654,
+              "usd": 2.0121004701764833,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/btc-btc",
+              "amount": 0.00001869,
+              "distributedAmount": 0.00001869,
+              "currentAmount": 0,
+              "priceUsd": 81806.60394769,
+              "usd": 1.5289654277823261,
+              "transferCount": 1
+            },
+            {
+              "denom": "gaia-atom",
+              "amount": 0.73199742,
+              "distributedAmount": 0.73199742,
+              "currentAmount": 0,
+              "priceUsd": 2.02200284,
+              "usd": 1.4801008621126728,
+              "transferCount": 1
+            },
+            {
+              "denom": "bch-bch",
+              "amount": 0.00287496,
+              "distributedAmount": 0.00287496,
+              "currentAmount": 0,
+              "priceUsd": 438.00114462,
+              "usd": 1.2592357707367152,
+              "transferCount": 1
+            },
+            {
+              "denom": "ltc-ltc",
+              "amount": 0.01895159,
+              "distributedAmount": 0.01895159,
+              "currentAmount": 0,
+              "priceUsd": 59.21154228,
+              "usd": 1.1221528725582253,
+              "transferCount": 1
+            },
+            {
+              "denom": "avax-avax",
+              "amount": 0.05601068,
+              "distributedAmount": 0.05601068,
+              "currentAmount": 0,
+              "priceUsd": 9.82800044,
+              "usd": 0.5504729876846992,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/eth-eth",
+              "amount": 0.00013341,
+              "distributedAmount": 0.00013341,
+              "currentAmount": 0,
+              "priceUsd": 2265.44103484,
+              "usd": 0.30223248845800443,
+              "transferCount": 1
+            },
+            {
+              "denom": "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
+              "amount": 0.0536942,
+              "distributedAmount": 0.0536942,
+              "currentAmount": 0,
+              "priceUsd": 1.00003489,
+              "usd": 0.053696073390638,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/eth-wbtc-0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+              "amount": 1.2e-7,
+              "distributedAmount": 1.2e-7,
+              "currentAmount": 0,
+              "priceUsd": 80703.81794079,
+              "usd": 0.0096844581528948,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/tcy",
+              "amount": 0.06325539,
+              "distributedAmount": 0.06325539,
+              "currentAmount": 0,
+              "priceUsd": 0.11544519,
+              "usd": 0.0073025305170740995,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/avax-avax",
+              "amount": 0.00063718,
+              "distributedAmount": 0.00063718,
+              "currentAmount": 0,
+              "priceUsd": 9.82800044,
+              "usd": 0.0062622053203592,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/x/ruji",
+              "amount": 0.00212543,
+              "distributedAmount": 0.00212543,
+              "currentAmount": 0,
+              "priceUsd": 0.37962934,
+              "usd": 0.0008068755881162,
+              "transferCount": 1
+            },
+            {
+              "denom": "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+              "amount": 0.00079367,
+              "distributedAmount": 0.00079367,
+              "currentAmount": 0,
+              "priceUsd": 1.00010047,
+              "usd": 0.0007937497400249,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/xrp-xrp",
+              "amount": 0.00020941,
+              "distributedAmount": 0.00020941,
+              "currentAmount": 0,
+              "priceUsd": 1.48924763,
+              "usd": 0.00031186334619829996,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/ltc-ltc",
+              "amount": 0.00000184,
+              "distributedAmount": 0.00000184,
+              "currentAmount": 0,
+              "priceUsd": 59.21154228,
+              "usd": 0.0001089492377952,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/bch-bch",
+              "amount": 1.1e-7,
+              "distributedAmount": 1.1e-7,
+              "currentAmount": 0,
+              "priceUsd": 438.00114462,
+              "usd": 0.0000481801259082,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/gaia-atom",
+              "amount": 0.00001667,
+              "distributedAmount": 0.00001667,
+              "currentAmount": 0,
+              "priceUsd": 2.02200284,
+              "usd": 0.0000337067873428,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/doge-doge",
+              "amount": 0.00010152,
+              "distributedAmount": 0.00010152,
+              "currentAmount": 0,
+              "priceUsd": 0.11501189,
+              "usd": 0.0000116760070728,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd",
+              "amount": 3.3e-7,
+              "distributedAmount": 3.3e-7,
+              "currentAmount": 0,
+              "priceUsd": 1.00219898,
+              "usd": 3.307256634e-7,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
+              "amount": 3e-8,
+              "distributedAmount": 3e-8,
+              "currentAmount": 0,
+              "priceUsd": 1.00010047,
+              "usd": 3.00030141e-8,
+              "transferCount": 1
+            },
+            {
+              "denom": "thor.auto",
+              "amount": 8309.19828263,
+              "distributedAmount": 8309.19828263,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            },
+            {
+              "denom": "thor.nami",
+              "amount": 4738.66893933,
+              "distributedAmount": 4738.66893933,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/ghost-vault/rune",
+              "amount": 0.00470014,
+              "distributedAmount": 0.00470014,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            }
+          ]
+        }
+      ],
       "pricedUsd": 16873.24745882443,
       "pricedAssetCount": 29,
       "unpricedAssetCount": 4,
@@ -558,9 +1606,47 @@
       "key": "swap",
       "name": "RUJI Swap",
       "address": "thor1mcy9jtp4kzl8q2lvdgfgsl8jvqrf504uphkf0pz2p9wud8tsntesjvccew",
-      "latestHeight": 26216125,
+      "latestHeight": 26217884,
       "distributionTxCount": 1,
       "distributionTransferCount": 2,
+      "distributionRoutes": [
+        {
+          "recipient": "thor13g83nn5ef4qzqeafp0508dnvkvm0zqr3sj7eefcn5umu65gqluusrml5cr",
+          "transferCount": 1,
+          "pricedUsd": 74.679292854871,
+          "pricedAssetCount": 1,
+          "unpricedAssetCount": 0,
+          "assets": [
+            {
+              "denom": "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+              "amount": 74.6819,
+              "distributedAmount": 74.6819,
+              "currentAmount": 0,
+              "priceUsd": 0.99996509,
+              "usd": 74.679292854871,
+              "transferCount": 1
+            }
+          ]
+        },
+        {
+          "recipient": "thor1dw8tadkwy746ytvaugv26g5jwekwpfyjyvlvncvryukm07rc998s4ukvrt",
+          "transferCount": 1,
+          "pricedUsd": 0.41200619120553483,
+          "pricedAssetCount": 1,
+          "unpricedAssetCount": 0,
+          "assets": [
+            {
+              "denom": "avax-avax",
+              "amount": 0.04192167,
+              "distributedAmount": 0.04192167,
+              "currentAmount": 0,
+              "priceUsd": 9.82800044,
+              "usd": 0.41200619120553483,
+              "transferCount": 1
+            }
+          ]
+        }
+      ],
       "pricedUsd": 105846.50255195203,
       "pricedAssetCount": 37,
       "unpricedAssetCount": 5,
@@ -949,9 +2035,47 @@
       "key": "index",
       "name": "RUJI Index",
       "address": "thor132u9qpm9gfdqtgwxwl8ty409s6zmewfrum2k6wvtvtyphdn5urzsej764l",
-      "latestHeight": 26216125,
+      "latestHeight": 26217884,
       "distributionTxCount": 1,
       "distributionTransferCount": 3,
+      "distributionRoutes": [
+        {
+          "recipient": "thor1mcy9jtp4kzl8q2lvdgfgsl8jvqrf504uphkf0pz2p9wud8tsntesjvccew",
+          "transferCount": 3,
+          "pricedUsd": 0,
+          "pricedAssetCount": 0,
+          "unpricedAssetCount": 3,
+          "assets": [
+            {
+              "denom": "x/nami-index-nav-thor1h0hr0rm3dawkedh44hlrmgvya6plsryehcr46yda2vj0wfwgq5xqrs86px-rcpt",
+              "amount": 15170.23502446,
+              "distributedAmount": 15170.23502446,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/nami-index-nav-thor1mlphkryw5g54yfkrp6xpqzlpv4f8wh6hyw27yyg4z2els8a9gxpqhfhekt-rcpt",
+              "amount": 1734.61451582,
+              "distributedAmount": 1734.61451582,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            },
+            {
+              "denom": "x/nami-index-fixed-thor1yqf5spdv8c4088zmvqsg32eq63fzepsjvntahdk0ek0yjnkt3qdqftp3lc-rcpt",
+              "amount": 1.56346694,
+              "distributedAmount": 1.56346694,
+              "currentAmount": 0,
+              "priceUsd": 0,
+              "usd": 0,
+              "transferCount": 1
+            }
+          ]
+        }
+      ],
       "pricedUsd": 0,
       "pricedAssetCount": 0,
       "unpricedAssetCount": 3,

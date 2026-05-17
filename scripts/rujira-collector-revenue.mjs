@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const THORNODE_BASE = process.env.THORNODE_BASE || "https://thornode.thorchain.network";
 const RPC_BASE = process.env.RPC_BASE || "https://rpc.thorchain.network";
-const OUTPUT_DIR = path.resolve("website/public/data/rujira-base-layer-fees");
+const OUTPUT_DIR = path.resolve(
+  existsSync("website") ? "website/public/data/rujira-base-layer-fees" : "public/data/rujira-base-layer-fees",
+);
 const START_HEIGHT = Number(process.env.START_HEIGHT || 25_900_000);
 const PER_PAGE = 100;
 
@@ -179,6 +182,54 @@ function mergeTotals(target, source) {
   }
 }
 
+function addTotal(totals, denom, amountBase) {
+  const existing = totals.get(denom) || {
+    denom,
+    amountBase: 0,
+    transferCount: 0,
+  };
+  existing.amountBase += amountBase;
+  existing.transferCount += 1;
+  totals.set(denom, existing);
+}
+
+function summarizeTotals(totals, prices, amountParts = {}) {
+  let pricedUsd = 0;
+  const assets = [...totals.values()]
+    .map((asset) => {
+      const isSplitSummary = amountParts.distributed || amountParts.current;
+      const distributedAmount = amountFromBase(
+        isSplitSummary
+          ? amountParts.distributed?.get(asset.denom)?.amountBase || 0
+          : asset.amountBase || 0,
+      );
+      const currentAmount = amountFromBase(amountParts.current?.get(asset.denom)?.amountBase || 0);
+      const amount = isSplitSummary
+        ? distributedAmount + currentAmount
+        : amountFromBase(asset.amountBase);
+      const priceUsd = assetUsdPrice(asset.denom, prices);
+      const usd = amount * priceUsd;
+      if (priceUsd > 0) pricedUsd += usd;
+      return {
+        denom: asset.denom,
+        amount,
+        distributedAmount,
+        currentAmount,
+        priceUsd,
+        usd,
+        transferCount: asset.transferCount,
+      };
+    })
+    .sort((a, b) => b.usd - a.usd || b.amount - a.amount);
+
+  return {
+    pricedUsd,
+    pricedAssetCount: assets.filter((asset) => asset.priceUsd > 0).length,
+    unpricedAssetCount: assets.filter((asset) => asset.priceUsd === 0).length,
+    assets,
+  };
+}
+
 async function fetchDistributionTxs(collector) {
   const query = `tx.height > ${START_HEIGHT} AND transfer.sender='${collector.address}'`;
   const first = await fetchJson(txSearchUrl(query, 1));
@@ -201,6 +252,7 @@ async function fetchDistributionTxs(collector) {
 
 async function scanCollector(collector, latestHeight, prices) {
   const distributedTotals = new Map();
+  const distributedByRecipient = new Map();
   const currentTotals = new Map();
   const distributionTxs = await fetchDistributionTxs(collector);
   let distributionTransferCount = 0;
@@ -208,14 +260,11 @@ async function scanCollector(collector, latestHeight, prices) {
   for (const tx of distributionTxs) {
     for (const transfer of transferEvents(tx, (event) => event.sender === collector.address)) {
       distributionTransferCount += 1;
-      const existing = distributedTotals.get(transfer.denom) || {
-        denom: transfer.denom,
-        amountBase: 0,
-        transferCount: 0,
-      };
-      existing.amountBase += transfer.amountBase;
-      existing.transferCount += 1;
-      distributedTotals.set(transfer.denom, existing);
+      addTotal(distributedTotals, transfer.denom, transfer.amountBase);
+
+      const recipientTotals = distributedByRecipient.get(transfer.recipient) || new Map();
+      addTotal(recipientTotals, transfer.denom, transfer.amountBase);
+      distributedByRecipient.set(transfer.recipient, recipientTotals);
     }
   }
 
@@ -231,36 +280,28 @@ async function scanCollector(collector, latestHeight, prices) {
 
   const totals = new Map(distributedTotals);
   mergeTotals(totals, currentTotals);
-  let pricedUsd = 0;
-  const assets = [...totals.values()]
-    .map((asset) => {
-      const distributedAmount = amountFromBase(distributedTotals.get(asset.denom)?.amountBase || 0);
-      const currentAmount = amountFromBase(currentTotals.get(asset.denom)?.amountBase || 0);
-      const amount = distributedAmount + currentAmount;
-      const priceUsd = assetUsdPrice(asset.denom, prices);
-      const usd = amount * priceUsd;
-      if (priceUsd > 0) pricedUsd += usd;
+  const summary = summarizeTotals(totals, prices, {
+    distributed: distributedTotals,
+    current: currentTotals,
+  });
+  const distributionRoutes = [...distributedByRecipient.entries()]
+    .map(([recipient, routeTotals]) => {
+      const routeSummary = summarizeTotals(routeTotals, prices);
       return {
-        denom: asset.denom,
-        amount,
-        distributedAmount,
-        currentAmount,
-        priceUsd,
-        usd,
-        transferCount: asset.transferCount,
+        recipient,
+        transferCount: [...routeTotals.values()].reduce((sum, asset) => sum + asset.transferCount, 0),
+        ...routeSummary,
       };
     })
-    .sort((a, b) => b.usd - a.usd || b.amount - a.amount);
+    .sort((a, b) => b.pricedUsd - a.pricedUsd || b.transferCount - a.transferCount);
 
   return {
     ...collector,
     latestHeight,
     distributionTxCount: distributionTxs.length,
     distributionTransferCount,
-    pricedUsd,
-    pricedAssetCount: assets.filter((asset) => asset.priceUsd > 0).length,
-    unpricedAssetCount: assets.filter((asset) => asset.priceUsd === 0).length,
-    assets,
+    distributionRoutes,
+    ...summary,
   };
 }
 
