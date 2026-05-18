@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh BooneTools App Layer live state every two minutes
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=2min
+Persistent=true
+Unit=boonetools-app-layer-live-state.service
+
+[Install]
+WantedBy=timers.target

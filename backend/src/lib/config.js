@@ -58,7 +58,8 @@ export const config = Object.freeze({
   rapidSwapsHeightOverlapBlocks: readInt('RAPID_SWAPS_HEIGHT_OVERLAP_BLOCKS', 1800),
   rapidSwapsMaxCandidateAttempts: readInt('RAPID_SWAPS_MAX_CANDIDATE_ATTEMPTS', 12),
   rapidSwapsPendingCandidateBatch: readInt('RAPID_SWAPS_PENDING_CANDIDATE_BATCH', 100),
-  rapidSwapsListenerBlockStallMs: readInt('RAPID_SWAPS_LISTENER_BLOCK_STALL_SECONDS', 3 * 60) * 1000
+  rapidSwapsListenerBlockStallMs: readInt('RAPID_SWAPS_LISTENER_BLOCK_STALL_SECONDS', 3 * 60) * 1000,
+  appLayerLiveStateTtlMs: readInt('APP_LAYER_LIVE_STATE_TTL_SECONDS', 2 * 60) * 1000
 });
 
 export function requireConfig(key) {

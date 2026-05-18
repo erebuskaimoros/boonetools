@@ -9,6 +9,7 @@ import {
   sendResponse
 } from './lib/http.js';
 import { closePool, query } from './db/pool.js';
+import { handleAppLayerLiveState } from './handlers/app-layer-live-state.js';
 import { handleBondHistory } from './handlers/bond-history.js';
 import { handleHealth } from './handlers/health.js';
 import { handleNodeopLeaderboard } from './handlers/nodeop-leaderboard.js';
@@ -27,6 +28,7 @@ const routes = new Map([
   ['/rapid-swaps', { auth: 'public', handler: handleRapidSwaps }],
   ['/rapid-swaps-swap-history', { auth: 'public', handler: handleRapidSwapsSwapHistory }],
   ['/bond-history', { auth: 'public', handler: handleBondHistory }],
+  ['/app-layer-live-state', { auth: 'none', handler: handleAppLayerLiveState }],
   ['/stock-prices', { auth: 'public', handler: handleStockPrices }]
 ]);
 

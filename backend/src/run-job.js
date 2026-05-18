@@ -1,10 +1,12 @@
 import { closePool } from './db/pool.js';
+import { runAppLayerLiveStateScheduler } from './jobs/app-layer-live-state-scheduler.js';
 import { runNodeopScheduler } from './jobs/nodeop-scheduler.js';
 import { runRapidSwapsScheduler } from './jobs/rapid-swaps-scheduler.js';
 
 const jobName = process.argv[2] || '';
 
 const runners = {
+  'app-layer-live-state-scheduler': runAppLayerLiveStateScheduler,
   'nodeop-scheduler': runNodeopScheduler,
   'rapid-swaps-scheduler': runRapidSwapsScheduler
 };

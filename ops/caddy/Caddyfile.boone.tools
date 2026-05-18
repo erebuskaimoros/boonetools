@@ -27,6 +27,12 @@ boone.tools {
         @private_thorstore path /store /store/* /merch /merch/* /thorstore /thorstore/* /ThorStore /ThorStore/*
         respond @private_thorstore 404
 
+        @static_assets path /assets/* /data/* /favicon.ico /favicon-192.png /favicon-512.png /apple-touch-icon.png /_redirects /ip-info.json /tcy_claims.json
+        handle @static_assets {
+            root * /var/www/boone-tools
+            file_server
+        }
+
         handle {
             root * /var/www/boone-tools
             try_files {path} /index.html

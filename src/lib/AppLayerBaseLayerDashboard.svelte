@@ -3,9 +3,13 @@
   import Chart from 'chart.js/auto';
 
   const DATA_BASE = '/data/rujira-base-layer-fees';
-  const THORNODE_BASES = import.meta.env.DEV
-    ? ['/__thornode_primary', '/__thornode_fallback']
-    : ['https://thornode.thorchain.network', 'https://gateway.liquify.com/chain/thorchain_api'];
+  const APP_LAYER_API_BASE = (
+    import.meta.env.VITE_APP_LAYER_API_BASE ||
+    import.meta.env.VITE_NODEOP_API_BASE ||
+    '/functions/v1'
+  ).replace(/\/$/, '');
+  const APP_LAYER_API_KEY =
+    import.meta.env.VITE_APP_LAYER_API_KEY || import.meta.env.VITE_NODEOP_API_KEY || '';
   const THORCHAIN_NET_BASE = 'https://thorchain.net';
   const BASE_LAYER_COLLECTOR =
     'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
@@ -283,46 +287,15 @@
       liveLoading = true;
       liveError = '';
       liveRouteWarning = '';
-      const [network, poolPayload, balancePayload, configResults, historyResults] = await Promise.all([
-        fetchThorNodePath('/thorchain/network'),
-        fetchThorNodePath('/thorchain/pools'),
-        fetchThorNodePath(`/cosmos/bank/v1beta1/balances/${BASE_LAYER_COLLECTOR}`),
-        Promise.allSettled(
-          collectors.map(async (collector) => [
-            collector.key,
-            await smartConfig(collector.address)
-          ])
-        ),
-        Promise.allSettled(
-          collectors.map(async (collector) => [
-            collector.key,
-            await contractHistory(collector.address)
-          ])
-        )
-      ]);
+      const liveState = await fetchAppLayerLiveState();
 
-      runePriceUsd = amountFromBase(network.rune_price_in_tor);
-      poolPrices = buildPoolPrices(poolPayload);
-      balances = balancePayload.balances || [];
-      configs = Object.fromEntries(
-        configResults
-          .filter((result) => result.status === 'fulfilled')
-          .map((result) => result.value)
-      );
-      histories = Object.fromEntries(
-        historyResults
-          .filter((result) => result.status === 'fulfilled')
-          .map((result) => result.value)
-      );
-      const routeFailures = [...configResults, ...historyResults].filter(
-        (result) => result.status === 'rejected'
-      );
-      if (routeFailures.length) {
-        liveRouteWarning = `${routeFailures.length} route queries failed: ${
-          routeFailures[0].reason?.message || 'unknown error'
-        }`;
-      }
-      lastLiveRefresh = new Date();
+      runePriceUsd = amountFromBase(liveState.network?.rune_price_in_tor);
+      poolPrices = buildPoolPrices(liveState.pools || []);
+      balances = liveState.balances || [];
+      configs = liveState.configs || {};
+      histories = liveState.histories || {};
+      liveRouteWarning = liveState.warning || '';
+      lastLiveRefresh = new Date(liveState.as_of || liveState.fetched_at || Date.now());
     } catch (error) {
       liveError = error.message;
     } finally {
@@ -330,36 +303,21 @@
     }
   }
 
-  async function smartConfig(address) {
-    const query = base64Encode(JSON.stringify({ config: {} }));
-    const payload = await fetchThorNodePath(
-      `/cosmwasm/wasm/v1/contract/${address}/smart/${query}`
-    );
-    return payload.data;
-  }
+  async function fetchAppLayerLiveState() {
+    const headers = APP_LAYER_API_KEY
+      ? { apikey: APP_LAYER_API_KEY, Authorization: `Bearer ${APP_LAYER_API_KEY}` }
+      : {};
+    const response = await fetch(`${APP_LAYER_API_BASE}/app-layer-live-state`, {
+      headers,
+      cache: 'no-store'
+    });
+    const text = await response.text();
 
-  async function contractHistory(address) {
-    const payload = await fetchThorNodePath(`/cosmwasm/wasm/v1/contract/${address}/history`);
-    return payload.entries || [];
-  }
-
-  async function fetchThorNodePath(path) {
-    let lastError = null;
-
-    for (const base of THORNODE_BASES) {
-      try {
-        const response = await fetch(`${base}${path}`, { cache: 'no-store' });
-        const text = await response.text();
-        if (!response.ok) {
-          throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 160)}`);
-        }
-        return JSON.parse(text);
-      } catch (error) {
-        lastError = error;
-      }
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 160)}`);
     }
 
-    throw lastError || new Error(`Unable to fetch ${path}`);
+    return JSON.parse(text);
   }
 
   function parseCsv(text) {
@@ -383,29 +341,6 @@
         ])
       );
     });
-  }
-
-  function base64Encode(value) {
-    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-    let output = '';
-    let index = 0;
-
-    while (index < value.length) {
-      const byte1 = value.charCodeAt(index++) & 255;
-      const byte2 = index < value.length ? value.charCodeAt(index++) & 255 : NaN;
-      const byte3 = index < value.length ? value.charCodeAt(index++) & 255 : NaN;
-      const triplet =
-        (byte1 << 16) |
-        ((Number.isNaN(byte2) ? 0 : byte2) << 8) |
-        (Number.isNaN(byte3) ? 0 : byte3);
-
-      output += alphabet[(triplet >> 18) & 63];
-      output += alphabet[(triplet >> 12) & 63];
-      output += Number.isNaN(byte2) ? '=' : alphabet[(triplet >> 6) & 63];
-      output += Number.isNaN(byte3) ? '=' : alphabet[triplet & 63];
-    }
-
-    return output;
   }
 
   function renderPaymentChart(rows) {
@@ -859,10 +794,8 @@
                     target="_blank"
                     rel="noopener noreferrer"
                     title={target.address}
-                  >
-                    {target.label}
-                    <span class="target-usd">{targetRouteRevenueDisplay(collector.revenueSummary, target)}</span>
-                  </a>
+                  >{target.label}</a>
+                  <span class="target-usd">{targetRouteRevenueDisplay(collector.revenueSummary, target)}</span>
                   <b class="target-pct">{target.percent.toFixed(0)}%</b>
                 </div>
               {/each}
@@ -1732,8 +1665,9 @@
 
   .target {
     display: grid;
-    grid-template-columns: 14px 1fr auto;
+    grid-template-columns: 14px minmax(0, 1fr) auto auto;
     gap: 8px;
+    align-items: baseline;
     padding: 6px 8px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
@@ -1747,10 +1681,6 @@
   }
 
   .target-name {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: baseline;
     color: inherit;
     min-width: 0;
     overflow-wrap: anywhere;

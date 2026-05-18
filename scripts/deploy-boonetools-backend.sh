@@ -79,6 +79,7 @@ RAPID_SWAPS_RATE_LIMIT_COOLDOWN_SECONDS_VALUE="${RAPID_SWAPS_RATE_LIMIT_COOLDOWN
 RAPID_SWAPS_HEIGHT_OVERLAP_BLOCKS_VALUE="${RAPID_SWAPS_HEIGHT_OVERLAP_BLOCKS:-1800}"
 RAPID_SWAPS_MAX_CANDIDATE_ATTEMPTS_VALUE="${RAPID_SWAPS_MAX_CANDIDATE_ATTEMPTS:-12}"
 RAPID_SWAPS_PENDING_CANDIDATE_BATCH_VALUE="${RAPID_SWAPS_PENDING_CANDIDATE_BATCH:-100}"
+APP_LAYER_LIVE_STATE_TTL_SECONDS_VALUE="${APP_LAYER_LIVE_STATE_TTL_SECONDS:-120}"
 
 cat > "$ENV_FILE" <<EOF
 PORT=$PORT_VALUE
@@ -105,6 +106,7 @@ RAPID_SWAPS_RATE_LIMIT_COOLDOWN_SECONDS=$RAPID_SWAPS_RATE_LIMIT_COOLDOWN_SECONDS
 RAPID_SWAPS_HEIGHT_OVERLAP_BLOCKS=$RAPID_SWAPS_HEIGHT_OVERLAP_BLOCKS_VALUE
 RAPID_SWAPS_MAX_CANDIDATE_ATTEMPTS=$RAPID_SWAPS_MAX_CANDIDATE_ATTEMPTS_VALUE
 RAPID_SWAPS_PENDING_CANDIDATE_BATCH=$RAPID_SWAPS_PENDING_CANDIDATE_BATCH_VALUE
+APP_LAYER_LIVE_STATE_TTL_SECONDS=$APP_LAYER_LIVE_STATE_TTL_SECONDS_VALUE
 EOF
 
 echo "    Wrote backend/.env"
@@ -141,10 +143,13 @@ ssh "$SERVER" "chmod +x $DEST/scripts/boonetools-db-migrate.sh $DEST/scripts/boo
 
 echo "==> Installing systemd units..."
 rsync -avz "$ROOT/ops/systemd/" "$SERVER:/etc/systemd/system/"
-ssh "$SERVER" "systemctl daemon-reload && systemctl enable boonetools-api.service boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-db-backup.timer rapid-swap-listener.service"
+ssh "$SERVER" "systemctl daemon-reload && systemctl enable boonetools-api.service boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-app-layer-live-state.timer boonetools-db-backup.timer rapid-swap-listener.service"
 
 echo "==> Restarting backend services and timers..."
-ssh "$SERVER" "systemctl restart boonetools-api.service rapid-swap-listener.service && systemctl restart boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-db-backup.timer"
+ssh "$SERVER" "systemctl restart boonetools-api.service rapid-swap-listener.service && systemctl restart boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-app-layer-live-state.timer boonetools-db-backup.timer"
+
+echo "==> Priming App Layer live-state cache..."
+ssh "$SERVER" "systemctl start boonetools-app-layer-live-state.service"
 
 echo "Done."
 echo "Next steps:"
