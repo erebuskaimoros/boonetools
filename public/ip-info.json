@@ -339,6 +339,18 @@
     "isp": "DigitalOcean, LLC",
     "countryCode": "US"
   },
+  "45.61.137.168": {
+    "isp": "BL Networks NL",
+    "countryCode": "NL"
+  },
+  "45.61.138.186": {
+    "isp": "BL Networks GB",
+    "countryCode": "GB"
+  },
+  "45.61.139.51": {
+    "isp": "BL Networks GB",
+    "countryCode": "GB"
+  },
   "45.63.12.47": {
     "isp": "The Constant Company",
     "countryCode": "US"
@@ -374,6 +386,10 @@
   "46.105.223.178": {
     "isp": "OVH SAS",
     "countryCode": "FR"
+  },
+  "46.225.37.189": {
+    "isp": "Hetzner Online GmbH",
+    "countryCode": "DE"
   },
   "50.172.56.1": {
     "isp": "Comcast Cable Communications, LLC",
@@ -427,6 +443,10 @@
     "isp": "BL Networks",
     "countryCode": "US"
   },
+  "64.111.92.201": {
+    "isp": "BL Networks",
+    "countryCode": "NL"
+  },
   "64.176.34.103": {
     "isp": "The Constant Company",
     "countryCode": "JP"
@@ -452,6 +472,10 @@
     "countryCode": "PL"
   },
   "65.108.43.178": {
+    "isp": "Hetzner Online GmbH",
+    "countryCode": "FI"
+  },
+  "65.108.123.148": {
     "isp": "Hetzner Online GmbH",
     "countryCode": "FI"
   },
@@ -486,6 +510,10 @@
   "74.50.69.70": {
     "isp": "Interserver, Inc",
     "countryCode": "US"
+  },
+  "77.42.120.224": {
+    "isp": "Hetzner Online GmbH",
+    "countryCode": "FI"
   },
   "78.13.78.31": {
     "isp": "Amazon.com",
@@ -532,6 +560,10 @@
     "countryCode": "NL"
   },
   "95.214.52.139": {
+    "isp": "MEVSPACE sp. z o.o.",
+    "countryCode": "PL"
+  },
+  "95.214.53.29": {
     "isp": "MEVSPACE sp. z o.o.",
     "countryCode": "PL"
   },
@@ -958,6 +990,10 @@
   "178.162.165.144": {
     "isp": "LeaseWeb Netherlands B.V.",
     "countryCode": "NL"
+  },
+  "178.211.139.77": {
+    "isp": "MEVSPACE sp. z o.o.",
+    "countryCode": "PL"
   },
   "185.16.38.159": {
     "isp": "MEVSPACE sp. z o.o.",
