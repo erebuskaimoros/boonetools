@@ -5,6 +5,7 @@ import {
   ACTION_PAGE_LIMIT,
   MIDGARD_BASES,
   THORNODE_BASES,
+  classifyRapidSwapSourceStatus,
   fetchMidgardActions,
   fetchRapidSwapRows,
   getRapidSwapRateLimitCooldownMs,
@@ -33,6 +34,56 @@ test('rapid swap backend recognizes provider rate limits and daily cooldowns', (
 
   assert.equal(isRapidSwapRateLimitError(error), true);
   assert.equal(getRapidSwapRateLimitCooldownMs(error, 60 * 60 * 1000), 60 * 60 * 1000);
+});
+
+test('classifyRapidSwapSourceStatus reports halted idle when trading and signing are paused', () => {
+  const status = classifyRapidSwapSourceStatus({
+    observedAt: '2026-05-25T13:00:00.000Z',
+    mimir: {
+      HALTTRADING: 1,
+      HALTSIGNING: 1,
+      HALTBTCCHAIN: 0,
+      HALTBTCTRADING: 1
+    },
+    inboundAddresses: [
+      {
+        chain: 'BTC',
+        halted: true,
+        global_trading_paused: true,
+        chain_trading_paused: true
+      }
+    ],
+    lastblock: [
+      {
+        chain: 'BTC',
+        thorchain: 26326177,
+        last_signed_out: 26183225
+      }
+    ],
+    latestSwapAction: buildRapidAction('latest-tx', 26183228)
+  });
+
+  assert.equal(status.status, 'halted_idle');
+  assert.equal(status.trading_halted, true);
+  assert.equal(status.signing_halted, true);
+  assert.equal(status.midgard.latest_swap_action.height, 26183228);
+  assert.equal(status.lastblock.thorchain_height, 26326177);
+});
+
+test('classifyRapidSwapSourceStatus reports degraded when a source check fails without halt flags', () => {
+  const status = classifyRapidSwapSourceStatus({
+    observedAt: '2026-05-25T13:00:00.000Z',
+    mimir: {},
+    inboundAddresses: [],
+    lastblock: [],
+    latestSwapAction: null,
+    errors: {
+      midgard: 'HTTP 500'
+    }
+  });
+
+  assert.equal(status.status, 'degraded');
+  assert.equal(status.midgard.status, 'error');
 });
 
 function buildRapidAction(txId, height) {

@@ -85,6 +85,57 @@ test('buildRapidSwapCanonicalScanPlan skips during provider cooldown', () => {
   });
 });
 
+test('buildRapidSwapCanonicalScanPlan skips during source-idle cooldown', () => {
+  const plan = buildRapidSwapCanonicalScanPlan({
+    syncState: {
+      last_scanned_height: 5000,
+      stats_json: {
+        source_idle_until: '2026-04-01T02:00:00.000Z'
+      }
+    },
+    nowMs: Date.parse('2026-04-01T01:00:00.000Z')
+  });
+
+  assert.deepEqual(plan, {
+    shouldScan: false,
+    skipReason: 'source_idle',
+    nextScanAt: '2026-04-01T02:00:00.000Z',
+    head: null,
+    catchup: null
+  });
+});
+
+test('buildRapidSwapCanonicalScanPlan allows catch-up only during source-idle cooldown', () => {
+  const plan = buildRapidSwapCanonicalScanPlan({
+    syncState: {
+      last_scanned_height: 5000,
+      last_scanned_at: '2026-04-01T00:59:00.000Z',
+      stats_json: {
+        lagging: true,
+        source_idle_until: '2026-04-01T02:00:00.000Z',
+        catchup_next_page_token: 'cursor-123',
+        catchup_stop_below_height: 3200
+      }
+    },
+    nowMs: Date.parse('2026-04-01T01:00:00.000Z'),
+    catchupMaxPages: 80,
+    catchupPages: 1,
+    scanIntervalMs: 15 * 60 * 1000
+  });
+
+  assert.deepEqual(plan, {
+    shouldScan: true,
+    skipReason: 'source_idle_catchup',
+    nextScanAt: '',
+    head: null,
+    catchup: {
+      maxPages: 1,
+      nextPageToken: 'cursor-123',
+      stopBelowHeight: 3200
+    }
+  });
+});
+
 test('shouldSkipRapidSwapCanonicalScanForHealthyListener skips canonical scans while the websocket listener is stable', () => {
   assert.equal(shouldSkipRapidSwapCanonicalScanForHealthyListener({
     finished_at: '2026-04-01T00:19:30.000Z',
@@ -237,6 +288,84 @@ test('summarizeRapidSwapCanonicalScan clears lagging after a catch-up scan reach
   });
 
   assert.equal(summary.lastScannedHeight, 6300);
+  assert.equal(summary.lagging, false);
+  assert.equal(summary.stats.catchup_next_page_token, '');
+  assert.equal(summary.stats.catchup_stop_below_height, 0);
+  assert.equal(summary.stats.catchup_reached_stop_height, true);
+});
+
+test('summarizeRapidSwapCanonicalScan advances catch-up cursor without a source-idle head scan', () => {
+  const syncState = {
+    last_scanned_height: 5000,
+    stats_json: {
+      lagging: true,
+      catchup_next_page_token: 'cursor-123',
+      catchup_stop_below_height: 3200,
+      lagging_started_at: '2026-03-31T12:00:00.000Z',
+      source_idle_until: '2026-04-01T02:00:00.000Z'
+    }
+  };
+  const plan = buildRapidSwapCanonicalScanPlan({
+    syncState,
+    nowMs: Date.parse('2026-04-01T01:00:00.000Z'),
+    catchupPages: 1
+  });
+
+  const summary = summarizeRapidSwapCanonicalScan({
+    syncState,
+    plan,
+    headScan: null,
+    catchupScan: {
+      highestHeight: 4199,
+      lowestHeight: 4100,
+      reachedStopHeight: false,
+      nextPageToken: 'cursor-124',
+      scannedPages: 1,
+      scannedActions: 50
+    }
+  });
+
+  assert.equal(summary.lastScannedHeight, 5000);
+  assert.equal(summary.lagging, true);
+  assert.equal(summary.stats.catchup_next_page_token, 'cursor-124');
+  assert.equal(summary.stats.catchup_stop_below_height, 3200);
+  assert.equal(summary.stats.catchup_loaded_from_state, true);
+  assert.equal(summary.stats.head_scanned_pages, 0);
+  assert.equal(summary.stats.catchup_scanned_pages, 1);
+});
+
+test('summarizeRapidSwapCanonicalScan clears source-idle catch-up after reaching the floor', () => {
+  const syncState = {
+    last_scanned_height: 5000,
+    stats_json: {
+      lagging: true,
+      catchup_next_page_token: 'cursor-123',
+      catchup_stop_below_height: 3200,
+      lagging_started_at: '2026-03-31T12:00:00.000Z',
+      source_idle_until: '2026-04-01T02:00:00.000Z'
+    }
+  };
+  const plan = buildRapidSwapCanonicalScanPlan({
+    syncState,
+    nowMs: Date.parse('2026-04-01T01:00:00.000Z'),
+    catchupPages: 1
+  });
+
+  const summary = summarizeRapidSwapCanonicalScan({
+    syncState,
+    plan,
+    headScan: null,
+    catchupScan: {
+      highestHeight: 4199,
+      lowestHeight: 3100,
+      reachedStopHeight: true,
+      nextPageToken: '',
+      scannedPages: 1,
+      scannedActions: 50
+    }
+  });
+
+  assert.equal(summary.lastScannedHeight, 5000);
   assert.equal(summary.lagging, false);
   assert.equal(summary.stats.catchup_next_page_token, '');
   assert.equal(summary.stats.catchup_stop_below_height, 0);

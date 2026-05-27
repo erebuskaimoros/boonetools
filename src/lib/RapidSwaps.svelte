@@ -73,6 +73,8 @@
   $: recentSwaps = dashboard?.recent_24h || [];
   $: trackerStart = dashboard?.tracker_started_at || null;
   $: backendMeta = dashboard?.backend || null;
+  $: sourceStatus = dashboard?.chain_status || dashboard?.source_status || backendMeta?.source_status || null;
+  $: sourceBanner = getSourceBanner(sourceStatus, backendMeta);
   $: backendConfigError = getRapidSwapsApiConfigError();
 
   // Filtered + sorted + paginated table data
@@ -160,6 +162,57 @@
     if (numeric < 60) return `${numeric}s old`;
     if (numeric < 3600) return `${Math.floor(numeric / 60)}m old`;
     return `${Math.floor(numeric / 3600)}h old`;
+  }
+
+  function formatHeight(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? formatNumber(numeric, { maximumFractionDigits: 0 }) : 'unknown';
+  }
+
+  function sourceStatusLabel(status) {
+    const value = status?.status || '';
+    if (value === 'halted_idle') return 'HALTED';
+    if (value === 'degraded') return 'DEGRADED';
+    if (value === 'active') return 'ACTIVE';
+    return 'UNKNOWN';
+  }
+
+  function getSourceBanner(status, backend) {
+    const skipReason = backend?.last_run_stats?.skip_reason || '';
+    const latestAction = status?.midgard?.latest_swap_action || null;
+    const latestDate = latestAction?.date ? formatDateTime(latestAction.date) : '';
+    const latestHeight = formatHeight(latestAction?.height);
+
+    if (status?.status === 'halted_idle') {
+      const haltBits = [
+        status.trading_halted ? 'trading halted' : '',
+        status.signing_halted ? 'signing halted' : ''
+      ].filter(Boolean).join(' / ');
+
+      return {
+        tone: 'warn',
+        title: 'THORCHAIN TRADING HALTED',
+        body: `No new completed rapid swaps are expected while ${haltBits || 'chain swap paths are halted'}. Latest Midgard swap action: ${latestDate || 'unknown time'} at height ${latestHeight}.`
+      };
+    }
+
+    if (skipReason === 'rate_limited' || status?.midgard?.status === 'rate_limited') {
+      return {
+        tone: 'err',
+        title: 'PROVIDER COOLDOWN ACTIVE',
+        body: 'Midgard returned a rate limit. The recorder is backing off instead of retrying aggressively.'
+      };
+    }
+
+    if (status?.status === 'degraded') {
+      return {
+        tone: 'warn',
+        title: 'SOURCE STATUS DEGRADED',
+        body: 'The recorder is running, but one or more THORChain data sources could not be checked on the last scheduler pass.'
+      };
+    }
+
+    return null;
   }
 
   function formatTimeSaved(seconds) {
@@ -1251,6 +1304,10 @@
           <span class="sep">|</span>
           <span class="warn-text">warming up</span>
         {/if}
+        {#if sourceStatus?.status}
+          <span class="sep">|</span>
+          <span class={sourceStatus.status !== 'active' ? 'warn-text' : ''}>SOURCE {sourceStatusLabel(sourceStatus)}</span>
+        {/if}
       {:else if dashboardError}
         <span class="status-dot err"></span>
         RECORDER OFFLINE
@@ -1273,6 +1330,13 @@
       {/if}
     </span>
   </div>
+
+  {#if sourceBanner}
+    <div class={`source-banner ${sourceBanner.tone === 'warn' ? 'source-banner-warn' : ''} ${sourceBanner.tone === 'err' ? 'source-banner-err' : ''}`}>
+      <div class="source-banner-title">{sourceBanner.title}</div>
+      <div class="source-banner-body">{sourceBanner.body}</div>
+    </div>
+  {/if}
 
   <!-- Sticky header: metrics + tabs -->
   <div class="sticky-header">
@@ -1672,6 +1736,41 @@
   @keyframes pulse-dot {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
+  }
+
+  .source-banner {
+    padding: 12px 16px;
+    border-bottom: 1px solid #2a220c;
+    background: #120f08;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .source-banner-warn {
+    border-color: #3a2d0a;
+    background: linear-gradient(90deg, rgba(212, 160, 23, 0.12), rgba(13, 13, 13, 0.96));
+  }
+
+  .source-banner-err {
+    border-color: #3a1111;
+    background: linear-gradient(90deg, rgba(204, 51, 51, 0.14), rgba(13, 13, 13, 0.96));
+  }
+
+  .source-banner-title {
+    color: #d4a017;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    margin-bottom: 4px;
+  }
+
+  .source-banner-err .source-banner-title {
+    color: #cc4444;
+  }
+
+  .source-banner-body {
+    color: #8d8366;
+    font-size: 11px;
+    line-height: 1.5;
   }
 
   /* ---- STICKY HEADER ---- */

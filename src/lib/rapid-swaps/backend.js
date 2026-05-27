@@ -1,6 +1,7 @@
 import {
   buildAssetUsdIndex,
   buildRapidSwapSyntheticAction,
+  midgardTimestampToMillis,
   normalizeRapidSwapAction,
   normalizeRapidSwapHintAction
 } from './model.js';
@@ -48,6 +49,18 @@ export class RapidSwapProviderError extends Error {
 function safeNumber(value, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function safeString(value) {
+  return String(value || '').trim();
+}
+
+function safeBoolean(value) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  return ['1', 'true', 'yes'].includes(String(value || '').toLowerCase());
 }
 
 function isChallengeResponse(response) {
@@ -256,6 +269,167 @@ export async function fetchMidgardActions(options = {}) {
     actions: Array.isArray(result.payload?.actions) ? result.payload.actions : [],
     nextPageToken: String(result.payload?.meta?.nextPageToken || '')
   };
+}
+
+function normalizeLatestSwapAction(action) {
+  if (!action || typeof action !== 'object') {
+    return null;
+  }
+
+  const dateMs = midgardTimestampToMillis(action.date);
+  const txId = safeString(action?.in?.[0]?.txID || action?.txID);
+
+  return {
+    height: Math.max(0, Math.trunc(safeNumber(action.height, 0))),
+    date: dateMs > 0 ? new Date(dateMs).toISOString() : '',
+    status: safeString(action.status),
+    source_asset: safeString(action?.in?.[0]?.coins?.[0]?.asset),
+    target_asset: safeString(action?.out?.[0]?.coins?.[0]?.asset),
+    tx_id: txId
+  };
+}
+
+function pickHaltFlags(mimir = {}) {
+  const entries = Object.entries(mimir && typeof mimir === 'object' ? mimir : {});
+  const haltFlags = {};
+  for (const [key, value] of entries) {
+    if (/^HALT|TRADING|SIGNING/.test(key)) {
+      haltFlags[key] = safeNumber(value, 0);
+    }
+  }
+
+  return haltFlags;
+}
+
+function summarizeLastblock(lastblock = []) {
+  const rows = Array.isArray(lastblock) ? lastblock : [];
+  const thorchainHeights = rows.map((row) => safeNumber(row?.thorchain, 0)).filter((value) => value > 0);
+  const signedHeights = rows.map((row) => safeNumber(row?.last_signed_out, 0)).filter((value) => value > 0);
+
+  return {
+    chain_count: rows.length,
+    thorchain_height: thorchainHeights.length ? Math.max(...thorchainHeights) : 0,
+    min_last_signed_out: signedHeights.length ? Math.min(...signedHeights) : 0,
+    max_last_signed_out: signedHeights.length ? Math.max(...signedHeights) : 0
+  };
+}
+
+function summarizeInbound(inboundAddresses = []) {
+  const rows = Array.isArray(inboundAddresses) ? inboundAddresses : [];
+  const tradableRows = rows.filter((row) => safeString(row?.chain));
+  const pausedRows = tradableRows.filter((row) => (
+    safeBoolean(row?.halted) ||
+    safeBoolean(row?.global_trading_paused) ||
+    safeBoolean(row?.chain_trading_paused)
+  ));
+
+  return {
+    chain_count: tradableRows.length,
+    paused_chain_count: pausedRows.length,
+    all_trading_paused: tradableRows.length > 0 && pausedRows.length === tradableRows.length,
+    sample: tradableRows.slice(0, 12).map((row) => ({
+      chain: safeString(row.chain),
+      halted: safeBoolean(row.halted),
+      global_trading_paused: safeBoolean(row.global_trading_paused),
+      chain_trading_paused: safeBoolean(row.chain_trading_paused),
+      chain_lp_actions_paused: safeBoolean(row.chain_lp_actions_paused)
+    }))
+  };
+}
+
+function settledValue(result, fallback) {
+  return result?.status === 'fulfilled' ? result.value : fallback;
+}
+
+function settledError(result) {
+  return result?.status === 'rejected'
+    ? safeString(result.reason?.message || result.reason)
+    : '';
+}
+
+export function classifyRapidSwapSourceStatus(parts = {}) {
+  const mimir = parts.mimir && typeof parts.mimir === 'object' ? parts.mimir : {};
+  const haltFlags = pickHaltFlags(mimir);
+  const inbound = summarizeInbound(parts.inboundAddresses);
+  const lastblock = summarizeLastblock(parts.lastblock);
+  const latestSwapAction = normalizeLatestSwapAction(parts.latestSwapAction);
+  const fetchErrors = Object.fromEntries(
+    Object.entries(parts.errors || {}).filter(([, value]) => safeString(value))
+  );
+
+  const globalTradingHalted = safeNumber(mimir.HALTTRADING, 0) > 0;
+  const globalSigningHalted = safeNumber(mimir.HALTSIGNING, 0) > 0;
+  const chainTradingFlags = Object.entries(haltFlags)
+    .filter(([key]) => /^HALT.+TRADING$/.test(key) && key !== 'HALTTRADING')
+    .map(([, value]) => safeNumber(value, 0));
+  const chainSigningFlags = Object.entries(haltFlags)
+    .filter(([key]) => /^HALTSIGNING.+/.test(key))
+    .map(([, value]) => safeNumber(value, 0));
+  const allChainTradingHalted = chainTradingFlags.length > 0 && chainTradingFlags.every((value) => value > 0);
+  const allChainSigningHalted = chainSigningFlags.length > 0 && chainSigningFlags.every((value) => value > 0);
+  const halted = globalTradingHalted ||
+    globalSigningHalted ||
+    allChainTradingHalted ||
+    allChainSigningHalted ||
+    inbound.all_trading_paused;
+
+  const midgardStatus = parts.midgardRateLimited
+    ? 'rate_limited'
+    : fetchErrors.midgard
+      ? 'error'
+      : latestSwapAction
+        ? 'ok'
+        : 'empty';
+
+  return {
+    status: halted ? 'halted_idle' : fetchErrors.thornode || fetchErrors.midgard ? 'degraded' : 'active',
+    observed_at: parts.observedAt || new Date().toISOString(),
+    halted,
+    trading_halted: globalTradingHalted || allChainTradingHalted || inbound.all_trading_paused,
+    signing_halted: globalSigningHalted || allChainSigningHalted,
+    halt_flags: haltFlags,
+    inbound,
+    lastblock,
+    midgard: {
+      status: midgardStatus,
+      latest_swap_action: latestSwapAction,
+      error: fetchErrors.midgard || ''
+    },
+    thornode: {
+      status: fetchErrors.thornode ? 'error' : 'ok',
+      error: fetchErrors.thornode || ''
+    }
+  };
+}
+
+export async function fetchRapidSwapSourceStatus() {
+  const observedAt = new Date().toISOString();
+  const [mimirResult, inboundResult, lastblockResult, midgardResult] = await Promise.allSettled([
+    fetchThorchain('/thorchain/mimir'),
+    fetchThorchain('/thorchain/inbound_addresses'),
+    fetchThorchain('/thorchain/lastblock'),
+    fetchMidgardActions({ limit: 1 })
+  ]);
+
+  const midgardError = settledError(midgardResult);
+  const thornodeErrors = [
+    settledError(mimirResult),
+    settledError(inboundResult),
+    settledError(lastblockResult)
+  ].filter(Boolean);
+
+  return classifyRapidSwapSourceStatus({
+    observedAt,
+    mimir: settledValue(mimirResult, {}),
+    inboundAddresses: settledValue(inboundResult, []),
+    lastblock: settledValue(lastblockResult, []),
+    latestSwapAction: settledValue(midgardResult, { actions: [] })?.actions?.[0] || null,
+    midgardRateLimited: midgardResult.status === 'rejected' && isRapidSwapRateLimitError(midgardResult.reason),
+    errors: {
+      thornode: thornodeErrors.join('; '),
+      midgard: midgardError
+    }
+  });
 }
 
 export async function enrichRapidSwapHint(hintInput = {}) {

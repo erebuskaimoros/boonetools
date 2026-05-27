@@ -14,6 +14,12 @@ import {
   writeRapidSwapListenerHeartbeat
 } from './db/rapid-swaps-store.js';
 import { getClient } from './db/pool.js';
+import {
+  enrichRowsWithNodeMetadata,
+  parseNodeVoteEvents,
+  upsertNodeVotes,
+  writeNodeVoteListenerHeartbeat
+} from './shared/node-votes.js';
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
@@ -34,6 +40,16 @@ let reconnectAttempt = 0;
 let pingTimer = null;
 let activeRpcWsIndex = 0;
 let connectedAt = 0;
+let messagesReceived = 0;
+let eventsSeen = 0;
+let streamingSwapEventsSeen = 0;
+let rapidCandidatesDetected = 0;
+let lastEventAt = 0;
+let lastStreamingSwapEventAt = 0;
+let lastCandidateAt = 0;
+let nodeVoteEventsSeen = 0;
+let nodeVoteEventsUpserted = 0;
+let lastNodeVoteAt = 0;
 
 async function getCachedPriceIndex() {
   const now = Date.now();
@@ -69,6 +85,32 @@ async function sendHeartbeat() {
       block_stall_seconds: blockStallSeconds,
       stream_status: streamStatus,
       blocks_processed: blocksProcessed,
+      uptime_seconds: Math.floor(process.uptime()),
+      messages_received: messagesReceived,
+      events_seen: eventsSeen,
+      streaming_swap_events_seen: streamingSwapEventsSeen,
+      rapid_candidates_detected: rapidCandidatesDetected,
+      last_event_at: lastEventAt > 0 ? new Date(lastEventAt).toISOString() : null,
+      last_streaming_swap_event_at: lastStreamingSwapEventAt > 0 ? new Date(lastStreamingSwapEventAt).toISOString() : null,
+      last_candidate_at: lastCandidateAt > 0 ? new Date(lastCandidateAt).toISOString() : null
+    }
+  }).catch(() => {});
+
+  await writeNodeVoteListenerHeartbeat({
+    started_at: new Date().toISOString(),
+    finished_at: new Date().toISOString(),
+    status: 'running',
+    stats_json: {
+      last_block: lastBlockHeight,
+      last_block_received_at: lastBlockReceivedAt > 0 ? new Date(lastBlockReceivedAt).toISOString() : null,
+      block_stall_seconds: blockStallSeconds,
+      stream_status: streamStatus,
+      blocks_processed: blocksProcessed,
+      messages_received: messagesReceived,
+      events_seen: eventsSeen,
+      node_vote_events_seen: nodeVoteEventsSeen,
+      node_vote_events_upserted: nodeVoteEventsUpserted,
+      last_node_vote_at: lastNodeVoteAt > 0 ? new Date(lastNodeVoteAt).toISOString() : null,
       uptime_seconds: Math.floor(process.uptime())
     }
   }).catch(() => {});
@@ -239,13 +281,65 @@ async function processRapidSwap(detected, blockHeight, blockTime) {
   }
 }
 
+async function processNodeVotes(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return;
+  }
+
+  const enrichedRows = await enrichRowsWithNodeMetadata(rows);
+  const client = await getClient();
+  try {
+    const upserted = await upsertNodeVotes(client, enrichedRows);
+    nodeVoteEventsSeen += enrichedRows.length;
+    nodeVoteEventsUpserted += upserted;
+    lastNodeVoteAt = Date.now();
+    for (const row of enrichedRows) {
+      log(`Node vote detected: ${row.node_address.slice(-6)} ${row.mimir_key}=${row.vote_value} at block ${row.height}`);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+function parseNodeVotesFromTxMessage(message, data) {
+  const value = data?.TxResult || data?.tx_result || data;
+  const txResult = value?.result || value?.tx_result || value?.txResult || value;
+  const height = Number(value?.height || data?.height || 0) || 0;
+  const txIndex = Number(value?.index || data?.index || 0) || 0;
+  const txId = String(
+    message.result?.events?.['tx.hash']?.[0] ||
+    message.result?.events?.['tx.hash'] ||
+    value?.hash ||
+    data?.hash ||
+    ''
+  ).toUpperCase();
+
+  return parseNodeVoteEvents(txResult?.events || [], {
+    txId,
+    txIndex,
+    height,
+    blockTime: new Date().toISOString(),
+    source: 'ws'
+  });
+}
+
 function handleMessage(message) {
+  messagesReceived += 1;
+
   if (message.result && !message.result.data) {
     return;
   }
 
   const data = message.result?.data?.value;
   if (!data) {
+    return;
+  }
+
+  if (data.TxResult || data.tx_result) {
+    const nodeVotes = parseNodeVotesFromTxMessage(message, data);
+    processNodeVotes(nodeVotes).catch((error) => {
+      log(`Error processing node vote tx: ${error.message}`);
+    });
     return;
   }
 
@@ -258,7 +352,37 @@ function handleMessage(message) {
   }
 
   const events = data.result_finalize_block?.events || data.result_end_block?.events || [];
+  if (events.length > 0) {
+    eventsSeen += events.length;
+    lastEventAt = Date.now();
+  }
+
+  let streamingEventsInBlock = 0;
+  for (const event of events) {
+    if (event.type === 'streaming_swap') {
+      streamingEventsInBlock += 1;
+    }
+  }
+  if (streamingEventsInBlock > 0) {
+    streamingSwapEventsSeen += streamingEventsInBlock;
+    lastStreamingSwapEventAt = Date.now();
+  }
+
   const rapidSwaps = parseStreamingSwapEvents(events);
+  if (rapidSwaps.length > 0) {
+    rapidCandidatesDetected += rapidSwaps.length;
+    lastCandidateAt = Date.now();
+  }
+
+  const nodeVotes = parseNodeVoteEvents(events, {
+    height: blockHeight,
+    blockTime,
+    source: 'ws'
+  });
+  processNodeVotes(nodeVotes).catch((error) => {
+    log(`Error processing node vote block ${blockHeight}: ${error.message}`);
+  });
+
   const seen = new Set();
 
   for (const detected of rapidSwaps) {
@@ -311,7 +435,7 @@ function connect() {
   });
 
   ws.on('open', () => {
-    log('Connected. Subscribing to NewBlock events...');
+    log('Connected. Subscribing to NewBlock and node vote tx events...');
     opened = true;
     connectedAt = Date.now();
     reconnectAttempt = 0;
@@ -321,6 +445,13 @@ function connect() {
       method: 'subscribe',
       id: 1,
       params: { query: "tm.event='NewBlock'" }
+    }));
+
+    ws.send(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'subscribe',
+      id: 2,
+      params: { query: "tm.event='Tx' AND set_node_mimir.key EXISTS" }
     }));
 
     startHeartbeat();

@@ -43,12 +43,49 @@ export function buildRapidSwapCanonicalScanPlan(options = {}) {
     ? Math.max(0, lastScannedHeight - overlapBlocks)
     : 0;
   const stats = safeStats(syncState);
+  const catchupNextPageToken = safeString(stats.catchup_next_page_token || stats.next_page_token);
+  const catchupStopBelowHeight = Math.max(
+    0,
+    Math.trunc(safeNumber(stats.catchup_stop_below_height || stats.stop_below_height, stopBelowHeight))
+  );
+  const lagging = Boolean(stats.lagging);
+  const catchupMaxPages = clampPageBudget(
+    options.catchupPages,
+    Math.min(2, requestedCatchupMaxPages),
+    requestedCatchupMaxPages
+  );
+  const hasCatchupCursor = lagging && catchupNextPageToken && catchupStopBelowHeight > 0;
   const rateLimitedUntilMs = safeTimestampMs(stats.rate_limited_until);
   if (rateLimitedUntilMs > nowMs) {
     return {
       shouldScan: false,
       skipReason: 'rate_limited',
       nextScanAt: new Date(rateLimitedUntilMs).toISOString(),
+      head: null,
+      catchup: null
+    };
+  }
+
+  const sourceIdleUntilMs = safeTimestampMs(stats.source_idle_until);
+  if (sourceIdleUntilMs > nowMs && !safeBoolean(options.force)) {
+    if (hasCatchupCursor) {
+      return {
+        shouldScan: true,
+        skipReason: 'source_idle_catchup',
+        nextScanAt: '',
+        head: null,
+        catchup: {
+          maxPages: catchupMaxPages,
+          nextPageToken: catchupNextPageToken,
+          stopBelowHeight: catchupStopBelowHeight
+        }
+      };
+    }
+
+    return {
+      shouldScan: false,
+      skipReason: 'source_idle',
+      nextScanAt: new Date(sourceIdleUntilMs).toISOString(),
       head: null,
       catchup: null
     };
@@ -71,20 +108,9 @@ export function buildRapidSwapCanonicalScanPlan(options = {}) {
     };
   }
 
-  const catchupNextPageToken = safeString(stats.catchup_next_page_token || stats.next_page_token);
-  const catchupStopBelowHeight = Math.max(
-    0,
-    Math.trunc(safeNumber(stats.catchup_stop_below_height || stats.stop_below_height, stopBelowHeight))
-  );
-  const lagging = Boolean(stats.lagging);
   const headMaxPages = lagging
     ? clampPageBudget(options.laggingHeadPages, Math.min(2, requestedHeadMaxPages), requestedHeadMaxPages)
     : clampPageBudget(options.normalHeadPages, Math.min(4, requestedHeadMaxPages), requestedHeadMaxPages);
-  const catchupMaxPages = clampPageBudget(
-    options.catchupPages,
-    Math.min(2, requestedCatchupMaxPages),
-    requestedCatchupMaxPages
-  );
 
   return {
     shouldScan: true,
@@ -94,7 +120,7 @@ export function buildRapidSwapCanonicalScanPlan(options = {}) {
       maxPages: headMaxPages,
       stopBelowHeight
     },
-    catchup: lagging && catchupNextPageToken && catchupStopBelowHeight > 0
+    catchup: hasCatchupCursor
       ? {
           maxPages: catchupMaxPages,
           nextPageToken: catchupNextPageToken,
@@ -167,6 +193,7 @@ export function summarizeRapidSwapCanonicalScan(options = {}) {
   const catchupLagging = Boolean(catchupScan)
     ? activeCatchupStopBelowHeight > 0 && !catchupReachedFloor && Boolean(catchupScan.nextPageToken)
     : false;
+  const headSkippedForCatchupOnly = Boolean(plan?.catchup) && !plan?.head;
 
   let lagging = false;
   let catchupNextPageToken = '';
@@ -185,7 +212,8 @@ export function summarizeRapidSwapCanonicalScan(options = {}) {
   const canAdvanceWatermark = headStopBelowHeight === 0
     || Boolean(headScan.reachedStopHeight)
     || headReachedKnownRows
-    || (headLagging && catchupReachedFloor);
+    || (headLagging && catchupReachedFloor)
+    || (headSkippedForCatchupOnly && catchupReachedFloor);
 
   return {
     lastScannedHeight: canAdvanceWatermark

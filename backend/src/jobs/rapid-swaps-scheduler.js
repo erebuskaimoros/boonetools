@@ -3,6 +3,7 @@ import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
 import {
   buildRapidSwapCanonicalScanPlan,
+  fetchRapidSwapSourceStatus,
   fetchRapidSwapPriceIndex,
   fetchRapidSwapRows,
   getRapidSwapRateLimitCooldownMs,
@@ -19,6 +20,45 @@ const SYNC_KEY = 'rapid-swaps-canonical';
 const FRESH_PENDING_CANDIDATE_RATIO = 0.75;
 const LISTENER_HEARTBEAT_GRACE_MS = 3 * 60 * 1000;
 const LISTENER_STABLE_UPTIME_MS = 10 * 60 * 1000;
+
+function safeStats(syncState) {
+  return syncState?.stats_json && typeof syncState.stats_json === 'object'
+    ? syncState.stats_json
+    : {};
+}
+
+function getSourceHeadHeight(sourceStatus) {
+  return Math.max(
+    0,
+    Math.trunc(Number(sourceStatus?.midgard?.latest_swap_action?.height || 0))
+  );
+}
+
+function getKnownSourceHeadHeight(syncState) {
+  const stats = safeStats(syncState);
+  return Math.max(
+    Number(syncState?.last_scanned_height || 0),
+    Number(stats.highest_height_seen || 0),
+    Number(stats.source_status?.midgard?.latest_swap_action?.height || 0)
+  );
+}
+
+function isSourceIdleForKnownHead(sourceStatus, syncState) {
+  const sourceHeadHeight = getSourceHeadHeight(sourceStatus);
+  if (sourceStatus?.status !== 'halted_idle' || sourceHeadHeight <= 0) {
+    return false;
+  }
+
+  return getKnownSourceHeadHeight(syncState) >= sourceHeadHeight;
+}
+
+function mergeSourceStatusIntoStats(stats, sourceStatus, extra = {}) {
+  return {
+    ...(stats && typeof stats === 'object' ? stats : {}),
+    ...(sourceStatus ? { source_status: sourceStatus } : {}),
+    ...extra
+  };
+}
 
 function computeRetryDelaySeconds(attempt) {
   const normalizedAttempt = Math.max(1, Math.trunc(attempt));
@@ -347,6 +387,8 @@ export async function runRapidSwapsScheduler() {
       syncState = await loadSyncState(client);
       const wsListenerState = await loadWsListenerState(client);
       const scanPlan = buildSchedulerScanPlan(syncState, wsListenerState);
+      let effectiveScanPlan = scanPlan;
+      let sourceIdleStats = null;
 
       const readyPendingCount = await countReadyPendingCandidates(client);
 
@@ -359,7 +401,143 @@ export async function runRapidSwapsScheduler() {
             skipped: true,
             skip_reason: scanPlan.skipReason,
             next_scan_at: scanPlan.nextScanAt,
-            pending_candidates_ready: readyPendingCount
+            pending_candidates_ready: readyPendingCount,
+            source_status: safeStats(syncState).source_status || null
+          }
+        };
+
+        await completeJobRun(client, jobId, payload);
+
+        return {
+          ok: true,
+          stats: payload.stats_json
+        };
+      }
+
+      let sourceStatus = null;
+      let sourceStatusFresh = false;
+      if (scanPlan.shouldScan) {
+        if (scanPlan.skipReason === 'source_idle_catchup') {
+          const stats = safeStats(syncState);
+          sourceStatus = stats.source_status || null;
+          sourceIdleStats = {
+            source_idle_at: stats.source_idle_at || null,
+            source_idle_until: stats.source_idle_until || null,
+            source_idle_reason: stats.source_idle_reason || 'chain_halted_action_head_unchanged'
+          };
+        } else {
+          sourceStatus = await fetchRapidSwapSourceStatus();
+          sourceStatusFresh = true;
+        }
+
+        if (sourceStatus?.midgard?.status === 'rate_limited') {
+          const now = new Date().toISOString();
+          const rateLimitedUntil = new Date(Date.now() + config.rapidSwapsRateLimitCooldownMs).toISOString();
+          const previousStats = safeStats(syncState);
+          await saveSyncState(client, {
+            last_scanned_height: Number(syncState?.last_scanned_height || 0),
+            last_scanned_at: syncState?.last_scanned_at || now,
+            stats_json: mergeSourceStatusIntoStats(previousStats, sourceStatus, {
+              rate_limited_at: now,
+              rate_limited_until: rateLimitedUntil,
+              rate_limit_error: sourceStatus.midgard.error || 'Rapid swap provider rate limit'
+            })
+          });
+
+          const payload = {
+            job_name: 'rapid-swaps-recent-actions',
+            finished_at: now,
+            status: 'success',
+            stats_json: {
+              skipped: true,
+              skip_reason: 'rate_limited',
+              rate_limited_until: rateLimitedUntil,
+              cooldown_seconds: Math.round(config.rapidSwapsRateLimitCooldownMs / 1000),
+              pending_candidates_ready: readyPendingCount,
+              source_status: sourceStatus
+            }
+          };
+
+          await completeJobRun(client, jobId, payload);
+
+          return {
+            ok: true,
+            stats: payload.stats_json
+          };
+        }
+
+        if (sourceStatusFresh && readyPendingCount === 0 && isSourceIdleForKnownHead(sourceStatus, syncState)) {
+          const now = new Date().toISOString();
+          const sourceIdleUntil = new Date(Date.now() + config.rapidSwapsSourceIdleCooldownMs).toISOString();
+          sourceIdleStats = {
+            source_idle_at: now,
+            source_idle_until: sourceIdleUntil,
+            source_idle_reason: 'chain_halted_action_head_unchanged'
+          };
+
+          if (scanPlan.catchup) {
+            effectiveScanPlan = {
+              ...scanPlan,
+              skipReason: 'source_idle_catchup',
+              nextScanAt: '',
+              head: null
+            };
+          } else {
+            const previousStats = safeStats(syncState);
+            await saveSyncState(client, {
+              last_scanned_height: Number(syncState?.last_scanned_height || 0),
+              last_scanned_at: now,
+              stats_json: mergeSourceStatusIntoStats(previousStats, sourceStatus, sourceIdleStats)
+            });
+
+            const payload = {
+              job_name: 'rapid-swaps-recent-actions',
+              finished_at: now,
+              status: 'success',
+              stats_json: {
+                skipped: true,
+                skip_reason: 'source_idle',
+                source_idle_until: sourceIdleUntil,
+                cooldown_seconds: Math.round(config.rapidSwapsSourceIdleCooldownMs / 1000),
+                pending_candidates_ready: readyPendingCount,
+                source_status: sourceStatus
+              }
+            };
+
+            await completeJobRun(client, jobId, payload);
+
+            return {
+              ok: true,
+              stats: payload.stats_json
+            };
+          }
+        }
+
+        if (sourceIdleStats?.source_idle_until && !sourceStatus) {
+          sourceStatus = safeStats(syncState).source_status || null;
+        }
+      }
+
+      if (sourceIdleStats?.source_idle_until && !effectiveScanPlan.catchup && readyPendingCount === 0) {
+        const now = new Date().toISOString();
+        const previousStats = safeStats(syncState);
+        await saveSyncState(client, {
+          last_scanned_height: Number(syncState?.last_scanned_height || 0),
+          last_scanned_at: now,
+          stats_json: mergeSourceStatusIntoStats(previousStats, sourceStatus, sourceIdleStats)
+        });
+
+        const payload = {
+          job_name: 'rapid-swaps-recent-actions',
+          finished_at: now,
+          status: 'success',
+          stats_json: {
+            skipped: true,
+            skip_reason: 'source_idle',
+            source_idle_until: sourceIdleStats.source_idle_until,
+            cooldown_seconds: Math.round(config.rapidSwapsSourceIdleCooldownMs / 1000),
+            pending_candidates_ready: readyPendingCount,
+            source_status: sourceStatus
           }
         };
 
@@ -384,20 +562,21 @@ export async function runRapidSwapsScheduler() {
       const pendingResolution = await resolvePendingCandidates(client, priceIndex);
       await upsertRapidSwaps(client, pendingResolution.upsertRows);
 
-      const headScan = scanPlan.shouldScan
+      const headScan = effectiveScanPlan.shouldScan && effectiveScanPlan.head
         ? await fetchRapidSwapRows({
-            maxPages: scanPlan.head.maxPages,
+            maxPages: effectiveScanPlan.head.maxPages,
             knownTxIds,
-            stopBelowHeight: scanPlan.head.stopBelowHeight,
+            stopBelowHeight: effectiveScanPlan.head.stopBelowHeight,
             priceIndex
           })
         : null;
 
-      const catchupScan = scanPlan.catchup && headScan && !headScan.reachedStopHeight && !headScan.stoppedEarly
+      const catchupScan = effectiveScanPlan.catchup
+        && (!effectiveScanPlan.head || (headScan && !headScan.reachedStopHeight && !headScan.stoppedEarly))
         ? await fetchRapidSwapRows({
-            maxPages: scanPlan.catchup.maxPages,
-            nextPageToken: scanPlan.catchup.nextPageToken,
-            stopBelowHeight: scanPlan.catchup.stopBelowHeight,
+            maxPages: effectiveScanPlan.catchup.maxPages,
+            nextPageToken: effectiveScanPlan.catchup.nextPageToken,
+            stopBelowHeight: effectiveScanPlan.catchup.stopBelowHeight,
             priceIndex
           })
         : null;
@@ -408,20 +587,30 @@ export async function runRapidSwapsScheduler() {
       );
       await upsertRapidSwaps(client, canonicalRowsToUpsert);
 
-      const scanSummary = headScan
+      const scanSummary = headScan || catchupScan
         ? summarizeRapidSwapCanonicalScan({
-            syncState,
-            plan: scanPlan,
+          syncState,
+            plan: effectiveScanPlan,
             headScan,
             catchupScan
           })
         : null;
 
       if (scanSummary) {
+        const statsExtra = sourceIdleStats?.source_idle_until
+          ? {
+              ...sourceIdleStats,
+              rate_limited_until: null
+            }
+          : {
+              source_idle_until: null,
+              rate_limited_until: null
+            };
+
         await saveSyncState(client, {
           last_scanned_height: Number(scanSummary.lastScannedHeight || 0),
           last_scanned_at: new Date().toISOString(),
-          stats_json: scanSummary.stats
+          stats_json: mergeSourceStatusIntoStats(scanSummary.stats, sourceStatus, statsExtra)
         });
       }
 
@@ -443,26 +632,29 @@ export async function runRapidSwapsScheduler() {
           candidates_deferred: pendingResolution.deferred,
           candidates_errored: pendingResolution.errored,
           pending_candidates_remaining: pendingCount,
-          skipped: !scanPlan.shouldScan,
-          skip_reason: scanPlan.skipReason,
-          next_scan_at: scanPlan.nextScanAt,
-          scan_stop_below_height: scanPlan.head?.stopBelowHeight || 0,
-          scan_head_budget_pages: scanPlan.head?.maxPages || 0,
-          scan_catchup_budget_pages: scanPlan.catchup?.maxPages || 0,
+          skipped: !effectiveScanPlan.shouldScan,
+          skip_reason: effectiveScanPlan.skipReason,
+          next_scan_at: effectiveScanPlan.nextScanAt,
+          scan_stop_below_height: effectiveScanPlan.head?.stopBelowHeight || 0,
+          scan_head_budget_pages: effectiveScanPlan.head?.maxPages || 0,
+          scan_catchup_budget_pages: effectiveScanPlan.catchup?.maxPages || 0,
           scan_reached_floor: Boolean(headScan?.reachedStopHeight),
           scan_lagging: Boolean(scanSummary?.lagging),
-          highest_height_seen: headScan?.highestHeight || 0,
-          lowest_height_seen: headScan?.lowestHeight || 0,
+          highest_height_seen: headScan?.highestHeight || catchupScan?.highestHeight || 0,
+          lowest_height_seen: headScan?.lowestHeight || catchupScan?.lowestHeight || 0,
           next_page_token: scanSummary?.stats?.next_page_token || '',
           scanned_pages: Number(headScan?.scannedPages || 0) + Number(catchupScan?.scannedPages || 0),
           scanned_actions: Number(headScan?.scannedActions || 0) + Number(catchupScan?.scannedActions || 0),
           catchup_scanned_pages: Number(catchupScan?.scannedPages || 0),
           catchup_scanned_actions: Number(catchupScan?.scannedActions || 0),
           rapid_swaps_upserted: pendingResolution.upsertRows.length + canonicalRowsToUpsert.length,
-          observed_at: headScan?.observedAt || '',
+          observed_at: headScan?.observedAt || catchupScan?.observedAt || '',
           stopped_early: Boolean(headScan?.stoppedEarly),
-          catchup_active: Boolean(scanPlan.catchup),
-          catchup_reached_floor: Boolean(catchupScan?.reachedStopHeight)
+          catchup_active: Boolean(effectiveScanPlan.catchup),
+          catchup_reached_floor: Boolean(catchupScan?.reachedStopHeight),
+          head_skipped_source_idle: Boolean(effectiveScanPlan.catchup && !effectiveScanPlan.head && sourceIdleStats?.source_idle_until),
+          source_idle_until: sourceIdleStats?.source_idle_until || null,
+          source_status: sourceStatus
         }
       };
 
@@ -477,24 +669,21 @@ export async function runRapidSwapsScheduler() {
         const cooldownMs = getRapidSwapRateLimitCooldownMs(error, config.rapidSwapsRateLimitCooldownMs);
         const rateLimitedAt = new Date().toISOString();
         const rateLimitedUntil = new Date(Date.now() + cooldownMs).toISOString();
-        const previousStats = syncState?.stats_json && typeof syncState.stats_json === 'object'
-          ? syncState.stats_json
-          : {};
+        const previousStats = safeStats(syncState);
 
         await saveSyncState(client, {
           last_scanned_height: Number(syncState?.last_scanned_height || 0),
           last_scanned_at: syncState?.last_scanned_at || rateLimitedAt,
-          stats_json: {
-            ...previousStats,
+          stats_json: mergeSourceStatusIntoStats(previousStats, null, {
             rate_limited_at: rateLimitedAt,
             rate_limited_until: rateLimitedUntil,
             rate_limit_error: error.message || 'Rapid swap provider rate limit'
-          }
+          })
         }).catch(() => {});
 
         const payload = {
           finished_at: rateLimitedAt,
-          status: 'rate_limited',
+          status: 'success',
           error: error.message || 'Rapid swap provider rate limit',
           stats_json: {
             skipped: true,

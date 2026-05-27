@@ -55,6 +55,7 @@ export const config = Object.freeze({
   rapidSwapsLaggingHeadPages: readInt('RAPID_SWAPS_LAGGING_HEAD_PAGES', 2),
   rapidSwapsCatchupPages: readInt('RAPID_SWAPS_CATCHUP_PAGES', 2),
   rapidSwapsRateLimitCooldownMs: readInt('RAPID_SWAPS_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000,
+  rapidSwapsSourceIdleCooldownMs: readInt('RAPID_SWAPS_SOURCE_IDLE_COOLDOWN_SECONDS', 15 * 60) * 1000,
   rapidSwapsHeightOverlapBlocks: readInt('RAPID_SWAPS_HEIGHT_OVERLAP_BLOCKS', 1800),
   rapidSwapsMaxCandidateAttempts: readInt('RAPID_SWAPS_MAX_CANDIDATE_ATTEMPTS', 12),
   rapidSwapsPendingCandidateBatch: readInt('RAPID_SWAPS_PENDING_CANDIDATE_BATCH', 100),
