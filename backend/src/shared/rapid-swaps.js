@@ -4,6 +4,7 @@ export {
   RECENT_SCAN_HEIGHT_BUFFER,
   fetchRapidSwapPriceIndex,
   fetchRapidSwapRows,
+  fetchRapidSwapSourceStatus,
   fetchThorchainTx,
   getRapidSwapRateLimitCooldownMs,
   isRapidSwapRateLimitError,

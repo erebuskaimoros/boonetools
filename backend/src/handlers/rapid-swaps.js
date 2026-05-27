@@ -374,6 +374,9 @@ export async function handleRapidSwaps(_request, url) {
   const summary = summaryResult.rows[0] || {};
   const trackerStartedAt = summary.tracker_started_at || null;
   const lastRunAt = lastRunResult.rows[0]?.finished_at || null;
+  const syncStats = syncStateResult.rows[0]?.stats_json || {};
+  const lastRunStats = lastRunResult.rows[0]?.stats_json || {};
+  const sourceStatus = syncStats.source_status || lastRunStats.source_status || null;
   const totalTracked = Number(summary.total_tracked) || 0;
   const tableTotal = Number(tableCountResult.rows[0]?.count) || 0;
   const topRows = topRowsResult.rows.map(normalizeRapidSwapRow);
@@ -410,6 +413,8 @@ export async function handleRapidSwaps(_request, url) {
       pct_faster: pctFaster,
       recent_24h_count: Number(summary.recent_24h_count) || recentRows.length,
       recent_24h_volume_usd: recentVolumeUsd,
+      chain_status: sourceStatus,
+      source_status: sourceStatus,
       top_20: topRows,
       recent_24h: recentRows,
       all_swaps: tableRows,
@@ -441,13 +446,14 @@ export async function handleRapidSwaps(_request, url) {
         last_run_at: toIsoString(lastRunAt),
         last_run_status: lastRunResult.rows[0]?.status || 'unknown',
         freshness_seconds: freshnessSeconds,
-        last_run_stats: lastRunResult.rows[0]?.stats_json || {},
+        last_run_stats: lastRunStats,
+        source_status: sourceStatus,
         pending_candidates: Number(pendingCandidatesResult.rows[0]?.count) || 0,
         canonical_sync: syncStateResult.rows[0]
           ? {
               last_scanned_height: Number(syncStateResult.rows[0].last_scanned_height || 0),
               last_scanned_at: toIsoString(syncStateResult.rows[0].last_scanned_at),
-              stats: syncStateResult.rows[0].stats_json || {}
+              stats: syncStats
             }
           : null
       },
