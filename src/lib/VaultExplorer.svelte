@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
-  import { formatNumber, formatUSD, formatUSDCompact, formatThorAmount, copyToClipboard as copyToClipboardUtil, shortenAddress as shortenAddressUtil } from '$lib/utils/formatting';
+  import { formatNumber, formatUSD, formatUSDCompact, formatThorAmount, copyToClipboard as copyToClipboardUtil, shortenAddress as shortenAddressUtil, getAddressSuffix } from '$lib/utils/formatting';
   import { fromBaseUnit } from '$lib/utils/blockchain';
   import {
     CHAIN_ICONS,
@@ -29,6 +29,7 @@
 
   // Vault Details state
   let showAssetBalances = false;
+  let expandedSignerVaults = new Set();
   let toastMessage = '';
   let showToast = false;
   const FALLBACK_ICON = '/assets/coins/fallback-logo.svg';
@@ -131,6 +132,40 @@
   function openExplorer(chain, address) {
     const explorerUrl = chainExplorers[chain];
     if (explorerUrl) window.open(explorerUrl + address, '_blank');
+  }
+
+  function getNodeExplorerUrl(nodeAddress) {
+    return `https://thorchain.net/node/${nodeAddress}`;
+  }
+
+  function getNodeForSignerPubkey(pubkey) {
+    return data?.nodesData?.find((node) => node.pub_key_set?.secp256k1 === pubkey) || null;
+  }
+
+  function getVaultSignerNodes(vault) {
+    return (vault?.membership || []).map((pubkey) => {
+      const node = getNodeForSignerPubkey(pubkey);
+      const nodeAddress = node?.node_address || '';
+      return {
+        pubkey,
+        nodeAddress,
+        suffix: getAddressSuffix(nodeAddress || pubkey, 4)
+      };
+    });
+  }
+
+  function isSignerListExpanded(vault) {
+    return expandedSignerVaults.has(vault?.pub_key);
+  }
+
+  function toggleSignerList(vault) {
+    const next = new Set(expandedSignerVaults);
+    if (next.has(vault.pub_key)) {
+      next.delete(vault.pub_key);
+    } else {
+      next.add(vault.pub_key);
+    }
+    expandedSignerVaults = next;
   }
 
   function getChainIcon(chain) {
@@ -394,11 +429,37 @@
                   <span class="vault-stat-label">ASSET VALUE</span>
                   <span class="vault-stat-val accent">{formatUSDCompact(calculateVaultAssetValue(vault.coins, data.prices))}</span>
                 </div>
-                <div class="vault-stat">
+                <button
+                  type="button"
+                  class="vault-stat vault-stat-button"
+                  class:expanded={isSignerListExpanded(vault)}
+                  aria-expanded={isSignerListExpanded(vault)}
+                  aria-label="Toggle signers for Vault {formatVaultName(vault.pub_key)}"
+                  on:click={() => toggleSignerList(vault)}
+                >
                   <span class="vault-stat-label">SIGNERS</span>
-                  <span class="vault-stat-val">{vault.membership?.length || 0}</span>
-                </div>
+                  <span class="vault-stat-val signer-stat-val">
+                    {vault.membership?.length || 0}
+                    <ChevronDownIcon size={12} />
+                  </span>
+                </button>
               </div>
+
+              {#if isSignerListExpanded(vault)}
+                <div class="signer-list" transition:slide={{ duration: 160 }} aria-label="Vault signers">
+                  {#each getVaultSignerNodes(vault) as signer (signer.pubkey)}
+                    {#if signer.nodeAddress}
+                      <a class="signer-link" href={getNodeExplorerUrl(signer.nodeAddress)} target="_blank" rel="noopener noreferrer" title={signer.nodeAddress}>
+                        {signer.suffix}
+                      </a>
+                    {:else}
+                      <span class="signer-link signer-link-missing" title={signer.pubkey}>
+                        {signer.suffix}
+                      </span>
+                    {/if}
+                  {/each}
+                </div>
+              {/if}
 
               <div class="vault-divider"></div>
 
@@ -977,6 +1038,30 @@
     text-align: center;
   }
 
+  .vault-stat-button {
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    width: 100%;
+    transition: background 0.15s;
+  }
+
+  .vault-stat-button:hover,
+  .vault-stat-button.expanded {
+    background: #141414;
+  }
+
+  .vault-stat-button:hover .vault-stat-label,
+  .vault-stat-button.expanded .vault-stat-label {
+    color: #666;
+  }
+
+  .vault-stat-button:hover .vault-stat-val,
+  .vault-stat-button.expanded .vault-stat-val {
+    color: #00cc66;
+  }
+
   .vault-stat-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 8px;
@@ -995,6 +1080,59 @@
   }
 
   .vault-stat-val.accent { color: #00cc66; }
+
+  .signer-stat-val {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .signer-stat-val :global(svg) {
+    transition: transform 0.15s;
+  }
+
+  .vault-stat-button.expanded .signer-stat-val :global(svg) {
+    transform: rotate(180deg);
+  }
+
+  .signer-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(48px, 1fr));
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .signer-link {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    color: #aaa;
+    text-decoration: none;
+    background: #111;
+    border: 1px solid #1e1e1e;
+    border-radius: 3px;
+    padding: 5px 6px;
+    text-align: center;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+  }
+
+  .signer-link:hover {
+    color: #00cc66;
+    background: rgba(0, 204, 102, 0.06);
+    border-color: rgba(0, 204, 102, 0.35);
+  }
+
+  .signer-link-missing {
+    color: #666;
+    cursor: default;
+  }
+
+  .signer-link-missing:hover {
+    color: #666;
+    background: #111;
+    border-color: #1e1e1e;
+  }
 
   .expand-toggle {
     font-family: 'JetBrains Mono', monospace;
