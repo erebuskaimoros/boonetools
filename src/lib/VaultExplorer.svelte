@@ -29,7 +29,7 @@
 
   // Vault Details state
   let showAssetBalances = false;
-  let expandedSignerVaultPubKey = null;
+  let expandedSignerVaultPubKeys = [];
   let toastMessage = '';
   let showToast = false;
   const FALLBACK_ICON = '/assets/coins/fallback-logo.svg';
@@ -155,7 +155,9 @@
   }
 
   function toggleSignerList(vault) {
-    expandedSignerVaultPubKey = expandedSignerVaultPubKey === vault.pub_key ? null : vault.pub_key;
+    expandedSignerVaultPubKeys = expandedSignerVaultPubKeys.includes(vault.pub_key)
+      ? expandedSignerVaultPubKeys.filter((pubKey) => pubKey !== vault.pub_key)
+      : [...expandedSignerVaultPubKeys, vault.pub_key];
   }
 
   function getChainIcon(chain) {
@@ -422,8 +424,8 @@
                 <button
                   type="button"
                   class="vault-stat vault-stat-button"
-                  class:expanded={expandedSignerVaultPubKey === vault.pub_key}
-                  aria-expanded={expandedSignerVaultPubKey === vault.pub_key}
+                  class:expanded={expandedSignerVaultPubKeys.includes(vault.pub_key)}
+                  aria-expanded={expandedSignerVaultPubKeys.includes(vault.pub_key)}
                   aria-label="Toggle signers for Vault {formatVaultName(vault.pub_key)}"
                   on:click={() => toggleSignerList(vault)}
                 >
@@ -435,7 +437,7 @@
                 </button>
               </div>
 
-              {#if expandedSignerVaultPubKey === vault.pub_key}
+              {#if expandedSignerVaultPubKeys.includes(vault.pub_key)}
                 <div class="signer-list" transition:slide={{ duration: 160 }} aria-label="Vault signers">
                   {#each getVaultSignerNodes(vault) as signer (signer.pubkey)}
                     {#if signer.nodeAddress}
