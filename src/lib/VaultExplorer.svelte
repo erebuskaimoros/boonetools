@@ -167,6 +167,14 @@
     if (amount >= 1) return formatNumber(amount, { maximumFractionDigits: 2 });
     return formatNumber(amount, { maximumFractionDigits: 4 });
   }
+
+  function getBalanceSourceLabel(coin) {
+    const labels = {
+      eth_chain: 'ETH chain',
+      ltc_chain: 'LTC chain'
+    };
+    return labels[coin?.balance_source] || '';
+  }
 </script>
 
 <div class="ve">
@@ -404,14 +412,15 @@
                   {#each getVisibleVaultCoins(vault) as coin (coin.asset)}
                     {@const logo = getAssetLogo(coin.asset)}
                     {@const name = getAssetDisplayName(coin.asset)}
+                    {@const sourceLabel = getBalanceSourceLabel(coin)}
                     <div class="asset-row">
                       <div class="asset-id">
                         {#if logo}
                           <img src={logo} alt={name} class="asset-logo" on:error={handleIconError} loading="eager" decoding="async" />
                         {/if}
                         <span>{name}</span>
-                        {#if coin.balance_source === 'eth_chain'}
-                          <span class="asset-source">ETH chain</span>
+                        {#if sourceLabel}
+                          <span class="asset-source">{sourceLabel}</span>
                         {/if}
                       </div>
                       <div class="asset-vals">

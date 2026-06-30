@@ -11,6 +11,7 @@ import { fromBaseUnit, getAssetType, normalizeAsset } from '$lib/utils/blockchai
 import { getNodes } from '$lib/utils/nodes';
 import { getAssetDisplayName } from '$lib/constants';
 import { hydrateEthOnChainBalances } from './eth-balances.js';
+import { hydrateUtxoOnChainBalances } from './utxo-balances.js';
 
 /**
  * Fetch and process all vault explorer data.
@@ -32,6 +33,11 @@ export async function fetchVaultExplorerData() {
     vaults = sortVaultsByStatus(await hydrateEthOnChainBalances(vaults, poolsData, inboundAddresses));
   } catch (error) {
     console.warn('Failed to hydrate Vault Explorer ETH balances from Ethereum RPC:', error);
+  }
+  try {
+    vaults = sortVaultsByStatus(await hydrateUtxoOnChainBalances(vaults));
+  } catch (error) {
+    console.warn('Failed to hydrate Vault Explorer UTXO balances from chain APIs:', error);
   }
   const activeVaults = vaults.filter(v => v.status === VAULT_STATUS.ACTIVE);
   const runePrice = fromBaseUnit(networkData.rune_price_in_tor);
