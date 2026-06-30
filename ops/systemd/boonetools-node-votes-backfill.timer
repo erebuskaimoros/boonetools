@@ -1,0 +1,12 @@
+[Unit]
+Description=Run BooneTools Node Votes Backfill hourly
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Persistent=true
+Unit=boonetools-node-votes-backfill.service
+
+[Install]
+WantedBy=timers.target
