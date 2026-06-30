@@ -1,0 +1,10 @@
+[Unit]
+Description=Run BooneTools Rujira Base Fees Scheduler every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+Unit=boonetools-rujira-base-fees.service
+
+[Install]
+WantedBy=timers.target

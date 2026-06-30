@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-18T01:10:02.745Z",
+  "generatedAt": "2026-05-18T13:54:03.382Z",
   "eventCount": 1985,
   "actionCount": 520,
   "reserveCollector": "thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr",
@@ -16,13 +16,11 @@
       1
     ]
   ],
-  "schedule": 100,
-  "lastExecuted": "1778834338474730021",
-  "lastExecutedHeight": 26183204,
-  "sourceMidgard": "https://gateway.liquify.com/chain/thorchain_midgard",
+  "sourceMidgard": "https://midgard.thorchain.network",
   "sourceThornode": "https://thornode.thorchain.network",
   "sourceRpc": [
     "https://gateway.liquify.com/chain/thorchain_rpc",
     "https://rpc.thorchain.network"
-  ]
+  ],
+  "priceBasis": "amountRune × Midgard daily RUNE/USD for each Reserve deposit date; weekly rows aggregate historical USD at dispersal time, not current RUNE value"
 }

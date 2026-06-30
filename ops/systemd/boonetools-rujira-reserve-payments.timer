@@ -1,0 +1,10 @@
+[Unit]
+Description=Run BooneTools Rujira Reserve Payment Backfill every 5 minutes
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+Unit=boonetools-rujira-reserve-payments.service
+
+[Install]
+WantedBy=timers.target

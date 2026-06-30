@@ -150,7 +150,12 @@
 
   let weeklyRows = [];
   let reserveEvents = [];
+  let staticWeeklyRows = [];
+  let staticReserveEvents = [];
+  let staticReserveMeta = null;
   let collectorRevenue = null;
+  let generatedFees = null;
+  let staticGeneratedFees = null;
   let meta = null;
   let configs = {};
   let histories = {};
@@ -158,13 +163,21 @@
   let poolPrices = {};
   let runePriceUsd = 0;
   let artifactsLoading = true;
+  let reservePaymentsLoading = true;
+  let generatedFeesLoading = true;
   let liveLoading = true;
   let artifactsError = '';
+  let reservePaymentsError = '';
+  let reservePaymentsWarning = '';
+  let generatedFeesError = '';
+  let generatedFeesWarning = '';
   let liveError = '';
   let liveRouteWarning = '';
   let lastLiveRefresh = null;
   let paymentCanvas;
   let paymentChart;
+  let generatedFeesCanvas;
+  let generatedFeesChart;
 
   const usd0 = new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -183,6 +196,30 @@
   $: firstEvent = reserveEvents[0] || null;
   $: latestEvent = reserveEvents.at(-1) || null;
   $: recentEvents = reserveEvents.slice(-8).reverse();
+  $: reservePaymentMeta = meta || {};
+  $: reservePaymentPendingBlocks = Number(reservePaymentMeta.pendingBlockCount || 0);
+  $: reservePaymentBackfillLabel = reservePaymentMeta.backfillComplete
+    ? 'backfill complete'
+    : `${number2.format(reservePaymentPendingBlocks)} blocks queued`;
+  $: reservePriceBasis =
+    reservePaymentMeta.priceBasis ||
+    'amount RUNE × Dune daily THORChain pool RUNE/USD for each Reserve deposit date';
+  $: latestReservePrice = latestWeek?.rune_price_usd || 0;
+  $: reservePriceRange = getWeeklyPriceRange(weeklyRows);
+  $: generatedFeeRows = generatedFees?.weekly || [];
+  $: latestGeneratedFeeWeek = generatedFeeRows.at(-1) || null;
+  $: generatedFeeMeta = generatedFees?.meta || null;
+  $: generatedFeeRoutes = generatedFees?.routes || [];
+  $: topGeneratedFeeRoutes = generatedFeeRoutes.slice(0, 8);
+  $: totalGeneratedFeeRune =
+    generatedFeeMeta?.totalLiquidityFeeRune || latestGeneratedFeeWeek?.cumulative_rune || 0;
+  $: totalGeneratedFeeUsd =
+    generatedFeeMeta?.totalLiquidityFeeUsd || latestGeneratedFeeWeek?.cumulative_usd || 0;
+  $: generatedFeeScope = generatedFeeMeta?.scope || 'pending generated-fee scan';
+  $: generatedFeePendingBlocks = Number(generatedFeeMeta?.pendingBlockCount || 0);
+  $: generatedFeeBackfillLabel = generatedFeeMeta?.backfillComplete
+    ? 'backfill complete'
+    : `${number2.format(generatedFeePendingBlocks)} blocks queued`;
   $: pendingRune = amountFromBase(
     balances.find((balance) => balance.denom === 'rune')?.amount || 0
   );
@@ -239,13 +276,20 @@
   $: if (paymentCanvas && weeklyRows.length) {
     renderPaymentChart(weeklyRows);
   }
+  $: if (generatedFeesCanvas && generatedFeeRows.length) {
+    renderGeneratedFeesChart(generatedFeeRows);
+  }
 
   onMount(() => {
-    loadArtifacts();
+    loadArtifacts().then(() => {
+      refreshReservePayments();
+      refreshGeneratedFees();
+    });
     refreshLiveState();
 
     return () => {
       paymentChart?.destroy();
+      generatedFeesChart?.destroy();
     };
   });
 
@@ -261,24 +305,106 @@
     try {
       artifactsLoading = true;
       artifactsError = '';
-      const [csvRows, eventRows, revenueJson, metaJson] = await Promise.all([
+      generatedFeesError = '';
+      generatedFeesWarning = '';
+      const [csvRows, eventRows, revenueJson, metaJson, generatedFeesResult] = await Promise.all([
         fetchDataFile('rujira-base-layer-fees.csv', parseCsv),
         fetchDataFile('rujira-base-layer-fees-events.json', JSON.parse),
         fetchDataFile('rujira-collector-revenue.json', JSON.parse),
-        fetchDataFile('rujira-base-layer-fees-meta.json', JSON.parse)
+        fetchDataFile('rujira-base-layer-fees-meta.json', JSON.parse),
+        fetchDataFile('rujira-app-layer-swap-fees.json', JSON.parse).catch((error) => ({
+          __error: error.message
+        }))
       ]);
 
-      weeklyRows = csvRows;
-      reserveEvents = eventRows.map((event) => ({
-        ...event,
-        amountRune: amountFromBase(event.amountBase)
-      }));
+      staticWeeklyRows = csvRows;
+      staticReserveEvents = eventRows.map((event) => normalizeReserveEvent(event, csvRows));
+      staticReserveMeta = metaJson;
       collectorRevenue = revenueJson;
-      meta = metaJson;
+      if (generatedFeesResult?.__error) {
+        staticGeneratedFees = null;
+      } else {
+        staticGeneratedFees = generatedFeesResult;
+      }
     } catch (error) {
       artifactsError = error.message;
     } finally {
       artifactsLoading = false;
+    }
+  }
+
+  async function refreshReservePayments() {
+    try {
+      reservePaymentsLoading = true;
+      reservePaymentsError = '';
+      reservePaymentsWarning = '';
+      const payload = await fetchAppLayerReservePayments();
+      if (!Array.isArray(payload?.weekly) || !Array.isArray(payload?.events)) {
+        throw new Error('invalid reserve-payment payload');
+      }
+      const staticEventCount = Number(staticReserveMeta?.eventCount || 0);
+      const dbEventCount = Number(payload?.meta?.eventCount || 0);
+      if (staticEventCount > dbEventCount && !payload?.meta?.backfillComplete && staticWeeklyRows.length) {
+        weeklyRows = staticWeeklyRows;
+        reserveEvents = staticReserveEvents;
+        meta = {
+          ...staticReserveMeta,
+          dbBackfill: payload.meta || {},
+          backfillComplete: false,
+          pendingBlockCount: payload.meta?.pendingBlockCount || 0,
+          fetchedBlockCount: payload.meta?.fetchedBlockCount || 0
+        };
+        reservePaymentsWarning = `reserve-payment DB backfill in progress — ${dbEventCount}/${staticEventCount} events loaded; using static fallback`;
+        return;
+      }
+      weeklyRows = payload.weekly;
+      reserveEvents = payload.events.map((event) => normalizeReserveEvent(event, payload.weekly));
+      meta = payload.meta || {};
+    } catch (error) {
+      if (weeklyRows.length) {
+        reservePaymentsWarning = String(error.message || '').startsWith('404')
+          ? ''
+          : `reserve-payment DB — ${error.message}; using last successful payload`;
+      } else if (staticWeeklyRows.length) {
+        weeklyRows = staticWeeklyRows;
+        reserveEvents = staticReserveEvents;
+        meta = staticReserveMeta;
+        reservePaymentsWarning = String(error.message || '').startsWith('404')
+          ? ''
+          : `reserve-payment DB — ${error.message}; using static fallback`;
+      } else {
+        reservePaymentsError = `reserve-payment DB — ${error.message}`;
+      }
+    } finally {
+      reservePaymentsLoading = false;
+    }
+  }
+
+  async function refreshGeneratedFees() {
+    try {
+      generatedFeesLoading = true;
+      generatedFeesError = '';
+      generatedFeesWarning = '';
+      const payload = await fetchAppLayerBaseFees();
+      if (!Array.isArray(payload?.weekly)) {
+        throw new Error('invalid generated-fee payload');
+      }
+      generatedFees = payload;
+    } catch (error) {
+      if (generatedFees) {
+        generatedFeesWarning = String(error.message || '').startsWith('404')
+          ? ''
+          : `generated-fee DB — ${error.message}; using last successful payload`;
+      } else if (staticGeneratedFees) {
+        generatedFees = staticGeneratedFees;
+        generatedFeesWarning = String(error.message || '').startsWith('404')
+          ? ''
+          : `generated-fee DB — ${error.message}; using static fallback`;
+      } else {
+        generatedFeesError = `generated-fee DB — ${error.message}`;
+      }
+    } finally {
+      generatedFeesLoading = false;
     }
   }
 
@@ -308,6 +434,40 @@
       ? { apikey: APP_LAYER_API_KEY, Authorization: `Bearer ${APP_LAYER_API_KEY}` }
       : {};
     const response = await fetch(`${APP_LAYER_API_BASE}/app-layer-live-state`, {
+      headers,
+      cache: 'no-store'
+    });
+    const text = await response.text();
+
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 160)}`);
+    }
+
+    return JSON.parse(text);
+  }
+
+  async function fetchAppLayerBaseFees() {
+    const headers = APP_LAYER_API_KEY
+      ? { apikey: APP_LAYER_API_KEY, Authorization: `Bearer ${APP_LAYER_API_KEY}` }
+      : {};
+    const response = await fetch(`${APP_LAYER_API_BASE}/app-layer-base-fees`, {
+      headers,
+      cache: 'no-store'
+    });
+    const text = await response.text();
+
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 160)}`);
+    }
+
+    return JSON.parse(text);
+  }
+
+  async function fetchAppLayerReservePayments() {
+    const headers = APP_LAYER_API_KEY
+      ? { apikey: APP_LAYER_API_KEY, Authorization: `Bearer ${APP_LAYER_API_KEY}` }
+      : {};
+    const response = await fetch(`${APP_LAYER_API_BASE}/app-layer-reserve-payments`, {
       headers,
       cache: 'no-store'
     });
@@ -355,7 +515,7 @@
         datasets: [
           {
             type: 'bar',
-            label: 'Weekly paid USD',
+            label: 'Weekly paid USD at deposit price',
             data: rows.map((row) => row.payment_usd),
             backgroundColor: 'rgba(0, 204, 102, 0.55)',
             borderColor: '#00cc66',
@@ -365,7 +525,7 @@
           },
           {
             type: 'line',
-            label: 'Cumulative paid USD',
+            label: 'Cumulative paid USD at deposit price',
             data: rows.map((row) => row.cumulative_usd),
             borderColor: '#d4a017',
             backgroundColor: '#d4a017',
@@ -407,7 +567,7 @@
                 const row = rows[items[0].dataIndex];
                 return [
                   `${number2.format(row.payment_rune)} RUNE paid`,
-                  `${number4.format(row.rune_price_usd)} RUNE/USD`,
+                  `${number4.format(row.rune_price_usd)} avg historical RUNE/USD`,
                   `${number2.format(row.cumulative_rune)} cumulative RUNE`
                 ];
               },
@@ -448,6 +608,111 @@
     });
   }
 
+  function renderGeneratedFeesChart(rows) {
+    if (!generatedFeesCanvas) return;
+    const ctx = generatedFeesCanvas.getContext('2d');
+    generatedFeesChart?.destroy();
+
+    generatedFeesChart = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: rows.map((row) => formatWeekLabel(row.week_start)),
+        datasets: [
+          {
+            type: 'bar',
+            label: 'Weekly generated fees USD',
+            data: rows.map((row) => row.liquidity_fee_usd),
+            backgroundColor: 'rgba(68, 160, 255, 0.35)',
+            borderColor: '#44a0ff',
+            borderWidth: 1,
+            borderRadius: 0,
+            yAxisID: 'weekly'
+          },
+          {
+            type: 'line',
+            label: 'Cumulative generated fees USD',
+            data: rows.map((row) => row.cumulative_usd),
+            borderColor: '#00cc66',
+            backgroundColor: '#00cc66',
+            pointBackgroundColor: '#00cc66',
+            pointBorderColor: '#080808',
+            pointRadius: 3,
+            borderWidth: 2,
+            tension: 0.2,
+            yAxisID: 'cumulative'
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          mode: 'index',
+          intersect: false
+        },
+        plugins: {
+          legend: {
+            labels: {
+              color: '#888',
+              boxWidth: 10,
+              usePointStyle: true,
+              font: { family: "'JetBrains Mono', monospace", size: 10 }
+            }
+          },
+          tooltip: {
+            backgroundColor: '#0a0a0a',
+            borderColor: '#1a1a1a',
+            borderWidth: 1,
+            titleColor: '#44a0ff',
+            bodyColor: '#c8c8c8',
+            titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
+            bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+            callbacks: {
+              afterBody(items) {
+                const row = rows[items[0].dataIndex];
+                return [
+                  `${number4.format(row.liquidity_fee_rune)} RUNE fees`,
+                  `${number4.format(row.rune_price_usd)} RUNE/USD`,
+                  `${number4.format(row.cumulative_rune)} cumulative RUNE`
+                ];
+              },
+              label(context) {
+                return `${context.dataset.label}: ${usd2.format(context.raw)}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: '#111', drawBorder: false },
+            border: { color: '#1a1a1a' },
+            ticks: { color: '#666', font: { family: "'JetBrains Mono', monospace", size: 10 } }
+          },
+          weekly: {
+            position: 'left',
+            grid: { color: '#111', drawBorder: false },
+            border: { color: '#1a1a1a' },
+            ticks: {
+              color: '#44a0ff',
+              font: { family: "'JetBrains Mono', monospace", size: 10 },
+              callback: (value) => usd2.format(value)
+            }
+          },
+          cumulative: {
+            position: 'right',
+            grid: { drawOnChartArea: false },
+            border: { color: '#1a1a1a' },
+            ticks: {
+              color: '#00cc66',
+              font: { family: "'JetBrains Mono', monospace", size: 10 },
+              callback: (value) => usd2.format(value)
+            }
+          }
+        }
+      }
+    });
+  }
+
   function getTargetsForConfig(collectorKey, config) {
     const targetRows = config?.target_addresses;
     if (!Array.isArray(targetRows) || !targetRows.length) {
@@ -465,6 +730,42 @@
   function amountFromBase(value) {
     const numeric = Number(value);
     return Number.isFinite(numeric) ? numeric / 1e8 : 0;
+  }
+
+  function normalizeReserveEvent(event, priceRows = []) {
+    const amountRune = Number(event.amountRune ?? event.amount_rune ?? amountFromBase(event.amountBase));
+    const runePriceUsd = Number(
+      event.runePriceUsd ??
+      event.rune_price_usd ??
+      reservePriceForDate(event.date, priceRows)
+    );
+    const amountUsd = Number(event.amountUsd ?? event.amount_usd ?? amountRune * runePriceUsd);
+    return {
+      ...event,
+      amountRune,
+      runePriceUsd,
+      amountUsd
+    };
+  }
+
+  function reservePriceForDate(value, rows = weeklyRows) {
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime())) return 0;
+    const match = (rows || []).find((row) => {
+      const start = new Date(`${row.week_start}T00:00:00Z`);
+      const end = new Date(`${row.week_end}T00:00:00Z`);
+      return Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && date >= start && date < end;
+    });
+    return Number(match?.rune_price_usd || 0);
+  }
+
+  function getWeeklyPriceRange(rows) {
+    const prices = (rows || []).map((row) => Number(row.rune_price_usd || 0)).filter((price) => price > 0);
+    if (!prices.length) return '';
+    const low = Math.min(...prices);
+    const high = Math.max(...prices);
+    if (Math.abs(low - high) < 0.000001) return `$${number4.format(low)}`;
+    return `$${number4.format(low)}–$${number4.format(high)}`;
   }
 
   function buildPoolPrices(pools) {
@@ -635,18 +936,43 @@
     </div>
     <h1 class="title">APP LAYER <span class="arrow">→</span> BASE LAYER<span class="cursor">_</span></h1>
     <p class="lede">
-      Rujira collector routes, observed final Reserve deposits, and live Base Layer collector
-      state. Reads `rujira-revenue` contract configs and observes RESERVE-memo MsgDeposits.
+      Rujira collector routes, observed final Reserve deposits, generated base-layer swap fees,
+      and live Base Layer collector state. Reads `rujira-revenue` contract configs and THORNode
+      swap fee events.
     </p>
     <div class="rule"></div>
   </div>
 
-  {#if artifactsError || liveError || liveRouteWarning}
+  {#if artifactsError || reservePaymentsError || reservePaymentsWarning || generatedFeesError || generatedFeesWarning || liveError || liveRouteWarning}
     <div class="alerts">
       {#if artifactsError}
         <div class="alert err">
           <span class="alert-tag">ERR</span>
           <span>artifact data — {artifactsError}</span>
+        </div>
+      {/if}
+      {#if generatedFeesError}
+        <div class="alert warn">
+          <span class="alert-tag">WRN</span>
+          <span>{generatedFeesError}</span>
+        </div>
+      {/if}
+      {#if reservePaymentsError}
+        <div class="alert warn">
+          <span class="alert-tag">WRN</span>
+          <span>{reservePaymentsError}</span>
+        </div>
+      {/if}
+      {#if reservePaymentsWarning}
+        <div class="alert warn">
+          <span class="alert-tag">WRN</span>
+          <span>{reservePaymentsWarning}</span>
+        </div>
+      {/if}
+      {#if generatedFeesWarning}
+        <div class="alert warn">
+          <span class="alert-tag">WRN</span>
+          <span>{generatedFeesWarning}</span>
         </div>
       {/if}
       {#if liveError}
@@ -670,20 +996,30 @@
         <span class="metric-idx">01</span>
         <span class="metric-label">paid to tc reserve</span>
       </div>
-      <strong class="metric-value">{artifactsLoading ? '—' : usd2.format(latestWeek?.cumulative_usd || 0)}</strong>
-      <small class="metric-foot">{number2.format(latestWeek?.cumulative_rune || 0)} RUNE observed</small>
+      <strong class="metric-value">{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(latestWeek?.cumulative_usd || 0)}</strong>
+      <small class="metric-foot">{number2.format(latestWeek?.cumulative_rune || 0)} RUNE · USD at dispersal</small>
     </article>
     <article class="metric">
       <div class="metric-head">
         <span class="metric-idx">02</span>
-        <span class="metric-label">reserve deposits</span>
+        <span class="metric-label">generated base fees</span>
       </div>
-      <strong class="metric-value">{artifactsLoading ? '—' : number2.format(meta?.eventCount || 0)}</strong>
-      <small class="metric-foot">{meta?.actionCount || 0} collector actions scanned</small>
+      <strong class="metric-value">
+        {generatedFeesLoading && !generatedFeeRows.length ? '—' : usd2.format(totalGeneratedFeeUsd)}
+      </strong>
+      <small class="metric-foot">{number4.format(totalGeneratedFeeRune)} RUNE liquidity fees</small>
     </article>
     <article class="metric">
       <div class="metric-head">
         <span class="metric-idx">03</span>
+        <span class="metric-label">reserve deposits</span>
+      </div>
+      <strong class="metric-value">{reservePaymentsLoading && !reserveEvents.length ? '—' : number2.format(meta?.eventCount || 0)}</strong>
+      <small class="metric-foot">{number2.format(meta?.fetchedBlockCount || 0)} blocks scanned · {reservePaymentBackfillLabel}</small>
+    </article>
+    <article class="metric">
+      <div class="metric-head">
+        <span class="metric-idx">04</span>
         <span class="metric-label">known pending usd</span>
       </div>
       <strong class="metric-value">{liveLoading ? '—' : usd2.format(pendingKnownUsd)}</strong>
@@ -691,7 +1027,7 @@
     </article>
     <article class="metric">
       <div class="metric-head">
-        <span class="metric-idx">04</span>
+        <span class="metric-idx">05</span>
         <span class="metric-label">base layer share</span>
       </div>
       <strong class="metric-value">
@@ -716,18 +1052,138 @@
       </div>
     </div>
     <p class="block-lede">
-      Weekly USD paid by the Base Layer collector via MsgDeposit memo RESERVE. Cumulative on the
-      right axis.
+      Weekly USD paid by the Base Layer collector to TC Reserve, priced when each Reserve deposit
+      happened. This is RUNE sent × historical RUNE/USD at dispersal time, not the current value
+      of that RUNE. The backend now uses the BooneTools Dune reserve-payment source query for
+      this stream.
     </p>
     <div class="chart-frame">
-      {#if artifactsLoading}
+      {#if reservePaymentsLoading && !weeklyRows.length}
         <div class="loading-block">
           <span class="loading-marker">▓░░░░</span>
-          <span>loading payment artifacts</span>
+          <span>loading reserve-payment stream</span>
+        </div>
+      {:else if !weeklyRows.length}
+        <div class="loading-block">
+          <span class="loading-marker">░░░░░</span>
+          <span>no reserve-payment rows available</span>
         </div>
       {:else}
         <canvas bind:this={paymentCanvas} aria-label="Weekly and cumulative Base Layer Reserve payments"></canvas>
       {/if}
+    </div>
+    {#if weeklyRows.length}
+      <div class="reserve-price-basis">
+        <span>price basis</span>
+        <strong>{reservePriceBasis}</strong>
+        <span>observed range</span>
+        <strong>{reservePriceRange || '—'} RUNE/USD</strong>
+        <span>latest week avg</span>
+        <strong>{latestReservePrice ? `$${number4.format(latestReservePrice)}` : '—'} RUNE/USD</strong>
+      </div>
+      <div class="table-scroll reserve-weekly-table">
+        <table>
+          <thead>
+            <tr>
+              <th>week</th>
+              <th>deposits</th>
+              <th>rune sent</th>
+              <th>avg rune/usd</th>
+              <th>usd at dispersal</th>
+              <th>cumulative usd</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each weeklyRows as row}
+              <tr>
+                <td class="mono">{formatWeekLabel(row.week_start)} → {formatWeekLabel(row.week_end)}</td>
+                <td class="num">{number2.format(row.payments || 0)}</td>
+                <td class="num">{number2.format(row.payment_rune || 0)}</td>
+                <td class="num">{row.rune_price_usd ? `$${number4.format(row.rune_price_usd)}` : '—'}</td>
+                <td class="num accent">{usd2.format(row.payment_usd || 0)}</td>
+                <td class="num accent">{usd2.format(row.cumulative_usd || 0)}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  </section>
+
+  <section class="block">
+    <div class="block-head">
+      <div class="block-title">
+        <span class="title-marker blue">▌</span>
+        <h2>generated base-layer fees</h2>
+      </div>
+      <div class="block-meta">
+        {#if generatedFeeMeta}
+          [{number2.format(generatedFeeMeta.matchedSwapFeeEventCount || 0)} swap events]
+        {:else}
+          [pending scan]
+        {/if}
+      </div>
+    </div>
+    <p class="block-lede">
+      Dune-indexed Rujira WASM context joined to THORChain swap fees from Rujira
+      contract-triggered base-layer swaps, displayed separately from explicit Reserve payments.
+      Current scan scope: {generatedFeeScope}
+    </p>
+
+    <div class="generated-layout">
+      <div class="chart-frame">
+        {#if generatedFeesLoading && !generatedFeeRows.length}
+          <div class="loading-block">
+            <span class="loading-marker">▓░░░░</span>
+            <span>loading generated-fee scan</span>
+          </div>
+        {:else if !generatedFeeRows.length}
+          <div class="loading-block">
+            <span class="loading-marker">░░░░░</span>
+            <span>no generated-fee rows available</span>
+          </div>
+        {:else}
+          <canvas bind:this={generatedFeesCanvas} aria-label="Weekly and cumulative generated base-layer fees"></canvas>
+        {/if}
+      </div>
+
+      <div class="impact-panel">
+        <div class="impact-card">
+          <span>generated fees</span>
+          <strong>{usd2.format(totalGeneratedFeeUsd)}</strong>
+          <small>{number4.format(totalGeneratedFeeRune)} RUNE</small>
+        </div>
+        <div class="impact-card">
+          <span>active heights</span>
+          <strong>{number2.format(generatedFeeMeta?.activeHeightCount || 0)}</strong>
+          <small>{number2.format(generatedFeeMeta?.matchedSwapFeeEventCount || 0)} matched swap events · {generatedFeeBackfillLabel}</small>
+        </div>
+        <div class="table-scroll route-table">
+          <table>
+            <thead>
+              <tr>
+                <th>route</th>
+                <th>events</th>
+                <th>fee rune</th>
+                <th>fee usd</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each topGeneratedFeeRoutes as route}
+                <tr>
+                  <td class="mono ellipsis" title={route.source_contract || route.source_denom || route.classification}>
+                    {route.source_label || route.source_denom || route.classification}
+                  </td>
+                  <td class="num">{number2.format(route.swap_events || 0)}</td>
+                  <td class="num">{number4.format(route.liquidity_fee_rune || 0)}</td>
+                  <td class="num accent-blue">{usd2.format(route.liquidity_fee_usd || 0)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        <p class="scope-note">{generatedFeeMeta?.caveat || 'Generated-fee scan is being prepared.'}</p>
+      </div>
     </div>
   </section>
 
@@ -748,7 +1204,7 @@
     <p class="block-lede">
       Live <span class="inline-code">rujira-revenue</span> target addresses. Base Layer routes
       highlighted green. Collector values are all-time distributions plus current residual balances,
-      priced with current pool TOR prices.
+      priced with THORNode pool prices plus Rujira app-asset prices and receipt-token NAVs.
     </p>
 
     <div class="flow">
@@ -871,7 +1327,7 @@
             >{formatAddress(RESERVE_MODULE)}</a>
           </p>
           <div class="reserve-total">
-            <span>cumulative observed</span>
+            <span>historical usd at dispersal</span>
             <strong>{usd2.format(latestWeek?.cumulative_usd || 0)}</strong>
           </div>
         </article>
@@ -929,7 +1385,7 @@
         </div>
         <div class="block-meta">[{recentEvents.length} events]</div>
       </div>
-      <p class="block-lede">Most recent observed final deposits from the event scan.</p>
+      <p class="block-lede">Most recent observed final deposits from the event scan, priced at the historical RUNE/USD rate for the deposit date.</p>
       <div class="table-scroll">
         <table>
           <thead>
@@ -938,6 +1394,8 @@
               <th>height</th>
               <th>tx</th>
               <th>rune</th>
+              <th>rune/usd</th>
+              <th>usd sent</th>
             </tr>
           </thead>
           <tbody>
@@ -951,6 +1409,8 @@
                   </a>
                 </td>
                 <td class="num accent">{number4.format(event.amountRune)}</td>
+                <td class="num">{event.runePriceUsd ? `$${number4.format(event.runePriceUsd)}` : '—'}</td>
+                <td class="num accent">{event.amountUsd ? usd2.format(event.amountUsd) : '—'}</td>
               </tr>
             {/each}
           </tbody>
@@ -1300,16 +1760,17 @@
 
   .metric-grid {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 1px;
     border: 1px solid #1a1a1a;
+    background: #1a1a1a;
     margin-bottom: 18px;
   }
 
   .metric {
     padding: 16px 18px;
     background: #0a0a0a;
-    border-right: 1px solid #1a1a1a;
+    border-right: none;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -1393,6 +1854,10 @@
     line-height: 1;
   }
 
+  .title-marker.blue {
+    color: #44a0ff;
+  }
+
   .block h2 {
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
@@ -1439,6 +1904,147 @@
   .chart-frame canvas {
     width: 100%;
     height: 100%;
+  }
+
+  .reserve-price-basis {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 6px 12px;
+    margin-top: 12px;
+    padding: 10px 12px;
+    background: #080808;
+    border: 1px solid #111;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .reserve-price-basis span {
+    color: #555;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .reserve-price-basis strong {
+    color: #b8b8b8;
+    font-size: 10px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+
+  .reserve-weekly-table {
+    margin-top: 12px;
+  }
+
+  .reserve-weekly-table table {
+    min-width: 760px;
+  }
+
+  .generated-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
+    gap: 14px;
+    align-items: stretch;
+  }
+
+  .generated-layout .chart-frame {
+    height: 390px;
+  }
+
+  .impact-panel {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    align-content: start;
+  }
+
+  .impact-card {
+    background: #080808;
+    border: 1px solid #141414;
+    border-left: 2px solid #44a0ff;
+    padding: 12px 14px;
+    min-height: 92px;
+  }
+
+  .impact-card span {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 8px;
+  }
+
+  .impact-card strong {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    color: #e8e8e8;
+    font-weight: 800;
+    line-height: 1.1;
+    overflow-wrap: anywhere;
+  }
+
+  .impact-card small {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #44a0ff;
+    margin-top: 7px;
+  }
+
+  .route-table,
+  .scope-note {
+    grid-column: 1 / -1;
+  }
+
+  .table-scroll.route-table {
+    overflow-x: hidden;
+  }
+
+  .route-table table {
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .route-table th,
+  .route-table td {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .route-table th {
+    letter-spacing: 0.08em;
+  }
+
+  .route-table th:first-child,
+  .route-table td:first-child {
+    width: 46%;
+  }
+
+  .route-table th:nth-child(2),
+  .route-table td:nth-child(2) {
+    width: 15%;
+  }
+
+  .route-table th:nth-child(3),
+  .route-table td:nth-child(3) {
+    width: 19%;
+  }
+
+  .route-table th:nth-child(4),
+  .route-table td:nth-child(4) {
+    width: 20%;
+  }
+
+  .scope-note {
+    margin: 0;
+    color: #666;
+    font-size: 11px;
+    line-height: 1.45;
+    border-top: 1px dashed #1a1a1a;
+    padding-top: 10px;
   }
 
   .loading-block {
@@ -1833,6 +2439,10 @@
     color: #00cc66;
   }
 
+  td.accent-blue {
+    color: #44a0ff;
+  }
+
   .table-link {
     color: #b8b8b8;
     border-bottom: 1px dotted #2a2a2a;
@@ -1987,14 +2597,6 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .metric:nth-child(2n) {
-      border-right: none;
-    }
-
-    .metric:nth-child(-n + 2) {
-      border-bottom: 1px solid #1a1a1a;
-    }
-
     .flow {
       grid-template-columns: 1fr;
     }
@@ -2009,6 +2611,10 @@
     }
 
     .split {
+      grid-template-columns: 1fr;
+    }
+
+    .generated-layout {
       grid-template-columns: 1fr;
     }
   }
@@ -2035,11 +2641,6 @@
 
     .metric {
       border-right: none;
-      border-bottom: 1px solid #1a1a1a;
-    }
-
-    .metric:last-child {
-      border-bottom: none;
     }
 
     .block {
@@ -2048,6 +2649,23 @@
 
     .chart-frame {
       height: 280px;
+    }
+
+    .generated-layout .chart-frame {
+      height: 300px;
+    }
+
+    .impact-panel {
+      grid-template-columns: 1fr;
+    }
+
+    .table-scroll.route-table {
+      overflow-x: auto;
+    }
+
+    .route-table table {
+      min-width: 480px;
+      table-layout: auto;
     }
   }
 </style>

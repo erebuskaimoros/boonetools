@@ -23,7 +23,7 @@
   <text x="118" y="76" class="subtitle">Actual final reserve deposits from the Base Layer collector (thor1txum04w...) grouped by UTC week and priced with Midgard weekly RUNE/USD.</text>
 
   <text x="118" y="106" class="metric-label">Cumulative paid</text>
-  <text x="118" y="135" class="metric-value">$6,447</text>
+  <text x="118" y="135" class="metric-value">$6,603</text>
   <text x="348" y="106" class="metric-label">Cumulative RUNE</text>
   <text x="348" y="135" class="metric-value">11,677 RUNE</text>
   <text x="578" y="106" class="metric-label">Reserve deposits</text>
@@ -47,13 +47,13 @@
 <text x="1300" y="397" class="axis-label" text-anchor="start">$4,200</text>
 <text x="1300" y="291" class="axis-label" text-anchor="start">$5,600</text>
 <text x="1300" y="185" class="axis-label" text-anchor="start">$7,000</text>
-    <rect x="118" y="536.0759574267186" width="385.6666666666667" height="173.92404257328144" rx="2" class="bar"><title>2026-04-27 to 2026-05-04: $1,313 (2,584 RUNE)</title></rect>
-<rect x="506.6666666666667" y="300.4795524794039" width="385.6666666666667" height="409.5204475205961" rx="2" class="bar"><title>2026-05-04 to 2026-05-11: $3,091 (5,603 RUNE)</title></rect>
-<rect x="895.3333333333334" y="439.18235863377174" width="385.6666666666667" height="270.81764136622826" rx="2" class="bar"><title>2026-05-11 to 2026-05-18: $2,044 (3,490 RUNE)</title></rect>
-    <polyline points="310.83333333333337,610.6148328152677 699.5,376.60314851778423 1088.1666666666667,221.8502105942252" class="line"/>
-    <circle cx="310.83333333333337" cy="610.6148328152677" r="4.5" class="dot"><title>2026-04-27: cumulative $1,313</title></circle>
-<circle cx="699.5" cy="376.60314851778423" r="4.5" class="dot"><title>2026-05-04: cumulative $4,403</title></circle>
-<circle cx="1088.1666666666667" cy="221.8502105942252" r="4.5" class="dot"><title>2026-05-11: cumulative $6,447</title></circle>
+    <rect x="118" y="535.291791412709" width="385.6666666666667" height="174.70820858729098" rx="2" class="bar"><title>2026-04-27 to 2026-05-04: $1,319 (2,584 RUNE)</title></rect>
+<rect x="506.6666666666667" y="287.2220384104187" width="385.6666666666667" height="422.7779615895813" rx="2" class="bar"><title>2026-05-04 to 2026-05-11: $3,191 (5,603 RUNE)</title></rect>
+<rect x="895.3333333333334" y="432.5618304452199" width="385.6666666666667" height="277.4381695547801" rx="2" class="bar"><title>2026-05-11 to 2026-05-18: $2,094 (3,490 RUNE)</title></rect>
+    <polyline points="310.83333333333337,610.1667379501195 699.5,368.57933132750156 1088.1666666666667,210.04323443905582" class="line"/>
+    <circle cx="310.83333333333337" cy="610.1667379501195" r="4.5" class="dot"><title>2026-04-27: cumulative $1,319</title></circle>
+<circle cx="699.5" cy="368.57933132750156" r="4.5" class="dot"><title>2026-05-04: cumulative $4,509</title></circle>
+<circle cx="1088.1666666666667" cy="210.04323443905582" r="4.5" class="dot"><title>2026-05-11: cumulative $6,603</title></circle>
     <text x="310.83333333333337" y="752" class="axis-label" text-anchor="middle">04-27</text>
 <text x="699.5" y="752" class="axis-label" text-anchor="middle">05-04</text>
 <text x="1088.1666666666667" y="752" class="axis-label" text-anchor="middle">05-11</text>
@@ -63,6 +63,6 @@
     <text x="140" y="794" class="legend">Weekly paid</text>
     <line x1="248" y1="788" x2="286" y2="788" class="line"/>
     <text x="296" y="794" class="legend">Cumulative paid</text>
-    <text x="478" y="794" class="note">Generated 2026-05-18T01:10:02.745Z; reserve target thor1dheycde...</text>
+    <text x="478" y="794" class="note">Generated 2026-05-18T13:54:03.382Z; reserve target thor1dheycde...</text>
   </g>
 </svg>

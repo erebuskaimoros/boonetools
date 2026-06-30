@@ -12,7 +12,11 @@ const RUJIRA_BASE_LAYER_DATA_DIR = path.resolve(__dirname, '../docs/rujira-base-
 const RUJIRA_BASE_LAYER_DATA_FILES = new Map([
   ['rujira-base-layer-fees.csv', 'text/csv; charset=utf-8'],
   ['rujira-base-layer-fees-events.json', 'application/json; charset=utf-8'],
-  ['rujira-base-layer-fees-meta.json', 'application/json; charset=utf-8']
+  ['rujira-base-layer-fees-meta.json', 'application/json; charset=utf-8'],
+  ['rujira-app-layer-swap-fees.json', 'application/json; charset=utf-8'],
+  ['rujira-app-layer-swap-fees-weekly.csv', 'text/csv; charset=utf-8'],
+  ['rujira-app-layer-swap-fees-events.csv', 'text/csv; charset=utf-8'],
+  ['rujira-app-layer-swap-fees-routes.csv', 'text/csv; charset=utf-8']
 ])
 const COINGECKO_NETWORK_BY_CHAIN = {
   ETH: 'ethereum',
