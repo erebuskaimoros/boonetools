@@ -31,6 +31,7 @@
   const HOLIDAY_MODE = new Date().getMonth() === 11; // Auto-enable in December
   const SHOW_BANNER = false; // Easy to toggle banner on/off
   const SHOW_LIMIT_ORDERS = import.meta.env.DEV;
+  const SHOW_VOTE_TRACKER = true;
 
   // Check for desktop app iframe mode
   let isDesktopApp = false;
@@ -47,6 +48,14 @@
     icon: "⚡",
     path: "rapid-swaps",
     description: "Track live rapid streams plus the largest and latest recorded rapid swaps"
+  };
+
+  const tcFeeDashApp = {
+    name: "TC Fee Dash",
+    component: () => import("./lib/TCFeeDash.svelte"),
+    icon: "$",
+    path: "tc-fee-dash",
+    description: "Track TC fee capture against global exchange volume"
   };
 
   const bondTrackerApp = {
@@ -89,12 +98,22 @@
     description: "Track observed Rujira fee sharing into the THORChain Reserve"
   };
 
+  const voteTrackerApp = {
+    name: "Vote Tracker",
+    component: () => import("./lib/NodeVotes.svelte"),
+    icon: "🗳️",
+    path: "vote-tracker",
+    description: "Track node Mimir vote history by vote key and node operator"
+  };
+
   const apps = [
     rapidSwapsApp,
+    tcFeeDashApp,
     bondTrackerApp,
     vaultExplorerApp,
     treasuryTrackerApp,
     ...(SHOW_LIMIT_ORDERS ? [limitOrdersApp] : []),
+    ...(SHOW_VOTE_TRACKER ? [voteTrackerApp] : []),
     appLayerBaseLayerApp
   ];
   const hiddenApps = [];
@@ -586,7 +605,7 @@
               {#each apps as app, i}
                 <button class="nav-row" on:click={() => selectApp(app)}>
                   <span class="nav-index">{i + 1}</span>
-                  <span class="nav-icon">
+                  <span class="nav-icon" class:vote-icon={app.path === 'vote-tracker'}>
                     {#if typeof app.icon === 'string' && app.icon.startsWith('/')}
                       <img src={app.icon} alt="" />
                     {:else}
@@ -1231,6 +1250,11 @@
     height: 33px;
     object-fit: contain;
     display: block;
+  }
+
+  .nav-icon.vote-icon {
+    font-size: 25px;
+    line-height: 1;
   }
 
   .nav-info {

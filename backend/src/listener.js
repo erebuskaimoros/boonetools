@@ -75,26 +75,28 @@ async function sendHeartbeat() {
       ? 'running'
       : 'stalled';
 
-  await writeRapidSwapListenerHeartbeat({
-    started_at: new Date().toISOString(),
-    finished_at: new Date().toISOString(),
-    status: 'running',
-    stats_json: {
-      last_block: lastBlockHeight,
-      last_block_received_at: lastBlockReceivedAt > 0 ? new Date(lastBlockReceivedAt).toISOString() : null,
-      block_stall_seconds: blockStallSeconds,
-      stream_status: streamStatus,
-      blocks_processed: blocksProcessed,
-      uptime_seconds: Math.floor(process.uptime()),
-      messages_received: messagesReceived,
-      events_seen: eventsSeen,
-      streaming_swap_events_seen: streamingSwapEventsSeen,
-      rapid_candidates_detected: rapidCandidatesDetected,
-      last_event_at: lastEventAt > 0 ? new Date(lastEventAt).toISOString() : null,
-      last_streaming_swap_event_at: lastStreamingSwapEventAt > 0 ? new Date(lastStreamingSwapEventAt).toISOString() : null,
-      last_candidate_at: lastCandidateAt > 0 ? new Date(lastCandidateAt).toISOString() : null
-    }
-  }).catch(() => {});
+  if (config.rapidSwapsWsIngestionEnabled) {
+    await writeRapidSwapListenerHeartbeat({
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      status: 'running',
+      stats_json: {
+        last_block: lastBlockHeight,
+        last_block_received_at: lastBlockReceivedAt > 0 ? new Date(lastBlockReceivedAt).toISOString() : null,
+        block_stall_seconds: blockStallSeconds,
+        stream_status: streamStatus,
+        blocks_processed: blocksProcessed,
+        uptime_seconds: Math.floor(process.uptime()),
+        messages_received: messagesReceived,
+        events_seen: eventsSeen,
+        streaming_swap_events_seen: streamingSwapEventsSeen,
+        rapid_candidates_detected: rapidCandidatesDetected,
+        last_event_at: lastEventAt > 0 ? new Date(lastEventAt).toISOString() : null,
+        last_streaming_swap_event_at: lastStreamingSwapEventAt > 0 ? new Date(lastStreamingSwapEventAt).toISOString() : null,
+        last_candidate_at: lastCandidateAt > 0 ? new Date(lastCandidateAt).toISOString() : null
+      }
+    }).catch(() => {});
+  }
 
   await writeNodeVoteListenerHeartbeat({
     started_at: new Date().toISOString(),
@@ -336,10 +338,12 @@ function handleMessage(message) {
   }
 
   if (data.TxResult || data.tx_result) {
-    const nodeVotes = parseNodeVotesFromTxMessage(message, data);
-    processNodeVotes(nodeVotes).catch((error) => {
-      log(`Error processing node vote tx: ${error.message}`);
-    });
+    if (config.nodeVotesWsIngestionEnabled) {
+      const nodeVotes = parseNodeVotesFromTxMessage(message, data);
+      processNodeVotes(nodeVotes).catch((error) => {
+        log(`Error processing node vote tx: ${error.message}`);
+      });
+    }
     return;
   }
 
@@ -368,20 +372,24 @@ function handleMessage(message) {
     lastStreamingSwapEventAt = Date.now();
   }
 
-  const rapidSwaps = parseStreamingSwapEvents(events);
+  const rapidSwaps = config.rapidSwapsWsIngestionEnabled
+    ? parseStreamingSwapEvents(events)
+    : [];
   if (rapidSwaps.length > 0) {
     rapidCandidatesDetected += rapidSwaps.length;
     lastCandidateAt = Date.now();
   }
 
-  const nodeVotes = parseNodeVoteEvents(events, {
-    height: blockHeight,
-    blockTime,
-    source: 'ws'
-  });
-  processNodeVotes(nodeVotes).catch((error) => {
-    log(`Error processing node vote block ${blockHeight}: ${error.message}`);
-  });
+  if (config.nodeVotesWsIngestionEnabled) {
+    const nodeVotes = parseNodeVoteEvents(events, {
+      height: blockHeight,
+      blockTime,
+      source: 'ws'
+    });
+    processNodeVotes(nodeVotes).catch((error) => {
+      log(`Error processing node vote block ${blockHeight}: ${error.message}`);
+    });
+  }
 
   const seen = new Set();
 
@@ -435,7 +443,7 @@ function connect() {
   });
 
   ws.on('open', () => {
-    log('Connected. Subscribing to NewBlock and node vote tx events...');
+    log('Connected. Subscribing to NewBlock and enabled tx event streams...');
     opened = true;
     connectedAt = Date.now();
     reconnectAttempt = 0;
@@ -447,12 +455,14 @@ function connect() {
       params: { query: "tm.event='NewBlock'" }
     }));
 
-    ws.send(JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'subscribe',
-      id: 2,
-      params: { query: "tm.event='Tx' AND set_node_mimir.key EXISTS" }
-    }));
+    if (config.nodeVotesWsIngestionEnabled) {
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        id: 2,
+        params: { query: "tm.event='Tx' AND set_node_mimir.key EXISTS" }
+      }));
+    }
 
     startHeartbeat();
     startStallWatchdog();
@@ -514,5 +524,7 @@ export function startRapidSwapListener() {
   log('Rapid Swap WebSocket Listener starting');
   log(`RPC URLs: ${getRpcWsUrls().join(', ')}`);
   log(`Midgard delay: ${config.midgardDelayMs}ms`);
+  log(`Rapid swap WebSocket ingestion: ${config.rapidSwapsWsIngestionEnabled ? 'enabled' : 'disabled'}`);
+  log(`Node vote WebSocket ingestion: ${config.nodeVotesWsIngestionEnabled ? 'enabled' : 'disabled'}`);
   connect();
 }

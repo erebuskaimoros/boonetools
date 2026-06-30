@@ -9,7 +9,7 @@ BooneTools now has a dedicated Hetzner-hosted backend stack for all current DB-b
 - `rapid-swaps`
 - `stock-prices`
 - local scheduler jobs for NodeOp and Rapid Swaps
-- the rapid-swap listener writing directly into the local DB
+- Dune-backed historical/canonical ingestion with THORNode/Midgard live tails where current data matters
 
 ## Layout
 
@@ -55,13 +55,20 @@ RAPID_SWAPS_NORMAL_HEAD_PAGES=4
 RAPID_SWAPS_LAGGING_HEAD_PAGES=2
 RAPID_SWAPS_CATCHUP_PAGES=2
 RAPID_SWAPS_RATE_LIMIT_COOLDOWN_SECONDS=3600
+DUNE_API_KEY=...
+RAPID_SWAPS_DUNE_QUERY_ID=7619996
+RAPID_SWAPS_DUNE_SCAN_INTERVAL_SECONDS=21600
+RAPID_SWAPS_LIVE_TAIL_INTERVAL_SECONDS=300
+RAPID_SWAPS_LIVE_TAIL_PAGES=2
 ```
 
-Rapid Swap scheduler page budgets are intentionally much smaller than the legacy
-`RAPID_SWAPS_MAX_PAGES` ceiling. The listener records candidates in real time,
-while the canonical Midgard scan acts as a bounded reconciliation path; provider
-`429` responses store a cooldown in `rapid_swap_sync_state` so timer runs skip
-without burning more quota.
+Rapid Swaps is hybrid in the Dune-backed deployment. Dune query `7619996`
+remains the canonical source and runs on its own cadence, while the scheduler
+also tails a small number of recent Midgard pages every few minutes for fresh
+rows. The live tail upserts into `rapid_swaps`; later Dune scans overwrite the
+same `tx_id` rows with canonical Dune values. Provider `429` responses store a
+cooldown in `rapid_swap_sync_state` so timer runs skip without burning more
+quota.
 
 The server env also carries the dedicated Postgres container settings:
 
@@ -84,9 +91,10 @@ That script:
 2. Installs backend dependencies
 3. Starts the dedicated Postgres container
 4. Applies canonical DB migrations
-5. Installs/restarts the backend API, schedulers, backup timer, and listener
+5. Installs/restarts the backend API, schedulers, and backup timer
 
-It also refuses to run unless the current checkout is the canonical BooneTools repo with `origin` set to `https://github.com/erebuskaimoros/boonetools.git`.
+When `RAPID_SWAPS_DUNE_QUERY_ID` is configured, deploy disables the legacy
+`rapid-swap-listener.service`; the scheduler live tail is the fresh-data path.
 
 After deploy, install the Caddy config in `ops/caddy/Caddyfile.boone.tools` if the API proxy is not already live.
 

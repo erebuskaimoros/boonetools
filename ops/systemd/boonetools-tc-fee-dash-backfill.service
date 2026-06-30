@@ -1,0 +1,15 @@
+[Unit]
+Description=BooneTools TC Fee Dash daily backfill
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/opt/boonetools-backend/backend
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--dns-result-order=ipv4first
+EnvironmentFile=/opt/boonetools-backend/backend/.env
+ExecStart=/usr/bin/node src/run-job.js tc-fee-dash-backfill
+TimeoutStartSec=infinity
+SyslogIdentifier=boonetools-tc-fee-dash-backfill

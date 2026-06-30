@@ -9,15 +9,19 @@ import {
   sendResponse
 } from './lib/http.js';
 import { closePool, query } from './db/pool.js';
+import { handleAppLayerBaseFees } from './handlers/app-layer-base-fees.js';
 import { handleAppLayerLiveState } from './handlers/app-layer-live-state.js';
+import { handleAppLayerReservePayments } from './handlers/app-layer-reserve-payments.js';
 import { handleBondHistory } from './handlers/bond-history.js';
 import { handleHealth } from './handlers/health.js';
 import { handleNodeopLeaderboard } from './handlers/nodeop-leaderboard.js';
 import { handleNodeopMeta } from './handlers/nodeop-meta.js';
 import { handleNodeopPerformance } from './handlers/nodeop-performance.js';
+import { handleNodeVotes } from './handlers/node-votes.js';
 import { handleRapidSwaps } from './handlers/rapid-swaps.js';
 import { handleRapidSwapsSwapHistory } from './handlers/rapid-swaps-swap-history.js';
 import { handleStockPrices } from './handlers/stock-prices.js';
+import { handleTcFeeDash } from './handlers/tc-fee-dash.js';
 
 const routes = new Map([
   ['/', { auth: 'none', handler: handleHealth }],
@@ -25,10 +29,14 @@ const routes = new Map([
   ['/nodeop-performance', { auth: 'public', handler: handleNodeopPerformance }],
   ['/nodeop-leaderboard', { auth: 'public', handler: handleNodeopLeaderboard }],
   ['/nodeop-meta', { auth: 'public', handler: handleNodeopMeta }],
+  ['/node-votes', { auth: 'public', handler: handleNodeVotes }],
+  ['/tc-fee-dash', { auth: 'public', handler: handleTcFeeDash }],
   ['/rapid-swaps', { auth: 'public', handler: handleRapidSwaps }],
   ['/rapid-swaps-swap-history', { auth: 'public', handler: handleRapidSwapsSwapHistory }],
   ['/bond-history', { auth: 'public', handler: handleBondHistory }],
+  ['/app-layer-base-fees', { auth: 'none', handler: handleAppLayerBaseFees }],
   ['/app-layer-live-state', { auth: 'none', handler: handleAppLayerLiveState }],
+  ['/app-layer-reserve-payments', { auth: 'none', handler: handleAppLayerReservePayments }],
   ['/stock-prices', { auth: 'public', handler: handleStockPrices }]
 ]);
 

@@ -7,7 +7,7 @@ The canonical standalone repository is:
 https://github.com/erebuskaimoros/boonetools
 ```
 
-This repo is a Svelte/Vite frontend with a small Node/Postgres backend for cached THORChain analytics. Most chain reads still use public THORChain endpoints directly or through lightweight local/prod proxy paths.
+This repo is a Svelte/Vite frontend with a small Node/Postgres backend for cached THORChain analytics. Dune is the source of truth for historical analytics; public THORChain endpoints are retained for live chain state, quotes, wallet balances, and other action-oriented reads that Dune cannot safely serve.
 
 ## What Is In Here
 
@@ -23,12 +23,13 @@ This repo is a Svelte/Vite frontend with a small Node/Postgres backend for cache
 
 - Bond Tracker
 - Rapid Swaps
+- TC Fee Dash
 - Treasury Tracker
 - Vault Explorer
 - Limit Orders
 - App Layer to Base Layer dashboard at `/app-layer-base-layer`
 
-The App Layer dashboard tracks Rujira App Layer fee-share flows into the THORChain Base Layer. It reads generated files under `public/data/rujira-base-layer-fees/`, links collector addresses and txs to `thorchain.net`, charts weekly and cumulative Reserve payments, and shows app-collector all-time revenue estimates from `rujira-collector-revenue.json`.
+The App Layer dashboard tracks Rujira App Layer fee-share flows into the THORChain Base Layer. Reserve-payment history and generated base-layer swap-fee attribution are sourced from Dune, generated static context artifacts still live under `public/data/rujira-base-layer-fees/`, and the page links collector addresses and txs to `thorchain.net`.
 
 ## Local Development
 
@@ -74,11 +75,25 @@ Frontend production builds use these public runtime values:
 ```bash
 VITE_NODEOP_API_BASE=https://boone.tools/functions/v1
 VITE_RAPID_SWAPS_API_BASE=https://boone.tools/functions/v1
+VITE_TC_FEE_DASH_API_BASE=https://boone.tools/functions/v1
 VITE_NODEOP_API_KEY=
 VITE_RAPID_SWAPS_API_KEY=
+VITE_TC_FEE_DASH_API_KEY=
 ```
 
-Backend runtime values live in `backend/.env` on the server. Start from `backend/.env.example` and set real values there, including `DATABASE_URL` and `PUBLIC_API_KEY`.
+Backend runtime values live in `backend/.env` on the server. Start from `backend/.env.example` and set real values there, including `DATABASE_URL`, `PUBLIC_API_KEY`, `DUNE_API_KEY`, and the CMC settings used by TC Fee Dash.
+
+Current Dune source queries:
+
+- TC Fee Dash daily series: `7619850`
+- Vote Tracker node Mimir events: `7619989`
+- Rapid Swaps canonical rows: `7619996`
+- Rapid Swaps market-history denominator: `7620035`
+- App Layer generated base-layer fees: `7620091`
+- App Layer explicit Reserve payments: `7620011`
+- Bond Tracker bond/unbond tx discovery: `7620042`
+
+TC Fee Dash uses THORChain daily earnings from `thorchain.defi_daily_earnings`, CMC historical global market volume for the CEX/global leg, and Dune-indexed DEX exchange volume from `dex.trades`. It no longer fans out to Midgard or DeFiLlama for that daily series.
 
 ## Generated Rujira Data
 
