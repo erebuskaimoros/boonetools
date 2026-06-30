@@ -1,6 +1,7 @@
 import { getClient, query } from '../db/pool.js';
 import { upsertRows } from '../db/sql.js';
 import { error, isValidThorAddress, json } from '../lib/http.js';
+import { config } from '../lib/config.js';
 import {
   calculateBondHistoryRow,
   hasBondHistoryValue,
@@ -8,6 +9,7 @@ import {
   isTransientHistoricalFetchError
 } from '../shared/bond-history.js';
 import { fetchMidgardActions } from '../shared/midgard.js';
+import { executeDuneQueryRows, summarizeDuneError } from '../shared/dune.js';
 import { fetchStockPrices } from '../shared/stock-prices.js';
 import { fetchChurns, fetchNodes, fetchThorchain } from '../shared/thornode.js';
 
@@ -62,6 +64,29 @@ function normalizeBondTxEvent(bondAddress, action) {
   };
 }
 
+function normalizeDuneBondTxEvent(bondAddress, row) {
+  const actionHeight = Number(row?.action_height);
+  const txId = String(row?.tx_id || '');
+  if (!txId || !Number.isFinite(actionHeight) || actionHeight <= 0) {
+    return null;
+  }
+
+  const nodeAddress = String(row?.node_address || '');
+  return {
+    bond_address: bondAddress,
+    tx_id: txId,
+    action_height: Math.trunc(actionHeight),
+    node_address: nodeAddress.startsWith('thor1') ? nodeAddress : '',
+    action_type: String(row?.action_type || 'bond'),
+    raw_action: {
+      source: 'dune',
+      dune_query_id: config.bondTxEventsDuneQueryId,
+      row
+    },
+    updated_at: new Date().toISOString()
+  };
+}
+
 async function loadBondTxEvents(bondAddress) {
   const { rows } = await query(
     `select bond_address, tx_id, action_height, node_address, action_type, raw_action
@@ -109,6 +134,45 @@ async function saveBondTxEventSyncState(client, bondAddress, payload) {
 }
 
 async function scanAndCacheBondTxEvents(bondAddress) {
+  let duneErrorSummary = null;
+
+  if (config.duneApiKey && config.bondTxEventsDuneQueryId) {
+    try {
+      const result = await executeDuneQueryRows(config.bondTxEventsDuneQueryId, {
+        bond_address: bondAddress,
+        start_time: config.bondTxEventsDuneStartTime,
+        limit: config.bondTxEventsDuneLimit
+      }, {
+        limit: config.bondTxEventsDuneLimit
+      });
+      const rows = result.rows
+        .map((row) => normalizeDuneBondTxEvent(bondAddress, row))
+        .filter(Boolean);
+      const dbClient = await getClient();
+      try {
+        await upsertRows(dbClient, 'bond_tx_events', rows, {
+          conflictColumns: ['bond_address', 'tx_id', 'action_height'],
+          jsonColumns: ['raw_action']
+        });
+        await saveBondTxEventSyncState(dbClient, bondAddress, {
+          complete: true,
+          error: ''
+        });
+      } finally {
+        dbClient.release();
+      }
+
+      return {
+        events: await loadBondTxEvents(bondAddress),
+        complete: true,
+        error: ''
+      };
+    } catch (duneError) {
+      duneErrorSummary = summarizeDuneError(duneError);
+      console.warn(`[bond-history] Dune bond action scan failed for ${bondAddress}; falling back to Midgard: ${duneErrorSummary.message}`);
+    }
+  }
+
   const rowsByKey = new Map();
   let offset = 0;
   let complete = false;
@@ -141,6 +205,8 @@ async function scanAndCacheBondTxEvents(bondAddress) {
 
   if (!complete) {
     errorMessage = `Bond action scan reached ${BOND_TX_EVENT_MAX_PAGES} pages`;
+  } else if (duneErrorSummary) {
+    errorMessage = `Dune bond action scan failed; served Midgard fallback (${duneErrorSummary.message})`;
   }
 
   const rows = [...rowsByKey.values()];

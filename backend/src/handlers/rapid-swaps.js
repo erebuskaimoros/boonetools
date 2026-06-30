@@ -377,6 +377,16 @@ export async function handleRapidSwaps(_request, url) {
   const syncStats = syncStateResult.rows[0]?.stats_json || {};
   const lastRunStats = lastRunResult.rows[0]?.stats_json || {};
   const sourceStatus = syncStats.source_status || lastRunStats.source_status || null;
+  const liveTailStats = syncStats.live_tail || lastRunStats.live_tail || null;
+  const canonicalSource = {
+    provider: syncStats.canonical_provider || lastRunStats.canonical_provider || (syncStats.dune_query_id || lastRunStats.dune_query_id ? 'dune' : ''),
+    query_id: syncStats.dune_query_id || lastRunStats.dune_query_id || sourceStatus?.dune?.query_id || '',
+    execution_id: syncStats.dune_execution_id || lastRunStats.dune_execution_id || sourceStatus?.dune?.execution_id || '',
+    last_scanned_at: toIsoString(syncStats.dune_last_scanned_at || lastRunStats.dune_last_scanned_at || sourceStatus?.dune?.last_scanned_at),
+    next_scan_at: toIsoString(syncStats.dune_next_scan_at || lastRunStats.dune_next_scan_at || sourceStatus?.dune?.next_scan_at),
+    next_start_time: toIsoString(syncStats.dune_next_start_time || lastRunStats.dune_next_start_time || sourceStatus?.dune?.next_start_time),
+    head_end_time: toIsoString(syncStats.dune_head_end_time || lastRunStats.dune_head_end_time || sourceStatus?.dune?.head_end_time)
+  };
   const totalTracked = Number(summary.total_tracked) || 0;
   const tableTotal = Number(tableCountResult.rows[0]?.count) || 0;
   const topRows = topRowsResult.rows.map(normalizeRapidSwapRow);
@@ -448,6 +458,8 @@ export async function handleRapidSwaps(_request, url) {
         freshness_seconds: freshnessSeconds,
         last_run_stats: lastRunStats,
         source_status: sourceStatus,
+        live_tail: liveTailStats,
+        canonical_source: canonicalSource.provider ? canonicalSource : null,
         pending_candidates: Number(pendingCandidatesResult.rows[0]?.count) || 0,
         canonical_sync: syncStateResult.rows[0]
           ? {

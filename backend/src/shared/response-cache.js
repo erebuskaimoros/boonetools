@@ -1,5 +1,9 @@
 import { query } from '../db/pool.js';
 
+const CACHE_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+
+let nextCleanupAt = 0;
+
 export async function getCachedResponse(cacheKey, options = {}) {
   const allowStale = Boolean(options.allowStale);
   const { rows } = await query(
@@ -29,7 +33,31 @@ export async function getCachedResponse(cacheKey, options = {}) {
   };
 }
 
+export async function cleanupExpiredCachedResponses(options = {}) {
+  const force = Boolean(options.force);
+  const now = Date.now();
+
+  if (!force && now < nextCleanupAt) {
+    return { skipped: true, reason: 'recent_cleanup' };
+  }
+
+  nextCleanupAt = now + CACHE_CLEANUP_INTERVAL_MS;
+  const { rowCount } = await query(
+    `delete from api_response_cache
+     where expires_at < now()`
+  );
+
+  return {
+    skipped: false,
+    deleted: rowCount
+  };
+}
+
 export async function setCachedResponse(cacheKey, payload, ttlMs) {
+  cleanupExpiredCachedResponses().catch((error) => {
+    console.warn('api_response_cache cleanup failed:', error.message || error);
+  });
+
   const normalizedTtlMs = Math.max(1000, Math.trunc(Number(ttlMs) || 0));
   const expiresAt = new Date(Date.now() + normalizedTtlMs).toISOString();
 

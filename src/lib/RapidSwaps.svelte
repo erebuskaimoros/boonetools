@@ -45,12 +45,14 @@
   let activeTab = 'overview';
 
   // Overview date range filter (defaults to last 7 local days inclusive of today)
+  let todayDateKey = toChartDateKey(new Date());
   let overviewDateFrom = (() => {
     const d = new Date();
     d.setDate(d.getDate() - 6);
     return toChartDateKey(d);
   })();
   let overviewDateTo = toChartDateKey(new Date());
+  let overviewDateToPinnedToToday = true;
 
   // Table filters + sorting
   let filterPath = '';
@@ -73,6 +75,8 @@
   $: recentSwaps = dashboard?.recent_24h || [];
   $: trackerStart = dashboard?.tracker_started_at || null;
   $: backendMeta = dashboard?.backend || null;
+  $: liveTailMeta = backendMeta?.live_tail || backendMeta?.last_run_stats?.live_tail || backendMeta?.canonical_sync?.stats?.live_tail || null;
+  $: canonicalSourceMeta = backendMeta?.canonical_source || null;
   $: sourceStatus = dashboard?.chain_status || dashboard?.source_status || backendMeta?.source_status || null;
   $: sourceBanner = getSourceBanner(sourceStatus, backendMeta);
   $: backendConfigError = getRapidSwapsApiConfigError();
@@ -164,6 +168,11 @@
     return `${Math.floor(numeric / 3600)}h old`;
   }
 
+  function ageSeconds(value) {
+    const parsed = Date.parse(value || '');
+    return Number.isFinite(parsed) ? Math.max(0, Math.floor((Date.now() - parsed) / 1000)) : -1;
+  }
+
   function formatHeight(value) {
     const numeric = Number(value);
     return Number.isFinite(numeric) && numeric > 0 ? formatNumber(numeric, { maximumFractionDigits: 0 }) : 'unknown';
@@ -179,6 +188,10 @@
 
   function getSourceBanner(status, backend) {
     const skipReason = backend?.last_run_stats?.skip_reason || '';
+    if (status?.provider === 'dune' || (status?.provider === 'hybrid' && status?.status === 'active')) {
+      return null;
+    }
+
     const latestAction = status?.midgard?.latest_swap_action || null;
     const latestDate = latestAction?.date ? formatDateTime(latestAction.date) : '';
     const latestHeight = formatHeight(latestAction?.height);
@@ -196,11 +209,11 @@
       };
     }
 
-    if (skipReason === 'rate_limited' || status?.midgard?.status === 'rate_limited') {
+    if (skipReason === 'rate_limited' || status?.midgard?.status === 'rate_limited' || status?.live_tail?.status === 'rate_limited') {
       return {
         tone: 'err',
         title: 'PROVIDER COOLDOWN ACTIVE',
-        body: 'Midgard returned a rate limit. The recorder is backing off instead of retrying aggressively.'
+        body: 'Midgard returned a rate limit. The live tail is backing off while canonical Dune sync stays available.'
       };
     }
 
@@ -1233,15 +1246,52 @@
     return params;
   }
 
+  function refreshTodayDateKey() {
+    todayDateKey = toChartDateKey(new Date());
+    return todayDateKey;
+  }
+
+  function handleOverviewDateFromChange() {
+    const today = refreshTodayDateKey();
+    if (overviewDateFrom > today) {
+      overviewDateFrom = today;
+    }
+
+    if (overviewDateFrom > overviewDateTo) {
+      overviewDateTo = overviewDateFrom;
+      overviewDateToPinnedToToday = overviewDateTo === today;
+    }
+
+    loadData(false);
+  }
+
+  function handleOverviewDateToChange() {
+    const today = refreshTodayDateKey();
+    if (overviewDateTo > today) {
+      overviewDateTo = today;
+    }
+
+    overviewDateToPinnedToToday = overviewDateTo === today;
+
+    if (overviewDateTo < overviewDateFrom) {
+      overviewDateFrom = overviewDateTo;
+    }
+
+    loadData(false);
+  }
+
   // --- Data loading ---
   async function loadData(showLoading = true, options = {}) {
     if (showLoading) loading = true;
     else refreshing = true;
     const requestId = ++dashboardRequestId;
     try {
-      // Keep date range end pinned to today (handles midnight rollover)
-      const today = toChartDateKey(new Date());
-      if (overviewDateTo < today) {
+      // Keep the default range pinned to today, but preserve a user-selected historical end date.
+      const today = refreshTodayDateKey();
+      if (overviewDateTo > today) {
+        overviewDateTo = today;
+        overviewDateToPinnedToToday = true;
+      } else if (overviewDateToPinnedToToday && overviewDateTo < today) {
         overviewDateTo = today;
       }
 
@@ -1296,6 +1346,17 @@
         RECORDER {backendMeta?.last_run_status === 'success' ? 'OK' : 'ERR'}
         <span class="sep">|</span>
         {formatFreshness(backendMeta?.freshness_seconds)}
+        {#if liveTailMeta}
+          <span class="sep">|</span>
+          LIVE {formatFreshness(ageSeconds(liveTailMeta.last_scanned_at))}
+          {#if liveTailMeta.status && liveTailMeta.status !== 'active'}
+            <span class="warn-text">{String(liveTailMeta.status).toUpperCase()}</span>
+          {/if}
+        {/if}
+        {#if canonicalSourceMeta?.last_scanned_at}
+          <span class="sep">|</span>
+          DUNE {formatFreshness(ageSeconds(canonicalSourceMeta.last_scanned_at))}
+        {/if}
         {#if trackerStart}
           <span class="sep">|</span>
           since {formatDateTime(trackerStart)}
@@ -1395,9 +1456,9 @@
       <button class="tab-btn" class:tab-active={activeTab === 'paths'} on:click={() => activeTab = 'paths'}>Swap Paths</button>
     </div>
     <div class="date-range">
-      <input type="date" class="date-input" bind:value={overviewDateFrom} on:change={() => loadData(false)} />
+      <input type="date" class="date-input" bind:value={overviewDateFrom} max={todayDateKey} on:change={handleOverviewDateFromChange} />
       <span class="date-sep">–</span>
-      <input type="date" class="date-input" bind:value={overviewDateTo} on:change={() => loadData(false)} />
+      <input type="date" class="date-input" bind:value={overviewDateTo} max={todayDateKey} on:change={handleOverviewDateToChange} />
     </div>
   </div>
   </div><!-- /sticky-header -->

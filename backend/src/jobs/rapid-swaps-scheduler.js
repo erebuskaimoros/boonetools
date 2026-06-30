@@ -1,8 +1,10 @@
 import { withAdvisoryLock } from '../db/lock.js';
 import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
+import { isDuneLimitError, summarizeDuneError } from '../shared/dune.js';
 import {
   buildRapidSwapCanonicalScanPlan,
+  fetchRapidSwapRowsFromDune,
   fetchRapidSwapSourceStatus,
   fetchRapidSwapPriceIndex,
   fetchRapidSwapRows,
@@ -25,6 +27,535 @@ function safeStats(syncState) {
   return syncState?.stats_json && typeof syncState.stats_json === 'object'
     ? syncState.stats_json
     : {};
+}
+
+function toIsoOrNull(value) {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+function addDays(value, days) {
+  const date = new Date(value);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date;
+}
+
+function timestampMs(value) {
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function statsObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function rapidSwapsDuneHeadEndTime() {
+  return new Date(Date.now() - Math.max(0, config.rapidSwapsDuneHeadLagHours) * 60 * 60 * 1000);
+}
+
+function buildRapidSwapsDuneWindow(syncState) {
+  const stats = safeStats(syncState);
+  const headEnd = rapidSwapsDuneHeadEndTime();
+  const configuredStart = toIsoOrNull(config.rapidSwapsDuneStartTime) || new Date(headEnd.getTime() - 3 * 24 * 60 * 60 * 1000).toISOString();
+  const nextStart = toIsoOrNull(stats.dune_next_start_time) || configuredStart;
+  let start = new Date(nextStart);
+
+  if (!Number.isFinite(start.getTime()) || start >= headEnd) {
+    start = new Date(Math.max(
+      Date.parse(configuredStart),
+      headEnd.getTime() - Math.max(1, config.rapidSwapsDuneDaysPerRun) * 24 * 60 * 60 * 1000
+    ));
+  }
+
+  const end = new Date(Math.min(
+    addDays(start, Math.max(1, config.rapidSwapsDuneDaysPerRun)).getTime(),
+    headEnd.getTime()
+  ));
+
+  return {
+    startTime: start.toISOString(),
+    endTime: end.toISOString(),
+    nextStartTime: end >= headEnd
+      ? new Date(Math.max(
+          Date.parse(configuredStart),
+          headEnd.getTime() - Math.max(1, config.rapidSwapsDuneDaysPerRun) * 24 * 60 * 60 * 1000
+        )).toISOString()
+      : end.toISOString(),
+    headEndTime: headEnd.toISOString()
+  };
+}
+
+function getDuneLastScannedAtMs(syncState, stats) {
+  const duneLastScannedAtMs = timestampMs(stats?.dune_last_scanned_at);
+  if (duneLastScannedAtMs > 0) {
+    return duneLastScannedAtMs;
+  }
+
+  const duneLastAttemptedAtMs = timestampMs(stats?.dune_last_attempted_at);
+  if (duneLastAttemptedAtMs > 0) {
+    return duneLastAttemptedAtMs;
+  }
+
+  if (!stats?.live_tail) {
+    return timestampMs(syncState?.last_scanned_at);
+  }
+
+  return 0;
+}
+
+function buildHybridSourceStatus({ dune = null, liveTail = null } = {}) {
+  const liveStatus = String(liveTail?.status || '');
+  const duneStatus = String(dune?.status || '');
+  return {
+    status: liveStatus === 'error'
+      || liveStatus === 'rate_limited'
+      || duneStatus === 'error'
+      || duneStatus === 'rate_limited'
+      ? 'degraded'
+      : 'active',
+    provider: 'hybrid',
+    canonical_provider: 'dune',
+    live_provider: 'midgard',
+    observed_at: new Date().toISOString(),
+    dune,
+    live_tail: liveTail || null
+  };
+}
+
+async function runRapidSwapsLiveTail(client, syncState, previousStats) {
+  const pages = Math.max(0, Math.trunc(Number(config.rapidSwapsLiveTailPages) || 0));
+  const intervalMs = Math.max(0, Math.trunc(Number(config.rapidSwapsLiveTailIntervalMs) || 0));
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const previousLiveTail = statsObject(previousStats?.live_tail);
+
+  if (pages <= 0) {
+    return {
+      changed: false,
+      ran: false,
+      liveTail: {
+        ...previousLiveTail,
+        status: 'disabled',
+        provider: 'midgard',
+        mode: 'live_tail',
+        skipped: true,
+        skip_reason: 'disabled'
+      }
+    };
+  }
+
+  const rateLimitedUntilMs = timestampMs(previousLiveTail.rate_limited_until);
+  if (rateLimitedUntilMs > nowMs) {
+    return {
+      changed: false,
+      ran: false,
+      liveTail: {
+        ...previousLiveTail,
+        status: 'rate_limited',
+        provider: 'midgard',
+        mode: 'live_tail',
+        skipped: true,
+        skip_reason: 'rate_limited',
+        next_scan_at: new Date(rateLimitedUntilMs).toISOString()
+      }
+    };
+  }
+
+  const lastLiveScanAtMs = timestampMs(previousLiveTail.last_scanned_at);
+  if (intervalMs > 0 && lastLiveScanAtMs > 0 && nowMs - lastLiveScanAtMs < intervalMs) {
+    return {
+      changed: false,
+      ran: false,
+      liveTail: {
+        ...previousLiveTail,
+        status: previousLiveTail.status || 'active',
+        provider: 'midgard',
+        mode: 'live_tail',
+        skipped: true,
+        skip_reason: 'scan_interval',
+        next_scan_at: new Date(lastLiveScanAtMs + intervalMs).toISOString()
+      }
+    };
+  }
+
+  try {
+    const [priceIndex, knownTxIds] = await Promise.all([
+      fetchRapidSwapPriceIndex(),
+      loadRecentRapidSwapTxIds(client)
+    ]);
+    const scan = await fetchRapidSwapRows({
+      maxPages: pages,
+      knownTxIds,
+      priceIndex,
+      observedAt: nowIso
+    });
+    await upsertRapidSwaps(client, scan.rows);
+
+    const liveTail = {
+      status: 'active',
+      provider: 'midgard',
+      mode: 'live_tail',
+      last_scanned_at: scan.observedAt || nowIso,
+      observed_at: scan.observedAt || nowIso,
+      scanned_pages: scan.scannedPages,
+      scanned_actions: scan.scannedActions,
+      rapid_swaps_upserted: scan.rows.length,
+      highest_height_seen: scan.highestHeight,
+      lowest_height_seen: scan.lowestHeight,
+      stopped_early: Boolean(scan.stoppedEarly),
+      reached_stop_height: Boolean(scan.reachedStopHeight),
+      next_page_token: scan.nextPageToken || '',
+      next_scan_at: intervalMs > 0 ? new Date(Date.now() + intervalMs).toISOString() : '',
+      rate_limited_until: null,
+      error: null
+    };
+
+    return {
+      changed: true,
+      ran: true,
+      liveTail,
+      highestHeight: scan.highestHeight,
+      lastScannedAt: liveTail.last_scanned_at
+    };
+  } catch (error) {
+    const rateLimited = isRapidSwapRateLimitError(error);
+    const cooldownMs = rateLimited
+      ? getRapidSwapRateLimitCooldownMs(error, config.rapidSwapsRateLimitCooldownMs)
+      : 0;
+    const rateLimitedUntil = rateLimited
+      ? new Date(nowMs + cooldownMs).toISOString()
+      : null;
+    const liveTail = {
+      ...previousLiveTail,
+      status: rateLimited ? 'rate_limited' : 'error',
+      provider: 'midgard',
+      mode: 'live_tail',
+      skipped: true,
+      skip_reason: rateLimited ? 'rate_limited' : 'provider_error',
+      last_error_at: nowIso,
+      error: error.message || 'Rapid swap live tail failed',
+      rate_limited_until: rateLimitedUntil,
+      next_scan_at: rateLimitedUntil || (intervalMs > 0 ? new Date(nowMs + intervalMs).toISOString() : '')
+    };
+
+    return {
+      changed: true,
+      ran: false,
+      liveTail,
+      error
+    };
+  }
+}
+
+async function runRapidSwapsDuneScheduler(client, jobId, syncState) {
+  const previousStats = safeStats(syncState);
+  const nextStats = { ...previousStats };
+  if (!nextStats.dune_last_scanned_at && syncState?.last_scanned_at && !previousStats.live_tail) {
+    nextStats.dune_last_scanned_at = toIsoOrNull(syncState.last_scanned_at);
+  }
+
+  let lastScannedHeight = Number(syncState?.last_scanned_height || 0);
+  let lastScannedAt = toIsoOrNull(syncState?.last_scanned_at) || '';
+  const liveTailResult = await runRapidSwapsLiveTail(client, syncState, nextStats);
+  nextStats.live_tail = liveTailResult.liveTail;
+  if (liveTailResult.lastScannedAt) {
+    lastScannedAt = liveTailResult.lastScannedAt;
+  }
+  if (liveTailResult.highestHeight) {
+    lastScannedHeight = Math.max(lastScannedHeight, liveTailResult.highestHeight);
+  }
+
+  if (!config.duneApiKey || !config.rapidSwapsDuneQueryId) {
+    const canonicalSkipReason = !config.duneApiKey ? 'missing_dune_api_key' : 'missing_dune_rapid_swaps_query_id';
+    const sourceStatus = buildHybridSourceStatus({
+      dune: {
+        status: 'not_configured',
+        query_id: config.rapidSwapsDuneQueryId || '',
+        skip_reason: canonicalSkipReason
+      },
+      liveTail: liveTailResult.liveTail
+    });
+    Object.assign(nextStats, {
+      provider: 'hybrid',
+      canonical_provider: 'dune',
+      live_provider: 'midgard',
+      dune_query_id: config.rapidSwapsDuneQueryId || '',
+      source_status: sourceStatus
+    });
+
+    if (liveTailResult.changed) {
+      await saveSyncState(client, {
+        last_scanned_height: lastScannedHeight,
+        last_scanned_at: lastScannedAt || new Date().toISOString(),
+        stats_json: nextStats
+      });
+    }
+
+    const payload = {
+      job_name: 'rapid-swaps-recent-actions',
+      finished_at: new Date().toISOString(),
+      status: 'success',
+      stats_json: {
+        provider: 'hybrid',
+        canonical_provider: 'dune',
+        live_provider: 'midgard',
+        skipped: !liveTailResult.ran,
+        skip_reason: liveTailResult.ran ? canonicalSkipReason : liveTailResult.liveTail?.skip_reason || canonicalSkipReason,
+        canonical_skipped: true,
+        canonical_skip_reason: canonicalSkipReason,
+        live_tail: liveTailResult.liveTail,
+        source_status: sourceStatus
+      }
+    };
+    await completeJobRun(client, jobId, payload);
+    return {
+      ok: true,
+      stats: payload.stats_json
+    };
+  }
+
+  const lastScannedAtMs = getDuneLastScannedAtMs(syncState, nextStats);
+  if (
+    lastScannedAtMs > 0 &&
+    Date.now() - lastScannedAtMs < config.rapidSwapsDuneScanIntervalMs
+  ) {
+    const nextScanAt = new Date(lastScannedAtMs + config.rapidSwapsDuneScanIntervalMs).toISOString();
+    const sourceStatus = buildHybridSourceStatus({
+      dune: {
+        status: 'waiting_for_interval',
+        query_id: config.rapidSwapsDuneQueryId,
+        last_scanned_at: nextStats.dune_last_scanned_at || '',
+        next_scan_at: nextScanAt
+      },
+      liveTail: liveTailResult.liveTail
+    });
+    Object.assign(nextStats, {
+      provider: 'hybrid',
+      canonical_provider: 'dune',
+      live_provider: 'midgard',
+      dune_query_id: config.rapidSwapsDuneQueryId,
+      dune_next_scan_at: nextScanAt,
+      source_status: sourceStatus
+    });
+
+    if (liveTailResult.changed) {
+      await saveSyncState(client, {
+        last_scanned_height: lastScannedHeight,
+        last_scanned_at: lastScannedAt || new Date().toISOString(),
+        stats_json: nextStats
+      });
+    }
+
+    const { rows: pendingCountRows } = await client.query(
+      `select count(*)::bigint as count
+       from rapid_swap_candidates
+       where status = $1`,
+      ['pending']
+    );
+    const pendingCount = Number(pendingCountRows[0]?.count) || 0;
+    const payload = {
+      job_name: 'rapid-swaps-recent-actions',
+      finished_at: new Date().toISOString(),
+      status: 'success',
+      stats_json: {
+        provider: 'hybrid',
+        canonical_provider: 'dune',
+        live_provider: 'midgard',
+        skipped: !liveTailResult.ran,
+        skip_reason: liveTailResult.ran ? 'dune_scan_interval' : 'scan_interval',
+        canonical_skipped: true,
+        canonical_skip_reason: 'scan_interval',
+        next_scan_at: liveTailResult.liveTail?.next_scan_at || nextScanAt,
+        dune_next_scan_at: nextScanAt,
+        live_tail: liveTailResult.liveTail,
+        pending_candidates_remaining: pendingCount,
+        source_status: sourceStatus
+      }
+    };
+    await completeJobRun(client, jobId, payload);
+    return {
+      ok: true,
+      stats: payload.stats_json
+    };
+  }
+
+  const window = buildRapidSwapsDuneWindow(syncState);
+  let duneResult;
+  try {
+    duneResult = await fetchRapidSwapRowsFromDune({
+      startTime: window.startTime,
+      endTime: window.endTime,
+      limit: config.rapidSwapsDuneLimit
+    });
+    await upsertRapidSwaps(client, duneResult.rows);
+  } catch (duneError) {
+    const finishedAt = new Date().toISOString();
+    const nextScanAt = new Date(Date.now() + config.rapidSwapsDuneScanIntervalMs).toISOString();
+    const duneErrorSummary = summarizeDuneError(duneError);
+    const canonicalSkipReason = isDuneLimitError(duneError) ? 'dune_limit_error' : 'dune_error';
+    const duneStatus = {
+      status: 'error',
+      query_id: config.rapidSwapsDuneQueryId,
+      start_time: window.startTime,
+      end_time: window.endTime,
+      next_start_time: window.startTime,
+      head_end_time: window.headEndTime,
+      next_scan_at: nextScanAt,
+      last_error_at: finishedAt,
+      skip_reason: canonicalSkipReason,
+      error: duneErrorSummary
+    };
+    const sourceStatus = buildHybridSourceStatus({
+      dune: duneStatus,
+      liveTail: liveTailResult.liveTail
+    });
+    Object.assign(nextStats, {
+      provider: 'hybrid',
+      canonical_provider: 'dune',
+      live_provider: 'midgard',
+      dune_query_id: config.rapidSwapsDuneQueryId,
+      dune_last_attempted_at: finishedAt,
+      dune_next_scan_at: nextScanAt,
+      dune_window_start_time: window.startTime,
+      dune_window_end_time: window.endTime,
+      dune_next_start_time: window.startTime,
+      dune_head_end_time: window.headEndTime,
+      dune_error: duneErrorSummary,
+      source_status: sourceStatus
+    });
+
+    await saveSyncState(client, {
+      last_scanned_height: lastScannedHeight,
+      last_scanned_at: lastScannedAt || toIsoOrNull(syncState?.last_scanned_at) || finishedAt,
+      stats_json: nextStats
+    });
+
+    const { rows: pendingCountRows } = await client.query(
+      `select count(*)::bigint as count
+       from rapid_swap_candidates
+       where status = $1`,
+      ['pending']
+    );
+    const pendingCount = Number(pendingCountRows[0]?.count) || 0;
+    const liveTailUpserted = liveTailResult.ran ? Number(liveTailResult.liveTail?.rapid_swaps_upserted || 0) : 0;
+    const payload = {
+      job_name: 'rapid-swaps-recent-actions',
+      finished_at: finishedAt,
+      status: 'success',
+      stats_json: {
+        provider: 'hybrid',
+        canonical_provider: 'dune',
+        live_provider: 'midgard',
+        skipped: liveTailUpserted <= 0,
+        skip_reason: liveTailResult.ran ? canonicalSkipReason : liveTailResult.liveTail?.skip_reason || canonicalSkipReason,
+        canonical_skipped: true,
+        canonical_skip_reason: canonicalSkipReason,
+        dune_query_id: config.rapidSwapsDuneQueryId,
+        dune_last_attempted_at: finishedAt,
+        dune_next_scan_at: nextScanAt,
+        dune_window_start_time: window.startTime,
+        dune_window_end_time: window.endTime,
+        dune_next_start_time: window.startTime,
+        dune_head_end_time: window.headEndTime,
+        dune_error: duneErrorSummary,
+        rapid_swaps_upserted: liveTailUpserted,
+        canonical_rapid_swaps_upserted: 0,
+        live_tail: liveTailResult.liveTail,
+        pending_candidates_remaining: pendingCount,
+        source_status: sourceStatus
+      }
+    };
+    await completeJobRun(client, jobId, payload);
+    return {
+      ok: true,
+      stats: payload.stats_json
+    };
+  }
+
+  const finishedAt = new Date().toISOString();
+  const duneStatus = {
+    status: 'active',
+    query_id: config.rapidSwapsDuneQueryId,
+    execution_id: duneResult.executionId,
+    start_time: window.startTime,
+    end_time: window.endTime,
+    next_start_time: window.nextStartTime,
+    head_end_time: window.headEndTime,
+    scanned_rows: duneResult.scannedActions,
+    accepted_rows: duneResult.rows.length,
+    observed_at: duneResult.observedAt,
+    last_scanned_at: finishedAt
+  };
+  const sourceStatus = buildHybridSourceStatus({
+    dune: duneStatus,
+    liveTail: liveTailResult.liveTail
+  });
+
+  await saveSyncState(client, {
+    last_scanned_height: Math.max(lastScannedHeight, duneResult.highestHeight || 0),
+    last_scanned_at: liveTailResult.lastScannedAt || finishedAt,
+    stats_json: mergeSourceStatusIntoStats(nextStats, sourceStatus, {
+      provider: 'hybrid',
+      canonical_provider: 'dune',
+      live_provider: 'midgard',
+      dune_query_id: config.rapidSwapsDuneQueryId,
+      dune_execution_id: duneResult.executionId,
+      dune_last_scanned_at: finishedAt,
+      dune_window_start_time: window.startTime,
+      dune_window_end_time: window.endTime,
+      dune_next_start_time: window.nextStartTime,
+      dune_head_end_time: window.headEndTime,
+      dune_scanned_rows: duneResult.scannedActions,
+      dune_accepted_rows: duneResult.rows.length,
+      highest_height_seen: duneResult.highestHeight || previousStats.highest_height_seen || 0,
+      lowest_height_seen: duneResult.lowestHeight || previousStats.lowest_height_seen || 0,
+      rate_limited_until: null,
+      source_idle_until: null
+    })
+  });
+
+  const { rows: pendingCountRows } = await client.query(
+    `select count(*)::bigint as count
+     from rapid_swap_candidates
+     where status = $1`,
+    ['pending']
+  );
+  const pendingCount = Number(pendingCountRows[0]?.count) || 0;
+
+  const payload = {
+    job_name: 'rapid-swaps-recent-actions',
+    finished_at: new Date().toISOString(),
+    status: 'success',
+    stats_json: {
+      provider: 'hybrid',
+      canonical_provider: 'dune',
+      live_provider: 'midgard',
+      dune_query_id: config.rapidSwapsDuneQueryId,
+      dune_execution_id: duneResult.executionId,
+      dune_last_scanned_at: finishedAt,
+      dune_window_start_time: window.startTime,
+      dune_window_end_time: window.endTime,
+      dune_next_start_time: window.nextStartTime,
+      dune_head_end_time: window.headEndTime,
+      scanned_actions: duneResult.scannedActions,
+      rapid_swaps_upserted: duneResult.rows.length + (liveTailResult.ran ? Number(liveTailResult.liveTail?.rapid_swaps_upserted || 0) : 0),
+      canonical_rapid_swaps_upserted: duneResult.rows.length,
+      live_tail: liveTailResult.liveTail,
+      pending_candidates_remaining: pendingCount,
+      highest_height_seen: duneResult.highestHeight,
+      lowest_height_seen: duneResult.lowestHeight,
+      source_status: sourceStatus
+    }
+  };
+
+  await completeJobRun(client, jobId, payload);
+  return {
+    ok: true,
+    stats: payload.stats_json
+  };
 }
 
 function getSourceHeadHeight(sourceStatus) {
@@ -138,6 +669,18 @@ async function loadWsListenerState(client) {
   );
 
   return rows[0] || null;
+}
+
+async function loadRecentRapidSwapTxIds(client, limit = 2000) {
+  const { rows } = await client.query(
+    `select tx_id
+     from rapid_swaps
+     order by action_date desc
+     limit $1`,
+    [Math.max(1, Math.trunc(Number(limit) || 2000))]
+  );
+
+  return new Set((rows || []).map((row) => String(row.tx_id || '')).filter(Boolean));
 }
 
 function buildSchedulerScanPlan(syncState, wsListenerState) {
@@ -385,6 +928,9 @@ export async function runRapidSwapsScheduler() {
       });
 
       syncState = await loadSyncState(client);
+      if (config.rapidSwapsDuneQueryId) {
+        return runRapidSwapsDuneScheduler(client, jobId, syncState);
+      }
       const wsListenerState = await loadWsListenerState(client);
       const scanPlan = buildSchedulerScanPlan(syncState, wsListenerState);
       let effectiveScanPlan = scanPlan;
@@ -551,13 +1097,7 @@ export async function runRapidSwapsScheduler() {
 
       const priceIndex = await fetchRapidSwapPriceIndex();
 
-      const { rows: recentRows } = await client.query(
-        `select tx_id
-         from rapid_swaps
-         order by action_date desc
-         limit 2000`
-      );
-      const knownTxIds = new Set((recentRows || []).map((row) => String(row.tx_id || '')));
+      const knownTxIds = await loadRecentRapidSwapTxIds(client);
 
       const pendingResolution = await resolvePendingCandidates(client, priceIndex);
       await upsertRapidSwaps(client, pendingResolution.upsertRows);
