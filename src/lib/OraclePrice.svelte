@@ -190,7 +190,7 @@
 
   async function fetchRunePrice() {
     try {
-      const response = await fetch('https://thornode.thorchain.network/thorchain/network');
+      const response = await fetch('https://gateway.liquify.com/chain/thorchain_api/thorchain/network');
       const data = await response.json();
       return Number(data.rune_price_in_tor) / 1e8;
     } catch (error) {

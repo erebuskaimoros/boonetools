@@ -13,16 +13,16 @@ import {
   resolveRapidSwapHint
 } from '../src/lib/rapid-swaps/backend.js';
 
-test('rapid swap backend keeps official Midgard first and avoids known bad fallback URL', () => {
-  assert.equal(MIDGARD_BASES[0], 'https://midgard.thorchain.network/v2');
+test('rapid swap backend keeps Liquify Midgard first and avoids known bad fallback URL', () => {
+  assert.equal(MIDGARD_BASES[0], 'https://gateway.liquify.com/chain/thorchain_midgard/v2');
   assert.equal(MIDGARD_BASES.includes('https://midgard.liquify.com/v2'), false);
-  assert.equal(MIDGARD_BASES.includes('https://gateway.liquify.com/chain/thorchain_midgard/v2'), true);
+  assert.equal(MIDGARD_BASES.includes('https://midgard.thorchain.network/v2'), true);
 });
 
-test('rapid swap backend uses the configured non-Nine-Realms THORNode fallback', () => {
-  assert.equal(THORNODE_BASES[0], 'https://thornode.thorchain.network');
+test('rapid swap backend uses Liquify THORNode first and official fallback', () => {
+  assert.equal(THORNODE_BASES[0], 'https://gateway.liquify.com/chain/thorchain_api');
   assert.equal(THORNODE_BASES.includes('https://thornode.ninerealms.com'), false);
-  assert.equal(THORNODE_BASES.includes('https://gateway.liquify.com/chain/thorchain_api'), true);
+  assert.equal(THORNODE_BASES.includes('https://thornode.thorchain.network'), true);
 });
 
 test('rapid swap backend recognizes provider rate limits and daily cooldowns', () => {
@@ -307,7 +307,7 @@ test('fetchMidgardActions can anchor scans before a timestamp without offset pag
   }
 });
 
-test('fetchMidgardActions re-probes official Midgard first after a fallback success', async () => {
+test('fetchMidgardActions re-probes primary Midgard first after a fallback success', async () => {
   const originalFetch = global.fetch;
   const [primaryBase, ...fallbackBases] = MIDGARD_BASES;
   const urls = [];
@@ -430,7 +430,7 @@ test('resolveRapidSwapHint resolves directly from thornode tx data without query
   global.fetch = async (url) => {
     requestedUrls.push(url);
 
-    if (url === 'https://thornode.thorchain.network/thorchain/tx/target-tx') {
+    if (url === 'https://gateway.liquify.com/chain/thorchain_api/thorchain/tx/target-tx') {
       return new Response(JSON.stringify({
         consensus_height: 100,
         observed_tx: {
@@ -495,7 +495,7 @@ test('resolveRapidSwapHint marks non-rapid listener candidates as terminal witho
   const originalFetch = global.fetch;
 
   global.fetch = async (url) => {
-    if (url === 'https://thornode.thorchain.network/thorchain/tx/not-rapid') {
+    if (url === 'https://gateway.liquify.com/chain/thorchain_api/thorchain/tx/not-rapid') {
       return new Response(JSON.stringify({
         consensus_height: 100,
         observed_tx: {

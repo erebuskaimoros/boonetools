@@ -151,7 +151,7 @@
         items: [
           {
             text: "ThorNode API",
-            url: "https://thornode.thorchain.network/",
+            url: "https://gateway.liquify.com/chain/thorchain_api/",
             subItems: [
               "Pools data",
               "Savers positions",

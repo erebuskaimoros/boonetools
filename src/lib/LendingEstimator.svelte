@@ -80,7 +80,7 @@
 
     try {
       let fromAmount = Math.round(userFromAmount * 1e8);
-      const endpoint = `https://thornode.thorchain.network/thorchain/quote/loan/open?from_asset=${fromAsset}&amount=${fromAmount}&to_asset=${toAsset}&destination=${toAddress}`;
+      const endpoint = `https://gateway.liquify.com/chain/thorchain_api/thorchain/quote/loan/open?from_asset=${fromAsset}&amount=${fromAmount}&to_asset=${toAsset}&destination=${toAddress}`;
       const res = await fetch(endpoint);
 
       if (!res.ok) {
@@ -154,7 +154,7 @@
 
   // Fetches the available destination assets from THORNode. This will only return gas assets & stablecoins on the EVM chains
   async function fetchToAssets() {
-    const res = await fetch("https://thornode.thorchain.network/thorchain/pools");
+    const res = await fetch("https://gateway.liquify.com/chain/thorchain_api/thorchain/pools");
     const pools = await res.json();
     toAssets = pools
       .filter((pool) => pool.status === "Available")
@@ -185,7 +185,7 @@
 
   // Fetches the available collateral assets from THORNode
   async function fetchFromAssets() {
-    const res = await fetch("https://thornode.thorchain.network/thorchain/pools");
+    const res = await fetch("https://gateway.liquify.com/chain/thorchain_api/thorchain/pools");
     const pools = await res.json();
     fromAssets = pools
       .filter((pool) => pool.loan_collateral > 0 && Number(pool.loan_collateral_remaining) > 0) // Filter out pools with zero remaining collateral

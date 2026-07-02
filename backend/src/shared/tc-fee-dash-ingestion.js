@@ -322,7 +322,7 @@ export function buildTcFeeDailyRowsFromMidgard(earningsIntervals = [], runeInter
       source_label: hasDexVolume
         ? 'Midgard TC fees + CMC volume + DeFiLlama DEX volume'
         : 'Midgard TC fees + CMC volume',
-      source_thread: 'https://midgard.thorchain.network/v2/history/earnings',
+      source_thread: 'https://gateway.liquify.com/chain/thorchain_midgard/v2/history/earnings',
       source_json: {
         midgard: interval,
         midgardRune: runeInterval,

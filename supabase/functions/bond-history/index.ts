@@ -34,7 +34,7 @@ async function fetchNetworkAtHeight(height: number): Promise<any> {
 /** Get current node addresses for a bond provider */
 async function getCurrentNodeAddresses(bondAddress: string): Promise<string[]> {
   const res = await fetch(
-    `https://midgard.thorchain.network/v2/bonds/${bondAddress}`,
+    `https://gateway.liquify.com/chain/thorchain_midgard/v2/bonds/${bondAddress}`,
     { headers: { Accept: 'application/json' } }
   );
   if (!res.ok) throw new Error(`Midgard bonds failed (${res.status})`);
@@ -62,7 +62,7 @@ async function getAllNodeAddresses(bondAddress: string): Promise<{
     let hasMore = true;
     while (hasMore) {
       const res = await fetch(
-        `https://midgard.thorchain.network/v2/actions?address=${bondAddress}&type=bond&limit=${limit}&offset=${offset}`,
+        `https://gateway.liquify.com/chain/thorchain_midgard/v2/actions?address=${bondAddress}&type=bond&limit=${limit}&offset=${offset}`,
         { headers: { Accept: 'application/json' } }
       );
       if (!res.ok) break;

@@ -18,7 +18,7 @@
   let error = null;
   let showMore = false;
 
-  const API_DOMAIN = import.meta.env.VITE_API_DOMAIN || 'https://thornode.thorchain.network';
+  const API_DOMAIN = import.meta.env.VITE_API_DOMAIN || 'https://gateway.liquify.com/chain/thorchain_api';
 
   // Asset logos now imported from $lib/constants/assets via getAssetLogo()
 

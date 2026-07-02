@@ -46,9 +46,9 @@ flowchart TB
 
 | Service | Endpoint | Purpose |
 |---------|----------|---------|
-| **THORNode** | `thornode.ninerealms.com` | CosmosSDK state machine - processes swaps, manages vaults, governance |
+| **THORNode** | `gateway.liquify.com/chain/thorchain_api` | CosmosSDK state machine - processes swaps, manages vaults, governance |
 | **Bifrost** | (runs on each validator) | Cross-chain bridge - observes external chains, signs transactions |
-| **Midgard** | `midgard.ninerealms.com/v2` | Analytics API - aggregated data, history, offloads read queries |
+| **Midgard** | `gateway.liquify.com/chain/thorchain_midgard/v2` | Analytics API - aggregated data, history, offloads read queries |
 
 ### Vault Architecture
 
@@ -154,7 +154,7 @@ stateDiagram-v2
 
 ## Resources
 
-- [THORNode API Docs](https://thornode.ninerealms.com/thorchain/doc/)
-- [Midgard API Docs](https://midgard.ninerealms.com/v2/doc)
+- [THORNode API Docs](https://gateway.liquify.com/chain/thorchain_api/thorchain/doc/)
+- [Midgard API Docs](https://gateway.liquify.com/chain/thorchain_midgard/v2/doc)
 - [THORChain Dev Docs](https://dev.thorchain.org)
 - [Nine Realms Ops](https://ops.ninerealms.com/links)

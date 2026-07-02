@@ -20,13 +20,13 @@ function uniqueBases(values) {
 }
 
 export const MIDGARD_BASES = uniqueBases([
-  readEnv('MIDGARD_URL') || 'https://midgard.thorchain.network/v2',
-  readEnv('MIDGARD_FALLBACK_URL') || 'https://gateway.liquify.com/chain/thorchain_midgard/v2'
+  readEnv('MIDGARD_URL') || 'https://gateway.liquify.com/chain/thorchain_midgard/v2',
+  readEnv('MIDGARD_FALLBACK_URL') || 'https://midgard.thorchain.network/v2'
 ]);
 
 export const THORNODE_BASES = uniqueBases([
-  readEnv('THORNODE_PRIMARY_URL') || 'https://thornode.thorchain.network',
-  readEnv('THORNODE_FALLBACK_URL') || 'https://gateway.liquify.com/chain/thorchain_api'
+  readEnv('THORNODE_PRIMARY_URL') || 'https://gateway.liquify.com/chain/thorchain_api',
+  readEnv('THORNODE_FALLBACK_URL') || 'https://thornode.thorchain.network'
 ]);
 
 export const ACTION_PAGE_LIMIT = 50;

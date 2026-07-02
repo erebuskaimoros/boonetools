@@ -2,8 +2,8 @@
  * THORNode API Client
  *
  * Provider Strategy:
- * - THORChain Network (thornode.thorchain.network): Official endpoint, generous rate limits
- * - Liquify Gateway (gateway.liquify.com/chain/thorchain_api): Public fallback with archive coverage
+ * - Liquify Gateway (gateway.liquify.com/chain/thorchain_api): Primary public endpoint
+ * - THORChain Network (thornode.thorchain.network): Official fallback endpoint
  */
 
 import { fromBaseUnit } from '../utils/blockchain.js';
@@ -18,10 +18,10 @@ const DEV_THORNODE_BASES = {
 
 export const PROVIDERS = {
   thorchain: {
-    name: 'thorchain',
+    name: 'liquify',
     base: import.meta.env.DEV
       ? DEV_THORNODE_BASES.primary
-      : 'https://thornode.thorchain.network',
+      : 'https://gateway.liquify.com/chain/thorchain_api',
     supportsBlockHeight: true,
     updateFrequency: 6000,
     priority: 1
@@ -30,7 +30,7 @@ export const PROVIDERS = {
     name: 'fallback',
     base: import.meta.env.DEV
       ? DEV_THORNODE_BASES.fallback
-      : 'https://gateway.liquify.com/chain/thorchain_api',
+      : 'https://thornode.thorchain.network',
     supportsBlockHeight: true,
     updateFrequency: 30000,
     priority: 2
@@ -43,7 +43,7 @@ export const PROVIDERS = {
 class ThorNodeClient {
   constructor() {
     this.failureCount = {
-      thorchain: 0,
+      liquify: 0,
       fallback: 0
     };
     this.maxFailures = 3;
@@ -56,7 +56,7 @@ class ThorNodeClient {
   }
 
   resetFailures() {
-    this.failureCount.thorchain = 0;
+    this.failureCount.liquify = 0;
     this.failureCount.fallback = 0;
   }
 

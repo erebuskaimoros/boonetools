@@ -5,15 +5,15 @@
  * It's better suited for analytics, historical queries, and member data.
  *
  * Endpoints:
- * - https://midgard.thorchain.network/v2
  * - https://gateway.liquify.com/chain/thorchain_midgard/v2
+ * - https://midgard.thorchain.network/v2
  */
 
 /**
  * Midgard API base URL
  */
-export const MIDGARD_BASE = 'https://midgard.thorchain.network/v2';
-export const MIDGARD_FALLBACK_BASE = 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
+export const MIDGARD_BASE = 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
+export const MIDGARD_FALLBACK_BASE = 'https://midgard.thorchain.network/v2';
 export const MIDGARD_BASES = [MIDGARD_BASE, MIDGARD_FALLBACK_BASE];
 
 function getPathSearchParams(path) {
@@ -27,9 +27,9 @@ function getPathSearchParams(path) {
 function shouldRetryMidgardResponse(path, data) {
   const params = getPathSearchParams(path);
 
-  // The thorchain-network Midgard proxy has started returning empty interval buckets
-  // for history queries that should contain data. Retry those requests on the
-  // canonical Ninerealms Midgard origin before treating the response as valid.
+  // Some Midgard providers can return empty interval buckets for history queries
+  // that should contain data. Retry on the next configured provider before
+  // treating the response as valid.
   if (path.startsWith('/history/') && params.has('interval')) {
     return Array.isArray(data?.intervals) && data.intervals.length === 0 && data?.meta;
   }

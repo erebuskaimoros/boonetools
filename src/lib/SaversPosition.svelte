@@ -20,7 +20,7 @@
 
   async function fetchAvailableAssets() {
     try {
-      const response = await fetch("https://thornode.thorchain.network/thorchain/pools");
+      const response = await fetch("https://gateway.liquify.com/chain/thorchain_api/thorchain/pools");
       if (!response.ok) {
         throw new Error('Failed to fetch pool data');
       }
@@ -51,7 +51,7 @@
 
   async function fetchSaverData() {
     try {
-      const response = await fetch(`https://thornode.thorchain.network/thorchain/pool/${asset}/saver/${address}`);
+      const response = await fetch(`https://gateway.liquify.com/chain/thorchain_api/thorchain/pool/${asset}/saver/${address}`);
       if (!response.ok) {
         throw new Error('Failed to fetch saver data');
       }
@@ -103,7 +103,7 @@
   async function fetchWithdrawQuote() {
     try {
       const bps = Math.floor(withdrawPercentage * 100);
-      const response = await fetch(`https://thornode.thorchain.network/thorchain/quote/saver/withdraw?asset=${asset}&address=${address}&withdraw_bps=${bps}`);
+      const response = await fetch(`https://gateway.liquify.com/chain/thorchain_api/thorchain/quote/saver/withdraw?asset=${asset}&address=${address}&withdraw_bps=${bps}`);
       if (!response.ok) {
         throw new Error('Failed to fetch withdraw quote');
       }

@@ -19,8 +19,8 @@
     text: '#777'
   };
   const RPC_WS_URLS = [
-    'wss://rpc.thorchain.network/websocket',
-    'wss://gateway.liquify.com/chain/thorchain_rpc/websocket'
+    'wss://gateway.liquify.com/chain/thorchain_rpc/websocket',
+    'wss://rpc.thorchain.network/websocket'
   ];
   const RECONNECT_BASE_MS = 1_000;
   const RECONNECT_MAX_MS = 30_000;

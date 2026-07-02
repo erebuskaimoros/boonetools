@@ -7,7 +7,7 @@ const MIDGARD_BASE =
   process.env.MIDGARD_BASE ||
   "https://gateway.liquify.com/chain/thorchain_midgard";
 const THORNODE_BASE =
-  process.env.THORNODE_BASE || "https://thornode.thorchain.network";
+  process.env.THORNODE_BASE || "https://gateway.liquify.com/chain/thorchain_api";
 const RPC_BASES = process.env.RPC_BASES
   ? process.env.RPC_BASES.split(",").map((base) => base.trim()).filter(Boolean)
   : [

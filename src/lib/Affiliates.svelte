@@ -83,7 +83,7 @@
 
   async function queryThorName(thorname: string) {
     try {
-      const response = await fetch(`https://thornode.thorchain.network/thorchain/thorname/${thorname}`);
+      const response = await fetch(`https://gateway.liquify.com/chain/thorchain_api/thorchain/thorname/${thorname}`);
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -140,7 +140,7 @@
 
   async function queryNetworkData() {
     try {
-      const response = await fetch('https://thornode.thorchain.network/thorchain/network');
+      const response = await fetch('https://gateway.liquify.com/chain/thorchain_api/thorchain/network');
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
@@ -156,7 +156,7 @@
 
   async function queryPreferredAssetFeeMultiplier() {
     try {
-      const response = await fetch('https://thornode.thorchain.network/thorchain/mimir/key/PreferredAssetOutboundFeeMultiplier');
+      const response = await fetch('https://gateway.liquify.com/chain/thorchain_api/thorchain/mimir/key/PreferredAssetOutboundFeeMultiplier');
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }

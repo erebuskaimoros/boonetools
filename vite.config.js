@@ -5,8 +5,8 @@ import path from 'path'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
-const THORNODE_PRIMARY = 'https://thornode.thorchain.network'
-const THORNODE_FALLBACK = 'https://gateway.liquify.com/chain/thorchain_api'
+const THORNODE_PRIMARY = 'https://gateway.liquify.com/chain/thorchain_api'
+const THORNODE_FALLBACK = 'https://thornode.thorchain.network'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RUJIRA_BASE_LAYER_DATA_DIR = path.resolve(__dirname, '../docs/rujira-base-layer-fees')
 const RUJIRA_BASE_LAYER_DATA_FILES = new Map([

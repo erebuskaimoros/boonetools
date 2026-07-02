@@ -25,9 +25,9 @@ export {
  */
 export const ENDPOINTS = {
   thornode: {
-    thorchain: 'https://thornode.thorchain.network',
-    fallback: 'https://gateway.liquify.com/chain/thorchain_api'
+    thorchain: 'https://gateway.liquify.com/chain/thorchain_api',
+    fallback: 'https://thornode.thorchain.network'
   },
-  midgard: 'https://midgard.thorchain.network/v2',
+  midgard: 'https://gateway.liquify.com/chain/thorchain_midgard/v2',
   coingecko: 'https://api.coingecko.com/api/v3'
 };

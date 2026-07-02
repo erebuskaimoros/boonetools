@@ -34,7 +34,7 @@
 
   async function fetchMemberPositions(address) {
     try {
-      const response = await fetch(`https://midgard.thorchain.network/v2/member/${address}`);
+      const response = await fetch(`https://gateway.liquify.com/chain/thorchain_midgard/v2/member/${address}`);
       if (!response.ok) return { pools: [] };
       const data = await response.json();
       return data;

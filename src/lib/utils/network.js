@@ -922,7 +922,7 @@ export function calculateVaultSurplus(vaultBalance, poolBalance, tradeDepth = 0)
 export async function getCurrentBlock() {
   // Try RPC status endpoint first (fastest)
   try {
-    const response = await fetch('https://rpc.thorchain.network/status');
+    const response = await fetch('https://gateway.liquify.com/chain/thorchain_rpc/status');
     const data = await response.json();
     const height = Number(data.result?.sync_info?.latest_block_height);
     if (height > 0) return height;

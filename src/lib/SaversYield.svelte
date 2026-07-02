@@ -148,7 +148,7 @@
   //Get relevant mimir values
   async function getConstants() {
     const response = await fetch(
-      "https://thornode.thorchain.network/thorchain/mimir"
+      "https://gateway.liquify.com/chain/thorchain_api/thorchain/mimir"
     );
     const data = await response.json();
     return {
@@ -181,7 +181,7 @@
   //get pools with savers balances and their synth utilization
   async function getPools() {
     const response = await fetch(
-      "https://thornode.thorchain.network/thorchain/pools"
+      "https://gateway.liquify.com/chain/thorchain_api/thorchain/pools"
     );
     const data = await response.json();
     const availablePools = data

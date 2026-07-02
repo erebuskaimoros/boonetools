@@ -164,7 +164,7 @@
       const [ethResponse, configResponse, poolsResponse] = await Promise.all([
         fetch('https://gitlab.com/api/v4/projects/thorchain%2Fthornode/repository/files/common%2Ftokenlist%2Fethtokens%2Feth_mainnet_latest.json/raw?ref=develop'),
         fetch('https://gitlab.com/api/v4/projects/thorchain%2Fthornode/repository/files/config%2Fdefault.yaml/raw?ref=develop'),
-        fetch('https://thornode.thorchain.network/thorchain/pools')
+        fetch('https://gateway.liquify.com/chain/thorchain_api/thorchain/pools')
       ]);
 
       if (!ethResponse.ok || !configResponse.ok) 

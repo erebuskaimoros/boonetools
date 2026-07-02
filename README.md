@@ -145,7 +145,7 @@ https://boone.tools/functions/v1
 
 ## Notes For Future Work
 
-- Prefer official `*.thorchain.network` endpoints first.
-- Keep tested non-Nine-Realms fallbacks such as Liquify gateway paths where the code already uses them.
+- Prefer Liquify gateway endpoints first for THORNode, Midgard, and RPC traffic.
+- Keep official `*.thorchain.network` endpoints as tested fallbacks where the code already uses failover.
 - Avoid pushing browser traffic directly into Midgard-heavy scan paths when a cached backend route exists.
 - New UI work should follow `DESIGN.md`, which reflects the current terminal-style BooneTools interface.
