@@ -106,12 +106,21 @@
     description: "Track node Mimir vote history by vote key and node operator"
   };
 
+  const dynamicFeeApp = {
+    name: "ADR26 Dynamic Fees",
+    component: () => import("./lib/DynamicFeeDashboard.svelte"),
+    icon: "$",
+    path: "adr26-dynamic-fees",
+    description: "Track ADR26 dynamic L1 fee floors by thorname, pair, epoch, and controller signal"
+  };
+
   const apps = [
     rapidSwapsApp,
     tcFeeDashApp,
     bondTrackerApp,
     vaultExplorerApp,
     treasuryTrackerApp,
+    dynamicFeeApp,
     ...(SHOW_LIMIT_ORDERS ? [limitOrdersApp] : []),
     ...(SHOW_VOTE_TRACKER ? [voteTrackerApp] : []),
     appLayerBaseLayerApp
