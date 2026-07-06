@@ -4,12 +4,22 @@ The BooneTools frontend is served from [boone.tools](https://boone.tools/). The 
 
 ## Canonical Repo
 
-Deploy the frontend only from this repo checkout:
+Deploy the frontend only from the BooneTools website checkout:
 
 - repo root: `/Users/boonewheeler/Desktop/Projects/THORChain/boonetools/website`
 - expected `origin`: `https://github.com/erebuskaimoros/boonetools.git`
 
-Do not deploy BooneTools from the outer THORChain workspace repo. The guarded deploy scripts will now fail if the repo root or `origin` does not match the canonical BooneTools repo.
+Do not do BooneTools deploy work from the outer THORChain workspace, the Thornode repo, or any other sibling checkout. If the current shell is in `/Users/boonewheeler/Desktop/Projects/THORChain`, `/Users/boonewheeler/Desktop/Projects/THORChain/ThorNode`, or a similarly broad workspace, stop and switch to the BooneTools website checkout before building or deploying.
+
+Before a deploy, verify the context:
+
+```bash
+pwd
+git remote get-url origin
+git status --short
+```
+
+`pwd` should be the BooneTools `website` repo root shown above, and `origin` should be the BooneTools remote. A dirty Thornode or outer THORChain worktree is not a reason to deploy manually from that location. Use a clean BooneTools checkout/worktree, then run the guarded deploy script from `website`.
 
 ## Server
 
@@ -27,6 +37,7 @@ Do not deploy BooneTools from the outer THORChain workspace repo. The guarded de
 Run the guarded frontend deploy script:
 
 ```bash
+cd /Users/boonewheeler/Desktop/Projects/THORChain/boonetools/website
 npm run boonetools:deploy:frontend
 ```
 
@@ -55,6 +66,8 @@ SERVER=root@boone.tools DEST=/var/www/boone-tools VERIFY_URL=https://boone.tools
 ## Manual Sync
 
 Manual `rsync` is still possible, but it is no longer the recommended path. Use the guarded script unless you intentionally need a one-off deploy flow and have verified the repo source yourself.
+
+Do not use manual `rsync` as a workaround for being in the wrong repo. If you need to avoid unrelated local changes, create or use a clean BooneTools `website` checkout/worktree, apply only the intended BooneTools patch there, and run the canonical deploy script from that checkout.
 
 ## Troubleshooting
 

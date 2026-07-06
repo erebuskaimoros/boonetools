@@ -14,6 +14,7 @@
   let expandedVoteKey = '';
   let expandedNodeAddress = '';
   let voteSortMode = 'last-vote';
+  let nodeSortMode = 'last-vote';
   let searchTerm = '';
   let refreshTimer = null;
 
@@ -24,7 +25,17 @@
   $: nodeRows = dashboard?.by_node || [];
   $: latestEvents = dashboard?.latest_events || [];
   $: filteredVoteRows = sortVoteRows(filterVoteRows(voteRows, searchTerm, categoryFilter), voteSortMode);
-  $: filteredNodeRows = filterNodeRows(nodeRows, searchTerm, categoryFilter);
+  $: filteredNodeRows = sortNodeRows(filterNodeRows(nodeRows, searchTerm, categoryFilter), nodeSortMode);
+  $: avgResponseSortLabel = nodeSortMode === 'avg-response-asc'
+    ? 'FASTEST'
+    : nodeSortMode === 'avg-response-desc'
+      ? 'SLOWEST'
+      : 'SORT';
+  $: percentVotedSortLabel = nodeSortMode === 'percent-voted-desc'
+    ? 'HIGH FIRST'
+    : nodeSortMode === 'percent-voted-asc'
+      ? 'LOW FIRST'
+      : 'SORT';
   $: wsStatus = backend?.ws_listener?.stats?.stream_status || backend?.ws_listener?.status || 'unknown';
   $: backfillStatus = backend?.backfill?.status || 'unknown';
   $: ingestionSource = dashboardIngestionSource(backend);
@@ -126,6 +137,43 @@
         row.node_status.toLowerCase().includes(q)
       );
     });
+  }
+
+  function sortNodeRowsByLastVote(rows) {
+    return [...rows].sort((left, right) => {
+      const timeDiff = voteRowTime(right) - voteRowTime(left);
+      if (timeDiff !== 0) return timeDiff;
+      const heightDiff = (right.latest_height || 0) - (left.latest_height || 0);
+      if (heightDiff !== 0) return heightDiff;
+      return left.node_address.localeCompare(right.node_address);
+    });
+  }
+
+  function compareNullableNumbers(leftValue, rightValue, direction) {
+    const left = Number(leftValue);
+    const right = Number(rightValue);
+    const leftValid = Number.isFinite(left);
+    const rightValid = Number.isFinite(right);
+    if (leftValid !== rightValid) return leftValid ? -1 : 1;
+    if (!leftValid && !rightValid) return 0;
+    return direction === 'asc' ? left - right : right - left;
+  }
+
+  function sortNodeRows(rows, mode) {
+    const baseRows = sortNodeRowsByLastVote(rows);
+    if (mode === 'avg-response-asc' || mode === 'avg-response-desc') {
+      const direction = mode === 'avg-response-asc' ? 'asc' : 'desc';
+      return baseRows.sort((left, right) => (
+        compareNullableNumbers(left.avg_response_time_ms, right.avg_response_time_ms, direction)
+      ));
+    }
+    if (mode === 'percent-voted-desc' || mode === 'percent-voted-asc') {
+      const direction = mode === 'percent-voted-asc' ? 'asc' : 'desc';
+      return baseRows.sort((left, right) => (
+        compareNullableNumbers(left.economic_voted_percent, right.economic_voted_percent, direction)
+      ));
+    }
+    return baseRows;
   }
 
   function shortAddress(address) {
@@ -272,6 +320,19 @@
     if (voteSortMode === 'consensus-passed') return 'PASSED FIRST';
     if (voteSortMode === 'consensus-progress') return 'IN PROGRESS FIRST';
     return 'SORT';
+  }
+
+  function toggleNodeSort(sortKey) {
+    if (sortKey === 'avg-response') {
+      nodeSortMode = nodeSortMode === 'avg-response-asc'
+        ? 'avg-response-desc'
+        : 'avg-response-asc';
+      return;
+    }
+
+    nodeSortMode = nodeSortMode === 'percent-voted-desc'
+      ? 'percent-voted-asc'
+      : 'percent-voted-desc';
   }
 
   function displayNodeVote(vote) {
@@ -551,8 +612,28 @@
                 <th>Node</th>
                 <th>Operator</th>
                 <th>Status</th>
-                <th>Avg Response Time</th>
-                <th>% Voted</th>
+                <th>
+                  <button
+                    class="sort-header"
+                    class:active={nodeSortMode === 'avg-response-asc' || nodeSortMode === 'avg-response-desc'}
+                    on:click={() => toggleNodeSort('avg-response')}
+                    aria-label="Sort nodes by average response time"
+                  >
+                    <span>Avg Response Time</span>
+                    <em>{avgResponseSortLabel}</em>
+                  </button>
+                </th>
+                <th>
+                  <button
+                    class="sort-header"
+                    class:active={nodeSortMode === 'percent-voted-desc' || nodeSortMode === 'percent-voted-asc'}
+                    on:click={() => toggleNodeSort('percent-voted')}
+                    aria-label="Sort nodes by percent voted"
+                  >
+                    <span>% Voted</span>
+                    <em>{percentVotedSortLabel}</em>
+                  </button>
+                </th>
                 <th>Last Vote</th>
               </tr>
             </thead>

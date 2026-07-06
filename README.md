@@ -113,6 +113,14 @@ The collector-revenue artifact estimates all-time net collected as outbound coll
 
 ## Deployment
 
+BooneTools deploys must be run from the BooneTools website checkout, not from the outer THORChain workspace or the Thornode repo:
+
+```bash
+cd /Users/boonewheeler/Desktop/Projects/THORChain/boonetools/website
+```
+
+If the broader THORChain/Thornode worktree is dirty, use a clean BooneTools checkout/worktree for the intended patch. Do not work around that by manually deploying from the wrong repo.
+
 The live frontend is served from:
 
 ```text
