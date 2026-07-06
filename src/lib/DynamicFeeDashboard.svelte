@@ -754,29 +754,6 @@
     </div>
   {/if}
 
-  <div class="metric-grid">
-    <article class="metric">
-      <div class="metric-head"><span class="metric-idx">01</span><span class="metric-label">state</span></div>
-      <div class="metric-value">{model?.summary.statusLabel || '--'}</div>
-      <div class="metric-foot">ADR26 {model?.config.adr26 === 1 ? 'yes' : 'no'} / L1 {model?.config.enabled === 1 ? 'on' : 'off'}</div>
-    </article>
-    <article class="metric">
-      <div class="metric-head"><span class="metric-idx">02</span><span class="metric-label">live fees</span></div>
-      <div class="metric-value">{formatUsdCompact(model?.summary.currentFeesUsd || 0)}</div>
-      <div class="metric-foot">epoch rate {formatRateBps(model?.summary.currentRateBps)}</div>
-    </article>
-    <article class="metric">
-      <div class="metric-head"><span class="metric-idx">03</span><span class="metric-label">dynamic bps</span></div>
-      <div class="metric-value">{formatBps(model?.summary.maxDynamicBps || 0)}</div>
-      <div class="metric-foot">avg {formatBps(model?.summary.avgDynamicBps || 0)} / binding {model?.summary.bindingRecords || 0}</div>
-    </article>
-    <article class="metric">
-      <div class="metric-head"><span class="metric-idx">04</span><span class="metric-label">enrolled</span></div>
-      <div class="metric-value">{model ? `${model.summary.activeWhitelistCount}/${model.summary.monitorWhitelistCount}` : '--'}</div>
-      <div class="metric-foot">active / monitor / records {model?.summary.recordCount || 0}</div>
-    </article>
-  </div>
-
   <section class="block">
     <div class="block-head">
       <div class="block-title"><span class="title-marker">|</span><h2>Controller</h2></div>
@@ -1232,7 +1209,6 @@
   .key,
   .arrow,
   .cursor,
-  .metric-idx,
   .title-marker,
   .accent {
     color: #00cc66;
@@ -1372,64 +1348,6 @@
     font-weight: 700;
     letter-spacing: 0.1em;
     flex-shrink: 0;
-  }
-
-  .metric-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0;
-    border: 1px solid #1a1a1a;
-    margin-bottom: 18px;
-  }
-
-  .metric {
-    padding: 16px 18px;
-    background: #0a0a0a;
-    border-right: 1px solid #1a1a1a;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-height: 116px;
-    transition: background 0.15s;
-  }
-
-  .metric:last-child {
-    border-right: none;
-  }
-
-  .metric:hover {
-    background: #0d0d0d;
-  }
-
-  .metric-head {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-  }
-
-  .metric-label {
-    color: #666;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-weight: 600;
-  }
-
-  .metric-value {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 24px;
-    font-weight: 800;
-    color: #e8e8e8;
-    line-height: 1.1;
-    margin-top: auto;
-    overflow-wrap: anywhere;
-  }
-
-  .metric-foot {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #555;
   }
 
   .block {
@@ -2010,19 +1928,16 @@
   }
 
   @media (max-width: 1120px) {
-    .metric-grid,
     .selected-strip,
     .affiliate-metrics {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .metric:nth-child(2n),
     .selected-strip div:nth-child(2n),
     .affiliate-metric:nth-child(2n) {
       border-right: none;
     }
 
-    .metric:nth-child(-n + 2),
     .selected-strip div:nth-child(-n + 2),
     .affiliate-metric:nth-child(-n + 2) {
       border-bottom: 1px solid #1a1a1a;
@@ -2078,20 +1993,17 @@
       font-size: 22px;
     }
 
-    .metric-grid,
     .selected-strip,
     .config-grid {
       grid-template-columns: 1fr;
     }
 
-    .metric,
     .selected-strip div,
     .config-cell {
       border-right: none;
       border-bottom: 1px solid #1a1a1a;
     }
 
-    .metric:last-child,
     .selected-strip div:last-child,
     .config-cell:last-child {
       border-bottom: none;
