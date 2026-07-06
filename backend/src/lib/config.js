@@ -34,14 +34,14 @@ function readList(name, fallback = []) {
   return [...new Set(values)];
 }
 
-const thornodePrimaryUrl = optional(process.env.THORNODE_PRIMARY_URL) || 'https://thornode.thorchain.network';
+const thornodePrimaryUrl = optional(process.env.THORNODE_PRIMARY_URL) || 'https://gateway.liquify.com/chain/thorchain_api';
 const thornodeArchiveUrl = optional(process.env.THORNODE_ARCHIVE_URL) || 'https://thornode-archive.ninerealms.com';
-const thornodeFallbackUrl = optional(process.env.THORNODE_FALLBACK_URL) || 'https://gateway.liquify.com/chain/thorchain_api';
-const midgardUrl = optional(process.env.MIDGARD_URL) || 'https://midgard.thorchain.network/v2';
-const midgardFallbackUrl = optional(process.env.MIDGARD_FALLBACK_URL) || 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
-const rpcWsUrl = optional(process.env.RPC_WS_URL) || 'wss://rpc.thorchain.network/websocket';
-const rpcRestUrl = optional(process.env.RPC_REST_URL) || 'https://rpc.thorchain.network';
-const rpcFallbackRestUrl = optional(process.env.RPC_FALLBACK_REST_URL) || 'https://gateway.liquify.com/chain/thorchain_rpc';
+const thornodeFallbackUrl = optional(process.env.THORNODE_FALLBACK_URL) || 'https://thornode.thorchain.network';
+const midgardUrl = optional(process.env.MIDGARD_URL) || 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
+const midgardFallbackUrl = optional(process.env.MIDGARD_FALLBACK_URL) || 'https://midgard.thorchain.network/v2';
+const rpcWsUrl = optional(process.env.RPC_WS_URL) || 'wss://gateway.liquify.com/chain/thorchain_rpc/websocket';
+const rpcRestUrl = optional(process.env.RPC_REST_URL) || 'https://gateway.liquify.com/chain/thorchain_rpc';
+const rpcFallbackRestUrl = optional(process.env.RPC_FALLBACK_REST_URL) || 'https://rpc.thorchain.network';
 const rpcArchiveRestUrl = optional(process.env.RPC_ARCHIVE_REST_URL) || 'https://rpc.thorchain.liquify.com';
 const duneApiBaseUrl = optional(process.env.DUNE_API_BASE_URL) || 'https://api.dune.com';
 const cmcApiKey = optional(process.env.CMC_API_KEY || process.env.CMC_PRO_API_KEY);
@@ -68,7 +68,7 @@ export const config = Object.freeze({
   rpcWsUrl,
   rpcWsUrls: readList('RPC_WS_URLS', [
     rpcWsUrl,
-    'wss://gateway.liquify.com/chain/thorchain_rpc/websocket'
+    'wss://rpc.thorchain.network/websocket'
   ]),
   midgardDelayMs: readInt('MIDGARD_DELAY_MS', 5000),
   rapidSwapsMaxPages: readInt('RAPID_SWAPS_MAX_PAGES', 200),
@@ -95,12 +95,12 @@ export const config = Object.freeze({
   rapidSwapsMarketHistoryDuneQueryId: optional(process.env.RAPID_SWAPS_MARKET_HISTORY_DUNE_QUERY_ID) || '7620035',
   appLayerLiveStateTtlMs: readInt('APP_LAYER_LIVE_STATE_TTL_SECONDS', 2 * 60) * 1000,
   rujiraBaseFeesMidgardUrls: readList('RUJIRA_BASE_FEES_MIDGARD_URLS', [
-    midgardFallbackUrl,
-    midgardUrl
+    midgardUrl,
+    midgardFallbackUrl
   ]),
   rujiraBaseFeesRpcUrls: readList('RUJIRA_BASE_FEES_RPC_URLS', [
-    rpcFallbackRestUrl,
-    rpcRestUrl
+    rpcRestUrl,
+    rpcFallbackRestUrl
   ]),
   rujiraBaseFeesMidgardMaxPages: readInt('RUJIRA_BASE_FEES_MIDGARD_MAX_PAGES', 10),
   rujiraBaseFeesBlockMaxHeights: readInt('RUJIRA_BASE_FEES_BLOCK_MAX_HEIGHTS', 75),
@@ -112,12 +112,12 @@ export const config = Object.freeze({
   rujiraBaseFeesDuneHeadLagHours: readInt('RUJIRA_BASE_FEES_DUNE_HEAD_LAG_HOURS', 6),
   rujiraBaseFeesDuneLimit: readInt('RUJIRA_BASE_FEES_DUNE_LIMIT', 5000),
   rujiraReservePaymentsMidgardUrls: readList('RUJIRA_RESERVE_PAYMENTS_MIDGARD_URLS', [
-    midgardFallbackUrl,
-    midgardUrl
+    midgardUrl,
+    midgardFallbackUrl
   ]),
   rujiraReservePaymentsRpcUrls: readList('RUJIRA_RESERVE_PAYMENTS_RPC_URLS', [
-    rpcFallbackRestUrl,
-    rpcRestUrl
+    rpcRestUrl,
+    rpcFallbackRestUrl
   ]),
   rujiraReservePaymentsStartHeight: readInt('RUJIRA_RESERVE_PAYMENTS_START_HEIGHT', 25982820),
   rujiraReservePaymentsScheduleBlocks: readInt('RUJIRA_RESERVE_PAYMENTS_SCHEDULE_BLOCKS', 101),

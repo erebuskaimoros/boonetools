@@ -4,8 +4,8 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const THORNODE_BASE = process.env.THORNODE_BASE || "https://thornode.thorchain.network";
-const RPC_BASE = process.env.RPC_BASE || "https://rpc.thorchain.network";
+const THORNODE_BASE = process.env.THORNODE_BASE || "https://gateway.liquify.com/chain/thorchain_api";
+const RPC_BASE = process.env.RPC_BASE || "https://gateway.liquify.com/chain/thorchain_rpc";
 const OUTPUT_DIR = path.resolve(
   existsSync("website") ? "website/public/data/rujira-base-layer-fees" : "public/data/rujira-base-layer-fees",
 );

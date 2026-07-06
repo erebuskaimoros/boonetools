@@ -58,11 +58,11 @@
         const toTimestamp = Math.floor(new Date(endDate + 'T23:59:59.999Z').getTime() / 1000);
         
         // For custom ranges, use from/to timestamps
-        apiUrl = `https://midgard.thorchain.network/v2/history/swaps?interval=day&from=${fromTimestamp}&to=${toTimestamp}`;
+        apiUrl = `https://gateway.liquify.com/chain/thorchain_midgard/v2/history/swaps?interval=day&from=${fromTimestamp}&to=${toTimestamp}`;
         console.log(`📅 Custom range: ${startDate} to ${endDate} (${fromTimestamp} to ${toTimestamp})`);
       } else {
         // For preset ranges, use count
-        apiUrl = `https://midgard.thorchain.network/v2/history/swaps?interval=day&count=${days}`;
+        apiUrl = `https://gateway.liquify.com/chain/thorchain_midgard/v2/history/swaps?interval=day&count=${days}`;
         console.log(`📅 Preset range: last ${days} days`);
       }
       
@@ -828,7 +828,7 @@
     </div>
     
     <div class="data-source-note">
-      <p><strong>Data Sources:</strong> THORChain volume data fetched from Midgard API (midgard.thorchain.network). Other protocol data from DefiLlama's free DEX endpoints. Note: Some endpoints may require Pro API for historical data, fallback demo data will be used if API limits are reached.</p>
+      <p><strong>Data Sources:</strong> THORChain volume data fetched from Midgard through the Liquify gateway. Other protocol data from DefiLlama's free DEX endpoints. Note: Some endpoints may require Pro API for historical data, fallback demo data will be used if API limits are reached.</p>
     </div>
   {/if}
 

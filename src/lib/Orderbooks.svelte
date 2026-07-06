@@ -24,7 +24,7 @@
   let testingQuote = new Set(); // Track which swaps are testing quotes
   let quoteResults = new Map(); // Store quote results
 
-  const MAINNET_API = 'https://thornode.thorchain.network/thorchain';
+  const MAINNET_API = 'https://gateway.liquify.com/chain/thorchain_api/thorchain';
 
   async function fetchLimitSwapsSummary() {
     try {

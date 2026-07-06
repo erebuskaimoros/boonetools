@@ -73,7 +73,7 @@
 
   async function fetchThorchainAddresses() {
     try {
-      const response = await fetch('https://thornode.thorchain.network/thorchain/inbound_addresses');
+      const response = await fetch('https://gateway.liquify.com/chain/thorchain_api/thorchain/inbound_addresses');
       const data = await response.json();
       const ethChain = data.find(chain => chain.chain === 'ETH');
       
@@ -101,7 +101,7 @@
 
   async function fetchPoolPrices() {
     try {
-      const response = await fetch('https://thornode.thorchain.network/thorchain/pools');
+      const response = await fetch('https://gateway.liquify.com/chain/thorchain_api/thorchain/pools');
       const pools = await response.json();
       
       const ethPool = pools.find(p => p.asset === 'ETH.ETH');
@@ -375,7 +375,7 @@
   async function fetchQuote() {
     try {
       const amountToSend = getNumericAmount() * 1e8;
-      const url = `https://thornode.thorchain.network/thorchain/quote/swap?amount=${amountToSend}&from_asset=${getFullAssetString(selectedAsset)}&to_asset=THOR.RUNE&destination=${runeAddress}&affiliate=${MEMO_CONFIG.AFFILIATE}&affiliate_bps=${MEMO_CONFIG.FEE}`;
+      const url = `https://gateway.liquify.com/chain/thorchain_api/thorchain/quote/swap?amount=${amountToSend}&from_asset=${getFullAssetString(selectedAsset)}&to_asset=THOR.RUNE&destination=${runeAddress}&affiliate=${MEMO_CONFIG.AFFILIATE}&affiliate_bps=${MEMO_CONFIG.FEE}`;
       
       const response = await fetch(url);
       const result = await response.json();
@@ -461,7 +461,7 @@
   // Add this helper function to verify addresses
   async function verifyThorchainAddresses() {
     try {
-      const response = await fetch('https://thornode.thorchain.network/thorchain/inbound_addresses');
+      const response = await fetch('https://gateway.liquify.com/chain/thorchain_api/thorchain/inbound_addresses');
       const data = await response.json();
       const ethChain = data.find(chain => chain.chain === 'ETH');
       

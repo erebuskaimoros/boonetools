@@ -2,21 +2,24 @@
 
 ## Overview
 
-THORNode provides a RESTful API for interacting with the THORChain network. The API is available through public endpoints hosted by Nine Realms.
+THORNode provides a RESTful API for interacting with the THORChain network. BooneTools should prefer Liquify gateway endpoints first, with official `thorchain.network` hosts retained as fallbacks where failover is available.
 
 ## Base URLs
 
 | Service | URL | Description |
 |---------|-----|-------------|
-| THORNode (Primary) | `https://thornode.ninerealms.com` | Main THORNode API |
-| THORNode (Fallback) | `https://thornode.thorchain.liquify.com` | Backup endpoint |
-| Midgard | `https://midgard.ninerealms.com` | Aggregated analytics API |
+| THORNode (Primary) | `https://gateway.liquify.com/chain/thorchain_api` | Liquify gateway THORNode API |
+| THORNode (Fallback) | `https://thornode.thorchain.network` | Official THORNode API |
+| Midgard (Primary) | `https://gateway.liquify.com/chain/thorchain_midgard` | Liquify gateway Midgard API |
+| Midgard (Fallback) | `https://midgard.thorchain.network` | Official Midgard API |
+| RPC (Primary) | `https://gateway.liquify.com/chain/thorchain_rpc` | Liquify gateway RPC |
+| RPC (Fallback) | `https://rpc.thorchain.network` | Official RPC |
 
 ## Interactive Documentation
 
-- **THORNode Swagger:** https://thornode.ninerealms.com/thorchain/doc/
-- **Midgard Swagger:** https://midgard.ninerealms.com/v2/doc
-- **OpenAPI Spec:** https://thornode.ninerealms.com/thorchain/doc/openapi.yaml
+- **THORNode Swagger:** https://gateway.liquify.com/chain/thorchain_api/thorchain/doc/
+- **Midgard Swagger:** https://gateway.liquify.com/chain/thorchain_midgard/v2/doc
+- **OpenAPI Spec:** https://gateway.liquify.com/chain/thorchain_api/thorchain/doc/openapi.yaml
 
 ## Rate Limits & Best Practices
 
@@ -280,7 +283,7 @@ These endpoints follow standard Cosmos SDK patterns:
 
 ## Midgard API (v2)
 
-Midgard provides aggregated analytics data. Base URL: `https://midgard.ninerealms.com/v2`
+Midgard provides aggregated analytics data. BooneTools primary base URL: `https://gateway.liquify.com/chain/thorchain_midgard/v2`
 
 ### Key Endpoints
 
@@ -300,7 +303,7 @@ Midgard provides aggregated analytics data. Base URL: `https://midgard.ninerealm
 | GET | `/v2/history/tvl` | TVL history |
 | GET | `/v2/actions` | Transaction actions |
 
-Full documentation: https://midgard.ninerealms.com/v2/doc
+Full documentation: https://gateway.liquify.com/chain/thorchain_midgard/v2/doc
 
 ---
 

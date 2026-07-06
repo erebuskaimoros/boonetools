@@ -132,7 +132,7 @@
 
   async function fetchTxDetails(txid) {
     try {
-      const response = await fetch(`https://midgard.thorchain.network/v2/actions?txid=${txid}`);
+      const response = await fetch(`https://gateway.liquify.com/chain/thorchain_midgard/v2/actions?txid=${txid}`);
       const data = await response.json();
       if (data.actions && data.actions[0]) {
         const action = data.actions[0];

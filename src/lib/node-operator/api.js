@@ -1,8 +1,8 @@
 const API_ENDPOINTS = {
-  primary: 'https://thornode.thorchain.network',
+  primary: 'https://gateway.liquify.com/chain/thorchain_api',
   archive: 'https://thornode-archive.ninerealms.com',
-  fallback: 'https://thornode.ninerealms.com',
-  midgard: 'https://midgard.thorchain.network'
+  fallback: 'https://thornode.thorchain.network',
+  midgard: 'https://gateway.liquify.com/chain/thorchain_midgard'
 };
 
 const NODEOP_API = {

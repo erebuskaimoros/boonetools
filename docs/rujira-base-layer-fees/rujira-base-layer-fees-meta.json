@@ -17,7 +17,7 @@
     ]
   ],
   "sourceMidgard": "https://gateway.liquify.com/chain/thorchain_midgard",
-  "sourceThornode": "https://thornode.thorchain.network",
+  "sourceThornode": "https://gateway.liquify.com/chain/thorchain_api",
   "sourceRpc": [
     "https://gateway.liquify.com/chain/thorchain_rpc",
     "https://rpc.thorchain.network"

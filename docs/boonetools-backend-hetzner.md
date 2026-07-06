@@ -46,10 +46,13 @@ Start from `backend/.env.example` and set at least:
 PORT=8787
 DATABASE_URL=postgresql://boonetools:...@127.0.0.1:5433/boonetools
 PUBLIC_API_KEY=...
-THORNODE_PRIMARY_URL=https://thornode.thorchain.network
-THORNODE_FALLBACK_URL=https://thornode.thorchain.liquify.com
-MIDGARD_URL=https://midgard.thorchain.network/v2
-MIDGARD_FALLBACK_URL=https://midgard.liquify.com/v2
+THORNODE_PRIMARY_URL=https://gateway.liquify.com/chain/thorchain_api
+THORNODE_FALLBACK_URL=https://thornode.thorchain.network
+MIDGARD_URL=https://gateway.liquify.com/chain/thorchain_midgard/v2
+MIDGARD_FALLBACK_URL=https://midgard.thorchain.network/v2
+RPC_REST_URL=https://gateway.liquify.com/chain/thorchain_rpc
+RPC_FALLBACK_REST_URL=https://rpc.thorchain.network
+RPC_WS_URL=wss://gateway.liquify.com/chain/thorchain_rpc/websocket
 RAPID_SWAPS_CANONICAL_SCAN_INTERVAL_SECONDS=900
 RAPID_SWAPS_NORMAL_HEAD_PAGES=4
 RAPID_SWAPS_LAGGING_HEAD_PAGES=2

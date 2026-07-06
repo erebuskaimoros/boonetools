@@ -155,8 +155,8 @@ const logo = getAssetLogo(pool.asset);
 ### THORNode Client
 
 **Provider Strategy:**
-- **Liquify** (`thornode.thorchain.liquify.com`): Updates every 6 seconds - use for real-time data
-- **Nine Realms** (`thornode.ninerealms.com`): Updates ~1 minute - fallback after 3 Liquify failures
+- **Liquify** (`gateway.liquify.com/chain/thorchain_api`): primary THORNode route
+- **Official THORChain** (`thornode.thorchain.network`): fallback route
 - **Archive** (`thornode-archive.ninerealms.com`): Historical queries with block height
 
 ### Available Methods
@@ -181,11 +181,8 @@ const logo = getAssetLogo(pool.asset);
 ### Options
 
 ```javascript
-// Default: Uses Liquify with Nine Realms fallback
+// Default: Uses Liquify with official THORChain fallback
 await thornode.getNetwork();
-
-// Prefer Nine Realms (less frequent updates OK)
-await thornode.getPools({ preferNinerealms: true });
 
 // Historical query with block height (uses Archive)
 await thornode.getLiquidityProvider(pool, address, { blockHeight: 12345678 });
@@ -200,7 +197,7 @@ await thornode.getNetwork({ cache: false });
 ```javascript
 const fetchRunePrice = async () => {
   try {
-    const response = await fetch('https://thornode.ninerealms.com/thorchain/network');
+    const response = await fetch('https://gateway.liquify.com/chain/thorchain_api/thorchain/network');
     const data = await response.json();
     runePrice = Number(data.rune_price_in_tor) / 1e8;
   } catch (err) {
@@ -337,8 +334,8 @@ When migrating a component, check for these patterns:
 - [ ] Hardcoded `1e8` → `THOR_BASE`
 
 ### Replace Direct API Calls
-- [ ] `fetch('https://thornode.ninerealms.com/...')` → `thornode.fetch()` or convenience method
-- [ ] `fetch('https://midgard.ninerealms.com/...')` → `midgard.fetch()` or convenience method
+- [ ] `fetch('https://gateway.liquify.com/chain/thorchain_api/...')` → `thornode.fetch()` or convenience method
+- [ ] `fetch('https://gateway.liquify.com/chain/thorchain_midgard/...')` → `midgard.fetch()` or convenience method
 
 ### Replace Independent Data Fetching
 - [ ] RUNE price fetching → `subscribeToRunePrice()` + `$runePrice`

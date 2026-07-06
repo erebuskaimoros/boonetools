@@ -1,6 +1,6 @@
-const THORNODE_PRIMARY = 'https://thornode.thorchain.network';
-const THORNODE_FALLBACK = 'https://thornode.thorchain.liquify.com';
-const MIDGARD_CHURNS = 'https://midgard.thorchain.network/v2/churns';
+const THORNODE_PRIMARY = 'https://gateway.liquify.com/chain/thorchain_api';
+const THORNODE_FALLBACK = 'https://thornode.thorchain.network';
+const MIDGARD_CHURNS = 'https://gateway.liquify.com/chain/thorchain_midgard/v2/churns';
 
 type ResponseType = 'json' | 'text';
 

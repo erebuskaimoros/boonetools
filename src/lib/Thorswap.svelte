@@ -47,8 +47,8 @@
   onMount(async () => {
     try {
       const [poolsResponse, networkResponse] = await Promise.all([
-        fetch('https://thornode.thorchain.network/thorchain/pools'),
-        fetch('https://thornode.thorchain.network/thorchain/network')
+        fetch('https://gateway.liquify.com/chain/thorchain_api/thorchain/pools'),
+        fetch('https://gateway.liquify.com/chain/thorchain_api/thorchain/network')
       ]);
 
       const pools = await poolsResponse.json();

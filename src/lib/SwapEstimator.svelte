@@ -276,7 +276,7 @@
 
       async function fetchAssetPrices() {
         try {
-          const priceUrl = `https://midgard.thorchain.network/v2/pools`;
+          const priceUrl = `https://gateway.liquify.com/chain/thorchain_midgard/v2/pools`;
           const priceResponse = await fetch(priceUrl);
           const priceResult = await priceResponse.json();
           
@@ -327,7 +327,7 @@
         const estimatedValueUSD = amount * assetInPriceUSD;
     
         // Fetch the streaming swap quote from thornode
-        let url_stream = `https://thornode.thorchain.network/thorchain/quote/swap?`;
+        let url_stream = `https://gateway.liquify.com/chain/thorchain_api/thorchain/quote/swap?`;
         
         // Add height parameter if provided
         if (height) {

@@ -113,7 +113,7 @@
   // Polling
   let pollInterval;
   const POLL_INTERVAL_MS = 20000;
-  const RPC_WS_URL = 'wss://rpc.thorchain.network/websocket';
+  const RPC_WS_URL = 'wss://gateway.liquify.com/chain/thorchain_rpc/websocket';
   const RPC_RECONNECT_BASE_MS = 2000;
   const RPC_RECONNECT_MAX_MS = 30000;
   const REALTIME_REFRESH_DEBOUNCE_MS = 2500;

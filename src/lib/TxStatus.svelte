@@ -39,7 +39,7 @@
     error = null;
     try {
       const cleanedTxId = txId.startsWith('0x') ? txId.slice(2) : txId;
-      const response = await fetch(`https://thornode.thorchain.network/thorchain/tx/status/${cleanedTxId}`);
+      const response = await fetch(`https://gateway.liquify.com/chain/thorchain_api/thorchain/tx/status/${cleanedTxId}`);
       if (!response.ok) {
         throw new Error('Failed to fetch transaction status');
       }
@@ -56,7 +56,7 @@
     error = null;
     try {
       const cleanedTxId = txId.startsWith('0x') ? txId : txId;
-      const response = await fetch(`https://midgard.thorchain.network/v2/actions?txid=${cleanedTxId}`);
+      const response = await fetch(`https://gateway.liquify.com/chain/thorchain_midgard/v2/actions?txid=${cleanedTxId}`);
       if (!response.ok) {
         throw new Error('Failed to fetch Midgard actions');
       }

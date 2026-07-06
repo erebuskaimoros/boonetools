@@ -19,7 +19,7 @@
   Chart.register(SankeyController, Flow);
 
   const REFRESH_INTERVAL_MS = 120000;
-  const RPC_WS_URL = 'wss://rpc.thorchain.network/websocket';
+  const RPC_WS_URL = 'wss://gateway.liquify.com/chain/thorchain_rpc/websocket';
   const RECONNECT_BASE_MS = 2000;
   const RECONNECT_MAX_MS = 30000;
   const REFRESH_DEBOUNCE_MS = 8000;

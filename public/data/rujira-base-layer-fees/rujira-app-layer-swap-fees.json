@@ -15,16 +15,16 @@
     "totalLiquidityFeeUsd": 31.70892725,
     "warningCount": 0,
     "sourceMidgard": [
-      "https://midgard.thorchain.network",
-      "https://gateway.liquify.com/chain/thorchain_midgard"
+      "https://gateway.liquify.com/chain/thorchain_midgard",
+      "https://midgard.thorchain.network"
     ],
     "sourceThornode": [
-      "https://thornode.thorchain.network",
-      "https://gateway.liquify.com/chain/thorchain_api"
+      "https://gateway.liquify.com/chain/thorchain_api",
+      "https://thornode.thorchain.network"
     ],
     "sourceRpc": [
-      "https://rpc.thorchain.network",
-      "https://gateway.liquify.com/chain/thorchain_rpc"
+      "https://gateway.liquify.com/chain/thorchain_rpc",
+      "https://rpc.thorchain.network"
     ]
   },
   "weekly": [

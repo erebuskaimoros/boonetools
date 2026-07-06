@@ -21,24 +21,25 @@
  * THORNode API endpoints with fallback
  */
 const DEV_THORNODE_ENDPOINTS = {
-  primary: '/__thornode_primary'
+  primary: '/__thornode_primary',
+  fallback: '/__thornode_fallback'
 };
 
 export const THORNODE_ENDPOINTS = {
   primary: import.meta.env.DEV
     ? DEV_THORNODE_ENDPOINTS.primary
-    : 'https://thornode.thorchain.network',
+    : 'https://gateway.liquify.com/chain/thorchain_api',
   fallback: import.meta.env.DEV
-    ? '/__thornode_fallback'
-    : 'https://gateway.liquify.com/chain/thorchain_api'
+    ? DEV_THORNODE_ENDPOINTS.fallback
+    : 'https://thornode.thorchain.network'
 };
 
 /**
  * Midgard API endpoints
  */
 export const MIDGARD_ENDPOINTS = {
-  primary: 'https://midgard.thorchain.network',
-  fallback: 'https://gateway.liquify.com/chain/thorchain_midgard'
+  primary: 'https://gateway.liquify.com/chain/thorchain_midgard',
+  fallback: 'https://midgard.thorchain.network'
 };
 
 // ============================================
