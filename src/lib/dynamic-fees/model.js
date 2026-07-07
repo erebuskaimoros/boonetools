@@ -109,6 +109,11 @@ export function computeEpochTiming({
   };
 }
 
+export function liveSealEpoch(reportedEpoch = 0) {
+  const normalized = parseNumeric(reportedEpoch);
+  return normalized > 0 ? normalized + 1 : normalized;
+}
+
 export function extractDynamicConfig({ mimir = {}, currentResponse = {}, lastblock = [] } = {}) {
   const epochBlocks = getMimirNumber(
     mimir,
@@ -116,11 +121,13 @@ export function extractDynamicConfig({ mimir = {}, currentResponse = {}, lastblo
     DYNAMIC_FEE_DEFAULTS.L1DynamicFeeEpochBlocks
   );
   const blockHeight = getBlockHeight(lastblock);
-  const epochTiming = computeEpochTiming({
-    epochBlocks,
-    blockHeight,
-    currentEpoch: currentResponse?.epoch
-  });
+  const derivedEpochTiming = computeEpochTiming({ epochBlocks, blockHeight });
+  const reportedCurrentEpoch = parseNumeric(currentResponse?.epoch, derivedEpochTiming.currentEpoch);
+  const epochTiming = {
+    ...derivedEpochTiming,
+    reportedCurrentEpoch,
+    currentEpoch: liveSealEpoch(reportedCurrentEpoch)
+  };
 
   const whitelists = Object.entries(mimir || {})
     .filter(([key]) => key.toUpperCase().startsWith(WHITELIST_PREFIX))
@@ -216,13 +223,10 @@ export function buildEpochChartSeries(record = {}, currentEpoch = 0) {
   const history = Array.isArray(record.history) ? record.history : [];
   const liveEpoch = parseNumeric(currentEpoch);
   const hasLive = (Number(record.currentFeesUsd) || 0) > 0 || (Number(record.currentVolumeUsd) || 0) > 0;
-  const displayHistory = hasLive && liveEpoch
-    ? history.filter((row) => parseNumeric(row.epoch) !== liveEpoch)
-    : history;
 
-  const labels = displayHistory.map((row) => `E${row.epoch}`);
-  const fees = displayHistory.map((row) => row.feesUsd);
-  const bps = displayHistory.map((row) => row.bpsAtClose);
+  const labels = history.map((row) => `E${row.epoch} sealed`);
+  const fees = history.map((row) => row.feesUsd);
+  const bps = history.map((row) => row.bpsAtClose);
 
   if (hasLive) {
     labels.push(liveEpoch ? `E${liveEpoch} live` : 'live');
@@ -233,8 +237,7 @@ export function buildEpochChartSeries(record = {}, currentEpoch = 0) {
   return {
     labels,
     fees,
-    bps,
-    mergedLiveEpoch: hasLive && displayHistory.length !== history.length
+    bps
   };
 }
 
@@ -244,11 +247,13 @@ export function buildAffiliateChartSeries(config = {}, records = [], currentOnly
 
   function addPoint(epoch, volumeUsd, feesUsd, live = false) {
     const normalizedEpoch = parseNumeric(epoch);
-    const key = normalizedEpoch || (live ? 'live' : 'unknown');
+    const key = normalizedEpoch
+      ? `${normalizedEpoch}:${live ? 'live' : 'sealed'}`
+      : (live ? 'live' : 'unknown');
     if (!epochMap.has(key)) {
       epochMap.set(key, {
         epoch: normalizedEpoch,
-        label: normalizedEpoch ? `E${normalizedEpoch}` : 'live',
+        label: normalizedEpoch ? `E${normalizedEpoch} sealed` : 'live',
         volumeUsd: 0,
         feesUsd: 0,
         live: false
@@ -266,11 +271,8 @@ export function buildAffiliateChartSeries(config = {}, records = [], currentOnly
     const liveFeesUsd = Number(record.currentFeesUsd) || 0;
     const hasLive = liveVolumeUsd > 0 || liveFeesUsd > 0;
     const history = Array.isArray(record.history) ? record.history : [];
-    const displayHistory = hasLive && currentEpoch
-      ? history.filter((row) => parseNumeric(row.epoch) !== currentEpoch)
-      : history;
 
-    displayHistory.forEach((row) => {
+    history.forEach((row) => {
       addPoint(row.epoch, row.volumeUsd, row.feesUsd);
     });
 
@@ -293,7 +295,7 @@ export function buildAffiliateChartSeries(config = {}, records = [], currentOnly
       if (!a.epoch && !b.epoch) return a.label.localeCompare(b.label);
       if (!a.epoch) return 1;
       if (!b.epoch) return -1;
-      return a.epoch - b.epoch;
+      return a.epoch - b.epoch || Number(a.live) - Number(b.live);
     });
 
   return {
@@ -389,7 +391,6 @@ export function buildAffiliateMidgardSeries(statsRows = [], earningsRows = [], t
 }
 
 export function buildAffiliateRollups(config = {}, records = [], currentEntries = []) {
-  const currentEpoch = parseNumeric(config.currentEpoch);
   const recordIds = new Set(records.map((record) => record.id));
   const recordsByThorname = records.reduce((map, record) => {
     const key = String(record.thorname || '').toLowerCase();
@@ -418,11 +419,8 @@ export function buildAffiliateRollups(config = {}, records = [], currentEntries 
         const liveFeesUsd = Number(record.currentFeesUsd) || 0;
         const hasLive = liveVolumeUsd > 0 || liveFeesUsd > 0;
         const history = Array.isArray(record.history) ? record.history : [];
-        const dedupedHistory = hasLive && currentEpoch
-          ? history.filter((row) => parseNumeric(row.epoch) !== currentEpoch)
-          : history;
-        const historyVolumeUsd = dedupedHistory.reduce((sum, row) => sum + (Number(row.volumeUsd) || 0), 0);
-        const historyFeesUsd = dedupedHistory.reduce((sum, row) => sum + (Number(row.feesUsd) || 0), 0);
+        const historyVolumeUsd = history.reduce((sum, row) => sum + (Number(row.volumeUsd) || 0), 0);
+        const historyFeesUsd = history.reduce((sum, row) => sum + (Number(row.feesUsd) || 0), 0);
 
         acc.liveVolumeUsd += liveVolumeUsd;
         acc.liveFeesUsd += liveFeesUsd;
@@ -434,7 +432,6 @@ export function buildAffiliateRollups(config = {}, records = [], currentEntries 
         if (record.isActive) acc.activePairCount += 1;
         if (record.isMonitor) acc.monitorPairCount += 1;
         if (hasLive) acc.livePairCount += 1;
-        if (hasLive && history.length !== dedupedHistory.length) acc.mergedPairCount += 1;
         return acc;
       },
       {
@@ -447,8 +444,7 @@ export function buildAffiliateRollups(config = {}, records = [], currentEntries 
         pairCount: 0,
         activePairCount: 0,
         monitorPairCount: 0,
-        livePairCount: 0,
-        mergedPairCount: 0
+        livePairCount: 0
       }
     );
     currentOnlyEntries.forEach((entry) => {
@@ -502,12 +498,15 @@ export function buildDynamicFeeModel({
     const id = recordId(thorname, pair);
     const volumeUsd = torToUsd(entry.volume_tor ?? entry.volumeTor);
     const feesUsd = torToUsd(entry.fees_tor ?? entry.feesTor);
+    const reportedEpoch = parseNumeric(entry.epoch, config.reportedCurrentEpoch);
+    const epoch = liveSealEpoch(reportedEpoch || config.reportedCurrentEpoch);
     currentMap.set(id, {
       id,
       thorname,
       pair,
       pairLabel: formatPairDisplayName(pair),
-      epoch: parseNumeric(entry.epoch, config.currentEpoch),
+      reportedEpoch,
+      epoch,
       volumeTor: String(entry.volume_tor ?? entry.volumeTor ?? '0'),
       feesTor: String(entry.fees_tor ?? entry.feesTor ?? '0'),
       volumeUsd,
@@ -537,8 +536,9 @@ export function buildDynamicFeeModel({
     const lastActiveEpoch = parseNumeric(
       entry.last_active_epoch ?? entry.lastActiveEpoch ?? detail?.last_active_epoch
     );
-    const staleEpochs = config.currentEpoch && lastActiveEpoch
-      ? Math.max(0, config.currentEpoch - lastActiveEpoch)
+    const activeEpoch = Math.max(lastActiveEpoch, current?.epoch || 0);
+    const staleEpochs = config.currentEpoch && activeEpoch
+      ? Math.max(0, config.currentEpoch - activeEpoch)
       : 0;
 
     return {
@@ -551,6 +551,7 @@ export function buildDynamicFeeModel({
       stateLabel: whitelistStateLabel(whitelistState),
       stateKind: whitelistStateKind(whitelistState),
       lastActiveEpoch,
+      activeEpoch,
       staleEpochs,
       latestFeesTor: String(entry.latest_fees_tor ?? entry.latestFeesTor ?? latestHistory?.feesTor ?? '0'),
       latestFeesUsd: torToUsd(entry.latest_fees_tor ?? entry.latestFeesTor ?? latestHistory?.feesTor),

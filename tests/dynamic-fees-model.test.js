@@ -10,7 +10,8 @@ import {
   computeEpochTiming,
   extractDynamicConfig,
   formatPairDisplayName,
-  inferDynamicFeeDecision
+  inferDynamicFeeDecision,
+  liveSealEpoch
 } from '../src/lib/dynamic-fees/model.js';
 
 test('formatPairDisplayName removes token contract addresses from display labels', () => {
@@ -46,7 +47,13 @@ test('computeEpochTiming derives countdown and progress from live block height',
   );
 });
 
-test('buildEpochChartSeries merges same-epoch history and live accumulators without doublecounting', () => {
+test('liveSealEpoch reports the epoch where current accumulators will seal', () => {
+  assert.equal(liveSealEpoch(1868), 1869);
+  assert.equal(liveSealEpoch('1868'), 1869);
+  assert.equal(liveSealEpoch(0), 0);
+});
+
+test('buildEpochChartSeries keeps sealed and live rows separate when epoch labels collide', () => {
   const series = buildEpochChartSeries(
     {
       history: [
@@ -60,13 +67,12 @@ test('buildEpochChartSeries merges same-epoch history and live accumulators with
     1863
   );
 
-  assert.deepEqual(series.labels, ['E1862', 'E1863 live']);
-  assert.deepEqual(series.fees, [1.25, 40]);
-  assert.deepEqual(series.bps, [1, 2]);
-  assert.equal(series.mergedLiveEpoch, true);
+  assert.deepEqual(series.labels, ['E1862 sealed', 'E1863 sealed', 'E1863 live']);
+  assert.deepEqual(series.fees, [1.25, 2.5, 40]);
+  assert.deepEqual(series.bps, [1, 1, 2]);
 });
 
-test('buildEpochChartSeries keeps live accumulator separate when it is a newer epoch', () => {
+test('buildEpochChartSeries labels adjusted live seal epoch separately', () => {
   const series = buildEpochChartSeries(
     {
       history: [
@@ -80,12 +86,11 @@ test('buildEpochChartSeries keeps live accumulator separate when it is a newer e
     1864
   );
 
-  assert.deepEqual(series.labels, ['E1862', 'E1863', 'E1864 live']);
+  assert.deepEqual(series.labels, ['E1862 sealed', 'E1863 sealed', 'E1864 live']);
   assert.deepEqual(series.fees, [1.25, 2.5, 40]);
-  assert.equal(series.mergedLiveEpoch, false);
 });
 
-test('buildAffiliateChartSeries aggregates volume fees and rate across pairs by epoch', () => {
+test('buildAffiliateChartSeries keeps sealed and live affiliate metrics separate', () => {
   const series = buildAffiliateChartSeries(
     { currentEpoch: 1863 },
     [
@@ -114,10 +119,10 @@ test('buildAffiliateChartSeries aggregates volume fees and rate across pairs by 
     ]
   );
 
-  assert.deepEqual(series.labels, ['E1862', 'E1863 live']);
-  assert.deepEqual(series.volume, [2000, 3000]);
-  assert.deepEqual(series.fees, [4, 6]);
-  assert.deepEqual(series.rateBps, [20, 20]);
+  assert.deepEqual(series.labels, ['E1862 sealed', 'E1863 sealed', 'E1863 live']);
+  assert.deepEqual(series.volume, [2000, 100, 3000]);
+  assert.deepEqual(series.fees, [4, 0.5, 6]);
+  assert.deepEqual(series.rateBps, [20, 50, 20]);
   assert.equal(series.hasLive, true);
 });
 
@@ -168,7 +173,7 @@ test('buildAffiliateMidgardSeries merges historical affiliate volume and fees be
   assert.equal(series.totalCount, 1);
 });
 
-test('buildAffiliateRollups includes whitelisted affiliates and avoids same-epoch doublecounting', () => {
+test('buildAffiliateRollups includes whitelisted affiliates without merging sealed and live rows', () => {
   const affiliates = buildAffiliateRollups(
     {
       currentEpoch: 1863,
@@ -205,14 +210,13 @@ test('buildAffiliateRollups includes whitelisted affiliates and avoids same-epoc
   assert.equal(affiliates[0].thorname, 'SYMBIOSIS');
   assert.equal(affiliates[0].liveVolumeUsd, 3000);
   assert.equal(affiliates[0].liveFeesUsd, 6);
-  assert.equal(affiliates[0].historyVolumeUsd, 500);
-  assert.equal(affiliates[0].historyFeesUsd, 1);
-  assert.equal(affiliates[0].totalVolumeUsd, 3500);
-  assert.equal(affiliates[0].totalFeesUsd, 7);
+  assert.equal(affiliates[0].historyVolumeUsd, 600);
+  assert.equal(affiliates[0].historyFeesUsd, 1.5);
+  assert.equal(affiliates[0].totalVolumeUsd, 3600);
+  assert.equal(affiliates[0].totalFeesUsd, 7.5);
   assert.equal(affiliates[0].pairCount, 2);
   assert.equal(affiliates[0].livePairCount, 2);
-  assert.equal(affiliates[0].mergedPairCount, 1);
-  assert.deepEqual(affiliates[0].series.labels, ['E1862', 'E1863 live']);
+  assert.deepEqual(affiliates[0].series.labels, ['E1862 sealed', 'E1863 sealed', 'E1863 live']);
   assert.equal(affiliates[1].thorname, 'EMPTY');
   assert.equal(affiliates[1].totalFeesUsd, 0);
 });
@@ -236,7 +240,8 @@ test('extractDynamicConfig applies protocol defaults and whitelist counts', () =
   assert.equal(config.stepBps, 1);
   assert.equal(config.deadbandBps, 1000);
   assert.equal(config.windowEpochs, 3);
-  assert.equal(config.currentEpoch, 1861);
+  assert.equal(config.reportedCurrentEpoch, 1861);
+  assert.equal(config.currentEpoch, 1862);
   assert.equal(config.activeWhitelistCount, 1);
   assert.equal(config.monitorWhitelistCount, 1);
   assert.equal(config.whitelists[0].thorname, 'ALICE');
@@ -311,6 +316,12 @@ test('buildDynamicFeeModel combines records, current accumulators, and history',
   assert.equal(model.summary.recordCount, 1);
   assert.equal(model.summary.currentVolumeUsd, 100);
   assert.equal(model.summary.currentFeesUsd, 1);
+  assert.equal(model.config.reportedCurrentEpoch, 13);
+  assert.equal(model.config.currentEpoch, 14);
+  assert.equal(model.currentEntries[0].reportedEpoch, 13);
+  assert.equal(model.currentEntries[0].epoch, 14);
+  assert.equal(model.records[0].activeEpoch, 14);
+  assert.equal(model.records[0].staleEpochs, 0);
   assert.equal(model.records[0].currentRateBps, 100);
   assert.equal(model.records[0].decision.reason, 'continue_up');
   assert.equal(model.records[0].decision.movementLabel, 'up');

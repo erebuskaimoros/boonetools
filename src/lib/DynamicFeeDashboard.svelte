@@ -6,7 +6,8 @@
     buildAffiliateMidgardSeries,
     buildDynamicFeeModel,
     buildEpochChartSeries,
-    computeEpochTiming
+    computeEpochTiming,
+    liveSealEpoch
   } from '$lib/dynamic-fees/model.js';
 
   const CHART = {
@@ -339,10 +340,16 @@
     if (!model?.config?.epochBlocks) return;
 
     const previousEpoch = model.config.currentEpoch;
-    const epochTiming = computeEpochTiming({
+    const derivedEpochTiming = computeEpochTiming({
       epochBlocks: model.config.epochBlocks,
       blockHeight
     });
+    const reportedCurrentEpoch = derivedEpochTiming.currentEpoch;
+    const epochTiming = {
+      ...derivedEpochTiming,
+      reportedCurrentEpoch,
+      currentEpoch: liveSealEpoch(reportedCurrentEpoch)
+    };
 
     model = {
       ...model,
@@ -641,6 +648,7 @@
     if (!model) return [];
     const config = model.config;
     return [
+      ['live seal', `E${config.currentEpoch || '--'}`, `TC E${config.reportedCurrentEpoch || '--'} + 1`],
       ['epoch', `${formatNumber(config.epochBlocks, 0)} blocks`, '~1 day'],
       ['floor', `${formatBps(config.floorBps)}`],
       ['ceiling', `${formatBps(config.ceilingBps)}`],
@@ -757,7 +765,7 @@
   <section class="block">
     <div class="block-head">
       <div class="block-title"><span class="title-marker">|</span><h2>Controller</h2></div>
-      <div class="block-meta">[epoch {model?.config.currentEpoch || '--'}]</div>
+      <div class="block-meta">[live E{model?.config.currentEpoch || '--'}]</div>
     </div>
 
     {#if loading}
@@ -890,8 +898,14 @@
             <strong>{formatRateBps(selectedRecord.historyRateBps)}</strong>
           </div>
           <div class="state-row">
-            <span>last active</span>
-            <strong>E{selectedRecord.lastActiveEpoch || '--'}</strong>
+            <span>active epoch</span>
+            <strong>
+              {#if selectedRecord.activeEpoch && selectedRecord.activeEpoch !== selectedRecord.lastActiveEpoch}
+                E{selectedRecord.activeEpoch} live
+              {:else}
+                E{selectedRecord.lastActiveEpoch || '--'} sealed
+              {/if}
+            </strong>
           </div>
           <div class="state-row">
             <span>stale</span>
@@ -977,8 +991,8 @@
 
   <section class="block">
     <div class="block-head">
-      <div class="block-title"><span class="title-marker">|</span><h2>Current Epoch Signal</h2></div>
-      <div class="block-meta">[{currentEntries.length} accumulators]</div>
+      <div class="block-title"><span class="title-marker">|</span><h2>Live Epoch Signal</h2></div>
+      <div class="block-meta">[{currentEntries.length} accumulators / E{model?.config.currentEpoch || '--'} live]</div>
     </div>
 
     <div class="table-scroll">
@@ -992,7 +1006,7 @@
             <th>volume</th>
             <th>fees</th>
             <th>rate</th>
-            <th>epoch</th>
+            <th>live epoch</th>
           </tr>
         </thead>
         <tbody>
@@ -1006,7 +1020,7 @@
                 <td>{formatUsdCompact(entry.volumeUsd)}</td>
                 <td>{formatUsdCompact(entry.feesUsd)}</td>
                 <td>{formatRateBps(entry.rateBps)}</td>
-                <td>E{entry.epoch}</td>
+                <td>E{entry.epoch} live</td>
               </tr>
             {/each}
           {:else}
@@ -1113,7 +1127,6 @@
               <th>total volume</th>
               <th>total fees paid</th>
               <th>total fees / volume</th>
-              <th>deduped</th>
             </tr>
           </thead>
           <tbody>
@@ -1134,11 +1147,10 @@
                   <td>{formatUsdCompact(affiliate.totalVolumeUsd)}</td>
                   <td>{formatUsdCompact(affiliate.totalFeesUsd)}</td>
                   <td>{formatRateBps(affiliate.totalRateBps)}</td>
-                  <td>{affiliate.mergedPairCount ? `${affiliate.mergedPairCount} pairs` : '--'}</td>
                 </tr>
               {/each}
             {:else}
-              <tr><td colspan="10" class="empty-cell">no whitelisted affiliates configured</td></tr>
+              <tr><td colspan="9" class="empty-cell">no whitelisted affiliates configured</td></tr>
             {/if}
           </tbody>
         </table>
