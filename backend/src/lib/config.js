@@ -159,7 +159,7 @@ export const config = Object.freeze({
   tcFeeDashStartDate: optional(process.env.TC_FEE_DASH_START_DATE) || '2022-06-22',
   tcFeeDashEndDate: optional(process.env.TC_FEE_DASH_END_DATE),
   tcFeeDashDaysPerRun: readInt('TC_FEE_DASH_DAYS_PER_RUN', 90),
-  tcFeeDashHeadLagDays: readInt('TC_FEE_DASH_HEAD_LAG_DAYS', 2),
+  tcFeeDashHeadLagDays: readInt('TC_FEE_DASH_HEAD_LAG_DAYS', 1),
   tcFeeDashRequestDelayMs: readInt('TC_FEE_DASH_REQUEST_DELAY_MS', 1000),
   tcFeeDashRateLimitCooldownMs: readInt('TC_FEE_DASH_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000
 });
