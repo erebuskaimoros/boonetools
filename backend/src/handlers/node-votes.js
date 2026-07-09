@@ -18,11 +18,12 @@ const OPERATIONAL_EXACT_KEYS = new Set([
   'ADVSWAPQUEUERAPIDSWAPMAX',
   'ENABLEADVSWAPQUEUE',
   'STREAMINGLIMITSWAPMAXAGE',
-  'SYSTEMINCOMEPOLRATEBPS',
   'OVERSOLVENCYCHECKINTERVAL',
+  'OVERSOLVENCYTOTREASURYBPS',
   'SCHEDULEDMIGRATION',
   'MAXRETIREDVAULTRECOVERYATTEMPTS',
-  'P2PGATEDISABLED'
+  'P2PGATEDISABLED',
+  'ENABLEMEMOLESSOUTBOUND'
 ]);
 
 const ECONOMIC_EXACT_KEYS = new Set([
@@ -35,7 +36,25 @@ const OPERATIONAL_PARTIAL_KEYS = [
   'PAUSE',
   'STOPSOLVENCYCHECK',
   'MIMIRUPGRADECONTRACT',
-  'EVMALLOWANCECHECK'
+  'EVMALLOWANCECHECK',
+  'POLRESERVEBLACKLIST',
+  'DYNAMICFEE-WHITELIST',
+  'REVSHARE',
+  'EVMDIRECTERC20INBOUND'
+];
+
+const OPERATIONAL_PREFIX_KEYS = [
+  'COMPROMISEDVAULT-',
+  'L1DYNAMICFEE'
+];
+
+const ASSET_SLIP_MIN_BPS_PREFIXES = [
+  'L1SLIPMINBPS-',
+  'SYNTHSLIPMINBPS-',
+  'TRADEACCOUNTSSLIPMINBPS-',
+  'DERIVEDSLIPMINBPS-',
+  'SECUREDASSETSLIPMINBPS-',
+  'STABLESLIPMINBPS-'
 ];
 
 function subtractMonths(reference, months) {
@@ -52,13 +71,19 @@ function normalizeMimirKey(key) {
   return String(key || '').trim().toUpperCase();
 }
 
+function isAssetSlipMinBpsMimirKey(normalized) {
+  return ASSET_SLIP_MIN_BPS_PREFIXES.some((prefix) => (
+    normalized.startsWith(prefix) && normalized.length > prefix.length
+  ));
+}
+
 export function classifyMimirKey(key) {
   const normalized = normalizeMimirKey(key);
   if (OPERATIONAL_EXACT_KEYS.has(normalized)) return 'operational';
   if (ECONOMIC_EXACT_KEYS.has(normalized)) return 'economic';
-  if (normalized.startsWith('SYSTEMINCOMEPOL-')) return 'operational';
+  if (OPERATIONAL_PREFIX_KEYS.some((prefix) => normalized.startsWith(prefix))) return 'operational';
   if (OPERATIONAL_PARTIAL_KEYS.some((match) => normalized.includes(match))) return 'operational';
-  if (normalized.endsWith('SLIPMINBPS')) return 'operational';
+  if (normalized.endsWith('SLIPMINBPS') || isAssetSlipMinBpsMimirKey(normalized)) return 'operational';
   return 'economic';
 }
 
