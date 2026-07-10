@@ -14,10 +14,10 @@ Restructured the `erebuskaimoros/boonetools` GitHub repo to contain the actual w
 - Updated footer source link to point to `https://github.com/erebuskaimoros/boonetools`
 - Compared boone.tools Rapid Swaps dashboard (1,933 swaps) vs Raynalytics (2,205 swaps)
 - Identified root cause: scheduler only scanned 20 pages (1,000 actions) every 5 min — high-frequency trade-account swaps were buried thousands of actions deep
-- Built and ran `scripts/catchup-rapid-swaps.mjs` — found 268 missed swaps, upserted 264 to Supabase (4 lost to script kill timing)
+- Built and ran `scripts/catchup-rapid-swaps.mjs` — found 268 missed swaps and upserted 264 to the legacy hosted backend (4 lost to script kill timing)
 - 89% of missed swaps were trade-account swaps (`~` notation), mostly small BSC USDT/BTCB → BTC/LTC
 - Patched scheduler to adaptive scanning: fetches 2,000 recent known tx_ids, scans up to 200 pages, stops after 3 consecutive pages of all-known swaps
-- Deployed updated scheduler to Supabase
+- Deployed the updated scheduler to the legacy hosted backend
 - Added diagnostic logging to WebSocket listener for trade-account event visibility
 
 ## Discoveries
@@ -33,8 +33,8 @@ Restructured the `erebuskaimoros/boonetools` GitHub repo to contain the actual w
 |------|--------|
 | `website/.gitignore` | Added `.claude/`, `knowledge/sessions/` exclusions |
 | `website/src/lib/Footer.svelte` | Updated source link to repo root |
-| `website/supabase/functions/_shared/rapid-swaps.ts` | Adaptive scanning with `knownTxIds` + early stop on overlap |
-| `website/supabase/functions/rapid-swaps-scheduler/index.ts` | Fetch known tx_ids, bump default to 200 pages, pass to scanner |
+| Legacy shared rapid-swap scanner | Adaptive scanning with `knownTxIds` + early stop on overlap |
+| Legacy rapid-swap scheduler | Fetch known tx_ids, bump default to 200 pages, pass to scanner |
 | `website/scripts/rapid-swap-listener.mjs` | Diagnostic logging for trade-account streaming_swap events |
 | `website/scripts/catchup-rapid-swaps.mjs` | New one-time catchup script with incremental upserts |
 

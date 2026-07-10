@@ -331,6 +331,5 @@ ssh "$SERVER" "systemctl start boonetools-rujira-reserve-payments.service"
 
 echo "Done."
 echo "Next steps:"
-echo "  1. Import Supabase data into the local DB."
-echo "  2. Diff old vs new endpoints."
-echo "  3. Install the Caddy config from ops/caddy/Caddyfile.boone.tools and reload Caddy."
+echo "  1. Verify the backend endpoints and migration state."
+echo "  2. Install the Caddy config from ops/caddy/Caddyfile.boone.tools and reload Caddy."

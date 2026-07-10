@@ -1190,17 +1190,12 @@ function normalizeDuneRujiraBaseFeeEvent(row) {
   if (!sourceEventKey) return rejectDuneBaseFeeEvent('missing event_key');
   if (!parsedBlockTime) return rejectDuneBaseFeeEvent('invalid block_time');
   if (!identity.height) return rejectDuneBaseFeeEvent('missing height');
-  if (!/^[A-F0-9]{64}$/.test(identity.swap_id)) return rejectDuneBaseFeeEvent('invalid swap_id');
+  if (!/^[A-F0-9]{64}(?:-[0-9]+)?$/.test(identity.swap_id)) return rejectDuneBaseFeeEvent('invalid swap_id');
   if (!identity.pool || !identity.pool.includes('.')) return rejectDuneBaseFeeEvent('invalid pool');
   if (identity.chain !== 'THOR') return rejectDuneBaseFeeEvent('unexpected swap chain');
   if (identity.from_address !== RUJIRA_THORCHAIN_SWAP_CONTRACT) {
     return rejectDuneBaseFeeEvent('unexpected swap sender');
   }
-  if (!identity.to_address || !identity.memo || identity.memo.startsWith('%%skipped%%')) {
-    return rejectDuneBaseFeeEvent('missing swap destination or memo');
-  }
-  if (!coin) return rejectDuneBaseFeeEvent('missing swap coin');
-  if (!identity.liquidity_fee_base) return rejectDuneBaseFeeEvent('invalid liquidity_fee_base');
   if (source && source !== 'dune') return rejectDuneBaseFeeEvent('unexpected source');
   if (!policy) return rejectDuneBaseFeeEvent('unsupported classification');
   if (included === null || included !== policy.included) {
@@ -1212,6 +1207,14 @@ function normalizeDuneRujiraBaseFeeEvent(row) {
   if (policy.requireSourceContract && !sourceContract.startsWith('thor1')) {
     return rejectDuneBaseFeeEvent('missing source_contract');
   }
+  const allowsMissingMemo = classification === 'direct_ruji_swap_excluded' && !included;
+  if (!identity.to_address
+    || (!identity.memo && !allowsMissingMemo)
+    || identity.memo.startsWith('%%skipped%%')) {
+    return rejectDuneBaseFeeEvent('missing swap destination or memo');
+  }
+  if (!coin) return rejectDuneBaseFeeEvent('missing swap coin');
+  if (!identity.liquidity_fee_base) return rejectDuneBaseFeeEvent('invalid liquidity_fee_base');
   if (sourceContract === RUJI_SWAP_REVENUE_COLLECTOR && classification !== 'ruji_swap_revenue_excluded') {
     return rejectDuneBaseFeeEvent('RUJI Swap collector must be excluded');
   }

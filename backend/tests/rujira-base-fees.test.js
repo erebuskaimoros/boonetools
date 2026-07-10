@@ -234,6 +234,25 @@ test('Dune generated-fee rows must satisfy the Rujira swap and classification in
     event_key: 'wrong-collector-classification',
     source_contract: RUJIRA_THORCHAIN_SWAP_CONTRACT
   }]).length, 0);
+
+  const directRujiSwapAuditRow = {
+    ...valid,
+    event_key: 'direct-ruji-swap-audit-row',
+    swap_id: `${valid.swap_id}-1`,
+    memo: '',
+    classification: 'direct_ruji_swap_excluded',
+    included: false,
+    source_contract: RUJIRA_THORCHAIN_SWAP_CONTRACT
+  };
+  const [normalizedDirectRujiSwapAuditRow] = buildRujiraBaseFeeRowsFromDune([directRujiSwapAuditRow]);
+  assert.equal(normalizedDirectRujiSwapAuditRow.swap_id, `${valid.swap_id.toUpperCase()}-1`);
+  assert.equal(normalizedDirectRujiSwapAuditRow.memo, '');
+
+  assert.equal(buildRujiraBaseFeeRowsFromDune([{
+    ...directRujiSwapAuditRow,
+    event_key: 'direct-ruji-swap-skipped-memo',
+    memo: '%%skipped%% missing final event'
+  }]).length, 0);
 });
 
 test('legacy and Dune rows share a canonical event identity and retain both providers on upsert', async () => {

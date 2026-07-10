@@ -101,39 +101,8 @@ When `RAPID_SWAPS_DUNE_QUERY_ID` is configured, deploy disables the legacy
 
 After deploy, install the Caddy config in `ops/caddy/Caddyfile.boone.tools` if the API proxy is not already live.
 
-## Data Import
-
-To seed or refresh the Hetzner DB from the existing Supabase project:
-
-```bash
-set -a
-source .env
-source backend/.env
-set +a
-node backend/src/import-supabase.js
-```
-
-Optional full replacement import:
-
-```bash
-BOONETOOLS_IMPORT_REPLACE=1 node backend/src/import-supabase.js
-```
-
-## Shadow Verification
-
-Compare the old Supabase responses to the local Hetzner backend:
-
-```bash
-npm run backend:compare -- --node-address thor... --bond-address thor...
-```
-
-Defaults:
-
-- old base: `https://<SUPABASE_PROJECT_REF>.supabase.co/functions/v1`
-- new base: `http://127.0.0.1:8787`
-
 ## Notes
 
 - GitHub workflow cron is no longer the source of truth for DB-backed jobs.
 - Hetzner cron wrappers should remain disabled once the systemd timers are active.
-- The listener and schedulers rely on Postgres advisory locks / durable tables rather than Supabase-specific runtime features.
+- The listener and schedulers rely on Postgres advisory locks and durable tables.

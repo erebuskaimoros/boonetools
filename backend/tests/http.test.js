@@ -15,7 +15,7 @@ test('parseIntegerParam clamps values within bounds', () => {
   assert.equal(parseIntegerParam('3', 10, { min: 1, max: 10 }), 3);
 });
 
-test('toIsoString formats UTC timestamps with +00:00 to match Supabase responses', () => {
+test('toIsoString formats UTC timestamps with an explicit +00:00 offset', () => {
   assert.equal(toIsoString('2026-04-01T11:42:54.143Z'), '2026-04-01T11:42:54.143+00:00');
   assert.equal(toIsoString(new Date('2026-04-01T11:42:54.143Z')), '2026-04-01T11:42:54.143+00:00');
 });

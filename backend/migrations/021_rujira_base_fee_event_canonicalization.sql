@@ -69,14 +69,28 @@ with deleted as (
     and not (
       height > 0
       and block_time is not null
-      and upper(btrim(swap_id)) ~ '^[A-F0-9]{64}$'
+      -- Dune appends an event ordinal to otherwise valid THORChain swap IDs
+      -- when a transaction emits more than one relevant row.
+      and upper(btrim(swap_id)) ~ '^[A-F0-9]{64}(-[0-9]+)?$'
       and btrim(pool) <> ''
       and position('.' in btrim(pool)) > 0
       and upper(btrim(chain)) = 'THOR'
       and lower(btrim(from_address)) = 'thor1n5a08r0zvmqca39ka2tgwlkjy9ugalutk7fjpzptfppqcccnat2ska5t4g'
       and btrim(to_address) <> ''
-      and btrim(memo) <> ''
-      and left(btrim(memo), 11) <> '%%skipped%%'
+      -- Direct RUJI Swap exclusions are retained only as audit rows. Dune does
+      -- not populate a memo for that valid excluded shape, while every
+      -- included row and other excluded classification still requires one.
+      and (
+        (
+          classification = 'direct_ruji_swap_excluded'
+          and not included
+          and btrim(memo) = ''
+        )
+        or (
+          btrim(memo) <> ''
+          and left(btrim(memo), 11) <> '%%skipped%%'
+        )
+      )
       and btrim(coin) <> ''
       and btrim(liquidity_fee_base) ~ '^[0-9]+$'
       and liquidity_fee_rune >= 0
