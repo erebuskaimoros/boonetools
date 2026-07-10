@@ -67,6 +67,8 @@ test('parseRujiraReservePaymentBlock reads Base Layer collector transfer events'
   assert.equal(parsed.events[0].recipient, TC_RESERVE_MODULE);
   assert.equal(parsed.scan.transfer_event_count, 1);
   assert.equal(parsed.scan.reserve_event_count, 1);
+  assert.equal(parsed.scan.matched_transfer_event_count, 1);
+  assert.equal(parsed.scan.unmatched_transfer_event_count, 0);
 });
 
 test('parseRujiraReservePaymentBlock falls back to reserve event when transfer is absent', async () => {
@@ -100,4 +102,79 @@ test('parseRujiraReservePaymentBlock falls back to reserve event when transfer i
   assert.equal(parsed.events[0].amount_rune, 5.9264);
   assert.equal(parsed.scan.transfer_event_count, 0);
   assert.equal(parsed.scan.reserve_event_count, 1);
+  assert.equal(parsed.scan.reserve_only_event_count, 1);
+});
+
+test('parseRujiraReservePaymentBlock does not label an unmatched transfer as RESERVE', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    BASE_LAYER_REVENUE_COLLECTOR,
+    TC_RESERVE_MODULE,
+    parseRujiraReservePaymentBlock
+  } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const parsed = parseRujiraReservePaymentBlock(25983022, {
+    result: {
+      finalize_block_events: [
+        event('transfer', {
+          amount: '659312000rune',
+          sender: BASE_LAYER_REVENUE_COLLECTOR,
+          recipient: TC_RESERVE_MODULE,
+          mode: 'EndBlock'
+        })
+      ]
+    }
+  }, {
+    blockTime: '2026-04-30T18:55:06.472Z',
+    source: 'test'
+  });
+
+  assert.equal(parsed.events.length, 0);
+  assert.equal(parsed.scan.transfer_event_count, 1);
+  assert.equal(parsed.scan.reserve_event_count, 0);
+  assert.equal(parsed.scan.unmatched_transfer_event_count, 1);
+});
+
+test('buildRujiraReservePaymentRowsFromDune requires the explicit Reserve path and RUNE coin', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    BASE_LAYER_REVENUE_COLLECTOR,
+    TC_RESERVE_MODULE,
+    buildRujiraReservePaymentRowsFromDune
+  } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const valid = {
+    event_key: 'dune-valid-reserve-payment',
+    height: 25982820,
+    block_time: '2026-04-30T18:32:34.605Z',
+    tx_id: 'DUNE123',
+    sender: BASE_LAYER_REVENUE_COLLECTOR,
+    recipient: TC_RESERVE_MODULE,
+    memo: 'RESERVE',
+    amount_base: '609308000',
+    amount_rune: 999,
+    rune_price_usd: 0.5,
+    amount_usd: 3.04654,
+    coin: '609308000 THOR.RUNE'
+  };
+
+  const rows = buildRujiraReservePaymentRowsFromDune([
+    valid,
+    { ...valid, event_key: 'missing-sender', sender: '' },
+    { ...valid, event_key: 'missing-recipient', recipient: '' },
+    { ...valid, event_key: 'missing-memo', memo: '' },
+    { ...valid, event_key: 'missing-coin', coin: '' },
+    { ...valid, event_key: 'wrong-recipient', recipient: 'thor1unrelated' },
+    { ...valid, event_key: 'wrong-memo', memo: 'ADD:THOR.RUNE' },
+    { ...valid, event_key: 'non-rune-coin', coin: '609308000 BTC.BTC' },
+    { ...valid, event_key: 'mismatched-amount', amount_base: '609308001' }
+  ]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].sender, BASE_LAYER_REVENUE_COLLECTOR);
+  assert.equal(rows[0].recipient, TC_RESERVE_MODULE);
+  assert.equal(rows[0].memo, 'RESERVE');
+  assert.equal(rows[0].coin, '609308000 THOR.RUNE');
+  assert.equal(rows[0].amount_base, '609308000');
+  assert.equal(rows[0].amount_rune, 6.09308);
 });

@@ -52,15 +52,15 @@
 
   const staticTargets = {
     trade: [
-      { label: 'RUJI staker collector', address: collectors[2].address, percent: 50 },
+      { label: 'RUJI Swap collector', address: collectors[2].address, percent: 50 },
       { label: 'Base Layer Collector', address: BASE_LAYER_COLLECTOR, percent: 50 }
     ],
     core: [
-      { label: 'RUJI staker collector', address: collectors[2].address, percent: 50 },
+      { label: 'RUJI Swap collector', address: collectors[2].address, percent: 50 },
       { label: 'Base Layer Collector', address: BASE_LAYER_COLLECTOR, percent: 50 }
     ],
     swap: [{ label: 'RUJI staker collector', address: RUJI_STAKER_COLLECTOR, percent: 100 }],
-    index: [{ label: 'RUJI staker collector', address: collectors[2].address, percent: 100 }],
+    index: [{ label: 'RUJI Swap collector', address: collectors[2].address, percent: 100 }],
     base: [{ label: 'TC Reserve', address: RESERVE_MODULE, percent: 100 }]
   };
 
@@ -139,30 +139,32 @@
       target: 'Swap-router target, not TC Reserve'
     }
   ];
-  const EMPTY_REVENUE_SUMMARY = {
-    pricedUsd: 0,
-    pricedAssetCount: 0,
-    unpricedAssetCount: 0,
-    distributionTxCount: 0,
-    distributionTransferCount: 0,
-    assets: []
-  };
+  const EMPTY_INVENTORY_BUCKET = Object.freeze({ rows: [], count: 0, pricedUsd: 0, unpricedCount: 0 });
+  const EMPTY_INVENTORY = Object.freeze({
+    available: false,
+    actionsAvailable: false,
+    eligible: EMPTY_INVENTORY_BUCKET,
+    conversion: EMPTY_INVENTORY_BUCKET,
+    blocked: EMPTY_INVENTORY_BUCKET,
+    unresolved: EMPTY_INVENTORY_BUCKET,
+    pricedUsd: 0
+  });
 
   let weeklyRows = [];
   let reserveEvents = [];
   let staticWeeklyRows = [];
   let staticReserveEvents = [];
   let staticReserveMeta = null;
-  let collectorRevenue = null;
   let generatedFees = null;
   let staticGeneratedFees = null;
   let meta = null;
   let configs = {};
   let histories = {};
   let balances = [];
+  let collectorBalances = {};
+  let collectorActions = {};
   let poolPrices = {};
   let runePriceUsd = 0;
-  let artifactsLoading = true;
   let reservePaymentsLoading = true;
   let generatedFeesLoading = true;
   let liveLoading = true;
@@ -203,7 +205,8 @@
     : `${number2.format(reservePaymentPendingBlocks)} blocks queued`;
   $: reservePriceBasis =
     reservePaymentMeta.priceBasis ||
-    'amount RUNE × Dune daily THORChain pool RUNE/USD for each Reserve deposit date';
+    'price basis unavailable for this fallback artifact';
+  $: reservePaymentSource = formatDataSource(reservePaymentMeta.source);
   $: latestReservePrice = latestWeek?.rune_price_usd || 0;
   $: reservePriceRange = getWeeklyPriceRange(weeklyRows);
   $: generatedFeeRows = generatedFees?.weekly || [];
@@ -216,27 +219,36 @@
   $: totalGeneratedFeeUsd =
     generatedFeeMeta?.totalLiquidityFeeUsd || latestGeneratedFeeWeek?.cumulative_usd || 0;
   $: generatedFeeScope = generatedFeeMeta?.scope || 'pending generated-fee scan';
+  $: generatedFeeSource = formatDataSource(generatedFeeMeta?.source);
   $: generatedFeePendingBlocks = Number(generatedFeeMeta?.pendingBlockCount || 0);
   $: generatedFeeBackfillLabel = generatedFeeMeta?.backfillComplete
     ? 'backfill complete'
     : `${number2.format(generatedFeePendingBlocks)} blocks queued`;
-  $: pendingRune = amountFromBase(
-    balances.find((balance) => balance.denom === 'rune')?.amount || 0
+  $: collectorInventories = Object.fromEntries(
+    collectors.map((collector) => [
+      collector.key,
+      summarizeCollectorInventory(
+        configs[collector.key],
+        Object.prototype.hasOwnProperty.call(collectorBalances, collector.key)
+          ? collectorBalances[collector.key]
+          : null,
+        collectorActions[collector.key]
+      )
+    ])
   );
-  $: pendingRuneUsd = pendingRune * runePriceUsd;
-  $: stableUsd = balances.filter((balance) => isStableDenom(balance.denom)).reduce(
-    (sum, balance) => sum + amountFromBase(balance.amount),
-    0
-  );
-  $: pendingKnownUsd = pendingRuneUsd + stableUsd;
-  $: collectorRevenueMap = Object.fromEntries(
-    (collectorRevenue?.collectors || []).map((collector) => [collector.key, collector])
-  );
+  $: baseInventory = collectorInventories.base || EMPTY_INVENTORY;
+  $: pendingRune = baseInventory.eligible.rows
+    .filter((balance) => normalizeDenom(balance.denom) === 'rune')
+    .reduce((sum, balance) => sum + balance.amount, 0);
+  $: stableUsd = baseInventory.conversion.rows
+    .filter((balance) => isStableDenom(balance.denom))
+    .reduce((sum, balance) => sum + balance.usdValue, 0);
+  $: pendingKnownUsd = baseInventory.pricedUsd;
   $: appCollectorRows = collectors
     .filter((collector) => collector.key !== 'base')
     .map((collector) => ({
       ...collector,
-      revenueSummary: collectorRevenueMap[collector.key] || EMPTY_REVENUE_SUMMARY
+      inventory: collectorInventories[collector.key] || EMPTY_INVENTORY
     }));
   $: targetMap = Object.fromEntries(
     collectors.map((collector) => [
@@ -250,6 +262,11 @@
       (targetMap[collector.key] || []).find((target) => target.address === BASE_LAYER_COLLECTOR)
         ?.percent || 0
     ])
+  );
+  $: baseAllocationFallback = ['trade', 'core'].some((key) =>
+    (targetMap[key] || []).some(
+      (target) => target.address === BASE_LAYER_COLLECTOR && target.isFallback
+    )
   );
   $: historyLabels = Object.fromEntries(
     collectors.map((collector) => [
@@ -272,6 +289,7 @@
     .filter((balance) => Number(balance.amount) > 0)
     .sort((a, b) => (b.usdValue || 0) - (a.usdValue || 0))
     .slice(0, 8);
+  $: baseRuneRatePerSecond = targetRatePerSecond(configs.base, 'rune');
 
   $: if (paymentCanvas && weeklyRows.length) {
     renderPaymentChart(weeklyRows);
@@ -303,14 +321,12 @@
 
   async function loadArtifacts() {
     try {
-      artifactsLoading = true;
       artifactsError = '';
       generatedFeesError = '';
       generatedFeesWarning = '';
-      const [csvRows, eventRows, revenueJson, metaJson, generatedFeesResult] = await Promise.all([
+      const [csvRows, eventRows, metaJson, generatedFeesResult] = await Promise.all([
         fetchDataFile('rujira-base-layer-fees.csv', parseCsv),
         fetchDataFile('rujira-base-layer-fees-events.json', JSON.parse),
-        fetchDataFile('rujira-collector-revenue.json', JSON.parse),
         fetchDataFile('rujira-base-layer-fees-meta.json', JSON.parse),
         fetchDataFile('rujira-app-layer-swap-fees.json', JSON.parse).catch((error) => ({
           __error: error.message
@@ -320,7 +336,6 @@
       staticWeeklyRows = csvRows;
       staticReserveEvents = eventRows.map((event) => normalizeReserveEvent(event, csvRows));
       staticReserveMeta = metaJson;
-      collectorRevenue = revenueJson;
       if (generatedFeesResult?.__error) {
         staticGeneratedFees = null;
       } else {
@@ -328,8 +343,6 @@
       }
     } catch (error) {
       artifactsError = error.message;
-    } finally {
-      artifactsLoading = false;
     }
   }
 
@@ -354,7 +367,7 @@
           pendingBlockCount: payload.meta?.pendingBlockCount || 0,
           fetchedBlockCount: payload.meta?.fetchedBlockCount || 0
         };
-        reservePaymentsWarning = `reserve-payment DB backfill in progress — ${dbEventCount}/${staticEventCount} events loaded; using static fallback`;
+        reservePaymentsWarning = `reserve-payment DB backfill in progress — ${dbEventCount}/${staticEventCount} events loaded; using ${staticArtifactLabel(staticReserveMeta)}`;
         return;
       }
       weeklyRows = payload.weekly;
@@ -362,16 +375,12 @@
       meta = payload.meta || {};
     } catch (error) {
       if (weeklyRows.length) {
-        reservePaymentsWarning = String(error.message || '').startsWith('404')
-          ? ''
-          : `reserve-payment DB — ${error.message}; using last successful payload`;
+        reservePaymentsWarning = `reserve-payment DB — ${error.message}; using last successful payload`;
       } else if (staticWeeklyRows.length) {
         weeklyRows = staticWeeklyRows;
         reserveEvents = staticReserveEvents;
         meta = staticReserveMeta;
-        reservePaymentsWarning = String(error.message || '').startsWith('404')
-          ? ''
-          : `reserve-payment DB — ${error.message}; using static fallback`;
+        reservePaymentsWarning = `reserve-payment DB — ${error.message}; using ${staticArtifactLabel(staticReserveMeta)}`;
       } else {
         reservePaymentsError = `reserve-payment DB — ${error.message}`;
       }
@@ -392,14 +401,10 @@
       generatedFees = payload;
     } catch (error) {
       if (generatedFees) {
-        generatedFeesWarning = String(error.message || '').startsWith('404')
-          ? ''
-          : `generated-fee DB — ${error.message}; using last successful payload`;
+        generatedFeesWarning = `generated-fee DB — ${error.message}; using last successful payload`;
       } else if (staticGeneratedFees) {
         generatedFees = staticGeneratedFees;
-        generatedFeesWarning = String(error.message || '').startsWith('404')
-          ? ''
-          : `generated-fee DB — ${error.message}; using static fallback`;
+        generatedFeesWarning = `generated-fee DB — ${error.message}; using ${staticArtifactLabel(staticGeneratedFees?.meta, 'narrow Base Collector conversion fallback')} (not comparable to the broad backend activity series)`;
       } else {
         generatedFeesError = `generated-fee DB — ${error.message}`;
       }
@@ -418,6 +423,8 @@
       runePriceUsd = amountFromBase(liveState.network?.rune_price_in_tor);
       poolPrices = buildPoolPrices(liveState.pools || []);
       balances = liveState.balances || [];
+      collectorBalances = liveState.collector_balances || { base: balances };
+      collectorActions = liveState.actions || {};
       configs = liveState.configs || {};
       histories = liveState.histories || {};
       liveRouteWarning = liveState.warning || '';
@@ -716,14 +723,15 @@
   function getTargetsForConfig(collectorKey, config) {
     const targetRows = config?.target_addresses;
     if (!Array.isArray(targetRows) || !targetRows.length) {
-      return staticTargets[collectorKey] || [];
+      return (staticTargets[collectorKey] || []).map((target) => ({ ...target, isFallback: true }));
     }
 
     const totalWeight = targetRows.reduce((sum, [, weight]) => sum + Number(weight || 0), 0);
     return targetRows.map(([address, weight]) => ({
       address,
       label: addressLabels[address] || formatAddress(address),
-      percent: totalWeight > 0 ? (Number(weight) / totalWeight) * 100 : 0
+      percent: totalWeight > 0 ? (Number(weight) / totalWeight) * 100 : 0,
+      isFallback: false
     }));
   }
 
@@ -802,60 +810,99 @@
     return amountFromBase(balance.amount) * assetUsdPrice(balance.denom);
   }
 
+  function normalizeDenom(denom) {
+    return String(denom || '').trim().toLowerCase();
+  }
+
+  function summarizeInventoryBucket(rows) {
+    const pricedUsd = rows.reduce((sum, row) => sum + (Number(row.usdValue) || 0), 0);
+    return {
+      rows,
+      count: rows.length,
+      pricedUsd,
+      unpricedCount: rows.filter((row) => row.amount > 0 && !row.usdValue).length
+    };
+  }
+
+  function summarizeCollectorInventory(config, balanceRows, actionRows) {
+    if (!Array.isArray(config?.target_denoms) || !Array.isArray(balanceRows)) {
+      return EMPTY_INVENTORY;
+    }
+
+    const targetDenoms = new Set(config.target_denoms.map(([denom]) => normalizeDenom(denom)));
+    const actionsAvailable = Array.isArray(actionRows);
+    const actionDenoms = new Set((actionRows || []).map((action) => normalizeDenom(action?.denom)));
+    const buckets = { eligible: [], conversion: [], blocked: [], unresolved: [] };
+
+    for (const balance of balanceRows || []) {
+      const amount = amountFromBase(balance.amount);
+      if (!(amount > 0)) continue;
+      const row = { ...balance, amount, usdValue: estimateUsd(balance) };
+      const denom = normalizeDenom(balance.denom);
+      if (targetDenoms.has(denom)) {
+        buckets.eligible.push(row);
+      } else if (!actionsAvailable) {
+        buckets.unresolved.push(row);
+      } else if (actionDenoms.has(denom)) {
+        buckets.conversion.push(row);
+      } else {
+        buckets.blocked.push(row);
+      }
+    }
+
+    const eligible = summarizeInventoryBucket(buckets.eligible);
+    const conversion = summarizeInventoryBucket(buckets.conversion);
+    const blocked = summarizeInventoryBucket(buckets.blocked);
+    const unresolved = summarizeInventoryBucket(buckets.unresolved);
+    return {
+      available: true,
+      actionsAvailable,
+      eligible,
+      conversion,
+      blocked,
+      unresolved,
+      pricedUsd: eligible.pricedUsd + conversion.pricedUsd + blocked.pricedUsd + unresolved.pricedUsd
+    };
+  }
+
+  function inventoryDisplay(bucket) {
+    if (!bucket?.count) return '—';
+    if (bucket.pricedUsd > 0) return usd2.format(bucket.pricedUsd);
+    return `${number2.format(bucket.count)} denom${bucket.count === 1 ? '' : 's'}`;
+  }
+
+  function inventoryNote(bucket, noun = 'denom') {
+    if (!bucket?.count) return `no ${noun}s`;
+    const count = `${number2.format(bucket.count)} ${noun}${bucket.count === 1 ? '' : 's'}`;
+    return bucket.unpricedCount ? `${count} · ${bucket.unpricedCount} unpriced` : count;
+  }
+
+  function targetRatePerSecond(config, denom) {
+    const target = (config?.target_denoms || [])
+      .find(([targetDenom]) => normalizeDenom(targetDenom) === normalizeDenom(denom));
+    return target ? amountFromBase(target[1]) : 0;
+  }
+
+  function formatDataSource(source) {
+    const value = String(source || '').trim();
+    if (!value) return 'fallback artifact';
+    if (value.includes('mixed')) return 'Dune + RPC/Midgard Postgres';
+    if (value.includes('dune')) return 'Dune-backed Postgres';
+    if (value.includes('postgres')) return 'RPC/Midgard-backed Postgres';
+    return value.replaceAll('-', ' ');
+  }
+
+  function staticArtifactLabel(artifactMeta, label = 'static fallback artifact') {
+    const generatedAt = artifactMeta?.generatedAt;
+    return generatedAt ? `${label} generated ${formatDateTime(generatedAt)}` : label;
+  }
+
   function isStableDenom(denom) {
     return /(?:usdc|usdt|dai|gusd|usdp)/i.test(denom || '');
   }
 
   function formatAssetAmount(balance) {
     const amount = amountFromBase(balance.amount);
-    if (amount >= 1000) return number2.format(amount);
-    if (amount >= 1) return number4.format(amount);
-    return amount.toLocaleString('en-US', { maximumFractionDigits: 8 });
-  }
-
-  function collectorRevenueDisplay(summary) {
-    if (artifactsLoading) return '—';
-    if (summary.pricedUsd > 0) return usd2.format(summary.pricedUsd);
-    if (summary.unpricedAssetCount > 0) return 'unpriced';
-    return '$0.00';
-  }
-
-  function collectorRevenueNote(summary) {
-    if (artifactsLoading) return 'loading all-time receipts';
-    const pieces = [];
-    if (summary.distributionTxCount) {
-      pieces.push(`${summary.distributionTransferCount} distributed transfers`);
-    }
-    const residualAssets = (summary.assets || []).filter((asset) => asset.currentAmount > 0).length;
-    if (residualAssets) pieces.push(`${residualAssets} current residual denoms`);
-    if (summary.unpricedAssetCount) {
-      pieces.push(`${formatUnpricedAssets(summary.assets)} unpriced`);
-    }
-    return pieces.join(' · ') || 'no all-time receipts found';
-  }
-
-  function targetRouteRevenue(summary, target) {
-    return (summary.distributionRoutes || []).find((route) => route.recipient === target.address);
-  }
-
-  function targetRouteRevenueDisplay(summary, target) {
-    if (artifactsLoading) return '—';
-    const route = targetRouteRevenue(summary, target);
-    if (route?.pricedUsd > 0) return usd2.format(route.pricedUsd);
-    if (route?.unpricedAssetCount > 0) return 'unpriced';
-    return '$0.00';
-  }
-
-  function formatUnpricedAssets(assets) {
-    const unpriced = (assets || [])
-      .filter((asset) => asset.priceUsd === 0 && asset.amount > 0)
-      .slice(0, 2)
-      .map((asset) => `${formatRevenueAmount(asset.amount)} ${formatDenom(asset.denom)}`);
-    const remaining = Math.max(0, (assets || []).filter((asset) => asset.priceUsd === 0 && asset.amount > 0).length - 2);
-    return `${unpriced.join(', ')}${remaining ? ` +${remaining} more` : ''}`;
-  }
-
-  function formatRevenueAmount(amount) {
     if (amount >= 1000) return number2.format(amount);
     if (amount >= 1) return number4.format(amount);
     return amount.toLocaleString('en-US', { maximumFractionDigits: 8 });
@@ -888,10 +935,6 @@
   function formatTxId(txId) {
     if (!txId) return '';
     return `${txId.slice(0, 8)}…${txId.slice(-6)}`;
-  }
-
-  function formatDenom(denom) {
-    return (denom || '').toUpperCase();
   }
 
   function addressUrl(address) {
@@ -936,9 +979,9 @@
     </div>
     <h1 class="title">APP LAYER <span class="arrow">→</span> BASE LAYER<span class="cursor">_</span></h1>
     <p class="lede">
-      Rujira collector routes, observed final Reserve deposits, generated base-layer swap fees,
-      and live Base Layer collector state. Reads `rujira-revenue` contract configs and THORNode
-      swap fee events.
+      Rujira collector configuration, observed final Reserve deposits, and separate app-attributed
+      THORChain liquidity-fee impact. Address allocations, conversion queues, and blocked inventory
+      are shown independently so only final RESERVE deposits are treated as revenue.
     </p>
     <div class="rule"></div>
   </div>
@@ -1002,12 +1045,12 @@
     <article class="metric">
       <div class="metric-head">
         <span class="metric-idx">02</span>
-        <span class="metric-label">generated base fees</span>
+        <span class="metric-label">app-generated tc fees</span>
       </div>
       <strong class="metric-value">
         {generatedFeesLoading && !generatedFeeRows.length ? '—' : usd2.format(totalGeneratedFeeUsd)}
       </strong>
-      <small class="metric-foot">{number4.format(totalGeneratedFeeRune)} RUNE liquidity fees</small>
+      <small class="metric-foot">{number4.format(totalGeneratedFeeRune)} RUNE · non-additive impact</small>
     </article>
     <article class="metric">
       <div class="metric-head">
@@ -1020,20 +1063,22 @@
     <article class="metric">
       <div class="metric-head">
         <span class="metric-idx">04</span>
-        <span class="metric-label">known pending usd</span>
+        <span class="metric-label">base inventory (priced)</span>
       </div>
       <strong class="metric-value">{liveLoading ? '—' : usd2.format(pendingKnownUsd)}</strong>
-      <small class="metric-foot">{number2.format(pendingRune)} RUNE + {usd2.format(stableUsd)} stables</small>
+      <small class="metric-foot">{number2.format(pendingRune)} RUNE eligible · {usd2.format(stableUsd)} stables need conversion</small>
     </article>
     <article class="metric">
       <div class="metric-head">
         <span class="metric-idx">05</span>
-        <span class="metric-label">base layer share</span>
+        <span class="metric-label">base allocation</span>
       </div>
       <strong class="metric-value">
         {liveLoading ? '—' : `${baseShares.trade.toFixed(0)}% / ${baseShares.core.toFixed(0)}%`}
       </strong>
-      <small class="metric-foot">trade / core apps to base layer</small>
+      <small class="metric-foot">
+        {baseAllocationFallback ? 'fallback config' : 'eligible target denoms'} · trade / core
+      </small>
     </article>
   </div>
 
@@ -1054,8 +1099,7 @@
     <p class="block-lede">
       Weekly USD paid by the Base Layer collector to TC Reserve, priced when each Reserve deposit
       happened. This is RUNE sent × historical RUNE/USD at dispersal time, not the current value
-      of that RUNE. The backend now uses the BooneTools Dune reserve-payment source query for
-      this stream.
+      of that RUNE. Source in use: {reservePaymentSource}.
     </p>
     <div class="chart-frame">
       {#if reservePaymentsLoading && !weeklyRows.length}
@@ -1114,7 +1158,7 @@
     <div class="block-head">
       <div class="block-title">
         <span class="title-marker blue">▌</span>
-        <h2>generated base-layer fees</h2>
+        <h2>app-generated tc liquidity fees</h2>
       </div>
       <div class="block-meta">
         {#if generatedFeeMeta}
@@ -1125,8 +1169,8 @@
       </div>
     </div>
     <p class="block-lede">
-      Dune-indexed Rujira WASM context joined to THORChain swap fees from Rujira
-      contract-triggered base-layer swaps, displayed separately from explicit Reserve payments.
+      Non-additive THORChain liquidity fees attributed to Rujira contract activity. They are not
+      Reserve revenue and must not be added to explicit Reserve payments. Source: {generatedFeeSource}.
       Current scan scope: {generatedFeeScope}
     </p>
 
@@ -1202,9 +1246,9 @@
       </div>
     </div>
     <p class="block-lede">
-      Live <span class="inline-code">rujira-revenue</span> target addresses. Base Layer routes
-      highlighted green. Collector values are all-time distributions plus current residual balances,
-      priced with THORNode pool prices plus Rujira app-asset prices and receipt-token NAVs.
+      Live <span class="inline-code">rujira-revenue</span> configuration. Percentages are address
+      allocations for eligible target denoms, not a claim that every collector balance is currently
+      transferable. Conversion queues and blocked inventory are shown separately.
     </p>
 
     <div class="flow">
@@ -1222,7 +1266,7 @@
                 title={collector.address}
               >{collector.name}</a>
               <span class="node-pill" class:hot={baseShares[collector.key] > 0}>
-                {baseShares[collector.key].toFixed(0)}% → base
+                {baseShares[collector.key].toFixed(0)}% base allocation
               </span>
             </div>
             <p class="node-role">
@@ -1236,10 +1280,35 @@
               >{formatAddress(collector.address)}</a>
             </p>
             <div class="node-value">
-              <span>all-time collected</span>
-              <strong>{collectorRevenueDisplay(collector.revenueSummary)}</strong>
-              <small>{collectorRevenueNote(collector.revenueSummary)}</small>
+              <span>eligible target inventory</span>
+              <strong>{collector.inventory.available ? inventoryDisplay(collector.inventory.eligible) : '—'}</strong>
+              <small>
+                {collector.inventory.available
+                  ? `${inventoryNote(collector.inventory.eligible)} configured for direct weighted distribution`
+                  : 'eligibility unavailable until live config and balances load'}
+              </small>
             </div>
+            {#if collector.inventory.available && collector.inventory.conversion.count}
+              <div class="inventory-note conversion">
+                <span>conversion queue</span>
+                <strong>{inventoryDisplay(collector.inventory.conversion)}</strong>
+                <small>{inventoryNote(collector.inventory.conversion)} need a configured action before distribution</small>
+              </div>
+            {/if}
+            {#if collector.inventory.available && collector.inventory.unresolved.count}
+              <div class="inventory-note unknown">
+                <span>conversion status unavailable</span>
+                <strong>{inventoryDisplay(collector.inventory.unresolved)}</strong>
+                <small>{inventoryNote(collector.inventory.unresolved)} cannot be classified until the actions query succeeds</small>
+              </div>
+            {/if}
+            {#if collector.inventory.available && collector.inventory.blocked.count}
+              <div class="inventory-note blocked">
+                <span>not configured</span>
+                <strong>{inventoryDisplay(collector.inventory.blocked)}</strong>
+                <small>{inventoryNote(collector.inventory.blocked)} have no target-denom or conversion-action path</small>
+              </div>
+            {/if}
             <div class="targets">
               {#each targetMap[collector.key] as target}
                 <div class="target" class:on-base={target.address === BASE_LAYER_COLLECTOR}>
@@ -1251,7 +1320,7 @@
                     rel="noopener noreferrer"
                     title={target.address}
                   >{target.label}</a>
-                  <span class="target-usd">{targetRouteRevenueDisplay(collector.revenueSummary, target)}</span>
+                  <span class="target-usd">{target.isFallback ? 'fallback config' : 'eligible-denom allocation'}</span>
                   <b class="target-pct">{target.percent.toFixed(0)}%</b>
                 </div>
               {/each}
@@ -1279,18 +1348,29 @@
           </p>
           <div class="queue">
             <div>
-              <span>rune</span>
+              <span>rune eligible now</span>
               <strong>{number2.format(pendingRune)}</strong>
             </div>
             <div>
-              <span>rune usd</span>
-              <strong>{usd2.format(pendingRuneUsd)}</strong>
+              <span>conversion queue</span>
+              <strong>{inventoryDisplay(baseInventory.conversion)}</strong>
             </div>
             <div>
-              <span>stables</span>
-              <strong>{usd2.format(stableUsd)}</strong>
+              <span>{baseInventory.unresolved.count ? 'actions unavailable' : 'not configured'}</span>
+              <strong>{inventoryDisplay(baseInventory.unresolved.count ? baseInventory.unresolved : baseInventory.blocked)}</strong>
             </div>
           </div>
+          <p class="queue-note">
+            Only RUNE can be distributed to Reserve.
+            {#if baseInventory.unresolved.count}
+              The actions query is unavailable, so the route status for those balances is unknown.
+            {:else}
+              Other balances need a configured action before they can enter the conversion queue.
+            {/if}
+            {#if baseRuneRatePerSecond > 0}
+              Current RUNE drip cap: {number4.format(baseRuneRatePerSecond)} RUNE/s.
+            {/if}
+          </p>
           <div class="targets">
             {#each targetMap.base as target}
               <div class="target on-base">
@@ -1302,6 +1382,7 @@
                   rel="noopener noreferrer"
                   title={target.address}
                 >{target.label}</a>
+                <span class="target-usd">RUNE only · rate limited</span>
                 <b class="target-pct">{target.percent.toFixed(0)}%</b>
               </div>
             {/each}
@@ -1350,11 +1431,11 @@
       <div class="block-head">
         <div class="block-title">
           <span class="title-marker">▌</span>
-          <h2>collector balances</h2>
+          <h2>base collector inventory</h2>
         </div>
         <div class="block-meta">[{topBalances.length} denoms]</div>
       </div>
-      <p class="block-lede">USD estimated for RUNE and stable denoms only.</p>
+      <p class="block-lede">Current Base collector balances. USD is estimated from available RUNE, pool, and stable prices; a balance is not automatically Reserve-bound.</p>
       <div class="table-scroll">
         <table>
           <thead>
@@ -2263,6 +2344,48 @@
     overflow-wrap: anywhere;
   }
 
+  .inventory-note {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 8px;
+    align-items: baseline;
+    margin: 6px 0;
+    padding: 7px 10px;
+    background: #060606;
+    border-left: 2px solid #44a0ff;
+  }
+
+  .inventory-note.blocked {
+    border-left-color: #d4a017;
+  }
+
+  .inventory-note span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .inventory-note strong {
+    justify-self: end;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #b8d8ff;
+  }
+
+  .inventory-note.blocked strong {
+    color: #d4a017;
+  }
+
+  .inventory-note small {
+    grid-column: 1 / -1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #666;
+    overflow-wrap: anywhere;
+  }
+
   .targets {
     display: flex;
     flex-direction: column;
@@ -2296,6 +2419,9 @@
     color: #c8c8c8;
     font-weight: 700;
     white-space: nowrap;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .target-pct {
@@ -2352,6 +2478,14 @@
     color: #00cc66;
     font-weight: 700;
     overflow-wrap: anywhere;
+  }
+
+  .queue-note {
+    margin: -2px 0 10px;
+    color: #777;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    line-height: 1.45;
   }
 
   .reserve-total {

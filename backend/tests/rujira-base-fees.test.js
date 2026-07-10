@@ -102,12 +102,12 @@ test('parseRujiraBaseFeeBlock counts only memo-matched Rujira THORChain swap fee
 
   assert.equal(parsed.events.length, 2);
 
-  const included = parsed.events.find((row) => row.swap_id === 'included');
+  const included = parsed.events.find((row) => row.swap_id === 'INCLUDED');
   assert.equal(included.included, true);
   assert.equal(included.classification, 'fin_base_layer_execution');
   assert.equal(included.liquidity_fee_rune, 0.00012345);
 
-  const excluded = parsed.events.find((row) => row.swap_id === 'excluded');
+  const excluded = parsed.events.find((row) => row.swap_id === 'EXCLUDED');
   assert.equal(excluded.included, false);
   assert.equal(excluded.classification, 'ruji_swap_revenue_excluded');
 
@@ -144,7 +144,10 @@ test('saveParsedRujiraBaseFeeBlock skips empty websocket blocks by default', asy
 
 test('buildRujiraBaseFeeRowsFromDune normalizes Dune generated-fee rows', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
-  const { buildRujiraBaseFeeRowsFromDune } = await import('../src/shared/rujira-base-fees.js');
+  const {
+    RUJIRA_THORCHAIN_SWAP_CONTRACT,
+    buildRujiraBaseFeeRowsFromDune
+  } = await import('../src/shared/rujira-base-fees.js');
 
   const [row] = buildRujiraBaseFeeRowsFromDune([{
     event_key: 'dune-row-1',
@@ -153,7 +156,7 @@ test('buildRujiraBaseFeeRowsFromDune normalizes Dune generated-fee rows', async 
     swap_id: '5ec55ce39298d90299b955df0b7149da389a9ce1ae33d9bbf75414b9c04e7ddc',
     pool: 'THOR.RUJI',
     chain: 'THOR',
-    from_address: 'thor1swap',
+    from_address: RUJIRA_THORCHAIN_SWAP_CONTRACT,
     to_address: 'thor1dest',
     coin: '16.999151 THOR.RUNE',
     memo: '=:THOR.RUJI:thor1dest:0/1/1',
@@ -169,13 +172,203 @@ test('buildRujiraBaseFeeRowsFromDune normalizes Dune generated-fee rows', async 
     source: 'dune'
   }]);
 
-  assert.equal(row.event_key, 'dune-row-1');
+  assert.equal(row.event_key, row.canonical_key);
+  assert.match(row.event_key, /^rujira-base-fee:v2\|25999025\|5EC55CE/);
   assert.equal(row.height, 25999025);
   assert.equal(row.block_time, '2026-05-01T23:11:49.000+00:00');
   assert.equal(row.swap_id, '5EC55CE39298D90299B955DF0B7149DA389A9CE1AE33D9BBF75414B9C04E7DDC');
   assert.equal(row.included, true);
   assert.equal(row.classification, 'fin_base_layer_execution');
   assert.equal(row.liquidity_fee_base, '1699960');
+  assert.equal(row.source, 'dune');
   assert.equal(row.raw_event.source, 'dune');
+  assert.equal(row.raw_event.source_event_key, 'dune-row-1');
   assert.equal(row.context_json.query_id, '7620091');
+});
+
+test('Dune generated-fee rows must satisfy the Rujira swap and classification invariants', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    RUJIRA_THORCHAIN_SWAP_CONTRACT,
+    buildRujiraBaseFeeRowsFromDune
+  } = await import('../src/shared/rujira-base-fees.js');
+  const valid = {
+    event_key: 'dune-valid-row',
+    height: 25999025,
+    block_time: '2026-05-01T23:11:49.000Z',
+    swap_id: '5ec55ce39298d90299b955df0b7149da389a9ce1ae33d9bbf75414b9c04e7ddc',
+    pool: 'THOR.RUJI',
+    chain: 'THOR',
+    from_address: RUJIRA_THORCHAIN_SWAP_CONTRACT,
+    to_address: 'thor1dest',
+    coin: '16.999151 THOR.RUNE',
+    memo: '=:THOR.RUJI:thor1dest:0/1/1',
+    liquidity_fee_base: '1699960',
+    liquidity_fee_rune: 0.0169996,
+    rune_price_usd: 0.5084920729,
+    liquidity_fee_usd: 0.0086441618,
+    classification: 'fin_base_layer_execution',
+    included: true,
+    source_contract: 'thor1fin',
+    source: 'dune'
+  };
+
+  assert.equal(buildRujiraBaseFeeRowsFromDune([valid]).length, 1);
+  assert.equal(buildRujiraBaseFeeRowsFromDune([{
+    ...valid,
+    event_key: 'wrong-sender',
+    from_address: 'thor1notrujira'
+  }]).length, 0);
+  assert.equal(buildRujiraBaseFeeRowsFromDune([{
+    ...valid,
+    event_key: 'wrong-inclusion',
+    included: false
+  }]).length, 0);
+  assert.equal(buildRujiraBaseFeeRowsFromDune([{
+    ...valid,
+    event_key: 'wrong-fee',
+    liquidity_fee_rune: 9
+  }]).length, 0);
+  assert.equal(buildRujiraBaseFeeRowsFromDune([{
+    ...valid,
+    event_key: 'wrong-collector-classification',
+    source_contract: RUJIRA_THORCHAIN_SWAP_CONTRACT
+  }]).length, 0);
+});
+
+test('legacy and Dune rows share a canonical event identity and retain both providers on upsert', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    RUJIRA_THORCHAIN_SWAP_CONTRACT,
+    buildRujiraBaseFeeRowsFromDune,
+    parseRujiraBaseFeeBlock,
+    saveRujiraBaseFeeEvents
+  } = await import('../src/shared/rujira-base-fees.js');
+  const swapId = '5ec55ce39298d90299b955df0b7149da389a9ce1ae33d9bbf75414b9c04e7ddc';
+  const memo = '=:THOR.RUJI:thor1dest:0/1/1';
+  const [legacy] = parseRujiraBaseFeeBlock(25999025, {
+    result: {
+      txs_results: [{
+        events: [
+          event('wasm-rujira-fin/trade', {
+            _contract_address: 'thor1fin',
+            offer: '1699915100',
+            bid: '1'
+          }),
+          event('wasm-rujira-thorchain-swap/swap', {
+            _contract_address: RUJIRA_THORCHAIN_SWAP_CONTRACT,
+            amount: '1699915100rune',
+            memo
+          })
+        ]
+      }],
+      finalize_block_events: [
+        event('swap', {
+          id: swapId,
+          from: RUJIRA_THORCHAIN_SWAP_CONTRACT,
+          to: 'thor1dest',
+          pool: 'THOR.RUJI',
+          chain: 'THOR',
+          coin: '1699915100 THOR.RUNE',
+          memo,
+          liquidity_fee_in_rune: '1699960'
+        })
+      ]
+    }
+  }, {
+    blockTime: '2026-05-01T23:11:49.000Z'
+  }).events;
+  const [dune] = buildRujiraBaseFeeRowsFromDune([{
+    event_key: 'dune-row-for-same-swap',
+    height: 25999025,
+    block_time: '2026-05-01T23:11:49.000Z',
+    swap_id: swapId,
+    pool: 'THOR.RUJI',
+    chain: 'THOR',
+    from_address: RUJIRA_THORCHAIN_SWAP_CONTRACT,
+    to_address: 'thor1dest',
+    coin: '16.999151 THOR.RUNE',
+    memo,
+    liquidity_fee_base: '1699960',
+    liquidity_fee_rune: 0.0169996,
+    rune_price_usd: 0.5084920729,
+    liquidity_fee_usd: 0.0086441618,
+    classification: 'fin_base_layer_execution',
+    included: true,
+    source_contract: 'thor1fin',
+    source: 'dune'
+  }]);
+
+  assert.equal(legacy.canonical_key, dune.canonical_key);
+  assert.equal(legacy.event_key, dune.event_key);
+
+  const queries = [];
+  const saved = await saveRujiraBaseFeeEvents({
+    query: async (...args) => {
+      queries.push(args);
+      return { rows: [], rowCount: 1 };
+    }
+  }, [legacy, dune]);
+
+  assert.equal(saved, 1);
+  assert.equal(queries.length, 1);
+  assert.match(queries[0][0], /on conflict \(canonical_key\) do update/i);
+  assert.match(queries[0][0], /source_provenance/i);
+  assert.ok(queries[0][1].some((value) => typeof value === 'string'
+    && value.includes('"dune"')
+    && value.includes('"legacy"')));
+});
+
+test('dashboard provenance reflects persisted Dune and legacy rows instead of the last sync state alone', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { getRujiraBaseFeesDashboardPayload } = await import('../src/shared/rujira-base-fees.js');
+  const client = {
+    query: async (sql) => {
+      if (sql.includes('from rujira_base_fee_actions')) {
+        return { rows: [{ count: '2', min_height: '1', max_height: '2' }] };
+      }
+      if (sql.includes('from rujira_base_fee_blocks')) {
+        return { rows: [{ status: 'fetched', count: '2' }] };
+      }
+      if (sql.includes('source_providers')) {
+        return {
+          rows: [{
+            total_events: '2',
+            included_events: '2',
+            excluded_events: '0',
+            active_heights: '2',
+            included_fee_rune: '3',
+            included_fee_usd: '4',
+            source_providers: ['dune', 'legacy'],
+            updated_at: '2026-05-01T00:00:00.000Z'
+          }]
+        };
+      }
+      if (sql.includes('from rujira_base_fee_sync_state')) {
+        return {
+          rows: [{
+            next_page_token: '',
+            complete: true,
+            rate_limited_until: null,
+            updated_at: '2026-05-01T00:00:00.000Z',
+            stats_json: {
+              source: 'dune',
+              dune_query_id: '7620091',
+              dune_execution_id: 'execution-1'
+            }
+          }]
+        };
+      }
+      if (sql.includes("job_name = 'rujira-base-fees-ws-listener'")) {
+        return { rows: [] };
+      }
+      return { rows: [] };
+    }
+  };
+
+  const payload = await getRujiraBaseFeesDashboardPayload(client);
+
+  assert.equal(payload.meta.source, 'mixed-dune-and-legacy-postgres');
+  assert.deepEqual(payload.meta.sourceProviders, ['dune', 'legacy']);
+  assert.match(payload.meta.method, /Canonical swap identities prevent/i);
 });

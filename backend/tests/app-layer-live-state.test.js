@@ -74,7 +74,9 @@ test('fetchAppLayerLiveStatePayload builds a backend snapshot through the Thorno
     assert.equal(payload.source, 'boonetools-backend');
     assert.equal(payload.network.rune_price_in_tor, '123000000');
     assert.equal(payload.balances.length, 1);
+    assert.equal(Object.keys(payload.collector_balances).length, 5);
     assert.equal(Object.keys(payload.configs).length, 5);
+    assert.equal(Object.keys(payload.actions).length, 5);
     assert.equal(Object.keys(payload.histories).length, 5);
     assert.deepEqual(payload.route_query_failures, []);
     assert.equal(payload.warning, '');

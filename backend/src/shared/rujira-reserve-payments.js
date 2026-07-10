@@ -126,20 +126,53 @@ function toIsoOrNull(value) {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
-function parseRuneAmount(value) {
-  const text = String(value || '').trim();
+function normalizeBaseUnitAmount(value) {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) {
+    return '';
+  }
+
+  try {
+    return BigInt(text).toString();
+  } catch {
+    return '';
+  }
+}
+
+function parseExplicitRuneAmount(value) {
+  const text = String(value ?? '').trim();
   const compact = text.match(/^(\d+)rune$/i);
   if (compact) {
-    return compact[1];
+    return normalizeBaseUnitAmount(compact[1]);
   }
 
   const spaced = text.match(/^(\d+)\s+THOR\.RUNE$/i);
   if (spaced) {
-    return spaced[1];
+    return normalizeBaseUnitAmount(spaced[1]);
   }
 
-  const plain = text.match(/^(\d+)$/);
-  return plain ? plain[1] : '';
+  return '';
+}
+
+function parseReserveRuneAmount(attrs) {
+  const coinText = String(attrs?.coin ?? '').trim();
+  const coinAmount = parseExplicitRuneAmount(coinText);
+  const amountWithDenom = parseExplicitRuneAmount(attrs?.amount);
+  const bareAmount = normalizeBaseUnitAmount(attrs?.amount);
+
+  // A reserve event may carry the amount in `amount` or `coin`, but any
+  // supplied coin must explicitly identify RUNE and agree with `amount`.
+  if (coinText && !coinAmount) {
+    return '';
+  }
+  if (coinAmount) {
+    if ((amountWithDenom && amountWithDenom !== coinAmount) || (bareAmount && bareAmount !== coinAmount)) {
+      return '';
+    }
+    return coinAmount;
+  }
+
+  return amountWithDenom;
 }
 
 function extractFinalizeEvents(payload) {
@@ -180,7 +213,7 @@ function isTargetTransfer(attrs) {
   return (
     attrs.sender === BASE_LAYER_REVENUE_COLLECTOR &&
     attrs.recipient === TC_RESERVE_MODULE &&
-    Boolean(parseRuneAmount(attrs.amount))
+    Boolean(parseExplicitRuneAmount(attrs.amount))
   );
 }
 
@@ -189,12 +222,12 @@ function isTargetReserve(attrs) {
     (attrs.from === BASE_LAYER_REVENUE_COLLECTOR || attrs.contributor_address === BASE_LAYER_REVENUE_COLLECTOR) &&
     attrs.to === TC_RESERVE_MODULE &&
     attrs.memo === 'RESERVE' &&
-    Boolean(parseRuneAmount(attrs.amount || attrs.coin))
+    Boolean(parseReserveRuneAmount(attrs))
   );
 }
 
 function takeMatchingReserve(reserveRows, amountBase) {
-  const index = reserveRows.findIndex((row) => !row.used && parseRuneAmount(row.attrs.amount || row.attrs.coin) === amountBase);
+  const index = reserveRows.findIndex((row) => !row.used && row.amountBase === amountBase);
   if (index === -1) {
     return null;
   }
@@ -208,6 +241,11 @@ function buildEventKey({ height, index, txId, amountBase }) {
 
 function normalizePaymentEvent({ height, blockTime, index, amountBase, transfer, reserve, source }) {
   const reserveAttrs = reserve?.attrs || {};
+  const reserveAmountBase = reserve?.amountBase || parseReserveRuneAmount(reserveAttrs);
+  if (!reserve || !reserveAmountBase || reserveAmountBase !== amountBase) {
+    return null;
+  }
+
   const txId = reserveAttrs.id || '';
   return {
     event_key: buildEventKey({ height, index, txId, amountBase }),
@@ -216,7 +254,7 @@ function normalizePaymentEvent({ height, blockTime, index, amountBase, transfer,
     tx_id: txId,
     sender: BASE_LAYER_REVENUE_COLLECTOR,
     recipient: TC_RESERVE_MODULE,
-    memo: reserveAttrs.memo || 'RESERVE',
+    memo: reserveAttrs.memo,
     amount_base: amountBase,
     amount_rune: baseRuneToNumber(amountBase),
     rune_price_usd: 0,
@@ -241,17 +279,22 @@ export function parseRujiraReservePaymentBlock(height, blockPayload, options = {
   for (const [index, event] of events.entries()) {
     const attrs = attrsToObject(event);
     if (event?.type === 'transfer' && isTargetTransfer(attrs)) {
-      transfers.push({ index, attrs, event });
+      transfers.push({ index, attrs, event, amountBase: parseExplicitRuneAmount(attrs.amount) });
     } else if (event?.type === 'reserve' && isTargetReserve(attrs)) {
-      reserves.push({ index, attrs, event, used: false });
+      reserves.push({ index, attrs, event, amountBase: parseReserveRuneAmount(attrs), used: false });
     }
   }
 
   const parsedEvents = [];
+  let matchedTransferCount = 0;
   for (const transfer of transfers) {
-    const amountBase = parseRuneAmount(transfer.attrs.amount);
+    const amountBase = transfer.amountBase;
     const reserve = takeMatchingReserve(reserves, amountBase);
-    parsedEvents.push(normalizePaymentEvent({
+    if (!reserve) {
+      continue;
+    }
+
+    const payment = normalizePaymentEvent({
       height: blockHeight,
       blockTime,
       index: transfer.index,
@@ -259,22 +302,36 @@ export function parseRujiraReservePaymentBlock(height, blockPayload, options = {
       transfer,
       reserve,
       source
-    }));
+    });
+    if (!payment) {
+      continue;
+    }
+
+    matchedTransferCount += 1;
+    parsedEvents.push(payment);
   }
 
-  if (!parsedEvents.length) {
-    for (const reserve of reserves) {
-      const amountBase = parseRuneAmount(reserve.attrs.amount || reserve.attrs.coin);
-      parsedEvents.push(normalizePaymentEvent({
-        height: blockHeight,
-        blockTime,
-        index: reserve.index,
-        amountBase,
-        transfer: null,
-        reserve,
-        source
-      }));
+  let reserveOnlyEventCount = 0;
+  for (const reserve of reserves) {
+    if (reserve.used) {
+      continue;
     }
+
+    const payment = normalizePaymentEvent({
+      height: blockHeight,
+      blockTime,
+      index: reserve.index,
+      amountBase: reserve.amountBase,
+      transfer: null,
+      reserve,
+      source
+    });
+    if (!payment) {
+      continue;
+    }
+
+    reserveOnlyEventCount += 1;
+    parsedEvents.push(payment);
   }
 
   return {
@@ -283,6 +340,9 @@ export function parseRujiraReservePaymentBlock(height, blockPayload, options = {
       height: blockHeight,
       transfer_event_count: transfers.length,
       reserve_event_count: reserves.length,
+      matched_transfer_event_count: matchedTransferCount,
+      unmatched_transfer_event_count: transfers.length - matchedTransferCount,
+      reserve_only_event_count: reserveOnlyEventCount,
       matched_event_count: parsedEvents.length,
       source
     }
@@ -984,28 +1044,49 @@ export async function writeRujiraReservePaymentListenerHeartbeat(payload = {}) {
 function normalizeDuneReservePaymentRow(row) {
   const eventKey = String(row?.event_key || '').trim();
   const blockTime = toIsoOrNull(row?.block_time);
-  if (!eventKey || !blockTime) {
+  const height = Math.max(0, Math.trunc(safeNumber(row?.height, 0)));
+  const sender = String(row?.sender || '').trim();
+  const recipient = String(row?.recipient || '').trim();
+  const memo = String(row?.memo || '').trim();
+  const amountBase = normalizeBaseUnitAmount(row?.amount_base);
+  const coin = String(row?.coin || '').trim();
+  const coinAmountBase = parseExplicitRuneAmount(coin);
+
+  if (
+    !eventKey ||
+    !blockTime ||
+    height <= 0 ||
+    sender !== BASE_LAYER_REVENUE_COLLECTOR ||
+    recipient !== TC_RESERVE_MODULE ||
+    memo !== 'RESERVE' ||
+    !amountBase ||
+    !coinAmountBase ||
+    amountBase !== coinAmountBase
+  ) {
     return null;
   }
 
-  const amountBase = String(row?.amount_base || '0');
-  const amountRune = safeNumber(row?.amount_rune, baseRuneToNumber(amountBase));
-  const runePriceUsd = safeNumber(row?.rune_price_usd, 0);
-  const amountUsd = safeNumber(row?.amount_usd, amountRune * runePriceUsd);
+  const amountRune = baseRuneToNumber(amountBase);
+  if (amountRune <= 0) {
+    return null;
+  }
+
+  const runePriceUsd = Math.max(0, safeNumber(row?.rune_price_usd, 0));
+  const amountUsd = Math.max(0, safeNumber(row?.amount_usd, amountRune * runePriceUsd));
 
   return {
     event_key: eventKey,
-    height: Math.max(0, Math.trunc(safeNumber(row?.height, 0))),
+    height,
     block_time: blockTime,
     tx_id: String(row?.tx_id || ''),
-    sender: String(row?.sender || BASE_LAYER_REVENUE_COLLECTOR),
-    recipient: String(row?.recipient || TC_RESERVE_MODULE),
-    memo: String(row?.memo || 'RESERVE'),
+    sender,
+    recipient,
+    memo,
     amount_base: amountBase,
     amount_rune: amountRune,
     rune_price_usd: runePriceUsd,
     amount_usd: amountUsd,
-    coin: String(row?.coin || `${amountBase} THOR.RUNE`),
+    coin,
     source: 'dune',
     raw_event: {
       source: 'dune',

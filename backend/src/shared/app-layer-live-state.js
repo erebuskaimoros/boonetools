@@ -4,7 +4,10 @@ import { config } from '../lib/config.js';
 import { toIsoString } from '../lib/utils.js';
 import { fetchThorchain } from './thornode.js';
 
-const CACHE_KEY = 'app-layer-live-state:v1';
+// The v2 snapshot adds per-collector balances and conversion actions. Keep it
+// separate from v1 so a cached pre-v2 response cannot be rendered as live
+// inventory data.
+const CACHE_KEY = 'app-layer-live-state:v2';
 const LOCK_KEY = 'boonetools:app-layer-live-state';
 const BASE_LAYER_COLLECTOR =
   'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
@@ -41,6 +44,19 @@ async function smartConfig(address) {
     `/cosmwasm/wasm/v1/contract/${address}/smart/${configQuery()}`
   );
   return payload.data || {};
+}
+
+async function smartActions(address) {
+  const query = Buffer.from(JSON.stringify({ actions: {} })).toString('base64');
+  const payload = await fetchThorchain(
+    `/cosmwasm/wasm/v1/contract/${address}/smart/${query}`
+  );
+  return Array.isArray(payload.data?.actions) ? payload.data.actions : [];
+}
+
+async function contractBalances(address) {
+  const payload = await fetchThorchain(`/cosmos/bank/v1beta1/balances/${address}`);
+  return Array.isArray(payload?.balances) ? payload.balances : [];
 }
 
 async function contractHistory(address) {
@@ -134,30 +150,42 @@ async function writeCachedSnapshot(client, payload) {
 
 export async function fetchAppLayerLiveStatePayload() {
   const startedAt = new Date().toISOString();
-  const [network, pools, balancePayload, configResults, historyResults] = await Promise.all([
+  const [network, pools, balanceResults, configResults, actionResults, historyResults] = await Promise.all([
     fetchThorchain('/thorchain/network'),
     fetchThorchain('/thorchain/pools'),
-    fetchThorchain(`/cosmos/bank/v1beta1/balances/${BASE_LAYER_COLLECTOR}`),
+    Promise.allSettled(collectors.map((collector) => contractBalances(collector.address))),
     Promise.allSettled(collectors.map((collector) => smartConfig(collector.address))),
+    Promise.allSettled(collectors.map((collector) => smartActions(collector.address))),
     Promise.allSettled(collectors.map((collector) => contractHistory(collector.address)))
   ]);
 
+  const balanceRows = balanceResults.map((result, index) => (
+    normalizeRouteResult('balance', collectors[index], result)
+  ));
   const configRows = configResults.map((result, index) => (
     normalizeRouteResult('config', collectors[index], result)
+  ));
+  const actionRows = actionResults.map((result, index) => (
+    normalizeRouteResult('actions', collectors[index], result)
   ));
   const historyRows = historyResults.map((result, index) => (
     normalizeRouteResult('history', collectors[index], result)
   ));
-  const failures = [...configRows, ...historyRows].filter((result) => !result.ok);
+  const collectorBalances = buildObject(balanceRows);
+  const failures = [...balanceRows, ...configRows, ...actionRows, ...historyRows]
+    .filter((result) => !result.ok);
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     source: 'boonetools-backend',
     as_of: startedAt,
     network,
     pools: Array.isArray(pools) ? pools : [],
-    balances: Array.isArray(balancePayload?.balances) ? balancePayload.balances : [],
+    // Preserve the original Base collector field for existing API consumers.
+    balances: collectorBalances.base || [],
+    collector_balances: collectorBalances,
     configs: buildObject(configRows),
+    actions: buildObject(actionRows),
     histories: buildObject(historyRows),
     route_query_failures: failures.map((failure) => ({
       key: failure.key,

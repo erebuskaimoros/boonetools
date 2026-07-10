@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { query } from '../db/pool.js';
 import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
-import { safeNumber, sleep, toIsoString } from '../lib/utils.js';
+import { chunkArray, safeNumber, sleep, toIsoString } from '../lib/utils.js';
 import { executeDuneQueryRows, summarizeDuneError } from './dune.js';
 import { fetchMidgard, isMidgardRateLimitError } from './midgard.js';
 
@@ -25,8 +25,135 @@ const KNOWN_REVENUE_COLLECTORS = Object.freeze({
   thor132u9qpm9gfdqtgwxwl8ty409s6zmewfrum2k6wvtvtyphdn5urzsej764l: 'RUJI Index collector'
 });
 
+const BASE_FEE_EVENT_KEY_VERSION = 'rujira-base-fee:v2';
+const DUNE_BASE_FEE_CLASSIFICATIONS = Object.freeze({
+  base_collector_conversion: {
+    included: true,
+    sourceContract: BASE_LAYER_REVENUE_COLLECTOR
+  },
+  app_revenue_conversion: {
+    included: true,
+    requireSourceContract: true
+  },
+  fin_base_layer_execution: {
+    included: true,
+    requireSourceContract: true
+  },
+  ghost_base_layer_execution: {
+    included: true,
+    requireSourceContract: true
+  },
+  app_layer_contract_execution: {
+    included: true,
+    requireSourceContract: true
+  },
+  mixed_app_layer_context: {
+    included: true,
+    requireSourceContract: true
+  },
+  ruji_swap_revenue_excluded: {
+    included: false,
+    sourceContract: RUJI_SWAP_REVENUE_COLLECTOR
+  },
+  direct_ruji_swap_excluded: {
+    included: false,
+    sourceContract: RUJIRA_THORCHAIN_SWAP_CONTRACT
+  },
+  mixed_or_excluded_context: {
+    included: false
+  }
+});
+
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function canonicalKeyPart(value) {
+  return String(value ?? '')
+    .trim()
+    .replaceAll('%', '%25')
+    .replaceAll('|', '%7C');
+}
+
+function normalizeBaseRuneAmount(value) {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return '';
+  return text.replace(/^0+(?=\d)/, '');
+}
+
+function normalizeRujiraBaseFeeIdentity(input, fallback = '') {
+  const height = Math.trunc(safeNumber(input?.height, 0));
+  const swapId = String(input?.swap_id || '').trim().toUpperCase();
+  const pool = normalizeAsset(input?.pool);
+  const toAddress = String(input?.to_address || '').trim().toLowerCase();
+  const memo = String(input?.memo || '').trim();
+  const liquidityFeeBase = normalizeBaseRuneAmount(input?.liquidity_fee_base);
+  const identifier = swapId || String(fallback || '').trim();
+  const canonicalKey = height > 0 && identifier
+    ? [
+        BASE_FEE_EVENT_KEY_VERSION,
+        height,
+        canonicalKeyPart(identifier),
+        canonicalKeyPart(pool),
+        canonicalKeyPart(toAddress),
+        canonicalKeyPart(memo),
+        canonicalKeyPart(liquidityFeeBase || '0')
+      ].join('|')
+    : '';
+
+  return {
+    canonical_key: canonicalKey,
+    height,
+    swap_id: swapId,
+    pool,
+    chain: String(input?.chain || '').trim().toUpperCase(),
+    from_address: String(input?.from_address || '').trim().toLowerCase(),
+    to_address: toAddress,
+    memo,
+    liquidity_fee_base: liquidityFeeBase
+  };
+}
+
+function parseStrictBoolean(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+  const text = String(value || '').trim().toLowerCase();
+  if (['true', '1', 'yes'].includes(text)) return true;
+  if (['false', '0', 'no'].includes(text)) return false;
+  return null;
+}
+
+function isFiniteNonNegativeNumber(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0;
+}
+
+function closeEnough(left, right) {
+  const difference = Math.abs(Number(left) - Number(right));
+  const scale = Math.max(Math.abs(Number(left)), Math.abs(Number(right)), 1);
+  return difference <= Math.max(1e-10, scale * 1e-6);
+}
+
+function makeLegacySourceProvenance(contextOrigin, sourceEventKey) {
+  return {
+    legacy: {
+      context_origin: String(contextOrigin || ''),
+      source_event_key: String(sourceEventKey || '')
+    }
+  };
+}
+
+function makeDuneSourceProvenance(sourceEventKey) {
+  return {
+    dune: {
+      query_id: String(config.rujiraBaseFeesDuneQueryId || ''),
+      context_origin: 'dune-wasm-tx',
+      source_event_keys: [String(sourceEventKey || '')].filter(Boolean)
+    }
+  };
 }
 
 function getAttr(event, key) {
@@ -105,11 +232,6 @@ function roundNumber(value, decimals = 8) {
   const numeric = Number(value) || 0;
   const factor = 10 ** decimals;
   return Math.round((numeric + Number.EPSILON) * factor) / factor;
-}
-
-function parseBoolean(value) {
-  if (typeof value === 'boolean') return value;
-  return /^(true|1|yes)$/i.test(String(value || '').trim());
 }
 
 function truncateValue(value, maxLength = 180) {
@@ -491,28 +613,39 @@ export function parseRujiraBaseFeeBlock(height, blockResults, options = {}) {
       });
     }
 
-    const feeBase = finalSwap.attrs.liquidity_fee_in_rune || '0';
-    const eventKey = sha256([
+    const sourceEventKey = sha256([
       height,
       finalSwap.index,
       finalSwap.id,
       finalSwap.attrs.pool || '',
       finalSwap.attrs.coin || '',
       finalSwap.memo,
-      feeBase
+      finalSwap.attrs.liquidity_fee_in_rune || '0'
     ].join('|'));
+    const identity = normalizeRujiraBaseFeeIdentity({
+      height,
+      swap_id: finalSwap.id,
+      pool: finalSwap.attrs.pool,
+      chain: finalSwap.attrs.chain,
+      from_address: finalSwap.attrs.from,
+      to_address: finalSwap.attrs.to,
+      memo: finalSwap.memo,
+      liquidity_fee_base: finalSwap.attrs.liquidity_fee_in_rune || '0'
+    }, `legacy:${sourceEventKey}`);
+    const feeBase = identity.liquidity_fee_base || '0';
 
     parsedEvents.push({
-      event_key: eventKey,
-      height,
+      event_key: identity.canonical_key,
+      canonical_key: identity.canonical_key,
+      height: identity.height,
       block_time: blockTime,
-      swap_id: finalSwap.id,
-      pool: finalSwap.attrs.pool || '',
-      chain: finalSwap.attrs.chain || '',
-      from_address: finalSwap.attrs.from || '',
-      to_address: finalSwap.attrs.to || '',
+      swap_id: identity.swap_id,
+      pool: identity.pool,
+      chain: identity.chain,
+      from_address: identity.from_address,
+      to_address: identity.to_address,
       coin: finalSwap.attrs.coin || '',
-      memo: finalSwap.memo,
+      memo: identity.memo,
       liquidity_fee_base: feeBase,
       liquidity_fee_rune: baseRuneToNumber(feeBase),
       rune_price_usd: 0,
@@ -523,8 +656,14 @@ export function parseRujiraBaseFeeBlock(height, blockResults, options = {}) {
       source_label: context.source_label || '',
       source_denom: context.source_denom || '',
       context_origin: context.origin || '',
+      source: 'legacy',
+      source_provenance: makeLegacySourceProvenance(context.origin, sourceEventKey),
       raw_event: compactEvent(finalSwap.event),
-      context_json: context.context_json || {}
+      context_json: {
+        ...(context.context_json || {}),
+        source: 'legacy',
+        source_event_key: sourceEventKey
+      }
     });
   }
 
@@ -847,82 +986,364 @@ async function markBlockError(client, row, error) {
   );
 }
 
+const BASE_FEE_EVENT_COLUMNS = Object.freeze([
+  'event_key',
+  'canonical_key',
+  'height',
+  'block_time',
+  'swap_id',
+  'pool',
+  'chain',
+  'from_address',
+  'to_address',
+  'coin',
+  'memo',
+  'liquidity_fee_base',
+  'liquidity_fee_rune',
+  'rune_price_usd',
+  'liquidity_fee_usd',
+  'classification',
+  'included',
+  'source_contract',
+  'source_label',
+  'source_denom',
+  'context_origin',
+  'source',
+  'source_provenance',
+  'raw_event',
+  'context_json',
+  'updated_at'
+]);
+
+const BASE_FEE_EVENT_JSON_COLUMNS = new Set([
+  'source_provenance',
+  'raw_event',
+  'context_json'
+]);
+
+function sourceForBaseFeeEvent(value) {
+  return String(value || '').trim().toLowerCase() === 'dune' ? 'dune' : 'legacy';
+}
+
+function normalizeBaseFeeEventForStorage(event) {
+  const source = sourceForBaseFeeEvent(event?.source);
+  const originalEventKey = String(event?.event_key || '').trim();
+  const identity = normalizeRujiraBaseFeeIdentity(event, source === 'legacy' ? `legacy:${originalEventKey}` : originalEventKey);
+  if (!identity.canonical_key) {
+    throw new Error('Rujira base-fee event is missing a canonical identity');
+  }
+
+  const sourceProvenance = event?.source_provenance && typeof event.source_provenance === 'object'
+    && !Array.isArray(event.source_provenance)
+    ? { ...event.source_provenance }
+    : {};
+  if (!sourceProvenance[source]) {
+    sourceProvenance[source] = source === 'dune'
+      ? makeDuneSourceProvenance(originalEventKey).dune
+      : makeLegacySourceProvenance(event?.context_origin, originalEventKey).legacy;
+  }
+
+  const liquidityFeeBase = identity.liquidity_fee_base || '0';
+  return {
+    event_key: identity.canonical_key,
+    canonical_key: identity.canonical_key,
+    height: identity.height,
+    block_time: event?.block_time || null,
+    swap_id: identity.swap_id,
+    pool: identity.pool,
+    chain: identity.chain,
+    from_address: identity.from_address,
+    to_address: identity.to_address,
+    coin: String(event?.coin || '').trim(),
+    memo: identity.memo,
+    liquidity_fee_base: liquidityFeeBase,
+    liquidity_fee_rune: safeNumber(event?.liquidity_fee_rune, baseRuneToNumber(liquidityFeeBase)),
+    rune_price_usd: safeNumber(event?.rune_price_usd, 0),
+    liquidity_fee_usd: safeNumber(event?.liquidity_fee_usd, 0),
+    classification: String(event?.classification || 'unknown').trim(),
+    included: Boolean(event?.included),
+    source_contract: String(event?.source_contract || '').trim().toLowerCase(),
+    source_label: String(event?.source_label || event?.classification || '').trim(),
+    source_denom: String(event?.source_denom || '').trim(),
+    context_origin: String(event?.context_origin || '').trim(),
+    source,
+    source_provenance: sourceProvenance,
+    raw_event: event?.raw_event || {},
+    context_json: event?.context_json || {},
+    updated_at: event?.updated_at || new Date().toISOString()
+  };
+}
+
+function mergeBaseFeeEventRows(existing, incoming) {
+  const incomingWins = incoming.source === 'dune' || existing.source !== 'dune';
+  const preferred = incomingWins ? incoming : existing;
+  const sourceProvenance = {
+    ...(existing.source_provenance || {}),
+    ...(incoming.source_provenance || {})
+  };
+  return {
+    ...preferred,
+    source: incomingWins ? incoming.source : existing.source,
+    source_provenance: sourceProvenance
+  };
+}
+
+function dedupeBaseFeeEventRows(events) {
+  const byCanonicalKey = new Map();
+  for (const event of events) {
+    const existing = byCanonicalKey.get(event.canonical_key);
+    byCanonicalKey.set(event.canonical_key, existing ? mergeBaseFeeEventRows(existing, event) : event);
+  }
+  return [...byCanonicalKey.values()];
+}
+
+function buildBaseFeeEventUpsertQuery(rows) {
+  const values = [];
+  const tuples = rows.map((row) => {
+    const placeholders = BASE_FEE_EVENT_COLUMNS.map((column) => {
+      const value = BASE_FEE_EVENT_JSON_COLUMNS.has(column)
+        ? JSON.stringify(row[column] || {})
+        : row[column];
+      values.push(value);
+      return BASE_FEE_EVENT_JSON_COLUMNS.has(column) ? `$${values.length}::jsonb` : `$${values.length}`;
+    });
+    return `(${placeholders.join(', ')})`;
+  });
+  const preferIncoming = "(excluded.source = 'dune' or rujira_base_fee_events.source <> 'dune')";
+  const preferred = (column) => `case when ${preferIncoming} then excluded.${column} else rujira_base_fee_events.${column} end`;
+
+  return {
+    text: `insert into rujira_base_fee_events (${BASE_FEE_EVENT_COLUMNS.join(', ')})
+           values ${tuples.join(', ')}
+           on conflict (canonical_key) do update
+           set event_key = ${preferred('event_key')},
+               height = excluded.height,
+               block_time = case
+                 when ${preferIncoming} then coalesce(excluded.block_time, rujira_base_fee_events.block_time)
+                 else rujira_base_fee_events.block_time
+               end,
+               swap_id = ${preferred('swap_id')},
+               pool = ${preferred('pool')},
+               chain = ${preferred('chain')},
+               from_address = ${preferred('from_address')},
+               to_address = ${preferred('to_address')},
+               coin = ${preferred('coin')},
+               memo = ${preferred('memo')},
+               liquidity_fee_base = ${preferred('liquidity_fee_base')},
+               liquidity_fee_rune = ${preferred('liquidity_fee_rune')},
+               rune_price_usd = ${preferred('rune_price_usd')},
+               liquidity_fee_usd = ${preferred('liquidity_fee_usd')},
+               classification = ${preferred('classification')},
+               included = ${preferred('included')},
+               source_contract = ${preferred('source_contract')},
+               source_label = ${preferred('source_label')},
+               source_denom = ${preferred('source_denom')},
+               context_origin = ${preferred('context_origin')},
+               source = ${preferred('source')},
+               source_provenance = coalesce(rujira_base_fee_events.source_provenance, '{}'::jsonb)
+                 || coalesce(excluded.source_provenance, '{}'::jsonb),
+               raw_event = ${preferred('raw_event')},
+               context_json = ${preferred('context_json')},
+               updated_at = excluded.updated_at`,
+    values
+  };
+}
+
 export async function saveRujiraBaseFeeEvents(client, events) {
-  if (!events.length) {
+  if (!Array.isArray(events) || !events.length) {
     return 0;
   }
 
-  await upsertRows(client, 'rujira_base_fee_events', events, {
-    conflictColumns: ['event_key'],
-    jsonColumns: ['raw_event', 'context_json']
-  });
+  const normalized = dedupeBaseFeeEventRows(events.map(normalizeBaseFeeEventForStorage));
+  for (const chunk of chunkArray(normalized, 200)) {
+    const statement = buildBaseFeeEventUpsertQuery(chunk);
+    await client.query(statement.text, statement.values);
+  }
 
-  return events.length;
+  return normalized.length;
+}
+
+function rejectDuneBaseFeeEvent(reason) {
+  return { row: null, reason };
 }
 
 function normalizeDuneRujiraBaseFeeEvent(row) {
-  const height = Math.trunc(safeNumber(row?.height, 0));
-  const blockTime = toIsoString(row?.block_time);
-  const swapId = String(row?.swap_id || row?.tx_id || '').trim().toUpperCase();
-  const pool = String(row?.pool || '').trim();
-  const fromAsset = String(row?.coin || '').trim();
-  const liquidityFeeBase = String(row?.liquidity_fee_base ?? Math.round(safeNumber(row?.liquidity_fee_rune, 0) * 1e8));
-  const eventKey = String(row?.event_key || [
-    'dune-rujira-base-fee',
-    height,
-    swapId,
-    pool,
-    fromAsset,
-    liquidityFeeBase
-  ].join('|'));
+  const sourceEventKey = String(row?.event_key || '').trim();
+  const parsedBlockTime = parseUtcDateTime(row?.block_time);
+  const identity = normalizeRujiraBaseFeeIdentity({
+    height: row?.height,
+    swap_id: row?.swap_id || row?.tx_id,
+    pool: row?.pool,
+    chain: row?.chain,
+    from_address: row?.from_address,
+    to_address: row?.to_address,
+    memo: row?.memo,
+    liquidity_fee_base: row?.liquidity_fee_base
+  });
+  const classification = String(row?.classification || '').trim().toLowerCase();
+  const policy = DUNE_BASE_FEE_CLASSIFICATIONS[classification];
+  const included = parseStrictBoolean(row?.included);
+  const sourceContract = String(row?.source_contract || '').trim().toLowerCase();
+  const source = String(row?.source || '').trim().toLowerCase();
+  const coin = String(row?.coin || '').trim();
 
-  if (!height || !blockTime || !swapId || !pool) {
-    return null;
+  if (!sourceEventKey) return rejectDuneBaseFeeEvent('missing event_key');
+  if (!parsedBlockTime) return rejectDuneBaseFeeEvent('invalid block_time');
+  if (!identity.height) return rejectDuneBaseFeeEvent('missing height');
+  if (!/^[A-F0-9]{64}$/.test(identity.swap_id)) return rejectDuneBaseFeeEvent('invalid swap_id');
+  if (!identity.pool || !identity.pool.includes('.')) return rejectDuneBaseFeeEvent('invalid pool');
+  if (identity.chain !== 'THOR') return rejectDuneBaseFeeEvent('unexpected swap chain');
+  if (identity.from_address !== RUJIRA_THORCHAIN_SWAP_CONTRACT) {
+    return rejectDuneBaseFeeEvent('unexpected swap sender');
+  }
+  if (!identity.to_address || !identity.memo || identity.memo.startsWith('%%skipped%%')) {
+    return rejectDuneBaseFeeEvent('missing swap destination or memo');
+  }
+  if (!coin) return rejectDuneBaseFeeEvent('missing swap coin');
+  if (!identity.liquidity_fee_base) return rejectDuneBaseFeeEvent('invalid liquidity_fee_base');
+  if (source && source !== 'dune') return rejectDuneBaseFeeEvent('unexpected source');
+  if (!policy) return rejectDuneBaseFeeEvent('unsupported classification');
+  if (included === null || included !== policy.included) {
+    return rejectDuneBaseFeeEvent('classification/included mismatch');
+  }
+  if (policy.sourceContract && sourceContract !== policy.sourceContract) {
+    return rejectDuneBaseFeeEvent('classification/source_contract mismatch');
+  }
+  if (policy.requireSourceContract && !sourceContract.startsWith('thor1')) {
+    return rejectDuneBaseFeeEvent('missing source_contract');
+  }
+  if (sourceContract === RUJI_SWAP_REVENUE_COLLECTOR && classification !== 'ruji_swap_revenue_excluded') {
+    return rejectDuneBaseFeeEvent('RUJI Swap collector must be excluded');
+  }
+  if (sourceContract === RUJIRA_THORCHAIN_SWAP_CONTRACT && classification !== 'direct_ruji_swap_excluded') {
+    return rejectDuneBaseFeeEvent('direct RUJI Swap path must be excluded');
+  }
+  if (sourceContract === BASE_LAYER_REVENUE_COLLECTOR && classification !== 'base_collector_conversion') {
+    return rejectDuneBaseFeeEvent('Base Layer collector classification mismatch');
+  }
+  if (!isFiniteNonNegativeNumber(row?.liquidity_fee_rune)
+    || !isFiniteNonNegativeNumber(row?.rune_price_usd)
+    || !isFiniteNonNegativeNumber(row?.liquidity_fee_usd)) {
+    return rejectDuneBaseFeeEvent('invalid fee or price value');
+  }
+
+  const liquidityFeeRune = baseRuneToNumber(identity.liquidity_fee_base);
+  const runePriceUsd = Number(row.rune_price_usd);
+  const liquidityFeeUsd = liquidityFeeRune * runePriceUsd;
+  if (!closeEnough(row.liquidity_fee_rune, liquidityFeeRune)) {
+    return rejectDuneBaseFeeEvent('liquidity_fee_rune does not match base amount');
+  }
+  if (!closeEnough(row.liquidity_fee_usd, liquidityFeeUsd)) {
+    return rejectDuneBaseFeeEvent('liquidity_fee_usd does not match RUNE/USD price');
   }
 
   return {
-    event_key: eventKey,
-    height,
-    block_time: blockTime,
-    swap_id: swapId,
-    pool,
-    chain: String(row?.chain || ''),
-    from_address: String(row?.from_address || ''),
-    to_address: String(row?.to_address || ''),
-    coin: fromAsset,
-    memo: String(row?.memo || ''),
-    liquidity_fee_base: liquidityFeeBase,
-    liquidity_fee_rune: safeNumber(row?.liquidity_fee_rune, 0),
-    rune_price_usd: safeNumber(row?.rune_price_usd, 0),
-    liquidity_fee_usd: safeNumber(row?.liquidity_fee_usd, 0),
-    classification: String(row?.classification || 'unknown'),
-    included: parseBoolean(row?.included),
-    source_contract: String(row?.source_contract || ''),
-    source_label: String(row?.source_label || row?.classification || ''),
-    source_denom: String(row?.source_denom || ''),
-    context_origin: 'dune-wasm-tx',
-    raw_event: {
+    row: {
+      event_key: identity.canonical_key,
+      canonical_key: identity.canonical_key,
+      height: identity.height,
+      block_time: toIsoString(parsedBlockTime),
+      swap_id: identity.swap_id,
+      pool: identity.pool,
+      chain: identity.chain,
+      from_address: identity.from_address,
+      to_address: identity.to_address,
+      coin,
+      memo: identity.memo,
+      liquidity_fee_base: identity.liquidity_fee_base,
+      liquidity_fee_rune: liquidityFeeRune,
+      rune_price_usd: runePriceUsd,
+      liquidity_fee_usd: liquidityFeeUsd,
+      classification,
+      included,
+      source_contract: sourceContract,
+      source_label: sourceLabelForClassification(classification, sourceContract),
+      source_denom: String(row?.source_denom || '').trim(),
+      context_origin: 'dune-wasm-tx',
       source: 'dune',
-      query_id: config.rujiraBaseFeesDuneQueryId,
-      row
+      source_provenance: makeDuneSourceProvenance(sourceEventKey),
+      raw_event: {
+        source: 'dune',
+        query_id: config.rujiraBaseFeesDuneQueryId,
+        source_event_key: sourceEventKey,
+        row
+      },
+      context_json: {
+        source: 'dune',
+        query_id: config.rujiraBaseFeesDuneQueryId,
+        source_event_key: sourceEventKey,
+        classification,
+        included,
+        source_contract: sourceContract,
+        source_label: sourceLabelForClassification(classification, sourceContract),
+        source_denom: String(row?.source_denom || '').trim()
+      },
+      updated_at: new Date().toISOString()
     },
-    context_json: {
-      source: 'dune',
-      query_id: config.rujiraBaseFeesDuneQueryId,
-      classification: String(row?.classification || ''),
-      included: parseBoolean(row?.included),
-      source_contract: String(row?.source_contract || ''),
-      source_label: String(row?.source_label || ''),
-      source_denom: String(row?.source_denom || '')
-    },
-    updated_at: new Date().toISOString()
+    reason: ''
+  };
+}
+
+function duneRowsAgree(left, right) {
+  return [
+    'height',
+    'block_time',
+    'swap_id',
+    'pool',
+    'chain',
+    'from_address',
+    'to_address',
+    'coin',
+    'memo',
+    'liquidity_fee_base',
+    'liquidity_fee_rune',
+    'rune_price_usd',
+    'liquidity_fee_usd',
+    'classification',
+    'included',
+    'source_contract',
+    'source_denom'
+  ].every((key) => left[key] === right[key]);
+}
+
+function mergeDuplicateDuneRows(existing, incoming) {
+  const sourceEventKeys = new Set([
+    ...(existing.source_provenance?.dune?.source_event_keys || []),
+    ...(incoming.source_provenance?.dune?.source_event_keys || [])
+  ]);
+  existing.source_provenance.dune.source_event_keys = [...sourceEventKeys].sort();
+  return existing;
+}
+
+function normalizeDuneRujiraBaseFeeRows(rows = []) {
+  const accepted = new Map();
+  const rejected = [];
+
+  for (const rawRow of Array.isArray(rows) ? rows : []) {
+    const normalized = normalizeDuneRujiraBaseFeeEvent(rawRow);
+    if (!normalized.row) {
+      rejected.push({ reason: normalized.reason, row: rawRow });
+      continue;
+    }
+
+    const existing = accepted.get(normalized.row.canonical_key);
+    if (existing && !duneRowsAgree(existing, normalized.row)) {
+      rejected.push({ reason: 'conflicting duplicate canonical event', row: rawRow });
+      continue;
+    }
+    accepted.set(normalized.row.canonical_key, existing
+      ? mergeDuplicateDuneRows(existing, normalized.row)
+      : normalized.row);
+  }
+
+  return {
+    rows: [...accepted.values()],
+    rejected
   };
 }
 
 export function buildRujiraBaseFeeRowsFromDune(rows = []) {
-  return rows
-    .map(normalizeDuneRujiraBaseFeeEvent)
-    .filter(Boolean);
+  return normalizeDuneRujiraBaseFeeRows(rows).rows;
 }
 
 async function upsertRujiraBaseFeeDuneBlocks(client, rows, executionId) {
@@ -1017,7 +1438,12 @@ export async function saveParsedRujiraBaseFeeBlock(client, height, blockPayload,
     return parsed;
   }
 
-  await client.query('delete from rujira_base_fee_events where height = $1', [blockHeight]);
+  await client.query(
+    `delete from rujira_base_fee_events
+     where height = $1
+       and source = 'legacy'`,
+    [blockHeight]
+  );
   if (parsed.events.length) {
     await saveRujiraBaseFeeEvents(client, parsed.events);
   }
@@ -1207,6 +1633,21 @@ function normalizeAggregateRows(rows) {
   }));
 }
 
+function resolveBaseFeeSourceProvider(eventSources, syncStats = {}) {
+  const sources = new Set(
+    (Array.isArray(eventSources) ? eventSources : [])
+      .map((source) => String(source || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (sources.has('dune') && sources.has('legacy')) return 'mixed';
+  if (sources.has('dune')) return 'dune';
+  if (sources.has('legacy')) return 'legacy';
+  return String(syncStats.source || '') === 'dune'
+    && !/^missing_dune_/i.test(String(syncStats.reason || ''))
+    ? 'dune'
+    : 'legacy';
+}
+
 async function fetchDashboardStats(client) {
   const [actions, blocks, events, sync, listener] = await Promise.all([
     client.query(
@@ -1227,6 +1668,7 @@ async function fetchDashboardStats(client) {
               count(distinct height) filter (where included)::bigint as active_heights,
               coalesce(sum(liquidity_fee_rune) filter (where included), 0) as included_fee_rune,
               coalesce(sum(liquidity_fee_usd) filter (where included), 0) as included_fee_usd,
+              coalesce(array_agg(distinct source) filter (where source is not null), array[]::text[]) as source_providers,
               max(updated_at) as updated_at
        from rujira_base_fee_events`
     ),
@@ -1306,7 +1748,7 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
     client.query(
       `select event_key, height, block_time, swap_id, pool, coin, memo,
               liquidity_fee_rune, liquidity_fee_usd, classification,
-              source_contract, source_label, source_denom
+              source_contract, source_label, source_denom, source
        from rujira_base_fee_events
        where included = true
        order by block_time desc nulls last, height desc
@@ -1324,20 +1766,27 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
   const blockCounts = stats.blockCounts || {};
   const sync = stats.sync || {};
   const duneStats = sync?.stats_json || {};
-  const sourceProvider = String(duneStats.source || '') === 'dune'
-    && !/^missing_dune_/i.test(String(duneStats.reason || ''))
-    ? 'dune'
-    : 'legacy';
+  const sourceProvider = resolveBaseFeeSourceProvider(stats.events.source_providers, duneStats);
+  const usesDune = sourceProvider === 'dune' || sourceProvider === 'mixed';
 
   return {
     schema_version: 2,
     meta: {
       generatedAt: new Date().toISOString(),
-      source: sourceProvider === 'dune' ? 'dune-query-backed-postgres' : 'boonetools-postgres',
+      source: sourceProvider === 'dune'
+        ? 'dune-query-backed-postgres'
+        : sourceProvider === 'mixed'
+          ? 'mixed-dune-and-legacy-postgres'
+          : 'boonetools-postgres',
+      sourceProviders: Array.isArray(stats.events.source_providers)
+        ? stats.events.source_providers
+        : [],
       scope: 'DB-backed Rujira app-layer THORChain swap fees, excluding direct/RUJI Swap collector contexts.',
       method:
         sourceProvider === 'dune'
           ? 'Execute the BooneTools Rujira Base Fees Dune source query over thorchain.core_wasm_contracts_events and thorchain.defi_swaps, classify Rujira app context by WASM event type, and upsert generated base-layer swap-fee rows into the local dashboard cache.'
+          : sourceProvider === 'mixed'
+            ? 'Use validated Dune rows where available and the legacy THORNode RPC/Midgard parser for fallback or live rows. Canonical swap identities prevent the overlapping sources from being counted twice.'
           : 'Listen to THORChain NewBlock websocket events for steady-state heights, fetch that block_results payload by RPC, match Rujira-emitted swap memos to final THORNode swap events, and sum liquidity_fee_in_rune for non-RUJI-Swap app contexts. Midgard action paging is retained as the backfill/reconciliation fallback.',
       caveat:
         'This tracks base-layer liquidity fees generated by app-layer activity. It is separate from explicit Reserve revenue-share deposits and intentionally keeps excluded RUJI Swap/direct contexts out of the headline total.',
@@ -1350,12 +1799,12 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
       pendingBlockCount: blockCounts.pending || 0,
       fetchedBlockCount: blockCounts.fetched || 0,
       errorBlockCount: blockCounts.error || 0,
-      backfillComplete: sourceProvider === 'dune' ? true : Boolean(sync.complete),
+      backfillComplete: Boolean(sync.complete),
       nextPageToken: sync.next_page_token || '',
       rateLimitedUntil: toIsoString(sync.rate_limited_until),
-      duneQueryId: sourceProvider === 'dune' ? sync.stats_json?.dune_query_id || config.rujiraBaseFeesDuneQueryId : '',
-      duneExecutionId: sourceProvider === 'dune' ? sync.stats_json?.dune_execution_id || '' : '',
-      duneNextStartTime: sourceProvider === 'dune' ? sync.stats_json?.dune_next_start_time || '' : '',
+      duneQueryId: usesDune ? sync.stats_json?.dune_query_id || config.rujiraBaseFeesDuneQueryId : '',
+      duneExecutionId: usesDune ? sync.stats_json?.dune_execution_id || '' : '',
+      duneNextStartTime: usesDune ? sync.stats_json?.dune_next_start_time || '' : '',
       matchedSwapFeeEventCount: Number(stats.events.included_events) || 0,
       excludedSwapFeeEventCount: Number(stats.events.excluded_events) || 0,
       activeHeightCount: Number(stats.events.active_heights) || 0,
@@ -1387,7 +1836,8 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
       classification: String(row.classification || ''),
       source_contract: String(row.source_contract || ''),
       source_label: String(row.source_label || ''),
-      source_denom: String(row.source_denom || '')
+      source_denom: String(row.source_denom || ''),
+      source: String(row.source || '')
     }))
   };
 }
@@ -1469,7 +1919,14 @@ export async function runRujiraBaseFeesDuneIngestion(client) {
   }, {
     limit
   });
-  const rows = buildRujiraBaseFeeRowsFromDune(result.rows);
+  const normalizedDuneRows = normalizeDuneRujiraBaseFeeRows(result.rows);
+  if (normalizedDuneRows.rejected.length) {
+    const reasons = [...new Set(normalizedDuneRows.rejected.map((entry) => entry.reason))];
+    throw new Error(
+      `Dune generated-fee validation rejected ${normalizedDuneRows.rejected.length} row(s): ${reasons.join(', ')}`
+    );
+  }
+  const rows = normalizedDuneRows.rows;
 
   if (rows.length) {
     await saveRujiraBaseFeeEvents(client, rows);
@@ -1494,6 +1951,8 @@ export async function runRujiraBaseFeesDuneIngestion(client) {
       end_time: formatDuneDateTime(windowEnd),
       dune_next_start_time: formatDuneDateTime(nextStartTime),
       rows: result.rows.length,
+      accepted_rows: rows.length,
+      duplicate_rows_collapsed: result.rows.length - rows.length,
       upserted: rows.length,
       heights,
       included_events: rows.filter((row) => row.included).length,
@@ -1509,6 +1968,8 @@ export async function runRujiraBaseFeesDuneIngestion(client) {
     start_time: formatDuneDateTime(startTime),
     end_time: formatDuneDateTime(windowEnd),
     rows: result.rows.length,
+    accepted_rows: rows.length,
+    duplicate_rows_collapsed: result.rows.length - rows.length,
     upserted: rows.length,
     heights,
     next_start_time: formatDuneDateTime(nextStartTime),

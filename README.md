@@ -29,7 +29,7 @@ This repo is a Svelte/Vite frontend with a small Node/Postgres backend for cache
 - Limit Orders
 - App Layer to Base Layer dashboard at `/app-layer-base-layer`
 
-The App Layer dashboard tracks Rujira App Layer fee-share flows into the THORChain Base Layer. Reserve-payment history and generated base-layer swap-fee attribution are sourced from Dune, generated static context artifacts still live under `public/data/rujira-base-layer-fees/`, and the page links collector addresses and txs to `thorchain.net`.
+The App Layer dashboard tracks Rujira App Layer fee-share configuration and final transfers into the THORChain Base Layer. Dune is the preferred historical source for Reserve payments and app-attributed THORChain liquidity fees; the API reports when it has fallen back to RPC/Midgard. Generated static artifacts live under `public/data/rujira-base-layer-fees/`, and the page links collector addresses and txs to `thorchain.net`.
 
 ## Local Development
 
@@ -103,13 +103,19 @@ Refresh observed Base Layer Reserve payments:
 node scripts/rujira-base-layer-fees.mjs
 ```
 
-Refresh app-collector all-time revenue estimates:
+Refresh observed direct app-collector distributions and current-balance context:
 
 ```bash
 node scripts/rujira-collector-revenue.mjs
 ```
 
-The collector-revenue artifact estimates all-time net collected as outbound collector distributions plus current residual collector balances, priced with current THORNode pool TOR prices. It is not historical USD-at-receipt accounting.
+Refresh the narrow Base Collector conversion-fee artifact used only as a backend-outage fallback:
+
+```bash
+node scripts/rujira-app-layer-swap-fees.mjs
+```
+
+The collector-distribution artifact is deliberately not an all-time revenue ledger: it observes direct transfers to the currently configured target addresses since its recorded start height, and records current residual balances separately. Its values are non-additive and use current pricing, not historical USD-at-receipt accounting.
 
 ## Deployment
 

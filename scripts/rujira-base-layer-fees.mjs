@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const MIDGARD_BASE =
   process.env.MIDGARD_BASE ||
@@ -17,9 +18,9 @@ const RPC_BASES = process.env.RPC_BASES
 
 const BASE_LAYER_REVENUE_COLLECTOR =
   "thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr";
-const OUTPUT_DIR = path.resolve("docs/rujira-base-layer-fees");
-const WEBSITE_OUTPUT_DIR = path.resolve("website/public/data/rujira-base-layer-fees");
-const REPRICE_FROM_LOCAL = process.env.REPRICE_FROM_LOCAL === "1";
+const WEBSITE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const OUTPUT_DIR = path.join(WEBSITE_ROOT, "docs/rujira-base-layer-fees");
+const WEBSITE_OUTPUT_DIR = path.join(WEBSITE_ROOT, "public/data/rujira-base-layer-fees");
 
 const CLIENT_HEADERS = {
   accept: "application/json",
@@ -66,6 +67,19 @@ function queryUrl(base, params) {
     }
   }
   return url.toString();
+}
+
+async function fetchRpcJson(pathname, params = {}) {
+  let lastError;
+  for (const rpcBase of RPC_BASES) {
+    const url = queryUrl(`${rpcBase}${pathname}`, params);
+    try {
+      return await fetchJson(url);
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError || new Error(`Failed to fetch RPC path ${pathname}`);
 }
 
 function getAttr(event, key) {
@@ -150,6 +164,7 @@ async function fetchRevenueConfig() {
     targetDenoms: payload.data.target_denoms,
     targetAddresses: payload.data.target_addresses,
     lastExecuted: payload.data.last_executed,
+    schedule: Number(payload.data.schedule || 0),
   };
 }
 
@@ -186,30 +201,59 @@ async function fetchActions() {
     .sort((a, b) => a.height - b.height);
 }
 
-async function fetchReserveEventsForHeight(height, dateHint, reserveTarget) {
-  let payload;
-  let lastError;
-  for (const rpcBase of RPC_BASES) {
-    const url = queryUrl(`${rpcBase}/block_results`, { height });
-    try {
-      payload = await fetchJson(url);
-      break;
-    } catch (err) {
-      lastError = err;
+const blockTimeCache = new Map();
+
+async function fetchLatestHeight() {
+  const payload = await fetchRpcJson("/status");
+  return Number(payload.result?.sync_info?.latest_block_height || 0);
+}
+
+async function fetchBlockTime(height) {
+  if (blockTimeCache.has(height)) return blockTimeCache.get(height);
+  const payload = await fetchRpcJson("/block", { height });
+  const time = payload.result?.block?.header?.time;
+  if (!time) throw new Error(`Could not read block time for height ${height}`);
+  const date = new Date(time);
+  blockTimeCache.set(height, date);
+  return date;
+}
+
+async function findHeightAtOrBefore(date, minHeight, maxHeight) {
+  const target = date.getTime();
+  let low = minHeight;
+  let high = maxHeight;
+  let found = minHeight;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const midTime = (await fetchBlockTime(mid)).getTime();
+    if (midTime <= target) {
+      found = mid;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
     }
   }
-  if (!payload) {
-    throw lastError || new Error(`Failed to fetch block results for height ${height}`);
-  }
+
+  return found;
+}
+
+async function fetchReserveEventsForHeight(height, dateHint, reserveTarget) {
+  const payload = await fetchRpcJson("/block_results", { height });
   const events = payload.result?.finalize_block_events || [];
-  return events
+  const reserveEvents = events
     .filter((event) => event.type === "reserve")
     .filter((event) => getAttr(event, "from") === BASE_LAYER_REVENUE_COLLECTOR)
     .filter((event) => getAttr(event, "to") === reserveTarget)
-    .filter((event) => getAttr(event, "memo") === "RESERVE")
+    .filter((event) => getAttr(event, "memo") === "RESERVE");
+
+  if (!reserveEvents.length) return [];
+  const date = dateHint || (await fetchBlockTime(height));
+
+  return reserveEvents
     .map((event) => ({
       height,
-      date: dateHint,
+      date,
       amountBase: Number(getAttr(event, "amount") || 0),
       coin: getAttr(event, "coin") || "",
       id: getAttr(event, "id") || "",
@@ -217,13 +261,28 @@ async function fetchReserveEventsForHeight(height, dateHint, reserveTarget) {
     .filter((event) => event.amountBase > 0);
 }
 
-async function fetchReserveEvents(actions, reserveTarget) {
-  const byHeight = new Map();
-  for (const action of actions) {
-    if (!byHeight.has(action.height)) byHeight.set(action.height, action);
+function expandScheduledHeights(actions, schedule, stopHeight) {
+  if (!actions.length) return [];
+  const step = Number(schedule) + 1;
+  if (!Number.isFinite(step) || step <= 1) {
+    return [...new Set(actions.map((action) => action.height))].sort((a, b) => a - b);
   }
 
-  const heights = [...byHeight.keys()].sort((a, b) => a - b);
+  const startHeight = actions[0].height;
+  const heights = [];
+  for (let height = startHeight; height <= stopHeight; height += step) {
+    heights.push(height);
+  }
+  return heights;
+}
+
+async function fetchReserveEvents(actions, reserveTarget, schedule, stopHeight) {
+  const actionByHeight = new Map();
+  for (const action of actions) {
+    if (!actionByHeight.has(action.height)) actionByHeight.set(action.height, action);
+  }
+
+  const heights = expandScheduledHeights(actions, schedule, stopHeight);
   const events = [];
   const concurrency = 8;
   let cursor = 0;
@@ -234,8 +293,8 @@ async function fetchReserveEvents(actions, reserveTarget) {
       cursor += 1;
       if (index >= heights.length) return;
       const height = heights[index];
-      const action = byHeight.get(height);
-      const found = await fetchReserveEventsForHeight(height, action.date, reserveTarget);
+      const action = actionByHeight.get(height);
+      const found = await fetchReserveEventsForHeight(height, action?.date, reserveTarget);
       events.push(...found);
       if (index % 40 === 0) {
         process.stderr.write(`processed ${index + 1}/${heights.length} heights\n`);
@@ -248,9 +307,9 @@ async function fetchReserveEvents(actions, reserveTarget) {
   return events.sort((a, b) => a.height - b.height);
 }
 
-async function fetchRunePriceDays(fromTs, count) {
+async function fetchRunePriceWeeks(fromTs, count) {
   const url = queryUrl(`${MIDGARD_BASE}/v2/history/rune`, {
-    interval: "day",
+    interval: "week",
     count,
     from: fromTs,
   });
@@ -265,25 +324,12 @@ async function fetchRunePriceDays(fromTs, count) {
   }));
 }
 
-function priceEvents(events, priceDays) {
-  const priceByDay = new Map();
-  for (const day of priceDays) {
-    priceByDay.set(formatDate(new Date(day.startTime * 1000)), day.price);
+function aggregateWeekly(events, priceWeeks) {
+  const priceByWeek = new Map();
+  for (const week of priceWeeks) {
+    priceByWeek.set(formatDate(new Date(week.startTime * 1000)), week.price);
   }
 
-  return events.map((event) => {
-    const amountRune = amountRuneFromBase(event.amountBase);
-    const runePriceUsd = priceByDay.get(formatDate(event.date)) || 0;
-    return {
-      ...event,
-      amountRune,
-      runePriceUsd,
-      amountUsd: amountRune * runePriceUsd,
-    };
-  });
-}
-
-function aggregateWeekly(events) {
   const grouped = new Map();
   for (const event of events) {
     const weekStart = startOfUtcWeek(event.date);
@@ -297,8 +343,7 @@ function aggregateWeekly(events) {
         payment_rune: 0,
       };
     existing.payments += 1;
-    existing.payment_rune += event.amountRune;
-    existing.payment_usd = (existing.payment_usd || 0) + event.amountUsd;
+    existing.payment_rune += amountRuneFromBase(event.amountBase);
     grouped.set(key, existing);
   }
 
@@ -307,8 +352,8 @@ function aggregateWeekly(events) {
   return [...grouped.values()]
     .sort((a, b) => a.week_start.localeCompare(b.week_start))
     .map((row) => {
-      const paymentUsd = row.payment_usd || 0;
-      const runePrice = row.payment_rune > 0 ? paymentUsd / row.payment_rune : 0;
+      const runePrice = priceByWeek.get(row.week_start) || 0;
+      const paymentUsd = row.payment_rune * runePrice;
       cumulativeRune += row.payment_rune;
       cumulativeUsd += paymentUsd;
       return {
@@ -527,80 +572,65 @@ function makeHtml(rows, meta, svg) {
 async function main() {
   await Promise.all([OUTPUT_DIR, WEBSITE_OUTPUT_DIR].map((dir) => mkdir(dir, { recursive: true })));
   const generatedAt = new Date().toISOString();
-  let config;
-  let actionCount = 0;
-  let events;
+  const config = await fetchRevenueConfig();
+  process.stderr.write(`reserve target ${config.reserveTarget}\n`);
 
-  if (REPRICE_FROM_LOCAL) {
-    const meta = JSON.parse(await readFile(path.join(WEBSITE_OUTPUT_DIR, "rujira-base-layer-fees-meta.json"), "utf8"));
-    config = {
-      reserveTarget: meta.reserveTarget,
-      targetDenoms: meta.targetDenoms || [],
-      targetAddresses: meta.targetAddresses || [],
-    };
-    actionCount = Number(meta.actionCount || 0);
-    events = JSON.parse(await readFile(path.join(WEBSITE_OUTPUT_DIR, "rujira-base-layer-fees-events.json"), "utf8"))
-      .map((event) => ({
-        height: Number(event.height),
-        date: new Date(event.date),
-        amountBase: Number(event.amountBase || event.amount_base || 0),
-        coin: event.coin || "",
-        id: event.id || event.tx_id || "",
-      }))
-      .filter((event) => event.height > 0 && Number.isFinite(event.date.getTime()) && event.amountBase > 0)
-      .sort((a, b) => a.height - b.height);
-    process.stderr.write(`repricing ${events.length} local reserve deposits\n`);
-  } else {
-    config = await fetchRevenueConfig();
-    process.stderr.write(`reserve target ${config.reserveTarget}\n`);
-
-    const actions = await fetchActions();
-    actionCount = actions.length;
-    process.stderr.write(`fetched ${actions.length} revenue run actions\n`);
-
-    events = await fetchReserveEvents(actions, config.reserveTarget);
+  const actions = await fetchActions();
+  process.stderr.write(`fetched ${actions.length} revenue run actions\n`);
+  if (!actions.length) {
+    throw new Error("No revenue run actions found for the base-layer revenue collector");
   }
+  const latestHeight = await fetchLatestHeight();
+  const lastExecutedDate = parseDateNs(config.lastExecuted);
+  const lastExecutedHeight = await findHeightAtOrBefore(
+    lastExecutedDate,
+    actions[0].height,
+    latestHeight,
+  );
+  process.stderr.write(`last executed height ${lastExecutedHeight}\n`);
 
+  const events = await fetchReserveEvents(
+    actions,
+    config.reserveTarget,
+    config.schedule,
+    lastExecutedHeight,
+  );
   if (!events.length) {
     throw new Error("No reserve events found for the base-layer revenue collector");
   }
   process.stderr.write(`found ${events.length} reserve deposits\n`);
 
-  const firstDay = new Date(Date.UTC(
-    events[0].date.getUTCFullYear(),
-    events[0].date.getUTCMonth(),
-    events[0].date.getUTCDate(),
-  ));
-  const lastDay = new Date(Date.UTC(
-    events.at(-1).date.getUTCFullYear(),
-    events.at(-1).date.getUTCMonth(),
-    events.at(-1).date.getUTCDate(),
-  ));
-  const dayCount = Math.ceil((lastDay.getTime() - firstDay.getTime()) / (24 * 60 * 60 * 1000)) + 2;
-  const pricedEvents = priceEvents(
-    events,
-    await fetchRunePriceDays(Math.floor(firstDay.getTime() / 1000), dayCount),
-  );
-  const rows = aggregateWeekly(pricedEvents);
+  const firstWeek = startOfUtcWeek(events[0].date);
+  const lastWeek = startOfUtcWeek(events.at(-1).date);
+  const weekCount =
+    Math.ceil((lastWeek.getTime() - firstWeek.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 2;
+  const priceWeeks = await fetchRunePriceWeeks(Math.floor(firstWeek.getTime() / 1000), weekCount);
+  const rows = aggregateWeekly(events, priceWeeks);
   const meta = {
     generatedAt,
     eventCount: events.length,
-    actionCount,
+    actionCount: actions.length,
     reserveCollector: BASE_LAYER_REVENUE_COLLECTOR,
     reserveTarget: config.reserveTarget,
     targetDenoms: config.targetDenoms,
     targetAddresses: config.targetAddresses,
+    schedule: config.schedule,
+    lastExecuted: config.lastExecuted,
+    lastExecutedHeight,
     sourceMidgard: MIDGARD_BASE,
     sourceThornode: THORNODE_BASE,
     sourceRpc: RPC_BASES,
-    priceBasis: "amountRune × Midgard daily RUNE/USD for each Reserve deposit date; weekly rows aggregate historical USD at dispersal time, not current RUNE value",
+    priceBasis:
+      "amountRune × Midgard weekly RUNE/USD for each UTC payment week; fallback artifact only, not the API's per-event historical-price ledger",
+    scope:
+      "Observed explicit Base Layer collector MsgDeposit RESERVE events on the scheduler cadence through the live last_executed height.",
   };
 
   const svg = makeSvg(rows, meta);
   const html = makeHtml(rows, meta, svg);
   const files = [
     ["rujira-base-layer-fees.csv", `${toCsv(rows)}\n`],
-    ["rujira-base-layer-fees-events.json", `${JSON.stringify(pricedEvents, null, 2)}\n`],
+    ["rujira-base-layer-fees-events.json", `${JSON.stringify(events, null, 2)}\n`],
     ["rujira-base-layer-fees-meta.json", `${JSON.stringify(meta, null, 2)}\n`],
     ["rujira-base-layer-fees.svg", svg],
     ["rujira-base-layer-fees.html", html],
@@ -617,7 +647,7 @@ async function main() {
       `wrote ${OUTPUT_DIR}`,
       `weeks: ${rows.length}`,
       `reserve deposits: ${events.length}`,
-      `cumulative historical USD: ${money(last.cumulative_usd)} / ${rune(last.cumulative_rune)}`,
+      `cumulative: ${money(last.cumulative_usd)} / ${rune(last.cumulative_rune)}`,
     ].join("\n") + "\n",
   );
 }
