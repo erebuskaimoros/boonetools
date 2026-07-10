@@ -17,6 +17,18 @@ DB_NAME="${BOONETOOLS_DB_NAME:-boonetools}"
 DB_USER="${BOONETOOLS_DB_USER:-boonetools}"
 : "${BOONETOOLS_DB_PASSWORD:?BOONETOOLS_DB_PASSWORD is required}"
 
+# This script opens a fresh psql connection for each migration statement, so a
+# database advisory lock would be released between commands. Serialize the
+# whole runner at the host level instead: two deploys must not both observe an
+# unapplied filename and start the same migration transaction.
+MIGRATION_LOCK_FILE="${BOONETOOLS_DB_MIGRATION_LOCK_FILE:-/var/lock/boonetools-db-migrate.lock}"
+mkdir -p "$(dirname "$MIGRATION_LOCK_FILE")"
+exec 9>"$MIGRATION_LOCK_FILE"
+if ! flock -n 9; then
+  echo "Another BooneTools database migration run is already active." >&2
+  exit 1
+fi
+
 run_psql() {
   docker exec -i "$CONTAINER" \
     env PGPASSWORD="$BOONETOOLS_DB_PASSWORD" \

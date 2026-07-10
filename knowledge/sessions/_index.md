@@ -3,7 +3,6 @@
 ## Current Work In Progress
 
 - Limit Orders tool: needs live wallet testing on the new per-chain routing model, plus final market/limit UX validation
-- App Layer to Base Layer dashboard: safe production rollout of migrations `021`/`022` and post-deploy provenance/inventory verification in progress
 - Finalize boonetools logo SVG and submit to THORChain Ecosystem page
 - Monitor BooneTools provider health after the Midgard cache/offload rollout
 - TradingView Advanced Charts form: needs personal details to complete submission
