@@ -17,6 +17,7 @@ Removed the retired hosted-provider implementation, workflows, dependency, deplo
 - Created and verified a 212 MB production Postgres dump, deployed backend/frontend commit `c6c24c4`, and applied migrations `021`/`022` through the canonical scripts.
 - Verified public API/frontend health, active services/timers, no post-deploy unit errors, the canonical unique index, mixed Dune/legacy API provenance, and retention of all 12,763 blank-memo audit rows.
 - Added a host-level exclusive lock to the migration runner after a duplicate deploy invocation demonstrated that migration-record checks alone do not serialize concurrent deployments.
+- Fixed the deploy script to propagate the Liquify websocket default instead of retaining an unreachable server-side RPC hostname; redeployed the backend and explicitly restarted both Rujira listeners.
 
 ## Discoveries
 
@@ -24,6 +25,7 @@ Removed the retired hosted-provider implementation, workflows, dependency, deplo
 - Direct-RUJI-Swap rows are excluded from dashboard totals but must be retained as audit evidence; they have valid destination/coin/fee data despite a blank memo.
 - Provider-specific source trees and GitHub scheduler workflows were no longer part of the active production path; systemd timers own the current schedules.
 - The migration helper opens a separate `psql` connection per command, so only a host-level lock can serialize the whole check/apply/record loop.
+- Active systemd state alone was insufficient listener health evidence: the preexisting RPC hostname failed DNS from production. A successful websocket subscription plus fresh persisted block heartbeat is the required post-deploy proof.
 
 ## Files Changed
 
@@ -36,10 +38,11 @@ Removed the retired hosted-provider implementation, workflows, dependency, deplo
 | Retired provider tree, workflows, utilities, and docs | Deleted obsolete implementation and deployment artifacts. |
 | `scripts/deploy-boonetools-backend.sh`, `docs/boonetools-backend-hetzner.md` | Updated guidance to the active backend path. |
 | `scripts/boonetools-db-migrate.sh` | Serialized future migration runs with an exclusive host-level lock. |
+| `scripts/deploy-boonetools-backend.sh` | Propagated the Liquify websocket endpoint into the backend environment. |
 
 ## In Progress
 
-None - session complete. Backend and frontend are live from commit `c6c24c4`; migrations `021` and `022` were applied at 2026-07-10 21:37 UTC.
+None - session complete. Backend/frontend functionality is live from `c6c24c4`; deployment hardening is pushed through `d59b145`. Migrations `021` and `022` were applied at 2026-07-10 21:37 UTC, and both Rujira websocket listeners were healthy through height `26950635` at 21:53 UTC.
 
 ## Next Steps
 
