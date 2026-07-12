@@ -8,8 +8,11 @@ The BooneTools `/status` dashboard is a concise public current-state surface. It
 - `/thorchain/lastblock`: THORChain height and each external chain's last observed height.
 - `/thorchain/nodes`: active-node count and majority active version.
 - `/thorchain/mimir`: asset-specific `PauseLPDeposit-*` state not represented by the chain-level LP flag.
+- Midgard `/v2/churns`: latest successful churn height and timestamp.
 
-`chain_lp_actions_paused` blocks both adds and withdrawals. Full `Halt<chain>Chain`, solvency, global-chain, and node-pause state also blocks both actions, matching the Thornode handlers. If those flags are clear but any `PauseLPDeposit-<chain>-*` Mimir is positive, the chain's deposit state is shown as `PARTIAL` while withdrawals remain enabled.
+The chain table presents one `LP Actions` state. `chain_lp_actions_paused` blocks both adds and withdrawals. Full `Halt<chain>Chain`, solvency, global-chain, and node-pause state also blocks both actions, matching the Thornode handlers. If those flags are clear but any `PauseLPDeposit-<chain>-*` Mimir is positive, the combined chain state is `PARTIAL`.
+
+Signing is independent of trading and LP actions. Global or per-chain `HaltSigning` values become active once their configured height is reached; a full chain halt also reports signing as paused. The top churn card applies the same height-aware rule to `HaltChurning` and shows elapsed time since Midgard's latest successful churn. If churn history is unavailable, the card estimates from the newest active-node `status_since` height without failing current chain status.
 
 ## Historical Sources
 

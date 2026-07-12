@@ -22,6 +22,12 @@ function chainDepositState(chain, inbound, mimir, chainHalted) {
   return hasPausedPool ? 'partial' : 'enabled';
 }
 
+function combineLpState(deposits, withdrawals) {
+  if (deposits === 'enabled' && withdrawals === 'enabled') return 'enabled';
+  if (deposits === 'paused' && withdrawals === 'paused') return 'paused';
+  return 'partial';
+}
+
 export function buildChainStatuses(inboundAddresses = [], mimir = {}, lastBlocks = []) {
   const blockByChain = new Map(lastBlocks.map((row) => [row.chain, row]));
   const mimirByKey = new Map(
@@ -34,6 +40,10 @@ export function buildChainStatuses(inboundAddresses = [], mimir = {}, lastBlocks
   );
   const nodePauseUntil = numberValue(mimirByKey.get('NODEPAUSECHAINGLOBAL'));
   const nodePauseActive = thorchainHeight > 0 && nodePauseUntil >= thorchainHeight;
+  const globalSigningHalt = isHeightMimirActive(
+    mimirByKey.get('HALTSIGNING'),
+    thorchainHeight
+  );
 
   return [...inboundAddresses]
     .map((inbound) => {
@@ -51,16 +61,24 @@ export function buildChainStatuses(inboundAddresses = [], mimir = {}, lastBlocks
       );
       const deposits = chainDepositState(chain, inbound, mimir, chainHalted);
       const withdrawals = lpPaused || chainHalted ? 'paused' : 'enabled';
+      const lpActions = combineLpState(deposits, withdrawals);
+      const signingPaused = Boolean(
+        chainHalted ||
+        globalSigningHalt ||
+        isHeightMimirActive(mimirByKey.get(`HALTSIGNING${chain}`), thorchainHeight)
+      );
 
       return {
         chain,
         trading: tradingPaused ? 'paused' : 'enabled',
         deposits,
         withdrawals,
+        lpActions,
+        signing: signingPaused ? 'paused' : 'enabled',
         lastObservedIn: numberValue(lastBlock.last_observed_in),
         lastSignedOut: numberValue(lastBlock.last_signed_out),
         thorchainHeight: numberValue(lastBlock.thorchain),
-        degraded: tradingPaused || withdrawals === 'paused' || deposits !== 'enabled'
+        degraded: tradingPaused || lpActions !== 'enabled' || signingPaused
       };
     })
     .sort((left, right) => left.chain.localeCompare(right.chain));
@@ -71,6 +89,9 @@ export function summarizeNetwork(chains = []) {
   const tradingEnabled = chains.filter((chain) => chain.trading === 'enabled').length;
   const depositsEnabled = chains.filter((chain) => chain.deposits === 'enabled').length;
   const withdrawalsEnabled = chains.filter((chain) => chain.withdrawals === 'enabled').length;
+  const lpEnabled = chains.filter((chain) => chain.lpActions === 'enabled').length;
+  const lpPartial = chains.filter((chain) => chain.lpActions === 'partial').length;
+  const signingEnabled = chains.filter((chain) => chain.signing === 'enabled').length;
   const degradedChains = chains.filter((chain) => chain.degraded).map((chain) => chain.chain);
 
   let tone = 'ok';
@@ -88,9 +109,58 @@ export function summarizeNetwork(chains = []) {
     tradingEnabled,
     depositsEnabled,
     withdrawalsEnabled,
+    lpEnabled,
+    lpPartial,
+    signingEnabled,
     degradedChains,
     tone,
     label
+  };
+}
+
+export function buildChurnStatus(
+  mimir = {},
+  currentHeight = 0,
+  churns = [],
+  activeNodes = [],
+  nowMs = Date.now()
+) {
+  const mimirByKey = new Map(
+    Object.entries(mimir || {}).map(([key, value]) => [key.toUpperCase(), value])
+  );
+  const height = numberValue(currentHeight);
+  const isPaused = isHeightMimirActive(mimirByKey.get('HALTCHURNING'), height);
+  const latestChurn = [...(Array.isArray(churns) ? churns : [])]
+    .filter((row) => numberValue(row?.height) > 0)
+    .sort((left, right) => numberValue(right.height) - numberValue(left.height))[0];
+
+  let lastChurnHeight = numberValue(latestChurn?.height);
+  let lastChurnTimestampMs = numberValue(latestChurn?.date) / 1_000_000;
+  let estimated = false;
+
+  if (!lastChurnHeight) {
+    lastChurnHeight = Math.max(
+      0,
+      ...activeNodes.map((node) => numberValue(node?.status_since))
+    );
+    estimated = lastChurnHeight > 0;
+  }
+
+  if (!Number.isFinite(lastChurnTimestampMs) || lastChurnTimestampMs <= 0) {
+    const blocksSince = Math.max(0, height - lastChurnHeight);
+    lastChurnTimestampMs = lastChurnHeight > 0
+      ? Math.max(0, nowMs - (blocksSince * 6_000))
+      : 0;
+    estimated = lastChurnHeight > 0;
+  }
+
+  return {
+    isPaused,
+    mimirValue: numberValue(mimirByKey.get('HALTCHURNING')),
+    lastChurnHeight,
+    lastChurnTimestampMs,
+    blocksSince: lastChurnHeight > 0 ? Math.max(0, height - lastChurnHeight) : 0,
+    estimated
   };
 }
 

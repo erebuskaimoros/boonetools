@@ -2,9 +2,11 @@
   import { onDestroy, onMount } from 'svelte';
 
   import { thornode } from './api/thornode.js';
+  import { midgard } from './api/midgard.js';
   import { fetchNodeVotesDashboard } from './node-votes/api.js';
   import {
     buildChainStatuses,
+    buildChurnStatus,
     getGovernanceVotes,
     getRecentStatusUpdates,
     summarizeNetwork
@@ -17,12 +19,14 @@
   let mimir = {};
   let lastBlocks = [];
   let nodes = [];
+  let churns = [];
   let voteDashboard = null;
   let lastUpdated = null;
   let loading = true;
   let refreshing = false;
   let coreError = '';
   let votesError = '';
+  let churnError = '';
   let refreshTimer;
 
   $: chainStatuses = buildChainStatuses(inboundAddresses, mimir, lastBlocks);
@@ -30,11 +34,11 @@
   $: activeNodes = nodes.filter((node) => node.status === 'Active');
   $: networkVersion = getMajorityVersion(activeNodes);
   $: thorchainHeight = Math.max(0, ...lastBlocks.map((row) => Number(row.thorchain || 0)));
+  $: churnStatus = buildChurnStatus(mimir, thorchainHeight, churns, activeNodes);
   $: voteRows = voteDashboard?.by_vote || [];
   $: governanceVotes = getGovernanceVotes(voteRows);
   $: statusUpdates = getRecentStatusUpdates(voteRows);
   $: haltedChains = chainStatuses.filter((chain) => chain.trading === 'paused').map((chain) => chain.chain);
-  $: lpPausedChains = chainStatuses.filter((chain) => chain.withdrawals === 'paused').map((chain) => chain.chain);
 
   onMount(() => {
     loadStatus();
@@ -48,19 +52,22 @@
       loading = chainStatuses.length === 0;
       refreshing = chainStatuses.length > 0;
       thornode.clearCache();
+      midgard.clearCache();
     }
 
     coreError = '';
     votesError = '';
+    churnError = '';
 
-    const [coreResult, votesResult] = await Promise.allSettled([
+    const [coreResult, votesResult, churnResult] = await Promise.allSettled([
       Promise.all([
         thornode.getInboundAddresses({ cache: false }),
         thornode.getNodes({ cache: false }),
         thornode.getAllMimir({ cache: false }),
         thornode.fetch('/thorchain/lastblock', { cache: false })
       ]),
-      fetchNodeVotesDashboard({ days: 45, forceRefresh: !options.silent })
+      fetchNodeVotesDashboard({ days: 45, forceRefresh: !options.silent }),
+      midgard.getChurns({ cache: false })
     ]);
 
     if (coreResult.status === 'fulfilled') {
@@ -74,6 +81,12 @@
       voteDashboard = votesResult.value;
     } else {
       votesError = votesResult.reason?.message || 'Vote and Mimir history is unavailable.';
+    }
+
+    if (churnResult.status === 'fulfilled') {
+      churns = churnResult.value;
+    } else {
+      churnError = churnResult.reason?.message || 'Churn history is unavailable.';
     }
 
     loading = false;
@@ -117,6 +130,18 @@
     return 'PAUSED';
   }
 
+  function formatElapsed(value) {
+    const time = Number(value);
+    if (!Number.isFinite(time) || time <= 0) return '-';
+    const totalMinutes = Math.max(0, Math.floor((Date.now() - time) / 60_000));
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${Math.max(1, minutes)}m`;
+  }
+
   function txUrl(txId) {
     return `https://thorchain.net/tx/${encodeURIComponent(txId)}`;
   }
@@ -153,29 +178,50 @@
   {#if loading}
     <div class="loading-panel"><span>▓░░░░</span> Reading live network state...</div>
   {:else if chainStatuses.length > 0}
-    <section class="network-callout {networkSummary.tone}">
-      <div class="network-state">
-        <span class="state-dot"></span>
-        <div>
-          <small>NETWORK STATE</small>
-          <strong>{networkSummary.label}</strong>
+    <div class="overview-grid">
+      <section class="network-callout {networkSummary.tone}">
+        <div class="network-state">
+          <span class="state-dot"></span>
+          <div>
+            <small>NETWORK STATE</small>
+            <strong>{networkSummary.label}</strong>
+          </div>
         </div>
-      </div>
-      <div class="network-notes">
-        <p>
-          Trading is available on <strong>{networkSummary.tradingEnabled} of {networkSummary.total}</strong> connected chains.
-          {#if haltedChains.length}Paused: <span>{haltedChains.join(', ')}</span>.{/if}
-        </p>
-        <p>
-          LP deposits are available on <strong>{networkSummary.depositsEnabled} of {networkSummary.total}</strong> chains;
-          withdrawals on <strong>{networkSummary.withdrawalsEnabled} of {networkSummary.total}</strong>.
-          {#if lpPausedChains.length === networkSummary.total}LP actions are currently paused network-wide.{/if}
-        </p>
-      </div>
-      <a class="text-link" href="https://thorchain.net/network" target="_blank" rel="noopener noreferrer">
-        Full network <span>↗</span>
-      </a>
-    </section>
+        <div class="network-notes">
+          <p>
+            Trading is available on <strong>{networkSummary.tradingEnabled} of {networkSummary.total}</strong> connected chains.
+            {#if haltedChains.length}Paused: <span>{haltedChains.join(', ')}</span>.{/if}
+          </p>
+          <p>
+            LP actions are available on <strong>{networkSummary.lpEnabled} of {networkSummary.total}</strong> chains;
+            signing on <strong>{networkSummary.signingEnabled} of {networkSummary.total}</strong>.
+            {#if networkSummary.lpPartial}Partial LP availability: <span>{networkSummary.lpPartial}</span>.{/if}
+          </p>
+        </div>
+        <a class="text-link" href="https://thorchain.net/network" target="_blank" rel="noopener noreferrer">
+          Full network <span>↗</span>
+        </a>
+      </section>
+
+      <section class="churn-card" class:paused={churnStatus.isPaused} aria-label="Validator churn status">
+        <div class="churn-head">
+          <span class="churn-dot"></span>
+          <div>
+            <small>VALIDATOR CHURN</small>
+            <strong>{churnStatus.isPaused ? 'PAUSED' : 'ACTIVE'}</strong>
+          </div>
+        </div>
+        <div class="churn-meta">
+          <span>Last churn</span>
+          <strong>{formatElapsed(churnStatus.lastChurnTimestampMs)} ago</strong>
+          <small>
+            block {number.format(churnStatus.lastChurnHeight)}
+            {#if churnStatus.estimated || churnError} · estimated{/if}
+          </small>
+        </div>
+        <span class="churn-mimir">[HALTCHURNING={churnStatus.mimirValue}]</span>
+      </section>
+    </div>
 
     <section class="metric-grid" aria-label="Network summary">
       <div class="metric">
@@ -199,7 +245,7 @@
       <div class="metric">
         <span class="metric-index">04</span>
         <span class="metric-label">LP Actions</span>
-        <strong>{networkSummary.withdrawalsEnabled}/{networkSummary.total}</strong>
+        <strong>{networkSummary.lpEnabled}/{networkSummary.total}</strong>
         <small>chains available</small>
       </div>
     </section>
@@ -215,8 +261,8 @@
             <tr>
               <th>Chain</th>
               <th>Trading</th>
-              <th>LP Deposits</th>
-              <th>LP Withdrawals</th>
+              <th>LP Actions</th>
+              <th>Signing</th>
               <th>Last Observed</th>
             </tr>
           </thead>
@@ -225,8 +271,8 @@
               <tr class:degraded={chain.degraded}>
                 <td class="chain-cell"><span>{chain.chain.slice(0, 2)}</span><strong>{chain.chain}</strong></td>
                 <td><span class="state {chain.trading}"><i></i>{stateLabel(chain.trading)}</span></td>
-                <td><span class="state {chain.deposits}"><i></i>{stateLabel(chain.deposits)}</span></td>
-                <td><span class="state {chain.withdrawals}"><i></i>{stateLabel(chain.withdrawals)}</span></td>
+                <td><span class="state {chain.lpActions}"><i></i>{stateLabel(chain.lpActions)}</span></td>
+                <td><span class="state {chain.signing}"><i></i>{stateLabel(chain.signing)}</span></td>
                 <td class="height">{number.format(chain.lastObservedIn)}</td>
               </tr>
             {/each}
@@ -303,7 +349,7 @@
 
     <div class="source-line">
       <span><i></i> LIVE</span>
-      THORNode current state · BooneTools node-vote history · auto-refresh 60s
+      THORNode current state · Midgard churn history · BooneTools node-vote history · auto-refresh 60s
       {#if lastUpdated}<em>updated {formatDateTime(lastUpdated)}</em>{/if}
     </div>
   {/if}
@@ -331,6 +377,8 @@
   .block-title,
   .network-callout,
   .network-state,
+  .churn-card,
+  .churn-head,
   .vote-main,
   .vote-progress,
   .source-line {
@@ -436,7 +484,6 @@
 
   .network-callout {
     min-height: 78px;
-    margin-bottom: 16px;
     padding: 14px 16px;
     border: 1px solid #1a1a1a;
     border-left: 2px solid #00cc66;
@@ -445,6 +492,12 @@
 
   .network-callout.warn { border-left-color: #d4a017; background: rgba(212, 160, 23, .035); }
   .network-callout.err { border-left-color: #dc3545; background: rgba(220, 53, 69, .035); }
+  .overview-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
   .network-state { min-width: 168px; gap: 12px; }
   .network-state small { display: block; margin-bottom: 3px; color: #555; font: 700 9px/1.2 'JetBrains Mono', monospace; letter-spacing: .14em; }
   .network-state strong { color: #e8e8e8; font: 800 16px/1.2 'JetBrains Mono', monospace; text-transform: uppercase; }
@@ -468,6 +521,27 @@
   }
   .text-link:hover,
   .block-title a:hover { color: #00cc66; }
+
+  .churn-card {
+    position: relative;
+    min-height: 78px;
+    gap: 14px;
+    padding: 14px 16px;
+    border: 1px solid #1a1a1a;
+    border-left: 2px solid #00cc66;
+    background: rgba(0, 204, 102, .035);
+  }
+  .churn-card.paused { border-left-color: #d4a017; background: rgba(212, 160, 23, .035); }
+  .churn-head { min-width: 94px; gap: 10px; }
+  .churn-dot { width: 6px; height: 6px; border-radius: 50%; background: #00cc66; box-shadow: 0 0 6px rgba(0, 204, 102, .4); animation: pulse-dot 2s infinite; }
+  .churn-card.paused .churn-dot { background: #d4a017; box-shadow: none; animation: none; }
+  .churn-head small,
+  .churn-meta span { display: block; color: #555; font: 700 8px/1.2 'JetBrains Mono', monospace; letter-spacing: .12em; }
+  .churn-head strong { color: #e8e8e8; font: 800 14px/1.2 'JetBrains Mono', monospace; }
+  .churn-meta { min-width: 0; padding-left: 14px; border-left: 1px solid #1a1a1a; }
+  .churn-meta strong { display: block; margin: 3px 0 2px; color: #c8c8c8; font: 700 11px/1.2 'JetBrains Mono', monospace; white-space: nowrap; }
+  .churn-meta small { color: #555; font: 8px/1.2 'JetBrains Mono', monospace; white-space: nowrap; }
+  .churn-mimir { position: absolute; top: 7px; right: 9px; color: #333; font: 7px/1 'JetBrains Mono', monospace; }
 
   .metric-grid {
     display: grid;
@@ -569,6 +643,7 @@
   @keyframes loader { 50% { opacity: .35; } }
 
   @media (max-width: 820px) {
+    .overview-grid { grid-template-columns: 1fr; }
     .metric-grid { grid-template-columns: repeat(2, 1fr); }
     .metric:nth-child(2) { border-right: 0; }
     .metric:nth-child(-n + 2) { border-bottom: 1px solid #1a1a1a; }
@@ -576,6 +651,7 @@
     .network-callout { align-items: flex-start; flex-wrap: wrap; gap: 12px; }
     .network-notes { order: 3; width: 100%; padding: 12px 0 0; border-top: 1px solid #1a1a1a; border-left: 0; }
     .text-link { margin-left: auto; }
+    .churn-card { justify-content: flex-start; }
   }
 
   @media (max-width: 560px) {
