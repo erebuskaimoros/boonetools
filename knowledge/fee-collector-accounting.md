@@ -1,0 +1,78 @@
+# Measuring Fees Through an On-Chain Collector
+
+## The problem
+
+An on-chain address that collects fees and later pays them downstream (a
+"revenue collector," "treasury," or similar multi-hop contract) looks like it
+should be auditable by summing its inbound transfer events. That breaks down
+whenever the collector does either of these:
+
+- **Receives from senders you can't fully enumerate.** Revenue can arrive
+  from a known set of upstream distributors, but also from other app
+  contracts sending directly (FIN markets, vaults, redemption flows) that
+  aren't on any list you maintain. A sender whitelist will silently miss
+  these and undercount.
+- **Performs internal conversions.** If the collector swaps held assets to a
+  target denom (e.g. converting fee assets to RUNE before paying out), the
+  swap's output arrives as a *new* inbound transfer event from the
+  collector's own conversion route. Counting all inbound transfers as
+  "collected" double-counts this value — once as the original asset, again
+  as the converted asset.
+
+Both failure modes showed up measuring the Rujira Base Layer Collector: an
+event-sum scan produced a "collected" total that didn't reconcile with
+`paid + pending`, first because conversion outputs were being recounted,
+then because the collector's pre-existing inventory before the measurement
+window wasn't attributed anywhere.
+
+## The fix: balance-delta accounting
+
+Measure collected fees from the collector's own balance changes, not from
+interpreting its inbound events:
+
+```
+collected(period) = Σ_denom [ balance_delta(denom, period) × price(denom, period) ]
+                     + payouts(period)
+```
+
+Seed the cumulative series from the collector's **opening inventory** (its
+balance the moment before the measurement window starts), priced at the
+window's first period. This makes `cumulative collected ≈ cumulative paid +
+current inventory` hold by construction, up to intraday price drift on held
+assets — it's a real identity you can check, not an approximation.
+
+This is exact and source-agnostic:
+- It doesn't matter who sent the fee or whether they're on a known list.
+- Internal conversions net out automatically — an asset→RUNE swap shows up
+  as a negative delta on the source asset and a positive delta on RUNE, at
+  their respective daily prices, with no double-count.
+- By-denom breakdowns become *net value flow per asset*, not "which asset
+  the fee arrived as" — a conversion-heavy collector will show most value
+  flowing through its target/settlement denom even though it originally
+  arrived as something else. Label denom breakdowns accordingly.
+
+## When to reach for this
+
+Any on-chain collector where:
+1. Inbound sources aren't a small, stable, enumerable set, **or**
+2. The collector converts/swaps held assets internally, **or**
+3. You have an independent, trustworthy series for its payouts (so you can
+   verify the identity holds)
+
+If none of those apply — a collector with a fixed, small sender list and no
+internal conversions — event-sum accounting is simpler and fine.
+
+## Implementation notes
+
+- Needs daily (or whatever bucket granularity you're reporting) historical
+  prices per denom, at each snapshot boundary — not just at receipt time.
+  Missing price history for an illiquid/new denom will silently zero that
+  denom's contribution; surface an `unpricedDenoms` list rather than letting
+  it disappear.
+- Snapshot cadence trades off RPC cost against granularity: daily balance
+  snapshots are enough for a daily/weekly dashboard and are far cheaper than
+  scanning every block for transfer events.
+- Reference implementation:
+  [`scripts/rujira-base-layer-inflows.mjs`](../scripts/rujira-base-layer-inflows.mjs)
+  (Base Layer Collector fee-collected series for the App Layer → Base Layer
+  dashboard).

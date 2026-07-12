@@ -476,6 +476,49 @@ function aggregateWeekly(events) {
     });
 }
 
+function aggregateDaily(events) {
+  const grouped = new Map();
+  for (const event of events) {
+    const key = formatDate(event.date);
+    const existing =
+      grouped.get(key) ||
+      {
+        day_start: key,
+        day_end: formatDate(addDays(new Date(`${key}T00:00:00Z`), 1)),
+        swap_events: 0,
+        unique_heights: new Set(),
+        liquidity_fee_rune: 0,
+        liquidity_fee_usd: 0,
+        rune_price_usd: event.rune_price_usd,
+      };
+    existing.swap_events += 1;
+    existing.unique_heights.add(event.height);
+    existing.liquidity_fee_rune += event.liquidity_fee_rune;
+    existing.liquidity_fee_usd += event.liquidity_fee_usd;
+    grouped.set(key, existing);
+  }
+
+  let cumulativeRune = 0;
+  let cumulativeUsd = 0;
+  return [...grouped.values()]
+    .sort((a, b) => a.day_start.localeCompare(b.day_start))
+    .map((row) => {
+      cumulativeRune += row.liquidity_fee_rune;
+      cumulativeUsd += row.liquidity_fee_usd;
+      return {
+        day_start: row.day_start,
+        day_end: row.day_end,
+        swap_events: row.swap_events,
+        active_heights: row.unique_heights.size,
+        liquidity_fee_rune: row.liquidity_fee_rune,
+        rune_price_usd: row.rune_price_usd,
+        liquidity_fee_usd: row.liquidity_fee_usd,
+        cumulative_rune: cumulativeRune,
+        cumulative_usd: cumulativeUsd,
+      };
+    });
+}
+
 function aggregateByKey(events, key, labelKey = key) {
   const grouped = new Map();
   for (const event of events) {
@@ -559,6 +602,7 @@ async function main() {
   }
 
   const weekly = aggregateWeekly(events);
+  const daily = aggregateDaily(events);
   const routes = aggregateRoutes(events);
   const pools = aggregateByKey(events, "pool", "pool");
   const totalFeeRune = events.reduce((sum, event) => sum + event.liquidity_fee_rune, 0);
@@ -591,6 +635,7 @@ async function main() {
   const payload = {
     meta,
     weekly,
+    daily,
     routes,
     pools,
     events,

@@ -1621,6 +1621,29 @@ function normalizeWeeklyRows(rows) {
   });
 }
 
+function normalizeDailyRows(rows) {
+  let cumulativeRune = 0;
+  let cumulativeUsd = 0;
+  return rows.map((row) => {
+    const liquidityFeeRune = Number(row.liquidity_fee_rune) || 0;
+    const liquidityFeeUsd = Number(row.liquidity_fee_usd) || 0;
+    cumulativeRune += liquidityFeeRune;
+    cumulativeUsd += liquidityFeeUsd;
+    const dayStart = dateKey(row.day_start);
+    return {
+      day_start: dayStart,
+      day_end: dateKey(addDays(new Date(`${dayStart}T00:00:00.000Z`), 1)),
+      swap_events: Number(row.swap_events) || 0,
+      active_heights: Number(row.active_heights) || 0,
+      liquidity_fee_rune: roundNumber(liquidityFeeRune, 8),
+      rune_price_usd: Number(row.rune_price_usd) || 0,
+      liquidity_fee_usd: roundNumber(liquidityFeeUsd, 8),
+      cumulative_rune: roundNumber(cumulativeRune, 8),
+      cumulative_usd: roundNumber(cumulativeUsd, 8)
+    };
+  });
+}
+
 function normalizeAggregateRows(rows) {
   return rows.map((row) => ({
     classification: String(row.classification || ''),
@@ -1701,9 +1724,22 @@ async function fetchDashboardStats(client) {
 }
 
 export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
-  const [weeklyResult, routesResult, poolsResult, excludedResult, recentResult, stats] = await Promise.all([
+  const [weeklyResult, dailyResult, routesResult, poolsResult, excludedResult, recentResult, stats] = await Promise.all([
     client.query(
       `select date_trunc('week', block_time at time zone 'UTC')::date as week_start,
+              count(*)::bigint as swap_events,
+              count(distinct height)::bigint as active_heights,
+              coalesce(sum(liquidity_fee_rune), 0) as liquidity_fee_rune,
+              coalesce(sum(liquidity_fee_usd), 0) as liquidity_fee_usd,
+              coalesce(avg(nullif(rune_price_usd, 0)), 0) as rune_price_usd
+       from rujira_base_fee_events
+       where included = true
+         and block_time is not null
+       group by 1
+       order by 1 asc`
+    ),
+    client.query(
+      `select date_trunc('day', block_time at time zone 'UTC')::date as day_start,
               count(*)::bigint as swap_events,
               count(distinct height)::bigint as active_heights,
               coalesce(sum(liquidity_fee_rune), 0) as liquidity_fee_rune,
@@ -1761,6 +1797,7 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
   ]);
 
   const weekly = normalizeWeeklyRows(weeklyResult.rows);
+  const daily = normalizeDailyRows(dailyResult.rows);
   const routes = normalizeAggregateRows(routesResult.rows);
   const pools = normalizeAggregateRows(poolsResult.rows);
   const excluded = normalizeAggregateRows(excludedResult.rows);
@@ -1823,6 +1860,7 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
         : null
     },
     weekly,
+    daily,
     routes,
     pools,
     excluded,
