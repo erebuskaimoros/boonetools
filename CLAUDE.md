@@ -1,29 +1,21 @@
-# CLAUDE.md
+# BooneTools Website Guidance
 
-## Knowledge Base
+Read [AGENTS.md](./AGENTS.md) for repo scope and [../../AGENTS.md](../../AGENTS.md) for workspace rules.
 
-See `knowledge/` for project documentation:
-- `tc-info.md` - THORChain architecture reference
-- `rune-dip-buying-bot-plan.md` - Trading bot design
-- `trading-bot-research.md` - Research notes
-- `sessions/` - Session logs
+## Local Sources of Truth
 
-## Sub-Projects
+- `DESIGN.md`: compact UI contract; read before UI work
+- `src/lib/styles/variables.css`: runtime tokens
+- `src/lib/styles/base.css`: shared style patterns
+- `docs/style.md`: longer visual rationale
+- `knowledge/`: website-specific protocol notes and session history
 
-### Website UI (`website/`)
+## Cross-Project Scope
 
-For website UI work, read `website/DESIGN.md` first. It is the compact agent-facing design contract; runtime CSS tokens remain in `website/src/lib/styles/variables.css`, shared class patterns are in `website/src/lib/styles/base.css`, and longer UI notes are in `website/docs/style.md`.
+- This repo owns the primary BooneTools website and production backend.
+- `../RUNE-Tools` is the legacy/alternate web app.
+- `../rune-tools-desktop` is the Electron line.
+- `../../chain-analysis-app` is a separate local investigation app.
+- `../../ThorNode` and `../../Rujira` own protocol and contract behavior respectively.
 
-### Trading Bot (`rune-tools-desktop/src/bot/`)
-
-Automated RUNE dip-buying bot using THORChain. Monitors price, detects 3% dips from rolling high, executes swaps via THORChain, takes profits on recovery.
-
-Key files: `signalEngine.ts`, `positionManager.ts`, `executor.ts`, `priceMonitor.ts`
-
-### Backtesting System (`rune-tools-desktop/src/bot/backtest/`)
-
-Historical simulation of the dip-buying strategy against Midgard price data. Includes parameter optimization, risk metrics (Sharpe, Sortino, Calmar), and data quality validation.
-
-Key files: `engine.ts`, `metrics.ts`, `dataLoader.ts`, `optimizer.ts`, `cli.ts`
-
-Run with: `npx tsx src/bot/backtest/cli.ts run --start 2024-01-01 --end 2024-03-01`
+Use [../../knowledge/projects/boonetools.md](../../knowledge/projects/boonetools.md) for shared product context.
