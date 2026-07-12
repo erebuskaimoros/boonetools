@@ -139,6 +139,7 @@
       target: 'Swap-router target, not TC Reserve'
     }
   ];
+
   const EMPTY_INVENTORY_BUCKET = Object.freeze({ rows: [], count: 0, pricedUsd: 0, unpricedCount: 0 });
   const EMPTY_INVENTORY = Object.freeze({
     available: false,
@@ -150,6 +151,30 @@
     pricedUsd: 0
   });
 
+  // Entity colors. Validated marks (dark-surface lightness band + CVD +
+  // contrast) carry the chart geometry; the brighter chrome variants are for
+  // page accents only.
+  const SERIES = {
+    collected: {
+      mark: '#b8860b',
+      fill: 'rgba(184, 134, 11, 0.5)',
+      faint: 'rgba(184, 134, 11, 0.09)',
+      chrome: '#d4a017'
+    },
+    paid: {
+      mark: '#00a755',
+      fill: 'rgba(0, 167, 85, 0.5)',
+      faint: 'rgba(0, 167, 85, 0.09)',
+      chrome: '#00cc66'
+    },
+    generated: {
+      mark: '#2f7fd6',
+      fill: 'rgba(47, 127, 214, 0.5)',
+      faint: 'rgba(47, 127, 214, 0.09)',
+      chrome: '#44a0ff'
+    }
+  };
+
   let weeklyRows = [];
   let reserveEvents = [];
   let staticWeeklyRows = [];
@@ -157,6 +182,7 @@
   let staticReserveMeta = null;
   let generatedFees = null;
   let staticGeneratedFees = null;
+  let inflows = null;
   let meta = null;
   let configs = {};
   let histories = {};
@@ -167,19 +193,37 @@
   let runePriceUsd = 0;
   let reservePaymentsLoading = true;
   let generatedFeesLoading = true;
+  let inflowsLoading = true;
   let liveLoading = true;
   let artifactsError = '';
   let reservePaymentsError = '';
   let reservePaymentsWarning = '';
   let generatedFeesError = '';
   let generatedFeesWarning = '';
+  let inflowsError = '';
   let liveError = '';
   let liveRouteWarning = '';
   let lastLiveRefresh = null;
+
+  let collectedCanvas;
+  let collectedChart;
   let paymentCanvas;
   let paymentChart;
   let generatedFeesCanvas;
   let generatedFeesChart;
+
+  // Two independent per-chart toggles: bucket size (daily default, weekly
+  // option) and view (per-bucket bars vs cumulative line).
+  let granularity = { collected: 'daily', paid: 'daily', generated: 'daily' };
+  let view = { collected: 'bars', paid: 'bars', generated: 'bars' };
+
+  function setGranularity(key, value) {
+    granularity = { ...granularity, [key]: value };
+  }
+
+  function setView(key, value) {
+    view = { ...view, [key]: value };
+  }
 
   const usd0 = new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -220,10 +264,18 @@
     generatedFeeMeta?.totalLiquidityFeeUsd || latestGeneratedFeeWeek?.cumulative_usd || 0;
   $: generatedFeeScope = generatedFeeMeta?.scope || 'pending generated-fee scan';
   $: generatedFeeSource = formatDataSource(generatedFeeMeta?.source);
-  $: generatedFeePendingBlocks = Number(generatedFeeMeta?.pendingBlockCount || 0);
   $: generatedFeeBackfillLabel = generatedFeeMeta?.backfillComplete
     ? 'backfill complete'
-    : `${number2.format(generatedFeePendingBlocks)} blocks queued`;
+    : `${number2.format(Number(generatedFeeMeta?.pendingBlockCount || 0))} blocks queued`;
+
+  $: inflowRows = inflows?.weekly || [];
+  $: inflowMeta = inflows?.meta || null;
+  $: inflowDenomTotals = (inflows?.denomTotals || []).slice(0, 8);
+  $: totalInflowUsd = inflowMeta?.totalInflowUsd || inflowRows.at(-1)?.cumulative_usd || 0;
+  $: inflowOpeningUsd = Number(inflowMeta?.baselineInventoryUsd || 0);
+  $: inflowNetNewUsd = Number(inflowMeta?.netNewInflowUsd || 0);
+  $: inflowDayCount = Number(inflowMeta?.dayCount || 0);
+
   $: collectorInventories = Object.fromEntries(
     collectors.map((collector) => [
       collector.key,
@@ -244,12 +296,9 @@
     .filter((balance) => isStableDenom(balance.denom))
     .reduce((sum, balance) => sum + balance.usdValue, 0);
   $: pendingKnownUsd = baseInventory.pricedUsd;
-  $: appCollectorRows = collectors
+  $: appCollectorInventoryUsd = collectors
     .filter((collector) => collector.key !== 'base')
-    .map((collector) => ({
-      ...collector,
-      inventory: collectorInventories[collector.key] || EMPTY_INVENTORY
-    }));
+    .reduce((sum, collector) => sum + (collectorInventories[collector.key]?.pricedUsd || 0), 0);
   $: targetMap = Object.fromEntries(
     collectors.map((collector) => [
       collector.key,
@@ -262,11 +311,6 @@
       (targetMap[collector.key] || []).find((target) => target.address === BASE_LAYER_COLLECTOR)
         ?.percent || 0
     ])
-  );
-  $: baseAllocationFallback = ['trade', 'core'].some((key) =>
-    (targetMap[key] || []).some(
-      (target) => target.address === BASE_LAYER_COLLECTOR && target.isFallback
-    )
   );
   $: historyLabels = Object.fromEntries(
     collectors.map((collector) => [
@@ -291,12 +335,74 @@
     .slice(0, 8);
   $: baseRuneRatePerSecond = targetRatePerSecond(configs.base, 'rune');
 
-  $: if (paymentCanvas && weeklyRows.length) {
-    renderPaymentChart(weeklyRows);
+  function renderCollectedChart(pick, chartView) {
+    collectedChart = renderSeriesChart(collectedCanvas, collectedChart, {
+      rows: pick.rows,
+      grain: pick.grain,
+      view: chartView,
+      colors: SERIES.collected,
+      valueField: 'inflow_usd',
+      cumulativeField: 'cumulative_usd',
+      barLabel: 'Collected USD at receipt price',
+      cumulativeLabel: 'Cumulative collected USD',
+      afterBody: (row) => [
+        `${number2.format(row.transfers || 0)} denoms moved`,
+        ...Object.entries(row.by_denom || {})
+          .sort((a, b) => (b[1].usd || 0) - (a[1].usd || 0))
+          .slice(0, 4)
+          .map(
+            ([denom, entry]) =>
+              `${denomLabel(denom)}: ${number4.format(entry.amount)} · ${usd2.format(entry.usd)}`
+          )
+      ]
+    });
   }
-  $: if (generatedFeesCanvas && generatedFeeRows.length) {
-    renderGeneratedFeesChart(generatedFeeRows);
+
+  function renderPaymentChart(pick, chartView) {
+    paymentChart = renderSeriesChart(paymentCanvas, paymentChart, {
+      rows: pick.rows,
+      grain: pick.grain,
+      view: chartView,
+      colors: SERIES.paid,
+      valueField: 'payment_usd',
+      cumulativeField: 'cumulative_usd',
+      barLabel: 'Paid USD at deposit price',
+      cumulativeLabel: 'Cumulative paid USD',
+      afterBody: (row) => [
+        `${number2.format(row.payments || 0)} deposit${row.payments === 1 ? '' : 's'}`,
+        `${number2.format(row.payment_rune || 0)} RUNE paid`,
+        `${number4.format(row.rune_price_usd || 0)} avg historical RUNE/USD`,
+        `${number2.format(row.cumulative_rune || 0)} cumulative RUNE`
+      ]
+    });
   }
+
+  function renderGeneratedFeesChart(pick, chartView) {
+    generatedFeesChart = renderSeriesChart(generatedFeesCanvas, generatedFeesChart, {
+      rows: pick.rows,
+      grain: pick.grain,
+      view: chartView,
+      colors: SERIES.generated,
+      valueField: 'liquidity_fee_usd',
+      cumulativeField: 'cumulative_usd',
+      barLabel: 'Generated fees USD',
+      cumulativeLabel: 'Cumulative generated fees USD',
+      afterBody: (row) => [
+        `${number4.format(row.liquidity_fee_rune || 0)} RUNE fees`,
+        `${number4.format(row.rune_price_usd || 0)} RUNE/USD`,
+        `${number4.format(row.cumulative_rune || 0)} cumulative RUNE`
+      ]
+    });
+  }
+
+  $: collectedPick = pickAggRows(inflows, granularity.collected);
+  $: paidPick = pickPaidRows(reserveEvents, weeklyRows, granularity.paid);
+  $: generatedPick = pickAggRows(generatedFees, granularity.generated);
+
+  $: if (collectedCanvas && collectedPick.rows.length) renderCollectedChart(collectedPick, view.collected);
+  $: if (paymentCanvas && paidPick.rows.length) renderPaymentChart(paidPick, view.paid);
+  $: if (generatedFeesCanvas && generatedPick.rows.length)
+    renderGeneratedFeesChart(generatedPick, view.generated);
 
   onMount(() => {
     loadArtifacts().then(() => {
@@ -306,6 +412,7 @@
     refreshLiveState();
 
     return () => {
+      collectedChart?.destroy();
       paymentChart?.destroy();
       generatedFeesChart?.destroy();
     };
@@ -324,11 +431,14 @@
       artifactsError = '';
       generatedFeesError = '';
       generatedFeesWarning = '';
-      const [csvRows, eventRows, metaJson, generatedFeesResult] = await Promise.all([
+      const [csvRows, eventRows, metaJson, generatedFeesResult, inflowsResult] = await Promise.all([
         fetchDataFile('rujira-base-layer-fees.csv', parseCsv),
         fetchDataFile('rujira-base-layer-fees-events.json', JSON.parse),
         fetchDataFile('rujira-base-layer-fees-meta.json', JSON.parse),
         fetchDataFile('rujira-app-layer-swap-fees.json', JSON.parse).catch((error) => ({
+          __error: error.message
+        })),
+        fetchDataFile('rujira-base-layer-inflows.json', JSON.parse).catch((error) => ({
           __error: error.message
         }))
       ]);
@@ -341,8 +451,17 @@
       } else {
         staticGeneratedFees = generatedFeesResult;
       }
+      if (inflowsResult?.__error) {
+        inflows = null;
+        inflowsError = `collected-fee artifact — ${inflowsResult.__error}; run scripts/rujira-base-layer-inflows.mjs to generate it`;
+      } else {
+        inflows = inflowsResult;
+        inflowsError = '';
+      }
     } catch (error) {
       artifactsError = error.message;
+    } finally {
+      inflowsLoading = false;
     }
   }
 
@@ -510,178 +629,161 @@
     });
   }
 
-  function renderPaymentChart(rows) {
-    if (!paymentCanvas) return;
-    const ctx = paymentCanvas.getContext('2d');
-    paymentChart?.destroy();
-
-    paymentChart = new Chart(ctx, {
-      type: 'bar',
-      data: {
-        labels: rows.map((row) => formatWeekLabel(row.week_start)),
-        datasets: [
-          {
-            type: 'bar',
-            label: 'Weekly paid USD at deposit price',
-            data: rows.map((row) => row.payment_usd),
-            backgroundColor: 'rgba(0, 204, 102, 0.55)',
-            borderColor: '#00cc66',
-            borderWidth: 1,
-            borderRadius: 0,
-            yAxisID: 'weekly'
-          },
-          {
-            type: 'line',
-            label: 'Cumulative paid USD at deposit price',
-            data: rows.map((row) => row.cumulative_usd),
-            borderColor: '#d4a017',
-            backgroundColor: '#d4a017',
-            pointBackgroundColor: '#d4a017',
-            pointBorderColor: '#080808',
-            pointRadius: 3,
-            borderWidth: 2,
-            tension: 0.2,
-            yAxisID: 'cumulative'
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: {
-          mode: 'index',
-          intersect: false
-        },
-        plugins: {
-          legend: {
-            labels: {
-              color: '#888',
-              boxWidth: 10,
-              usePointStyle: true,
-              font: { family: "'JetBrains Mono', monospace", size: 10 }
-            }
-          },
-          tooltip: {
-            backgroundColor: '#0a0a0a',
-            borderColor: '#1a1a1a',
-            borderWidth: 1,
-            titleColor: '#00cc66',
-            bodyColor: '#c8c8c8',
-            titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
-            bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
-            callbacks: {
-              afterBody(items) {
-                const row = rows[items[0].dataIndex];
-                return [
-                  `${number2.format(row.payment_rune)} RUNE paid`,
-                  `${number4.format(row.rune_price_usd)} avg historical RUNE/USD`,
-                  `${number2.format(row.cumulative_rune)} cumulative RUNE`
-                ];
-              },
-              label(context) {
-                return `${context.dataset.label}: ${usd2.format(context.raw)}`;
-              }
-            }
-          }
-        },
-        scales: {
-          x: {
-            grid: { color: '#111', drawBorder: false },
-            border: { color: '#1a1a1a' },
-            ticks: { color: '#666', font: { family: "'JetBrains Mono', monospace", size: 10 } }
-          },
-          weekly: {
-            position: 'left',
-            grid: { color: '#111', drawBorder: false },
-            border: { color: '#1a1a1a' },
-            ticks: {
-              color: '#00cc66',
-              font: { family: "'JetBrains Mono', monospace", size: 10 },
-              callback: (value) => usd0.format(value)
-            }
-          },
-          cumulative: {
-            position: 'right',
-            grid: { drawOnChartArea: false },
-            border: { color: '#1a1a1a' },
-            ticks: {
-              color: '#d4a017',
-              font: { family: "'JetBrains Mono', monospace", size: 10 },
-              callback: (value) => usd0.format(value)
-            }
-          }
-        }
-      }
-    });
+  function startOfUtcWeek(date) {
+    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+    const day = d.getUTCDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    d.setUTCDate(d.getUTCDate() + mondayOffset);
+    return d;
   }
 
-  function renderGeneratedFeesChart(rows) {
-    if (!generatedFeesCanvas) return;
-    const ctx = generatedFeesCanvas.getContext('2d');
-    generatedFeesChart?.destroy();
+  function normalizeBuckets(rows, grain) {
+    const startKey = grain === 'weekly' ? 'week_start' : 'day_start';
+    return rows.map((row) => ({ ...row, bucket_start: row[startKey] }));
+  }
 
-    generatedFeesChart = new Chart(ctx, {
+  // Pre-aggregated source (collected inflows / generated fees): use the
+  // requested grain, falling back to whichever grain the artifact carries.
+  function pickAggRows(source, grain) {
+    const daily = source?.daily || [];
+    const weekly = source?.weekly || [];
+    if (grain === 'daily' && daily.length) return { rows: normalizeBuckets(daily, 'daily'), grain: 'daily' };
+    if (grain === 'weekly' && weekly.length) return { rows: normalizeBuckets(weekly, 'weekly'), grain: 'weekly' };
+    if (daily.length) return { rows: normalizeBuckets(daily, 'daily'), grain: 'daily' };
+    return { rows: normalizeBuckets(weekly, 'weekly'), grain: 'weekly' };
+  }
+
+  // Reserve deposits arrive as per-event rows, so bucket them client-side at
+  // the requested grain — daily needs no separate backend series.
+  function bucketReserveEvents(events, grain) {
+    const startOf =
+      grain === 'weekly'
+        ? (d) => startOfUtcWeek(d)
+        : (d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const map = new Map();
+    for (const event of events) {
+      const date = new Date(event.date);
+      if (!Number.isFinite(date.getTime())) continue;
+      const key = startOf(date).toISOString().slice(0, 10);
+      const row =
+        map.get(key) ||
+        { bucket_start: key, payments: 0, payment_rune: 0, payment_usd: 0, priceNum: 0, priceDen: 0 };
+      const amountRune = Number(event.amountRune) || 0;
+      row.payments += 1;
+      row.payment_rune += amountRune;
+      row.payment_usd += Number(event.amountUsd) || 0;
+      row.priceNum += (Number(event.runePriceUsd) || 0) * amountRune;
+      row.priceDen += amountRune;
+      map.set(key, row);
+    }
+    let cumUsd = 0;
+    let cumRune = 0;
+    return [...map.values()]
+      .sort((a, b) => a.bucket_start.localeCompare(b.bucket_start))
+      .map((row) => {
+        cumUsd += row.payment_usd;
+        cumRune += row.payment_rune;
+        return {
+          bucket_start: row.bucket_start,
+          payments: row.payments,
+          payment_rune: row.payment_rune,
+          payment_usd: row.payment_usd,
+          rune_price_usd: row.priceDen > 0 ? row.priceNum / row.priceDen : 0,
+          cumulative_usd: cumUsd,
+          cumulative_rune: cumRune
+        };
+      });
+  }
+
+  function pickPaidRows(events, weeklyFallback, grain) {
+    if (events && events.length) {
+      return { rows: bucketReserveEvents(events, grain), grain };
+    }
+    return { rows: normalizeBuckets(weeklyFallback || [], 'weekly'), grain: 'weekly' };
+  }
+
+  // Fill absent buckets with zero-value rows (cumulative carried forward) so
+  // scheduler pauses read as real gaps instead of a compressed axis.
+  function fillBucketGaps(rows, valueField, cumulativeField, stepDays) {
+    if (rows.length < 2) return rows;
+    const stepMs = stepDays * 86400 * 1000;
+    const out = [];
+    let prev = null;
+    let guard = 0;
+    for (const row of rows) {
+      if (prev) {
+        let cursor = new Date(`${prev.bucket_start}T00:00:00Z`);
+        for (;;) {
+          cursor = new Date(cursor.getTime() + stepMs);
+          const key = cursor.toISOString().slice(0, 10);
+          if (key >= row.bucket_start || (guard += 1) > 1000) break;
+          out.push({
+            bucket_start: key,
+            [valueField]: 0,
+            [cumulativeField]: prev[cumulativeField] || 0
+          });
+        }
+      }
+      out.push(row);
+      prev = row;
+    }
+    return out;
+  }
+
+  // Single-axis bar / cumulative-line chart, switched by view.
+  function renderSeriesChart(canvas, previousChart, config) {
+    previousChart?.destroy();
+    const { grain, view: chartView, colors, valueField, cumulativeField, barLabel, cumulativeLabel, afterBody } = config;
+    const stepDays = grain === 'weekly' ? 7 : 1;
+    const rows = fillBucketGaps(config.rows, valueField, cumulativeField, stepDays);
+    const cumulative = chartView === 'cumulative';
+    const dataset = cumulative
+      ? {
+          type: 'line',
+          label: cumulativeLabel,
+          data: rows.map((row) => row[cumulativeField] || 0),
+          borderColor: colors.mark,
+          backgroundColor: colors.faint,
+          pointBackgroundColor: colors.mark,
+          pointBorderColor: '#080808',
+          pointRadius: rows.length > 45 ? 0 : 3,
+          borderWidth: 2,
+          tension: 0.2,
+          fill: true
+        }
+      : {
+          type: 'bar',
+          label: barLabel,
+          data: rows.map((row) => row[valueField] || 0),
+          backgroundColor: colors.fill,
+          borderColor: colors.mark,
+          borderWidth: rows.length > 90 ? 0 : 1,
+          borderRadius: 0
+        };
+
+    return new Chart(canvas.getContext('2d'), {
       type: 'bar',
       data: {
-        labels: rows.map((row) => formatWeekLabel(row.week_start)),
-        datasets: [
-          {
-            type: 'bar',
-            label: 'Weekly generated fees USD',
-            data: rows.map((row) => row.liquidity_fee_usd),
-            backgroundColor: 'rgba(68, 160, 255, 0.35)',
-            borderColor: '#44a0ff',
-            borderWidth: 1,
-            borderRadius: 0,
-            yAxisID: 'weekly'
-          },
-          {
-            type: 'line',
-            label: 'Cumulative generated fees USD',
-            data: rows.map((row) => row.cumulative_usd),
-            borderColor: '#00cc66',
-            backgroundColor: '#00cc66',
-            pointBackgroundColor: '#00cc66',
-            pointBorderColor: '#080808',
-            pointRadius: 3,
-            borderWidth: 2,
-            tension: 0.2,
-            yAxisID: 'cumulative'
-          }
-        ]
+        labels: rows.map((row) => formatWeekLabel(row.bucket_start)),
+        datasets: [dataset]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        interaction: {
-          mode: 'index',
-          intersect: false
-        },
+        interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: {
-            labels: {
-              color: '#888',
-              boxWidth: 10,
-              usePointStyle: true,
-              font: { family: "'JetBrains Mono', monospace", size: 10 }
-            }
-          },
+          legend: { display: false },
           tooltip: {
             backgroundColor: '#0a0a0a',
             borderColor: '#1a1a1a',
             borderWidth: 1,
-            titleColor: '#44a0ff',
+            titleColor: colors.chrome,
             bodyColor: '#c8c8c8',
             titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
             bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
             callbacks: {
               afterBody(items) {
-                const row = rows[items[0].dataIndex];
-                return [
-                  `${number4.format(row.liquidity_fee_rune)} RUNE fees`,
-                  `${number4.format(row.rune_price_usd)} RUNE/USD`,
-                  `${number4.format(row.cumulative_rune)} cumulative RUNE`
-                ];
+                return afterBody ? afterBody(rows[items[0].dataIndex]) : [];
               },
               label(context) {
                 return `${context.dataset.label}: ${usd2.format(context.raw)}`;
@@ -695,24 +797,13 @@
             border: { color: '#1a1a1a' },
             ticks: { color: '#666', font: { family: "'JetBrains Mono', monospace", size: 10 } }
           },
-          weekly: {
-            position: 'left',
+          y: {
             grid: { color: '#111', drawBorder: false },
             border: { color: '#1a1a1a' },
             ticks: {
-              color: '#44a0ff',
+              color: colors.chrome,
               font: { family: "'JetBrains Mono', monospace", size: 10 },
-              callback: (value) => usd2.format(value)
-            }
-          },
-          cumulative: {
-            position: 'right',
-            grid: { drawOnChartArea: false },
-            border: { color: '#1a1a1a' },
-            ticks: {
-              color: '#00cc66',
-              font: { family: "'JetBrains Mono', monospace", size: 10 },
-              callback: (value) => usd2.format(value)
+              callback: (value) => (value >= 1000 ? usd0.format(value) : usd2.format(value))
             }
           }
         }
@@ -742,16 +833,16 @@
 
   function normalizeReserveEvent(event, priceRows = []) {
     const amountRune = Number(event.amountRune ?? event.amount_rune ?? amountFromBase(event.amountBase));
-    const runePriceUsd = Number(
+    const runePriceUsdValue = Number(
       event.runePriceUsd ??
       event.rune_price_usd ??
       reservePriceForDate(event.date, priceRows)
     );
-    const amountUsd = Number(event.amountUsd ?? event.amount_usd ?? amountRune * runePriceUsd);
+    const amountUsd = Number(event.amountUsd ?? event.amount_usd ?? amountRune * runePriceUsdValue);
     return {
       ...event,
       amountRune,
-      runePriceUsd,
+      runePriceUsd: runePriceUsdValue,
       amountUsd
     };
   }
@@ -796,6 +887,15 @@
     if (!denom.includes('-')) return `THOR.${denom.toUpperCase()}`;
     const splitAt = denom.indexOf('-');
     return `${denom.slice(0, splitAt).toUpperCase()}.${denom.slice(splitAt + 1).toUpperCase()}`;
+  }
+
+  function denomLabel(denom) {
+    if (!denom) return '';
+    if (denom === 'rune') return 'RUNE';
+    if (denom.startsWith('x/')) return denom.slice(2).toUpperCase();
+    const pool = denomToPoolAsset(denom);
+    const dashAt = pool.indexOf('-');
+    return dashAt === -1 ? pool : pool.slice(0, dashAt);
   }
 
   function assetUsdPrice(denom) {
@@ -871,12 +971,6 @@
     return `${number2.format(bucket.count)} denom${bucket.count === 1 ? '' : 's'}`;
   }
 
-  function inventoryNote(bucket, noun = 'denom') {
-    if (!bucket?.count) return `no ${noun}s`;
-    const count = `${number2.format(bucket.count)} ${noun}${bucket.count === 1 ? '' : 's'}`;
-    return bucket.unpricedCount ? `${count} · ${bucket.unpricedCount} unpriced` : count;
-  }
-
   function targetRatePerSecond(config, denom) {
     const target = (config?.target_denoms || [])
       .find(([targetDenom]) => normalizeDenom(targetDenom) === normalizeDenom(denom));
@@ -889,6 +983,7 @@
     if (value.includes('mixed')) return 'Dune + RPC/Midgard Postgres';
     if (value.includes('dune')) return 'Dune-backed Postgres';
     if (value.includes('postgres')) return 'RPC/Midgard-backed Postgres';
+    if (value.includes('static')) return 'static artifact';
     return value.replaceAll('-', ' ');
   }
 
@@ -952,8 +1047,10 @@
       .join(' → ');
   }
 
-  function pad2(n) {
-    return String(n).padStart(2, '0');
+  function targetSummary(targets) {
+    return (targets || [])
+      .map((target) => `${target.percent.toFixed(0)}% → ${target.label}`)
+      .join('  ·  ');
   }
 </script>
 
@@ -979,19 +1076,27 @@
     </div>
     <h1 class="title">APP LAYER <span class="arrow">→</span> BASE LAYER<span class="cursor">_</span></h1>
     <p class="lede">
-      Rujira collector configuration, observed final Reserve deposits, and separate app-attributed
-      THORChain liquidity-fee impact. Address allocations, conversion queues, and blocked inventory
-      are shown independently so only final RESERVE deposits are treated as revenue.
+      App-layer fees, tracked in three steps: <b class="k-collected">01 collected</b> by the Base
+      Layer collector, <b class="k-paid">02 paid</b> out to the TC Reserve, and
+      <b class="k-generated">03 liquidity fees generated</b> on THORChain pools along the way.
+      The base layer only benefits when 02 lands — 01 is upstream accrual and 03 goes to pool
+      LPs, so the three series are never summed.
     </p>
     <div class="rule"></div>
   </div>
 
-  {#if artifactsError || reservePaymentsError || reservePaymentsWarning || generatedFeesError || generatedFeesWarning || liveError || liveRouteWarning}
+  {#if artifactsError || reservePaymentsError || reservePaymentsWarning || generatedFeesError || generatedFeesWarning || inflowsError || liveError || liveRouteWarning}
     <div class="alerts">
       {#if artifactsError}
         <div class="alert err">
           <span class="alert-tag">ERR</span>
           <span>artifact data — {artifactsError}</span>
+        </div>
+      {/if}
+      {#if inflowsError}
+        <div class="alert warn">
+          <span class="alert-tag">WRN</span>
+          <span>{inflowsError}</span>
         </div>
       {/if}
       {#if generatedFeesError}
@@ -1033,10 +1138,127 @@
     </div>
   {/if}
 
+  <!-- ============ FLOW OF FUNDS ============ -->
+  <section class="block flowmap-block">
+    <div class="block-head">
+      <div class="block-title">
+        <span class="title-marker">▌</span>
+        <h2>flow of funds</h2>
+      </div>
+      <div class="block-meta">
+        {#if lastLiveRefresh}
+          [live config {formatDateTime(lastLiveRefresh)}]
+        {:else}
+          [pending live refresh]
+        {/if}
+      </div>
+    </div>
+
+    <div class="fmap">
+      <div class="fnode dim" style="grid-area: apps;">
+        <span class="fnode-kicker">source</span>
+        <strong class="fnode-name">Rujira Apps</strong>
+        <p class="fnode-sub">
+          RUJI Trade · RUJI Swap · RUJI Index · core apps — trading fees accrue continuously
+        </p>
+      </div>
+
+      <div class="fpipe neutral" style="grid-area: p1;">
+        <span class="fpipe-tag">fees</span>
+        <span class="fpipe-line"></span>
+        <span class="fpipe-arrow">▶</span>
+      </div>
+
+      <div class="fnode dim" style="grid-area: cols;">
+        <span class="fnode-kicker">app collectors</span>
+        <strong class="fnode-name">Revenue Collectors</strong>
+        <strong class="fnode-fig neutral">{liveLoading ? '—' : usd2.format(appCollectorInventoryUsd)}</strong>
+        <p class="fnode-sub">currently held across trade / core / swap / index collectors</p>
+      </div>
+
+      <div class="fpipe amber" style="grid-area: p2;">
+        <span class="fpipe-tag">{liveLoading || !baseShares.trade ? '≈50%' : `${baseShares.trade.toFixed(0)}%`} of trade + core</span>
+        <span class="fpipe-line"></span>
+        <span class="fpipe-arrow">▶</span>
+      </div>
+
+      <a class="fnode amber stage" style="grid-area: base;" href="#chart-collected">
+        <span class="fnode-kicker"><i>01</i> collected</span>
+        <strong class="fnode-name">Base Layer Collector</strong>
+        <strong class="fnode-fig">{inflowsLoading ? '—' : totalInflowUsd ? usd2.format(totalInflowUsd) : 'scan pending'}</strong>
+        <p class="fnode-sub">
+          holds {liveLoading ? '—' : usd2.format(pendingKnownUsd)} pending · converts everything to RUNE
+        </p>
+      </a>
+
+      <div class="fpipe green" style="grid-area: p3;">
+        <span class="fpipe-tag">RUNE drip{baseRuneRatePerSecond > 0 ? ` · ${number4.format(baseRuneRatePerSecond)}/s cap` : ''}</span>
+        <span class="fpipe-line"></span>
+        <span class="fpipe-arrow">▶</span>
+      </div>
+
+      <a class="fnode green stage" style="grid-area: reserve;" href="#chart-paid">
+        <span class="fnode-kicker"><i>02</i> paid</span>
+        <strong class="fnode-name">TC Reserve</strong>
+        <strong class="fnode-fig">{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(latestWeek?.cumulative_usd || 0)}</strong>
+        <p class="fnode-sub">
+          MsgDeposit RESERVE · {number2.format(meta?.eventCount || 0)} deposits — the moment the base layer actually benefits
+        </p>
+      </a>
+
+      <div class="fpipe-v neutral" style="grid-area: pv;">
+        <span class="fpipe-tag">{liveLoading || !baseShares.trade ? '≈50%' : `${(100 - baseShares.trade).toFixed(0)}%`}</span>
+        <span class="fpipe-line-v"></span>
+        <span class="fpipe-arrow">▼</span>
+      </div>
+
+      <div class="fnode dim faded" style="grid-area: stak;">
+        <span class="fnode-kicker">out of scope</span>
+        <strong class="fnode-name">RUJI Stakers</strong>
+        <p class="fnode-sub">the other half of trade + core revenue — never reaches the base layer</p>
+      </div>
+
+      <div class="fchannel" style="grid-area: chan;">
+        <div class="fchannel-rail">
+          <span class="fchannel-note">every conversion swap and app trade also routes through TC pools…</span>
+          <span class="fpipe-line blue-line"></span>
+          <span class="fpipe-arrow blue-arrow">▶</span>
+        </div>
+        <a class="fnode blue stage fchannel-node" href="#chart-generated">
+          <span class="fnode-kicker"><i>03</i> generated</span>
+          <strong class="fnode-name">TC Liquidity Fees</strong>
+          <strong class="fnode-fig">{generatedFeesLoading && !generatedFeeRows.length ? '—' : usd2.format(totalGeneratedFeeUsd)}</strong>
+          <p class="fnode-sub">paid to pool LPs — a side effect, not Reserve revenue; never added to 01 or 02</p>
+        </a>
+      </div>
+    </div>
+
+    <div class="flow-legend">
+      <span><b class="k-collected">01</b> fees land in the collector</span>
+      <span class="legend-arrow">→</span>
+      <span>held &amp; converted to RUNE</span>
+      <span class="legend-arrow">→</span>
+      <span><b class="k-paid">02</b> dripped into the Reserve</span>
+      <span class="legend-sep">│</span>
+      <span><b class="k-generated">03</b> pool fees generated along the way go to LPs</span>
+    </div>
+  </section>
+
+  <!-- ============ METRICS ============ -->
   <div class="metric-grid">
     <article class="metric">
       <div class="metric-head">
-        <span class="metric-idx">01</span>
+        <span class="metric-idx amber-i">01</span>
+        <span class="metric-label">collected by base collector</span>
+      </div>
+      <strong class="metric-value">{inflowsLoading ? '—' : totalInflowUsd ? usd2.format(totalInflowUsd) : '—'}</strong>
+      <small class="metric-foot">
+        {inflowMeta ? `${usd2.format(inflowOpeningUsd)} opening + ${usd2.format(inflowNetNewUsd)} net new · daily prices` : 'inflow artifact pending'}
+      </small>
+    </article>
+    <article class="metric">
+      <div class="metric-head">
+        <span class="metric-idx">02</span>
         <span class="metric-label">paid to tc reserve</span>
       </div>
       <strong class="metric-value">{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(latestWeek?.cumulative_usd || 0)}</strong>
@@ -1044,8 +1266,8 @@
     </article>
     <article class="metric">
       <div class="metric-head">
-        <span class="metric-idx">02</span>
-        <span class="metric-label">app-generated tc fees</span>
+        <span class="metric-idx blue-i">03</span>
+        <span class="metric-label">tc liq fees generated</span>
       </div>
       <strong class="metric-value">
         {generatedFeesLoading && !generatedFeeRows.length ? '—' : usd2.format(totalGeneratedFeeUsd)}
@@ -1054,52 +1276,123 @@
     </article>
     <article class="metric">
       <div class="metric-head">
-        <span class="metric-idx">03</span>
-        <span class="metric-label">reserve deposits</span>
-      </div>
-      <strong class="metric-value">{reservePaymentsLoading && !reserveEvents.length ? '—' : number2.format(meta?.eventCount || 0)}</strong>
-      <small class="metric-foot">{number2.format(meta?.fetchedBlockCount || 0)} blocks scanned · {reservePaymentBackfillLabel}</small>
-    </article>
-    <article class="metric">
-      <div class="metric-head">
-        <span class="metric-idx">04</span>
-        <span class="metric-label">base inventory (priced)</span>
+        <span class="metric-idx dim-i">--</span>
+        <span class="metric-label">pending in base collector</span>
       </div>
       <strong class="metric-value">{liveLoading ? '—' : usd2.format(pendingKnownUsd)}</strong>
       <small class="metric-foot">{number2.format(pendingRune)} RUNE eligible · {usd2.format(stableUsd)} stables need conversion</small>
     </article>
-    <article class="metric">
-      <div class="metric-head">
-        <span class="metric-idx">05</span>
-        <span class="metric-label">base allocation</span>
-      </div>
-      <strong class="metric-value">
-        {liveLoading ? '—' : `${baseShares.trade.toFixed(0)}% / ${baseShares.core.toFixed(0)}%`}
-      </strong>
-      <small class="metric-foot">
-        {baseAllocationFallback ? 'fallback config' : 'eligible target denoms'} · trade / core
-      </small>
-    </article>
   </div>
 
-  <section class="block">
+  <!-- ============ 01 COLLECTED ============ -->
+  <section class="block" id="chart-collected">
     <div class="block-head">
       <div class="block-title">
-        <span class="title-marker">▌</span>
-        <h2>observed reserve payments</h2>
+        <span class="title-marker amber">▌</span>
+        <h2>01 · fees collected by the base layer collector</h2>
       </div>
-      <div class="block-meta">
-        {#if firstEvent && latestEvent}
-          [{formatWeekLabel(firstEvent.date.slice(0, 10))} → {formatWeekLabel(latestEvent.date.slice(0, 10))}]
-        {:else}
-          [loading range]
-        {/if}
+      <div class="chart-controls amber-t">
+        <div class="mode-toggle">
+          <button class:active={granularity.collected === 'daily'} on:click={() => setGranularity('collected', 'daily')}>[daily]</button>
+          <button class:active={granularity.collected === 'weekly'} on:click={() => setGranularity('collected', 'weekly')}>[weekly]</button>
+        </div>
+        <span class="ctrl-div">·</span>
+        <div class="mode-toggle">
+          <button class:active={view.collected === 'bars'} on:click={() => setView('collected', 'bars')}>[bars]</button>
+          <button class:active={view.collected === 'cumulative'} on:click={() => setView('collected', 'cumulative')}>[cumul]</button>
+        </div>
       </div>
     </div>
     <p class="block-lede">
-      Weekly USD paid by the Base Layer collector to TC Reserve, priced when each Reserve deposit
-      happened. This is RUNE sent × historical RUNE/USD at dispersal time, not the current value
-      of that RUNE. Source in use: {reservePaymentSource}.
+      Net fees collected by the Base Layer collector, measured from daily balance changes plus
+      Reserve payouts at daily prices — so collected always ≈ paid + pending, no matter how fees
+      arrive or get converted. Cumulative starts from the inventory the collector already held at
+      the first Reserve deposit. Collected is not yet a base-layer benefit.
+      Source: {formatDataSource(inflowMeta?.source)}.
+    </p>
+
+    <div class="side-layout">
+      <div class="chart-frame">
+        {#if inflowsLoading}
+          <div class="loading-block">
+            <span class="loading-marker">▓░░░░</span>
+            <span>loading collected-fee artifact</span>
+          </div>
+        {:else if !inflowRows.length}
+          <div class="loading-block">
+            <span class="loading-marker">░░░░░</span>
+            <span>no collected-fee rows — run scripts/rujira-base-layer-inflows.mjs</span>
+          </div>
+        {:else}
+          <canvas bind:this={collectedCanvas} aria-label="Weekly and cumulative fees collected by the Base Layer collector"></canvas>
+        {/if}
+      </div>
+
+      <div class="side-panel amber-p">
+        <div class="side-card">
+          <span>total collected</span>
+          <strong>{totalInflowUsd ? usd2.format(totalInflowUsd) : '—'}</strong>
+          <small>{inflowMeta ? `${number2.format(inflowDayCount)} days measured · = paid + pending by construction` : 'artifact pending'}</small>
+        </div>
+        {#if inflowDenomTotals.length}
+          <div class="table-scroll side-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>denom</th>
+                  <th>amount</th>
+                  <th>usd</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each inflowDenomTotals as row}
+                  <tr>
+                    <td class="mono ellipsis" title={row.denom}>{denomLabel(row.denom)}</td>
+                    <td class="num">{number4.format(row.amount)}</td>
+                    <td class="num accent-amber">{row.usd ? usd2.format(row.usd) : 'unpriced'}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+        <p class="scope-note">
+          {inflowMeta?.scope || 'Scan scope pending.'}
+          {inflowMeta?.unpricedCoinCount ? ` ${number2.format(inflowMeta.unpricedCoinCount)} coins had no price history and are excluded from USD sums.` : ''}
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 02 PAID ============ -->
+  <section class="block" id="chart-paid">
+    <div class="block-head">
+      <div class="block-title">
+        <span class="title-marker">▌</span>
+        <h2>02 · fees paid to tc reserve</h2>
+      </div>
+      <div class="chart-controls green-t">
+        <div class="mode-toggle">
+          <button class:active={granularity.paid === 'daily'} on:click={() => setGranularity('paid', 'daily')}>[daily]</button>
+          <button class:active={granularity.paid === 'weekly'} on:click={() => setGranularity('paid', 'weekly')}>[weekly]</button>
+        </div>
+        <span class="ctrl-div">·</span>
+        <div class="mode-toggle">
+          <button class:active={view.paid === 'bars'} on:click={() => setView('paid', 'bars')}>[bars]</button>
+          <button class:active={view.paid === 'cumulative'} on:click={() => setView('paid', 'cumulative')}>[cumul]</button>
+        </div>
+      </div>
+    </div>
+    <p class="block-lede">
+      Actual RESERVE deposits from the Base Layer collector — RUNE sent × historical RUNE/USD at
+      dispersal time, not the current value of that RUNE. This is the moment the base layer
+      benefits. Range:
+      {#if firstEvent && latestEvent}
+        {formatWeekLabel(firstEvent.date.slice(0, 10))} → {formatWeekLabel(latestEvent.date.slice(0, 10))}.
+      {:else}
+        loading.
+      {/if}
+      Source in use: {reservePaymentSource} · {reservePaymentBackfillLabel}.
     </p>
     <div class="chart-frame">
       {#if reservePaymentsLoading && !weeklyRows.length}
@@ -1125,56 +1418,64 @@
         <span>latest week avg</span>
         <strong>{latestReservePrice ? `$${number4.format(latestReservePrice)}` : '—'} RUNE/USD</strong>
       </div>
-      <div class="table-scroll reserve-weekly-table">
-        <table>
-          <thead>
-            <tr>
-              <th>week</th>
-              <th>deposits</th>
-              <th>rune sent</th>
-              <th>avg rune/usd</th>
-              <th>usd at dispersal</th>
-              <th>cumulative usd</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each weeklyRows as row}
+      <details class="fold">
+        <summary><span class="fold-marker">+</span> weekly breakdown table</summary>
+        <div class="table-scroll reserve-weekly-table">
+          <table>
+            <thead>
               <tr>
-                <td class="mono">{formatWeekLabel(row.week_start)} → {formatWeekLabel(row.week_end)}</td>
-                <td class="num">{number2.format(row.payments || 0)}</td>
-                <td class="num">{number2.format(row.payment_rune || 0)}</td>
-                <td class="num">{row.rune_price_usd ? `$${number4.format(row.rune_price_usd)}` : '—'}</td>
-                <td class="num accent">{usd2.format(row.payment_usd || 0)}</td>
-                <td class="num accent">{usd2.format(row.cumulative_usd || 0)}</td>
+                <th>week</th>
+                <th>deposits</th>
+                <th>rune sent</th>
+                <th>avg rune/usd</th>
+                <th>usd at dispersal</th>
+                <th>cumulative usd</th>
               </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {#each weeklyRows as row}
+                <tr>
+                  <td class="mono">{formatWeekLabel(row.week_start)} → {formatWeekLabel(row.week_end)}</td>
+                  <td class="num">{number2.format(row.payments || 0)}</td>
+                  <td class="num">{number2.format(row.payment_rune || 0)}</td>
+                  <td class="num">{row.rune_price_usd ? `$${number4.format(row.rune_price_usd)}` : '—'}</td>
+                  <td class="num accent">{usd2.format(row.payment_usd || 0)}</td>
+                  <td class="num accent">{usd2.format(row.cumulative_usd || 0)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </details>
     {/if}
   </section>
 
-  <section class="block">
+  <!-- ============ 03 GENERATED ============ -->
+  <section class="block" id="chart-generated">
     <div class="block-head">
       <div class="block-title">
         <span class="title-marker blue">▌</span>
-        <h2>app-generated tc liquidity fees</h2>
+        <h2>03 · tc liquidity fees generated by app activity</h2>
       </div>
-      <div class="block-meta">
-        {#if generatedFeeMeta}
-          [{number2.format(generatedFeeMeta.matchedSwapFeeEventCount || 0)} swap events]
-        {:else}
-          [pending scan]
-        {/if}
+      <div class="chart-controls blue-t">
+        <div class="mode-toggle">
+          <button class:active={granularity.generated === 'daily'} on:click={() => setGranularity('generated', 'daily')}>[daily]</button>
+          <button class:active={granularity.generated === 'weekly'} on:click={() => setGranularity('generated', 'weekly')}>[weekly]</button>
+        </div>
+        <span class="ctrl-div">·</span>
+        <div class="mode-toggle">
+          <button class:active={view.generated === 'bars'} on:click={() => setView('generated', 'bars')}>[bars]</button>
+          <button class:active={view.generated === 'cumulative'} on:click={() => setView('generated', 'cumulative')}>[cumul]</button>
+        </div>
       </div>
     </div>
     <p class="block-lede">
-      Non-additive THORChain liquidity fees attributed to Rujira contract activity. They are not
-      Reserve revenue and must not be added to explicit Reserve payments. Source: {generatedFeeSource}.
-      Current scan scope: {generatedFeeScope}
+      THORChain liquidity fees attributed to Rujira contract activity. They are paid to pool LPs,
+      not the Reserve, and must never be added to 01 or 02. Source: {generatedFeeSource} ·
+      {generatedFeeBackfillLabel}. Scan scope: {generatedFeeScope}
     </p>
 
-    <div class="generated-layout">
+    <div class="side-layout">
       <div class="chart-frame">
         {#if generatedFeesLoading && !generatedFeeRows.length}
           <div class="loading-block">
@@ -1191,51 +1492,47 @@
         {/if}
       </div>
 
-      <div class="impact-panel">
-        <div class="impact-card">
+      <div class="side-panel blue-p">
+        <div class="side-card">
           <span>generated fees</span>
           <strong>{usd2.format(totalGeneratedFeeUsd)}</strong>
-          <small>{number4.format(totalGeneratedFeeRune)} RUNE</small>
+          <small>{number4.format(totalGeneratedFeeRune)} RUNE · {number2.format(generatedFeeMeta?.matchedSwapFeeEventCount || 0)} swap events</small>
         </div>
-        <div class="impact-card">
-          <span>active heights</span>
-          <strong>{number2.format(generatedFeeMeta?.activeHeightCount || 0)}</strong>
-          <small>{number2.format(generatedFeeMeta?.matchedSwapFeeEventCount || 0)} matched swap events · {generatedFeeBackfillLabel}</small>
-        </div>
-        <div class="table-scroll route-table">
-          <table>
-            <thead>
-              <tr>
-                <th>route</th>
-                <th>events</th>
-                <th>fee rune</th>
-                <th>fee usd</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each topGeneratedFeeRoutes as route}
+        {#if topGeneratedFeeRoutes.length}
+          <div class="table-scroll side-table">
+            <table>
+              <thead>
                 <tr>
-                  <td class="mono ellipsis" title={route.source_contract || route.source_denom || route.classification}>
-                    {route.source_label || route.source_denom || route.classification}
-                  </td>
-                  <td class="num">{number2.format(route.swap_events || 0)}</td>
-                  <td class="num">{number4.format(route.liquidity_fee_rune || 0)}</td>
-                  <td class="num accent-blue">{usd2.format(route.liquidity_fee_usd || 0)}</td>
+                  <th>route</th>
+                  <th>events</th>
+                  <th>fee usd</th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {#each topGeneratedFeeRoutes as route}
+                  <tr>
+                    <td class="mono ellipsis" title={route.source_contract || route.source_denom || route.classification}>
+                      {route.source_label || route.source_denom || route.classification}
+                    </td>
+                    <td class="num">{number2.format(route.swap_events || 0)}</td>
+                    <td class="num accent-blue">{usd2.format(route.liquidity_fee_usd || 0)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
         <p class="scope-note">{generatedFeeMeta?.caveat || 'Generated-fee scan is being prepared.'}</p>
       </div>
     </div>
   </section>
 
+  <!-- ============ LIVE CONTEXT ============ -->
   <section class="block">
     <div class="block-head">
       <div class="block-title">
         <span class="title-marker">▌</span>
-        <h2>current revenue routes</h2>
+        <h2>live collector routing</h2>
       </div>
       <div class="block-meta">
         {#if lastLiveRefresh}
@@ -1247,182 +1544,40 @@
     </div>
     <p class="block-lede">
       Live <span class="inline-code">rujira-revenue</span> configuration. Percentages are address
-      allocations for eligible target denoms, not a claim that every collector balance is currently
-      transferable. Conversion queues and blocked inventory are shown separately.
+      allocations for eligible target denoms; conversion queues are balances that still need a
+      configured action before they can move.
     </p>
-
-    <div class="flow">
-      <div class="flow-col">
-        <div class="col-head">app collectors</div>
-        {#each appCollectorRows as collector, i}
-          <article class="node">
-            <div class="node-head">
-              <span class="node-idx">{pad2(i + 1)}</span>
-              <a
-                class="node-title-link"
-                href={addressUrl(collector.address)}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={collector.address}
-              >{collector.name}</a>
-              <span class="node-pill" class:hot={baseShares[collector.key] > 0}>
-                {baseShares[collector.key].toFixed(0)}% base allocation
-              </span>
-            </div>
-            <p class="node-role">
-              {collector.role}
-              <a
-                class="addr-link"
-                href={addressUrl(collector.address)}
-                target="_blank"
-                rel="noopener noreferrer"
-                title={collector.address}
-              >{formatAddress(collector.address)}</a>
-            </p>
-            <div class="node-value">
-              <span>eligible target inventory</span>
-              <strong>{collector.inventory.available ? inventoryDisplay(collector.inventory.eligible) : '—'}</strong>
-              <small>
-                {collector.inventory.available
-                  ? `${inventoryNote(collector.inventory.eligible)} configured for direct weighted distribution`
-                  : 'eligibility unavailable until live config and balances load'}
-              </small>
-            </div>
-            {#if collector.inventory.available && collector.inventory.conversion.count}
-              <div class="inventory-note conversion">
-                <span>conversion queue</span>
-                <strong>{inventoryDisplay(collector.inventory.conversion)}</strong>
-                <small>{inventoryNote(collector.inventory.conversion)} need a configured action before distribution</small>
-              </div>
-            {/if}
-            {#if collector.inventory.available && collector.inventory.unresolved.count}
-              <div class="inventory-note unknown">
-                <span>conversion status unavailable</span>
-                <strong>{inventoryDisplay(collector.inventory.unresolved)}</strong>
-                <small>{inventoryNote(collector.inventory.unresolved)} cannot be classified until the actions query succeeds</small>
-              </div>
-            {/if}
-            {#if collector.inventory.available && collector.inventory.blocked.count}
-              <div class="inventory-note blocked">
-                <span>not configured</span>
-                <strong>{inventoryDisplay(collector.inventory.blocked)}</strong>
-                <small>{inventoryNote(collector.inventory.blocked)} have no target-denom or conversion-action path</small>
-              </div>
-            {/if}
-            <div class="targets">
-              {#each targetMap[collector.key] as target}
-                <div class="target" class:on-base={target.address === BASE_LAYER_COLLECTOR}>
-                  <span class="target-arrow">→</span>
-                  <a
-                    class="target-name"
-                    href={addressUrl(target.address)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={target.address}
-                  >{target.label}</a>
-                  <span class="target-usd">{target.isFallback ? 'fallback config' : 'eligible-denom allocation'}</span>
-                  <b class="target-pct">{target.percent.toFixed(0)}%</b>
-                </div>
-              {/each}
-            </div>
-          </article>
-        {/each}
-      </div>
-
-      <div class="flow-col flow-mid">
-        <div class="col-head accent">base layer queue</div>
-        <article class="node primary">
-          <div class="node-head">
-            <span class="node-idx">▣</span>
-            <strong>Base Layer Collector</strong>
-            <span class="node-pill code">code {latestCodeIds.base}</span>
-          </div>
-          <p class="node-role mono">
-            <a
-              class="addr-link"
-              href={addressUrl(BASE_LAYER_COLLECTOR)}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={BASE_LAYER_COLLECTOR}
-            >{formatAddress(BASE_LAYER_COLLECTOR)}</a>
-          </p>
-          <div class="queue">
-            <div>
-              <span>rune eligible now</span>
-              <strong>{number2.format(pendingRune)}</strong>
-            </div>
-            <div>
-              <span>conversion queue</span>
-              <strong>{inventoryDisplay(baseInventory.conversion)}</strong>
-            </div>
-            <div>
-              <span>{baseInventory.unresolved.count ? 'actions unavailable' : 'not configured'}</span>
-              <strong>{inventoryDisplay(baseInventory.unresolved.count ? baseInventory.unresolved : baseInventory.blocked)}</strong>
-            </div>
-          </div>
-          <p class="queue-note">
-            Only RUNE can be distributed to Reserve.
-            {#if baseInventory.unresolved.count}
-              The actions query is unavailable, so the route status for those balances is unknown.
-            {:else}
-              Other balances need a configured action before they can enter the conversion queue.
-            {/if}
-            {#if baseRuneRatePerSecond > 0}
-              Current RUNE drip cap: {number4.format(baseRuneRatePerSecond)} RUNE/s.
-            {/if}
-          </p>
-          <div class="targets">
-            {#each targetMap.base as target}
-              <div class="target on-base">
-                <span class="target-arrow">→</span>
+    <div class="table-scroll">
+      <table class="routing-table">
+        <thead>
+          <tr>
+            <th>collector</th>
+            <th>code</th>
+            <th>eligible</th>
+            <th>conversion queue</th>
+            <th>targets</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each collectors as collector}
+            <tr>
+              <td>
                 <a
-                  class="target-name"
-                  href={addressUrl(target.address)}
+                  class="table-link"
+                  href={addressUrl(collector.address)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  title={target.address}
-                >{target.label}</a>
-                <span class="target-usd">RUNE only · rate limited</span>
-                <b class="target-pct">{target.percent.toFixed(0)}%</b>
-              </div>
-            {/each}
-          </div>
-        </article>
-      </div>
-
-      <div class="flow-col">
-        <div class="col-head">destination</div>
-        <article class="node reserve">
-          <div class="node-head">
-            <span class="node-idx">◈</span>
-            <strong>TC Reserve</strong>
-            <span class="node-pill amber">RESERVE memo</span>
-          </div>
-          <p class="node-role mono">
-            <a
-              class="addr-link"
-              href={addressUrl(RESERVE_MODULE)}
-              target="_blank"
-              rel="noopener noreferrer"
-              title={RESERVE_MODULE}
-            >{formatAddress(RESERVE_MODULE)}</a>
-          </p>
-          <div class="reserve-total">
-            <span>historical usd at dispersal</span>
-            <strong>{usd2.format(latestWeek?.cumulative_usd || 0)}</strong>
-          </div>
-        </article>
-        <article class="node muted">
-          <div class="node-head">
-            <span class="node-idx">!</span>
-            <strong>System income note</strong>
-          </div>
-          <p class="node-role">
-            Midgard system income = liquidity fees + block rewards. These Reserve deposits are
-            <em>not</em> included in that line item.
-          </p>
-        </article>
-      </div>
+                  title={collector.address}
+                >{collector.name}</a>
+              </td>
+              <td class="num">{latestCodeIds[collector.key]}</td>
+              <td class="num">{collectorInventories[collector.key]?.available ? inventoryDisplay(collectorInventories[collector.key].eligible) : '—'}</td>
+              <td class="num">{collectorInventories[collector.key]?.available ? inventoryDisplay(collectorInventories[collector.key].conversion) : '—'}</td>
+              <td class="mono targets-cell">{targetSummary(targetMap[collector.key])}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
     </div>
   </section>
 
@@ -1472,10 +1627,8 @@
           <thead>
             <tr>
               <th>time</th>
-              <th>height</th>
               <th>tx</th>
               <th>rune</th>
-              <th>rune/usd</th>
               <th>usd sent</th>
             </tr>
           </thead>
@@ -1483,14 +1636,12 @@
             {#each recentEvents as event}
               <tr>
                 <td class="mono">{formatDateTime(event.date)}</td>
-                <td class="num">{event.height}</td>
                 <td class="num">
                   <a class="table-link" href={txUrl(event.id)} target="_blank" rel="noopener noreferrer" title={event.id}>
                     {formatTxId(event.id)}
                   </a>
                 </td>
                 <td class="num accent">{number4.format(event.amountRune)}</td>
-                <td class="num">{event.runePriceUsd ? `$${number4.format(event.runePriceUsd)}` : '—'}</td>
                 <td class="num accent">{event.amountUsd ? usd2.format(event.amountUsd) : '—'}</td>
               </tr>
             {/each}
@@ -1500,113 +1651,101 @@
     </article>
   </div>
 
-  <section class="block">
-    <div class="block-head">
-      <div class="block-title">
-        <span class="title-marker">▌</span>
-        <h2>version path</h2>
+  <!-- ============ ARCHIVE ============ -->
+  <section class="block archive-block">
+    <details class="fold">
+      <summary>
+        <span class="fold-marker">+</span> archive — version path, contract history &amp; similar contracts
+      </summary>
+
+      <div class="archive-body">
+        <div class="archive-section">
+          <h3 class="archive-title">version path</h3>
+          <ol class="timeline">
+            {#each versionTimeline as item, index}
+              <li>
+                <div class="t-idx">{String(index + 1).padStart(2, '0')}</div>
+                <div class="t-rail">
+                  <span class="t-node"></span>
+                  {#if index < versionTimeline.length - 1}<span class="t-line"></span>{/if}
+                </div>
+                <div class="t-body">
+                  <span class="t-date">{item.date}</span>
+                  <strong class="t-collector">{item.collector}</strong>
+                  <b class="t-event">{item.event}</b>
+                  <p class="t-flow">{item.flow}</p>
+                </div>
+              </li>
+            {/each}
+          </ol>
+        </div>
+
+        <div class="split">
+          <div class="archive-section">
+            <h3 class="archive-title">contract history</h3>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>collector</th>
+                    <th>history</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each collectors as collector}
+                    <tr>
+                      <td>
+                        <a
+                          class="table-link"
+                          href={addressUrl(collector.address)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={collector.address}
+                        >{collector.name}</a>
+                      </td>
+                      <td class="mono">{historyLabels[collector.key]}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="archive-section">
+            <h3 class="archive-title">similar contracts</h3>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>label</th>
+                    <th>code</th>
+                    <th>target</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each similarContracts as contract}
+                    <tr>
+                      <td>
+                        <a
+                          class="table-link"
+                          href={addressUrl(contract.address)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title={contract.address}
+                        >{contract.label}</a>
+                      </td>
+                      <td class="num">{contract.codeId}</td>
+                      <td>{contract.target}</td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="block-meta">[{versionTimeline.length} events]</div>
-    </div>
-    <p class="block-lede">
-      Historical points that explain why allocation existed earlier than observed Reserve payments.
-    </p>
-    <ol class="timeline">
-      {#each versionTimeline as item, i}
-        <li>
-          <div class="t-idx">{pad2(i + 1)}</div>
-          <div class="t-rail">
-            <span class="t-node"></span>
-            {#if i < versionTimeline.length - 1}<span class="t-line"></span>{/if}
-          </div>
-          <div class="t-body">
-            <span class="t-date">{item.date}</span>
-            <strong class="t-collector">{item.collector}</strong>
-            <b class="t-event">{item.event}</b>
-            <p class="t-flow">{item.flow}</p>
-          </div>
-        </li>
-      {/each}
-    </ol>
+    </details>
   </section>
-
-  <div class="split">
-    <article class="block">
-      <div class="block-head">
-        <div class="block-title">
-          <span class="title-marker">▌</span>
-          <h2>contract history</h2>
-        </div>
-        <div class="block-meta">[{collectors.length} collectors]</div>
-      </div>
-      <p class="block-lede">Live code history for the current `rujira-revenue` contracts.</p>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>collector</th>
-              <th>history</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each collectors as collector}
-              <tr>
-                <td>
-                  <a
-                    class="table-link"
-                    href={addressUrl(collector.address)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={collector.address}
-                  >{collector.name}</a>
-                </td>
-                <td class="mono">{historyLabels[collector.key]}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    </article>
-
-    <article class="block">
-      <div class="block-head">
-        <div class="block-title">
-          <span class="title-marker">▌</span>
-          <h2>similar contracts</h2>
-        </div>
-        <div class="block-meta">[{similarContracts.length} checked]</div>
-      </div>
-      <p class="block-lede">Same or similar revenue code contracts that did not target TC Reserve.</p>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>label</th>
-              <th>code</th>
-              <th>target</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each similarContracts as contract}
-              <tr>
-                <td>
-                  <a
-                    class="table-link"
-                    href={addressUrl(contract.address)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={contract.address}
-                  >{contract.label}</a>
-                </td>
-                <td class="num">{contract.codeId}</td>
-                <td>{contract.target}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    </article>
-  </div>
 
   <footer class="foot">
     <div class="foot-line">
@@ -1616,6 +1755,7 @@
     <div class="foot-line">
       <span class="foot-tag">path</span>
       <span class="mono">
+        apps → collectors →
         <a href={addressUrl(BASE_LAYER_COLLECTOR)} target="_blank" rel="noopener noreferrer">Base Layer Collector</a>
         → <a href={addressUrl(RESERVE_MODULE)} target="_blank" rel="noopener noreferrer">TC Reserve</a>
         via MsgDeposit RESERVE
@@ -1633,10 +1773,12 @@
     font-family: 'DM Sans', -apple-system, sans-serif;
     font-size: 13px;
     line-height: 1.5;
+    scroll-behavior: smooth;
   }
 
   .terminal h1,
   .terminal h2,
+  .terminal h3,
   .terminal p,
   .terminal strong,
   .terminal b,
@@ -1786,7 +1928,27 @@
   .lede {
     color: #888;
     font-size: 13px;
-    max-width: 820px;
+    max-width: 880px;
+  }
+
+  .lede b {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .k-collected {
+    color: #d4a017;
+  }
+
+  .k-paid {
+    color: #00cc66;
+  }
+
+  .k-generated {
+    color: #44a0ff;
   }
 
   .rule {
@@ -1837,11 +1999,308 @@
     flex-shrink: 0;
   }
 
+  /* ========== FLOW MAP ========== */
+
+  .flowmap-block {
+    padding-bottom: 18px;
+  }
+
+  .fmap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1.05fr) 72px minmax(0, 1.25fr) 72px minmax(0, 1.15fr);
+    grid-template-areas:
+      'apps p1 cols p2 base p3 reserve'
+      '.    .  pv   .  .    .  .'
+      '.    .  stak .  .    .  .'
+      'chan chan chan chan chan chan chan';
+    align-items: stretch;
+    row-gap: 0;
+  }
+
+  .fnode {
+    border: 1px solid #1a1a1a;
+    background: #0d0d0d;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+    text-decoration: none;
+    color: inherit;
+  }
+
+  .fnode.faded {
+    opacity: 0.62;
+    border-style: dashed;
+  }
+
+  .fnode.amber {
+    border-color: rgba(212, 160, 23, 0.5);
+    background: linear-gradient(180deg, rgba(212, 160, 23, 0.07) 0%, #0a0a0a 65%);
+  }
+
+  .fnode.green {
+    border-color: rgba(0, 204, 102, 0.5);
+    background: linear-gradient(180deg, rgba(0, 204, 102, 0.07) 0%, #0a0a0a 65%);
+  }
+
+  .fnode.blue {
+    border-color: rgba(68, 160, 255, 0.5);
+    background: linear-gradient(180deg, rgba(68, 160, 255, 0.07) 0%, #0a0a0a 65%);
+  }
+
+  .fnode.stage {
+    cursor: pointer;
+    transition: box-shadow 0.15s, transform 0.15s;
+  }
+
+  .fnode.stage:hover {
+    transform: translateY(-1px);
+  }
+
+  .fnode.amber.stage:hover {
+    box-shadow: 0 0 16px rgba(212, 160, 23, 0.18);
+  }
+
+  .fnode.green.stage:hover {
+    box-shadow: 0 0 16px rgba(0, 204, 102, 0.18);
+  }
+
+  .fnode.blue.stage:hover {
+    box-shadow: 0 0 16px rgba(68, 160, 255, 0.18);
+  }
+
+  .fnode-kicker {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+  }
+
+  .fnode-kicker i {
+    font-style: normal;
+    padding: 0 4px;
+    margin-right: 5px;
+    border: 1px solid #2a2a2a;
+    color: #888;
+  }
+
+  .fnode.amber .fnode-kicker,
+  .fnode.amber .fnode-kicker i {
+    color: #d4a017;
+    border-color: rgba(212, 160, 23, 0.5);
+  }
+
+  .fnode.green .fnode-kicker,
+  .fnode.green .fnode-kicker i {
+    color: #00cc66;
+    border-color: rgba(0, 204, 102, 0.5);
+  }
+
+  .fnode.blue .fnode-kicker,
+  .fnode.blue .fnode-kicker i {
+    color: #44a0ff;
+    border-color: rgba(68, 160, 255, 0.5);
+  }
+
+  .fnode-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: #e0e0e0;
+  }
+
+  .fnode-fig {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 19px;
+    font-weight: 800;
+    line-height: 1.1;
+    overflow-wrap: anywhere;
+  }
+
+  .fnode.amber .fnode-fig {
+    color: #d4a017;
+  }
+
+  .fnode.green .fnode-fig {
+    color: #00cc66;
+  }
+
+  .fnode.blue .fnode-fig {
+    color: #44a0ff;
+  }
+
+  .fnode-fig.neutral {
+    color: #b8b8b8;
+    font-size: 15px;
+  }
+
+  .fnode-sub {
+    font-size: 11px;
+    color: #666;
+    line-height: 1.45;
+  }
+
+  .fpipe {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 3px;
+    padding: 0 5px;
+    min-width: 0;
+  }
+
+  .fpipe-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    text-align: center;
+    line-height: 1.3;
+  }
+
+  .fpipe.amber .fpipe-tag {
+    color: #d4a017;
+  }
+
+  .fpipe.green .fpipe-tag {
+    color: #00cc66;
+  }
+
+  .fpipe-line {
+    width: 100%;
+    height: 2px;
+    background: repeating-linear-gradient(90deg, currentColor 0 7px, transparent 7px 14px);
+    animation: dashflow 0.9s linear infinite;
+    opacity: 0.65;
+  }
+
+  .fpipe,
+  .fpipe-v {
+    color: #3a3a3a;
+  }
+
+  .fpipe.amber {
+    color: rgba(212, 160, 23, 0.75);
+  }
+
+  .fpipe.green {
+    color: rgba(0, 204, 102, 0.75);
+  }
+
+  .fpipe-arrow {
+    align-self: flex-end;
+    margin-top: -11px;
+    font-size: 9px;
+    line-height: 1;
+    color: currentColor;
+  }
+
+  @keyframes dashflow {
+    to { background-position: 14px 0; }
+  }
+
+  .fpipe-v {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 2px 0;
+  }
+
+  .fpipe-v .fpipe-tag {
+    color: #555;
+  }
+
+  .fpipe-line-v {
+    width: 2px;
+    flex: 1;
+    min-height: 22px;
+    background: repeating-linear-gradient(180deg, currentColor 0 7px, transparent 7px 14px);
+    animation: dashflow-v 0.9s linear infinite;
+    opacity: 0.65;
+  }
+
+  @keyframes dashflow-v {
+    to { background-position: 0 14px; }
+  }
+
+  .fpipe-v .fpipe-arrow {
+    align-self: center;
+    margin-top: -2px;
+  }
+
+  .fchannel {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px dashed #1a1a1a;
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: center;
+  }
+
+  .fchannel-rail {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: rgba(68, 160, 255, 0.7);
+    min-width: 0;
+  }
+
+  .fchannel-note {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #557799;
+    flex-shrink: 1;
+  }
+
+  .fchannel-rail .fpipe-line {
+    flex: 1;
+    min-width: 40px;
+  }
+
+  .fchannel-rail .fpipe-arrow {
+    align-self: center;
+    margin-top: 0;
+  }
+
+  .flow-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 9px 12px;
+    background: #080808;
+    border: 1px solid #111;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #777;
+  }
+
+  .flow-legend b {
+    font-weight: 700;
+  }
+
+  .legend-arrow {
+    color: #3a3a3a;
+  }
+
+  .legend-sep {
+    color: #222;
+  }
+
   /* ========== METRIC GRID ========== */
 
   .metric-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 1px;
     border: 1px solid #1a1a1a;
     background: #1a1a1a;
@@ -1851,16 +2310,11 @@
   .metric {
     padding: 16px 18px;
     background: #0a0a0a;
-    border-right: none;
     display: flex;
     flex-direction: column;
     gap: 8px;
     min-height: 116px;
     transition: background 0.15s;
-  }
-
-  .metric:last-child {
-    border-right: none;
   }
 
   .metric:hover {
@@ -1878,6 +2332,18 @@
   .metric-idx {
     color: #00cc66;
     font-weight: 700;
+  }
+
+  .metric-idx.amber-i {
+    color: #d4a017;
+  }
+
+  .metric-idx.blue-i {
+    color: #44a0ff;
+  }
+
+  .metric-idx.dim-i {
+    color: #555;
   }
 
   .metric-label {
@@ -1911,6 +2377,7 @@
     background: #0a0a0a;
     padding: 18px 20px 22px;
     margin-bottom: 14px;
+    scroll-margin-top: 16px;
   }
 
   .block-head {
@@ -1937,6 +2404,10 @@
 
   .title-marker.blue {
     color: #44a0ff;
+  }
+
+  .title-marker.amber {
+    color: #d4a017;
   }
 
   .block h2 {
@@ -1971,6 +2442,58 @@
     background: #111;
     color: #00cc66;
     border: 1px solid #1a1a1a;
+  }
+
+  /* ========== MODE TOGGLE ========== */
+
+  .chart-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  .ctrl-div {
+    color: #2a2a2a;
+    font-size: 10px;
+  }
+
+  .mode-toggle {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .mode-toggle button {
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #555;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: color 0.15s;
+  }
+
+  .mode-toggle button:hover {
+    color: #999;
+  }
+
+  .amber-t button.active {
+    color: #d4a017;
+    font-weight: 700;
+  }
+
+  .green-t button.active {
+    color: #00cc66;
+    font-weight: 700;
+  }
+
+  .blue-t button.active {
+    color: #44a0ff;
+    font-weight: 700;
   }
 
   /* ========== CHART ========== */
@@ -2021,33 +2544,42 @@
     min-width: 760px;
   }
 
-  .generated-layout {
+  /* ========== SIDE LAYOUT ========== */
+
+  .side-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.8fr);
+    grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.8fr);
     gap: 14px;
     align-items: stretch;
   }
 
-  .generated-layout .chart-frame {
-    height: 390px;
+  .side-layout .chart-frame {
+    height: 380px;
   }
 
-  .impact-panel {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .side-panel {
+    display: flex;
+    flex-direction: column;
     gap: 10px;
     align-content: start;
+    min-width: 0;
   }
 
-  .impact-card {
+  .side-card {
     background: #080808;
     border: 1px solid #141414;
-    border-left: 2px solid #44a0ff;
     padding: 12px 14px;
-    min-height: 92px;
   }
 
-  .impact-card span {
+  .amber-p .side-card {
+    border-left: 2px solid #d4a017;
+  }
+
+  .blue-p .side-card {
+    border-left: 2px solid #44a0ff;
+  }
+
+  .side-card span {
     display: block;
     font-family: 'JetBrains Mono', monospace;
     font-size: 9px;
@@ -2057,7 +2589,7 @@
     margin-bottom: 8px;
   }
 
-  .impact-card strong {
+  .side-card strong {
     display: block;
     font-family: 'JetBrains Mono', monospace;
     font-size: 18px;
@@ -2067,56 +2599,32 @@
     overflow-wrap: anywhere;
   }
 
-  .impact-card small {
+  .side-card small {
     display: block;
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px;
-    color: #44a0ff;
+    color: #777;
     margin-top: 7px;
   }
 
-  .route-table,
-  .scope-note {
-    grid-column: 1 / -1;
-  }
-
-  .table-scroll.route-table {
+  .side-table {
     overflow-x: hidden;
   }
 
-  .route-table table {
+  .side-table table {
     min-width: 0;
     table-layout: fixed;
   }
 
-  .route-table th,
-  .route-table td {
+  .side-table th,
+  .side-table td {
     padding-left: 6px;
     padding-right: 6px;
   }
 
-  .route-table th {
-    letter-spacing: 0.08em;
-  }
-
-  .route-table th:first-child,
-  .route-table td:first-child {
-    width: 46%;
-  }
-
-  .route-table th:nth-child(2),
-  .route-table td:nth-child(2) {
-    width: 15%;
-  }
-
-  .route-table th:nth-child(3),
-  .route-table td:nth-child(3) {
-    width: 19%;
-  }
-
-  .route-table th:nth-child(4),
-  .route-table td:nth-child(4) {
-    width: 20%;
+  .side-table th:first-child,
+  .side-table td:first-child {
+    width: 42%;
   }
 
   .scope-note {
@@ -2140,6 +2648,8 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
+    text-align: center;
+    padding: 0 20px;
   }
 
   .loading-marker {
@@ -2154,362 +2664,79 @@
     100% { opacity: 0.3; }
   }
 
-  /* ========== FLOW ========== */
+  /* ========== FOLD ========== */
 
-  .flow {
-    display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) minmax(0, 0.95fr);
-    gap: 0;
-    border-top: 1px solid #141414;
+  .fold {
+    margin-top: 12px;
   }
 
-  .flow-col {
-    padding: 14px 14px 4px;
-    border-right: 1px solid #141414;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .flow-col:last-child {
-    border-right: none;
-  }
-
-  .flow-col.flow-mid {
-    background: rgba(0, 204, 102, 0.02);
-  }
-
-  .col-head {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    font-weight: 700;
-    color: #555;
-    text-transform: uppercase;
-    letter-spacing: 0.18em;
-    padding-bottom: 8px;
-    border-bottom: 1px dashed #1a1a1a;
-  }
-
-  .col-head.accent {
-    color: #00cc66;
-  }
-
-  .node {
-    border: 1px solid #1a1a1a;
-    padding: 12px 14px;
-    background: #0d0d0d;
-  }
-
-  .node.primary {
-    border-color: rgba(0, 204, 102, 0.45);
-    background: linear-gradient(180deg, rgba(0, 204, 102, 0.07) 0%, #0a0a0a 60%);
-    box-shadow: inset 0 0 18px rgba(0, 204, 102, 0.04);
-  }
-
-  .node.reserve {
-    border-color: rgba(212, 160, 23, 0.4);
-    background: linear-gradient(180deg, rgba(212, 160, 23, 0.06) 0%, #0a0a0a 60%);
-  }
-
-  .node.muted {
-    background: #080808;
-    border-color: #141414;
-  }
-
-  .node-head {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    margin-bottom: 4px;
-    flex-wrap: wrap;
-  }
-
-  .node-idx {
+  .fold summary {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #00cc66;
-    font-weight: 700;
-    min-width: 14px;
-  }
-
-  .node-head strong,
-  .node-title-link {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    color: #e0e0e0;
-    font-weight: 700;
-    flex: 1;
-    min-width: 0;
-  }
-
-  .node-title-link,
-  .addr-link,
-  .target-name,
-  .table-link,
-  .foot a {
-    text-decoration: none;
-    transition: color 0.15s, border-color 0.15s;
-  }
-
-  .node-title-link:hover,
-  .addr-link:hover,
-  .target-name:hover,
-  .table-link:hover,
-  .foot a:hover {
-    color: #00cc66;
-  }
-
-  .node-pill {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    font-weight: 600;
-    padding: 2px 7px;
-    border: 1px solid #1a1a1a;
-    background: #050505;
-    color: #555;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    white-space: nowrap;
-  }
-
-  .node-pill.hot {
-    border-color: rgba(0, 204, 102, 0.4);
-    color: #00cc66;
-  }
-
-  .node-pill.code {
-    color: #888;
-  }
-
-  .node-pill.amber {
-    border-color: rgba(212, 160, 23, 0.4);
-    color: #d4a017;
-  }
-
-  .node-role {
-    color: #666;
-    font-size: 11px;
-    margin: 4px 0 10px;
-    line-height: 1.45;
-  }
-
-  .node-role.mono {
-    font-family: 'JetBrains Mono', monospace;
-    color: #888;
-  }
-
-  .addr-link {
-    color: #888;
-    font-family: 'JetBrains Mono', monospace;
-    margin-left: 6px;
-    border-bottom: 1px dotted #2a2a2a;
-  }
-
-  .node-role.mono .addr-link {
-    margin-left: 0;
-  }
-
-  .node-value {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 2px 8px;
-    align-items: baseline;
-    margin: 8px 0 10px;
-    padding: 8px 10px;
-    background: #060606;
-    border-left: 2px solid #1a1a1a;
-  }
-
-  .node-value span {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: #555;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-  }
-
-  .node-value strong {
-    justify-self: end;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
-    color: #d8d8d8;
-    font-weight: 700;
-  }
-
-  .node-value small {
-    grid-column: 1 / -1;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #666;
-    overflow-wrap: anywhere;
-  }
-
-  .inventory-note {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 2px 8px;
-    align-items: baseline;
-    margin: 6px 0;
-    padding: 7px 10px;
-    background: #060606;
-    border-left: 2px solid #44a0ff;
-  }
-
-  .inventory-note.blocked {
-    border-left-color: #d4a017;
-  }
-
-  .inventory-note span {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: #666;
+    color: #777;
     text-transform: uppercase;
     letter-spacing: 0.1em;
+    cursor: pointer;
+    padding: 8px 10px;
+    border: 1px dashed #1a1a1a;
+    background: #080808;
+    list-style: none;
+    transition: color 0.15s, border-color 0.15s;
+    user-select: none;
   }
 
-  .inventory-note strong {
-    justify-self: end;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: #b8d8ff;
+  .fold summary::-webkit-details-marker {
+    display: none;
   }
 
-  .inventory-note.blocked strong {
+  .fold summary:hover {
+    color: #b8b8b8;
+    border-color: #2a2a2a;
+  }
+
+  .fold-marker {
+    color: #00cc66;
+    font-weight: 700;
+    margin-right: 6px;
+  }
+
+  .fold[open] .fold-marker {
     color: #d4a017;
   }
 
-  .inventory-note small {
-    grid-column: 1 / -1;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: #666;
-    overflow-wrap: anywhere;
+  .fold[open] summary {
+    border-bottom-style: solid;
+    margin-bottom: 12px;
   }
 
-  .targets {
+  .archive-block {
+    padding-bottom: 16px;
+  }
+
+  .archive-block .fold {
+    margin-top: 0;
+  }
+
+  .archive-body {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 18px;
   }
 
-  .target {
-    display: grid;
-    grid-template-columns: 14px minmax(0, 1fr) auto auto;
-    gap: 8px;
-    align-items: baseline;
-    padding: 6px 8px;
+  .archive-section {
+    min-width: 0;
+  }
+
+  .archive-title {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #888;
-    background: #060606;
-    border-left: 2px solid #1a1a1a;
-  }
-
-  .target-arrow {
-    color: #333;
-  }
-
-  .target-name {
-    color: inherit;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .target-usd {
-    color: #c8c8c8;
     font-weight: 700;
-    white-space: nowrap;
-    font-size: 9px;
+    color: #999;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .target-pct {
-    color: #c8c8c8;
-    font-weight: 600;
-  }
-
-  .target.on-base {
-    border-left-color: #00cc66;
-    background: rgba(0, 204, 102, 0.05);
-    color: #b8e8c8;
-  }
-
-  .target.on-base .target-arrow {
-    color: #00cc66;
-  }
-
-  .target.on-base .target-pct {
-    color: #00cc66;
-  }
-
-  .target.on-base .target-usd {
-    color: #00cc66;
-  }
-
-  .queue {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 4px;
-    margin: 10px 0;
-    border-top: 1px dashed #1a1a1a;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
     border-bottom: 1px dashed #1a1a1a;
-    padding: 8px 0;
-  }
-
-  .queue div {
-    text-align: left;
-    padding: 0 4px;
-  }
-
-  .queue span {
-    display: block;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: #555;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    margin-bottom: 4px;
-  }
-
-  .queue strong {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    color: #00cc66;
-    font-weight: 700;
-    overflow-wrap: anywhere;
-  }
-
-  .queue-note {
-    margin: -2px 0 10px;
-    color: #777;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    line-height: 1.45;
-  }
-
-  .reserve-total {
-    margin-top: 8px;
-    padding: 10px 12px;
-    background: rgba(212, 160, 23, 0.05);
-    border-left: 2px solid #d4a017;
-  }
-
-  .reserve-total span {
-    display: block;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: #777;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    margin-bottom: 4px;
-  }
-
-  .reserve-total strong {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 16px;
-    color: #d4a017;
-    font-weight: 700;
   }
 
   /* ========== SPLIT ========== */
@@ -2519,6 +2746,10 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px;
     margin-bottom: 14px;
+  }
+
+  .archive-body .split {
+    margin-bottom: 0;
   }
 
   /* ========== TABLES ========== */
@@ -2577,9 +2808,19 @@
     color: #44a0ff;
   }
 
+  td.accent-amber {
+    color: #d4a017;
+  }
+
   .table-link {
     color: #b8b8b8;
     border-bottom: 1px dotted #2a2a2a;
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+
+  .table-link:hover {
+    color: #00cc66;
   }
 
   td.ellipsis {
@@ -2595,6 +2836,17 @@
 
   tbody tr:hover td.accent {
     color: #2ee080;
+  }
+
+  .routing-table td.targets-cell {
+    text-align: left;
+    font-size: 10px;
+    color: #888;
+    max-width: 380px;
+  }
+
+  .routing-table th:last-child {
+    text-align: left;
   }
 
   /* ========== TIMELINE ========== */
@@ -2722,6 +2974,24 @@
   .foot a {
     color: #888;
     border-bottom: 1px dotted #2a2a2a;
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+
+  .foot a:hover {
+    color: #00cc66;
+  }
+
+  /* ========== MOTION ========== */
+
+  @media (prefers-reduced-motion: reduce) {
+    .fpipe-line,
+    .fpipe-line-v,
+    .cursor,
+    .dot.ok,
+    .loading-marker {
+      animation: none;
+    }
   }
 
   /* ========== RESPONSIVE ========== */
@@ -2731,24 +3001,61 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .flow {
+    .fmap {
       grid-template-columns: 1fr;
+      grid-template-areas:
+        'apps'
+        'p1'
+        'cols'
+        'pv'
+        'stak'
+        'p2'
+        'base'
+        'p3'
+        'reserve'
+        'chan';
     }
 
-    .flow-col {
-      border-right: none;
-      border-bottom: 1px solid #141414;
+    .fpipe {
+      flex-direction: row;
+      justify-content: flex-start;
+      gap: 10px;
+      padding: 8px 14px;
     }
 
-    .flow-col:last-child {
-      border-bottom: none;
+    .fpipe .fpipe-line {
+      width: 2px;
+      height: 26px;
+      background: repeating-linear-gradient(180deg, currentColor 0 7px, transparent 7px 14px);
+      animation: dashflow-v 0.9s linear infinite;
+    }
+
+    .fpipe .fpipe-arrow {
+      align-self: center;
+      margin-top: 0;
+    }
+
+    .fpipe-v {
+      flex-direction: row;
+      justify-content: flex-start;
+      gap: 10px;
+      padding: 8px 14px;
+    }
+
+    .fpipe-line-v {
+      min-height: 26px;
+      flex: 0 0 auto;
+    }
+
+    .fchannel {
+      grid-template-columns: 1fr;
     }
 
     .split {
       grid-template-columns: 1fr;
     }
 
-    .generated-layout {
+    .side-layout {
       grid-template-columns: 1fr;
     }
   }
@@ -2773,33 +3080,20 @@
       grid-template-columns: 1fr;
     }
 
-    .metric {
-      border-right: none;
-    }
-
     .block {
       padding: 14px 14px 18px;
+    }
+
+    .block-head {
+      flex-wrap: wrap;
     }
 
     .chart-frame {
       height: 280px;
     }
 
-    .generated-layout .chart-frame {
+    .side-layout .chart-frame {
       height: 300px;
-    }
-
-    .impact-panel {
-      grid-template-columns: 1fr;
-    }
-
-    .table-scroll.route-table {
-      overflow-x: auto;
-    }
-
-    .route-table table {
-      min-width: 480px;
-      table-layout: auto;
     }
   }
 </style>
