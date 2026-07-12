@@ -5,7 +5,7 @@
 
 ## Summary
 
-Added a first-class BooneTools `/status` dashboard that combines current THORNode chain state with the existing node-vote history backend. The page gives normal users and operators one concise view of trading, LP deposits/withdrawals, live network metrics, effective halt/resume changes, and recent economic governance votes, with thorchain.net retained as the detail surface.
+Added and deployed a first-class BooneTools `/status` dashboard that combines current THORNode chain state with the existing node-vote history backend. The page gives normal users and operators one concise view of trading, LP deposits/withdrawals, live network metrics, effective halt/resume changes, and recent economic governance votes, with thorchain.net retained as the detail surface.
 
 ## Work Done
 
@@ -17,6 +17,7 @@ Added a first-class BooneTools `/status` dashboard that combines current THORNod
 - Added 60-second auto-refresh, manual refresh, source/freshness labels, transaction links, and redirects to `thorchain.net/network` and `thorchain.net/network/votes`.
 - Added focused model tests for halt semantics, chain-state separation, update translation/deduplication, and governance filtering.
 - Verified desktop and mobile layouts, manual refresh behavior, live mainnet data, no horizontal overflow, and an empty browser error console.
+- Deployed pushed `main@a6f113d` with the canonical frontend script and verified `https://boone.tools/status`, its generated JS/CSS chunks, live-source rendering, and production browser console.
 
 ## Discoveries
 
@@ -41,11 +42,11 @@ Added a first-class BooneTools `/status` dashboard that combines current THORNod
 
 ## In Progress
 
-Production deployment follows this session commit and push; it is not yet complete at the time of this record.
+None - session complete. The feature is committed, pushed, deployed, and live.
 
 ## Next Steps
 
-- [ ] Deploy the pushed `main` frontend with `scripts/deploy-boonetools-frontend.sh`.
-- [ ] Verify `https://boone.tools/status` loads the new chunk and current mainnet data.
+- [x] Deploy the pushed `main` frontend with `scripts/deploy-boonetools-frontend.sh`.
+- [x] Verify `https://boone.tools/status` loads the new chunk and current mainnet data.
 - [ ] Gather operator/community feedback on which additional current-state signals are worth the page space.
 - [ ] Consider a small backend-composed status endpoint only if browser-side THORNode fan-out becomes an operational concern.
