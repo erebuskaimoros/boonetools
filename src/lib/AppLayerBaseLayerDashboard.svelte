@@ -1,6 +1,9 @@
 <script>
   import { onMount } from 'svelte';
   import Chart from 'chart.js/auto';
+  import zoomPlugin from 'chartjs-plugin-zoom';
+
+  Chart.register(zoomPlugin);
 
   const DATA_BASE = '/data/rujira-base-layer-fees';
   const APP_LAYER_API_BASE = (
@@ -213,16 +216,35 @@
   let generatedFeesChart;
 
   // Two independent per-chart toggles: bucket size (daily default, weekly
-  // option) and view (per-bucket bars vs cumulative line).
+  // option) and view (per-bucket bars vs cumulative line). The visible time
+  // range is set directly on the chart by dragging or scrolling to zoom.
   let granularity = { collected: 'daily', paid: 'daily', generated: 'daily' };
   let view = { collected: 'bars', paid: 'bars', generated: 'bars' };
+  let zoomed = { collected: false, paid: false, generated: false };
 
   function setGranularity(key, value) {
     granularity = { ...granularity, [key]: value };
+    zoomed = { ...zoomed, [key]: false };
   }
 
   function setView(key, value) {
     view = { ...view, [key]: value };
+    zoomed = { ...zoomed, [key]: false };
+  }
+
+  const chartByKey = () => ({
+    collected: collectedChart,
+    paid: paymentChart,
+    generated: generatedFeesChart
+  });
+
+  function resetZoom(key) {
+    chartByKey()[key]?.resetZoom();
+    zoomed = { ...zoomed, [key]: false };
+  }
+
+  function markZoomed(key, active) {
+    if (zoomed[key] !== active) zoomed = { ...zoomed, [key]: active };
   }
 
   const usd0 = new Intl.NumberFormat('en-US', {
@@ -267,6 +289,18 @@
   $: generatedFeeBackfillLabel = generatedFeeMeta?.backfillComplete
     ? 'backfill complete'
     : `${number2.format(Number(generatedFeeMeta?.pendingBlockCount || 0))} blocks queued`;
+
+  // Total benefit to THORChain = 02 realized to the Reserve + 03 realized to
+  // System Income. 01 collected is excluded (it overlaps 02 by construction) and
+  // so is pending inventory (not yet realized) — only these two are fresh,
+  // non-overlapping value that actually reached the network.
+  $: totalReservePaidUsd = latestWeek?.cumulative_usd || 0;
+  $: totalBenefitUsd = totalReservePaidUsd + totalGeneratedFeeUsd;
+  $: benefitReserveShare = totalBenefitUsd > 0 ? (totalReservePaidUsd / totalBenefitUsd) * 100 : 0;
+  $: benefitLpShare = totalBenefitUsd > 0 ? (totalGeneratedFeeUsd / totalBenefitUsd) * 100 : 0;
+  $: totalBenefitLoading =
+    (reservePaymentsLoading && !weeklyRows.length) ||
+    (generatedFeesLoading && !generatedFeeRows.length);
 
   $: inflowRows = inflows?.weekly || [];
   $: inflowMeta = inflows?.meta || null;
@@ -337,6 +371,7 @@
 
   function renderCollectedChart(pick, chartView) {
     collectedChart = renderSeriesChart(collectedCanvas, collectedChart, {
+      zoomKey: 'collected',
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
@@ -360,6 +395,7 @@
 
   function renderPaymentChart(pick, chartView) {
     paymentChart = renderSeriesChart(paymentCanvas, paymentChart, {
+      zoomKey: 'paid',
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
@@ -379,6 +415,7 @@
 
   function renderGeneratedFeesChart(pick, chartView) {
     generatedFeesChart = renderSeriesChart(generatedFeesCanvas, generatedFeesChart, {
+      zoomKey: 'generated',
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
@@ -733,7 +770,7 @@
   // Single-axis bar / cumulative-line chart, switched by view.
   function renderSeriesChart(canvas, previousChart, config) {
     previousChart?.destroy();
-    const { grain, view: chartView, colors, valueField, cumulativeField, barLabel, cumulativeLabel, afterBody } = config;
+    const { grain, view: chartView, colors, valueField, cumulativeField, barLabel, cumulativeLabel, afterBody, zoomKey } = config;
     const stepDays = grain === 'weekly' ? 7 : 1;
     const rows = fillBucketGaps(config.rows, valueField, cumulativeField, stepDays);
     const cumulative = chartView === 'cumulative';
@@ -788,6 +825,23 @@
               label(context) {
                 return `${context.dataset.label}: ${usd2.format(context.raw)}`;
               }
+            }
+          },
+          zoom: {
+            limits: { x: { minRange: 1 } },
+            zoom: {
+              // Drag-to-select the time range; wheel is intentionally off so
+              // scrolling past the chart doesn't get trapped zooming it.
+              mode: 'x',
+              wheel: { enabled: false },
+              pinch: { enabled: true },
+              drag: {
+                enabled: true,
+                backgroundColor: colors.faint,
+                borderColor: colors.mark,
+                borderWidth: 1
+              },
+              onZoomComplete: zoomKey ? () => markZoomed(zoomKey, true) : undefined
             }
           }
         },
@@ -1079,8 +1133,9 @@
       App-layer fees, tracked in three steps: <b class="k-collected">01 collected</b> by the Base
       Layer collector, <b class="k-paid">02 paid</b> out to the TC Reserve, and
       <b class="k-generated">03 liquidity fees generated</b> on THORChain pools along the way.
-      The base layer only benefits when 02 lands — 01 is upstream accrual and 03 goes to pool
-      LPs, so the three series are never summed.
+      <b class="k-benefit">Σ total benefit to THORChain</b> = 02 (realized to the Reserve) + 03
+      (realized to System Income). 01 collected approximates 02 plus pending inventory, so it is
+      not added to the total.
     </p>
     <div class="rule"></div>
   </div>
@@ -1202,7 +1257,7 @@
         <strong class="fnode-name">TC Reserve</strong>
         <strong class="fnode-fig">{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(latestWeek?.cumulative_usd || 0)}</strong>
         <p class="fnode-sub">
-          MsgDeposit RESERVE · {number2.format(meta?.eventCount || 0)} deposits — the moment the base layer actually benefits
+          MsgDeposit RESERVE · {number2.format(meta?.eventCount || 0)} deposits into the THORChain Reserve
         </p>
       </a>
 
@@ -1228,7 +1283,7 @@
           <span class="fnode-kicker"><i>03</i> generated</span>
           <strong class="fnode-name">TC Liquidity Fees</strong>
           <strong class="fnode-fig">{generatedFeesLoading && !generatedFeeRows.length ? '—' : usd2.format(totalGeneratedFeeUsd)}</strong>
-          <p class="fnode-sub">paid to pool LPs — a side effect, not Reserve revenue; never added to 01 or 02</p>
+          <p class="fnode-sub">flows to THORChain System Income, not the Reserve; counted in Σ benefit alongside 02, never with 01</p>
         </a>
       </div>
     </div>
@@ -1240,9 +1295,37 @@
       <span class="legend-arrow">→</span>
       <span><b class="k-paid">02</b> dripped into the Reserve</span>
       <span class="legend-sep">│</span>
-      <span><b class="k-generated">03</b> pool fees generated along the way go to LPs</span>
+      <span><b class="k-generated">03</b> pool fees generated along the way flow to System Income</span>
+      <span class="legend-sep">│</span>
+      <span><b class="k-benefit">Σ</b> benefit to TC = 02 + 03</span>
     </div>
   </section>
+
+  <!-- ============ TOTAL BENEFIT ============ -->
+  <article class="benefit-hero">
+    <div class="benefit-hero-main">
+      <div class="metric-head">
+        <span class="benefit-hero-sigma">Σ</span>
+        <span class="metric-label">total benefit to thorchain</span>
+      </div>
+      <strong class="benefit-hero-value">{totalBenefitLoading ? '—' : usd2.format(totalBenefitUsd)}</strong>
+      <small class="metric-foot">
+        <b class="k-paid">02</b> paid to Reserve + <b class="k-generated">03</b> liquidity fees to System Income · excludes 01 collected &amp; pending
+      </small>
+    </div>
+    <div class="benefit-hero-split">
+      <div class="benefit-hero-leg green">
+        <span>02 → tc reserve</span>
+        <strong>{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(totalReservePaidUsd)}</strong>
+        <small>{totalBenefitUsd > 0 ? `${benefitReserveShare.toFixed(0)}% · realized` : 'realized'}</small>
+      </div>
+      <div class="benefit-hero-leg blue">
+        <span>03 → system income</span>
+        <strong>{generatedFeesLoading && !generatedFeeRows.length ? '—' : usd2.format(totalGeneratedFeeUsd)}</strong>
+        <small>{totalBenefitUsd > 0 ? `${benefitLpShare.toFixed(0)}% · liq fees` : 'liq fees'}</small>
+      </div>
+    </div>
+  </article>
 
   <!-- ============ METRICS ============ -->
   <div class="metric-grid">
@@ -1272,7 +1355,7 @@
       <strong class="metric-value">
         {generatedFeesLoading && !generatedFeeRows.length ? '—' : usd2.format(totalGeneratedFeeUsd)}
       </strong>
-      <small class="metric-foot">{number4.format(totalGeneratedFeeRune)} RUNE · non-additive impact</small>
+      <small class="metric-foot">{number4.format(totalGeneratedFeeRune)} RUNE · System Income side of Σ benefit</small>
     </article>
     <article class="metric">
       <div class="metric-head">
@@ -1301,13 +1384,16 @@
           <button class:active={view.collected === 'bars'} on:click={() => setView('collected', 'bars')}>[bars]</button>
           <button class:active={view.collected === 'cumulative'} on:click={() => setView('collected', 'cumulative')}>[cumul]</button>
         </div>
+        <span class="ctrl-div">·</span>
+        <span class="zoom-hint">drag to zoom</span>
+        <button class="zoom-reset" on:click={() => resetZoom('collected')} disabled={!zoomed.collected}>[reset]</button>
       </div>
     </div>
     <p class="block-lede">
-      Net fees collected by the Base Layer collector, measured from daily balance changes plus
-      Reserve payouts at daily prices — so collected always ≈ paid + pending, no matter how fees
-      arrive or get converted. Cumulative starts from the inventory the collector already held at
-      the first Reserve deposit. Collected is not yet a base-layer benefit.
+      Net fees collected by the Base Layer collector, derived from daily balance changes plus
+      Reserve payouts and valued at daily prices. By construction this approximates the amount
+      subsequently paid to the Reserve plus the balance still pending conversion. Cumulative
+      totals begin from the inventory held at the first Reserve deposit.
       Source: {formatDataSource(inflowMeta?.source)}.
     </p>
 
@@ -1381,12 +1467,14 @@
           <button class:active={view.paid === 'bars'} on:click={() => setView('paid', 'bars')}>[bars]</button>
           <button class:active={view.paid === 'cumulative'} on:click={() => setView('paid', 'cumulative')}>[cumul]</button>
         </div>
+        <span class="ctrl-div">·</span>
+        <span class="zoom-hint">drag to zoom</span>
+        <button class="zoom-reset" on:click={() => resetZoom('paid')} disabled={!zoomed.paid}>[reset]</button>
       </div>
     </div>
     <p class="block-lede">
-      Actual RESERVE deposits from the Base Layer collector — RUNE sent × historical RUNE/USD at
-      dispersal time, not the current value of that RUNE. This is the moment the base layer
-      benefits. Range:
+      RESERVE deposits from the Base Layer collector, valued as RUNE deposited × the historical
+      RUNE/USD rate at the time of each deposit rather than its current value. Range:
       {#if firstEvent && latestEvent}
         {formatWeekLabel(firstEvent.date.slice(0, 10))} → {formatWeekLabel(latestEvent.date.slice(0, 10))}.
       {:else}
@@ -1467,12 +1555,16 @@
           <button class:active={view.generated === 'bars'} on:click={() => setView('generated', 'bars')}>[bars]</button>
           <button class:active={view.generated === 'cumulative'} on:click={() => setView('generated', 'cumulative')}>[cumul]</button>
         </div>
+        <span class="ctrl-div">·</span>
+        <span class="zoom-hint">drag to zoom</span>
+        <button class="zoom-reset" on:click={() => resetZoom('generated')} disabled={!zoomed.generated}>[reset]</button>
       </div>
     </div>
     <p class="block-lede">
-      THORChain liquidity fees attributed to Rujira contract activity. They are paid to pool LPs,
-      not the Reserve, and must never be added to 01 or 02. Source: {generatedFeeSource} ·
-      {generatedFeeBackfillLabel}. Scan scope: {generatedFeeScope}
+      THORChain liquidity fees attributed to Rujira contract activity. These fees flow into
+      THORChain System Income rather than the Reserve, and are counted toward Total Benefit to TC
+      alongside 02. Source: {generatedFeeSource} · {generatedFeeBackfillLabel}. Scan scope:
+      {generatedFeeScope}
     </p>
 
     <div class="side-layout">
@@ -1951,6 +2043,10 @@
     color: #44a0ff;
   }
 
+  .k-benefit {
+    color: #1fd9a6;
+  }
+
   .rule {
     height: 1px;
     background: linear-gradient(
@@ -2296,6 +2392,98 @@
     color: #222;
   }
 
+  /* ========== TOTAL BENEFIT ========== */
+
+  .benefit-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    gap: 1px;
+    border: 1px solid rgba(31, 217, 166, 0.35);
+    background: #1a1a1a;
+    margin-bottom: 18px;
+  }
+
+  .benefit-hero-main {
+    background: linear-gradient(135deg, rgba(31, 217, 166, 0.09) 0%, #0a0a0a 58%);
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-height: 118px;
+  }
+
+  .benefit-hero-sigma {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 800;
+    color: #1fd9a6;
+  }
+
+  .benefit-hero-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 30px;
+    font-weight: 800;
+    color: #7ff0d0;
+    letter-spacing: -0.01em;
+    line-height: 1.05;
+    margin-top: auto;
+    text-shadow: 0 0 22px rgba(31, 217, 166, 0.22);
+    overflow-wrap: anywhere;
+  }
+
+  .benefit-hero-split {
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+    gap: 1px;
+    background: #1a1a1a;
+  }
+
+  .benefit-hero-leg {
+    background: #0a0a0a;
+    padding: 10px 16px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+  }
+
+  .benefit-hero-leg span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+  }
+
+  .benefit-hero-leg strong {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 17px;
+    font-weight: 800;
+    line-height: 1.1;
+  }
+
+  .benefit-hero-leg small {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #555;
+  }
+
+  .benefit-hero-leg.green {
+    border-left: 2px solid #00cc66;
+  }
+
+  .benefit-hero-leg.green strong {
+    color: #00cc66;
+  }
+
+  .benefit-hero-leg.blue {
+    border-left: 2px solid #44a0ff;
+  }
+
+  .benefit-hero-leg.blue strong {
+    color: #44a0ff;
+  }
+
   /* ========== METRIC GRID ========== */
 
   .metric-grid {
@@ -2494,6 +2682,35 @@
   .blue-t button.active {
     color: #44a0ff;
     font-weight: 700;
+  }
+
+  .zoom-hint {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: #444;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  .zoom-reset {
+    background: transparent;
+    border: none;
+    padding: 2px 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #666;
+    cursor: pointer;
+    letter-spacing: 0.04em;
+    transition: color 0.15s;
+  }
+
+  .zoom-reset:hover:not(:disabled) {
+    color: #c8c8c8;
+  }
+
+  .zoom-reset:disabled {
+    color: #2a2a2a;
+    cursor: default;
   }
 
   /* ========== CHART ========== */
@@ -3001,6 +3218,15 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .benefit-hero {
+      grid-template-columns: 1fr;
+    }
+
+    .benefit-hero-split {
+      grid-template-rows: none;
+      grid-template-columns: 1fr 1fr;
+    }
+
     .fmap {
       grid-template-columns: 1fr;
       grid-template-areas:
@@ -3078,6 +3304,11 @@
 
     .metric-grid {
       grid-template-columns: 1fr;
+    }
+
+    .benefit-hero-split {
+      grid-template-columns: 1fr;
+      grid-template-rows: 1fr 1fr;
     }
 
     .block {
