@@ -50,6 +50,14 @@
     description: "Track live rapid streams plus the largest and latest recorded rapid swaps"
   };
 
+  const statusApp = {
+    name: "Network Status",
+    component: () => import("./lib/StatusDashboard.svelte"),
+    icon: "●",
+    path: "status",
+    description: "Live THORChain chain availability, network changes, and governance activity"
+  };
+
   const tcFeeDashApp = {
     name: "TC Fee Dash",
     component: () => import("./lib/TCFeeDash.svelte"),
@@ -115,6 +123,7 @@
   };
 
   const apps = [
+    statusApp,
     rapidSwapsApp,
     tcFeeDashApp,
     bondTrackerApp,
