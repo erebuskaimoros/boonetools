@@ -15,6 +15,7 @@ Refined the BooneTools `/status` dashboard so chain operations are easier to sca
 - Loaded Midgard churn history independently from the core status sources so a history failure cannot blank the dashboard.
 - Added an active-node `status_since` fallback for the latest churn height and marks fallback-derived timing as estimated.
 - Updated status-model tests and verified the production build, desktop/mobile layout, and browser console.
+- Pushed `main@ec7df14`, deployed it with the guarded frontend script, and verified the live route, hashed status assets, responsive layout, current network data, and empty production console.
 
 ## Discoveries
 
@@ -34,10 +35,10 @@ Refined the BooneTools `/status` dashboard so chain operations are easier to sca
 
 ## In Progress
 
-Production deployment and live verification are requested after the session commit is pushed.
+None - session complete. The refinement is committed, pushed, deployed, and live.
 
 ## Next Steps
 
-- [ ] Deploy the pushed frontend with `scripts/deploy-boonetools-frontend.sh`.
-- [ ] Verify `https://boone.tools/status` renders LP Actions, Signing, and current churn state.
+- [x] Deploy the pushed frontend with `scripts/deploy-boonetools-frontend.sh`.
+- [x] Verify `https://boone.tools/status` renders LP Actions, Signing, and current churn state.
 - [ ] Monitor operator feedback on whether signing and churn provide the right level of at-a-glance detail.
