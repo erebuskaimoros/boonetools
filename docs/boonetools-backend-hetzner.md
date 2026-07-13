@@ -38,6 +38,8 @@ Public GETs continue to accept:
 - `apikey: <PUBLIC_API_KEY>`
 - `Authorization: Bearer <PUBLIC_API_KEY>`
 
+The public `/functions/v1/stuck-transactions` endpoint powers the `/status` dashboard's high-confidence stuck-payment list. It composes current THORNode queue and transaction-stage state behind a 30-second in-process cache; it requires no database migration or additional environment variable.
+
 ## Local / Server Runtime Env
 
 Start from `backend/.env.example` and set at least:

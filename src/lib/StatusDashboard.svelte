@@ -4,6 +4,7 @@
   import { thornode } from './api/thornode.js';
   import { midgard } from './api/midgard.js';
   import { fetchNodeVotesDashboard } from './node-votes/api.js';
+  import { fetchStuckTransactions } from './status/api.js';
   import {
     buildChainStatuses,
     buildChurnStatus,
@@ -20,6 +21,7 @@
   let lastBlocks = [];
   let nodes = [];
   let churns = [];
+  let stuckDashboard = null;
   let voteDashboard = null;
   let lastUpdated = null;
   let loading = true;
@@ -27,6 +29,7 @@
   let coreError = '';
   let votesError = '';
   let churnError = '';
+  let stuckError = '';
   let refreshTimer;
 
   $: chainStatuses = buildChainStatuses(inboundAddresses, mimir, lastBlocks);
@@ -38,6 +41,7 @@
   $: voteRows = voteDashboard?.by_vote || [];
   $: governanceVotes = getGovernanceVotes(voteRows);
   $: statusUpdates = getRecentStatusUpdates(voteRows);
+  $: stuckTransactions = stuckDashboard?.transactions || [];
   $: haltedChains = chainStatuses.filter((chain) => chain.trading === 'paused').map((chain) => chain.chain);
 
   onMount(() => {
@@ -58,8 +62,9 @@
     coreError = '';
     votesError = '';
     churnError = '';
+    stuckError = '';
 
-    const [coreResult, votesResult, churnResult] = await Promise.allSettled([
+    const [coreResult, votesResult, churnResult, stuckResult] = await Promise.allSettled([
       Promise.all([
         thornode.getInboundAddresses({ cache: false }),
         thornode.getNodes({ cache: false }),
@@ -67,7 +72,8 @@
         thornode.fetch('/thorchain/lastblock', { cache: false })
       ]),
       fetchNodeVotesDashboard({ days: 45, forceRefresh: !options.silent }),
-      midgard.getChurns({ cache: false })
+      midgard.getChurns({ cache: false }),
+      fetchStuckTransactions({ forceRefresh: !options.silent })
     ]);
 
     if (coreResult.status === 'fulfilled') {
@@ -87,6 +93,12 @@
       churns = churnResult.value;
     } else {
       churnError = churnResult.reason?.message || 'Churn history is unavailable.';
+    }
+
+    if (stuckResult.status === 'fulfilled') {
+      stuckDashboard = stuckResult.value;
+    } else {
+      stuckError = stuckResult.reason?.message || 'Stuck transaction scan is unavailable.';
     }
 
     loading = false;
@@ -145,10 +157,44 @@
   function txUrl(txId) {
     return `https://thorchain.net/tx/${encodeURIComponent(txId)}`;
   }
+
+  function shortValue(value, start = 8, end = 6) {
+    const text = String(value || '');
+    if (text.length <= start + end + 1) return text || '-';
+    return `${text.slice(0, start)}…${text.slice(-end)}`;
+  }
+
+  function formatBaseAmount(value) {
+    try {
+      const amount = BigInt(String(value || '0'));
+      const whole = amount / 100_000_000n;
+      const fraction = String(amount % 100_000_000n).padStart(8, '0').replace(/0+$/, '');
+      return `${number.format(Number(whole))}${fraction ? `.${fraction}` : ''}`;
+    } catch {
+      return '-';
+    }
+  }
+
+  function formatOutstanding(row) {
+    const formatted = formatBaseAmount(row?.amount);
+    return formatted === '0'
+      ? `Pending ${row?.asset_ticker || row?.chain || 'output'}`
+      : `${formatted} ${row?.asset_ticker || ''}`.trim();
+  }
+
+  function formatBlockDuration(value) {
+    const totalMinutes = Math.max(0, Math.floor((Number(value) * 6) / 60));
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${Math.max(1, minutes)}m`;
+  }
 </script>
 
 <svelte:head>
-  <meta name="description" content="Live THORChain network, chain, governance, and Mimir status." />
+  <meta name="description" content="Live THORChain network, chain, stuck transaction, governance, and Mimir status." />
 </svelte:head>
 
 <div class="status-dashboard">
@@ -281,6 +327,75 @@
       </div>
     </section>
 
+    <section class="block stuck-block" aria-labelledby="stuck-transactions-title">
+      <div class="block-title">
+        <h2 id="stuck-transactions-title"><span>▌</span> Stuck Transactions</h2>
+        {#if stuckDashboard}
+          <span class="stuck-count">{stuckDashboard.count || 0} ACTIVE</span>
+        {/if}
+      </div>
+      <p class="stuck-criteria">
+        Finalized user payments past their protocol window with no matching outbound.
+        Expected limit, streaming, security-delay, and halt waits are excluded.
+      </p>
+      {#if stuckError && !stuckDashboard}
+        <div class="inline-alert"><span>WRN</span>{stuckError}</div>
+      {:else}
+        {#if stuckError || stuckDashboard?.warning || stuckDashboard?.partial}
+          <div class="inline-alert">
+            <span>WRN</span>
+            {stuckError || stuckDashboard?.warning || `${stuckDashboard?.failed_lookups || 0} transaction lookups failed; this scan may be incomplete.`}
+          </div>
+        {/if}
+        {#if stuckTransactions.length === 0}
+          <div class="empty-state clean-state"><span>✓</span>No currently detected stuck transactions.</div>
+        {:else}
+          <div class="table-wrap">
+            <table class="stuck-table">
+              <thead>
+                <tr>
+                  <th>Transaction</th>
+                  <th>State</th>
+                  <th>Outstanding</th>
+                  <th>Destination</th>
+                  <th>Overdue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each stuckTransactions as transaction}
+                  <tr class="stuck-row">
+                    <td>
+                      <a class="tx-id" href={txUrl(transaction.tx_id)} target="_blank" rel="noopener noreferrer" title={transaction.tx_id}>
+                        {shortValue(transaction.tx_id)} <span>↗</span>
+                      </a>
+                      {#if transaction.completed_outbounds > 0}
+                        <small>{transaction.completed_outbounds} sibling outbound{transaction.completed_outbounds === 1 ? '' : 's'} completed</small>
+                      {/if}
+                    </td>
+                    <td>
+                      <span class="stuck-state"><i></i>STUCK</span>
+                      <small>{transaction.stage_label}</small>
+                    </td>
+                    <td>
+                      <strong class="outstanding-amount">{formatOutstanding(transaction)}</strong>
+                      <small>{transaction.chain}</small>
+                    </td>
+                    <td>
+                      <span class="destination" title={transaction.destination}>{shortValue(transaction.destination, 7, 6)}</span>
+                    </td>
+                    <td>
+                      <strong class="overdue-time">{formatBlockDuration(transaction.overdue_blocks)}</strong>
+                      <small>{number.format(transaction.overdue_blocks)} blocks</small>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      {/if}
+    </section>
+
     <div class="lower-grid">
       <section class="block updates-block">
         <div class="block-title">
@@ -349,7 +464,7 @@
 
     <div class="source-line">
       <span><i></i> LIVE</span>
-      THORNode current state · Midgard churn history · BooneTools node-vote history · auto-refresh 60s
+      THORNode current state · Midgard churn history · BooneTools stuck-tx scan and node-vote history · auto-refresh 60s
       {#if lastUpdated}<em>updated {formatDateTime(lastUpdated)}</em>{/if}
     </div>
   {/if}
@@ -569,6 +684,22 @@
   }
 
   .chain-block { margin-bottom: 16px; }
+  .stuck-block { margin-bottom: 16px; border-color: #241518; }
+  .stuck-block .block-title h2 span { color: #dc3545; }
+  .stuck-count {
+    padding: 3px 7px;
+    border: 1px solid rgba(220, 53, 69, .28);
+    color: #dc3545;
+    font: 700 8px/1 'JetBrains Mono', monospace;
+    letter-spacing: .1em;
+  }
+  .stuck-criteria {
+    margin: 0;
+    padding: 10px 16px;
+    border-bottom: 1px solid #151112;
+    color: #555;
+    font: 9px/1.5 'JetBrains Mono', monospace;
+  }
   .block-title { justify-content: space-between; min-height: 44px; padding: 0 16px; border-bottom: 1px solid #1a1a1a; }
   .block-title h2 { margin: 0; color: #aaa; font: 700 11px/1.2 'JetBrains Mono', monospace; letter-spacing: .08em; text-transform: uppercase; }
   .block-title h2 span { color: #00cc66; }
@@ -588,6 +719,21 @@
   .state.partial { color: #888; }
   .state.partial i { background: #888; }
   .height { color: #666; }
+
+  .stuck-table { min-width: 840px; }
+  .stuck-row { background: rgba(220, 53, 69, .018); }
+  .stuck-row:hover { background: rgba(220, 53, 69, .045); }
+  .stuck-row td { border-top-color: #181112; vertical-align: middle; }
+  .stuck-row small { display: block; margin-top: 4px; color: #4d4d4d; font: 8px/1.25 'JetBrains Mono', monospace; }
+  .tx-id { color: #c8c8c8; font: 600 10px/1.2 'JetBrains Mono', monospace; text-decoration: none; }
+  .tx-id span { color: #dc3545; }
+  .tx-id:hover { color: #fff; }
+  .stuck-state { display: inline-flex; align-items: center; gap: 6px; color: #dc3545; font: 800 9px/1 'JetBrains Mono', monospace; letter-spacing: .08em; }
+  .stuck-state i { width: 5px; height: 5px; border-radius: 50%; background: #dc3545; box-shadow: 0 0 7px rgba(220, 53, 69, .35); }
+  .outstanding-amount,
+  .overdue-time { color: #e0b4b9; font: 700 10px/1.2 'JetBrains Mono', monospace; white-space: nowrap; }
+  .destination { color: #777; font: 10px/1.2 'JetBrains Mono', monospace; }
+  .clean-state span { margin-right: 8px; color: #00cc66; }
 
   .lower-grid {
     display: grid;

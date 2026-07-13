@@ -21,6 +21,7 @@ import { handleNodeVotes } from './handlers/node-votes.js';
 import { handleRapidSwaps } from './handlers/rapid-swaps.js';
 import { handleRapidSwapsSwapHistory } from './handlers/rapid-swaps-swap-history.js';
 import { handleStockPrices } from './handlers/stock-prices.js';
+import { handleStuckTransactions } from './handlers/stuck-transactions.js';
 import { handleTcFeeDash } from './handlers/tc-fee-dash.js';
 
 const routes = new Map([
@@ -37,7 +38,8 @@ const routes = new Map([
   ['/app-layer-base-fees', { auth: 'none', handler: handleAppLayerBaseFees }],
   ['/app-layer-live-state', { auth: 'none', handler: handleAppLayerLiveState }],
   ['/app-layer-reserve-payments', { auth: 'none', handler: handleAppLayerReservePayments }],
-  ['/stock-prices', { auth: 'public', handler: handleStockPrices }]
+  ['/stock-prices', { auth: 'public', handler: handleStockPrices }],
+  ['/stuck-transactions', { auth: 'public', handler: handleStuckTransactions }]
 ]);
 
 const server = http.createServer(async (request, response) => {

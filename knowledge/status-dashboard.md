@@ -9,10 +9,15 @@ The BooneTools `/status` dashboard is a concise public current-state surface. It
 - `/thorchain/nodes`: active-node count and majority active version.
 - `/thorchain/mimir`: asset-specific `PauseLPDeposit-*` state not represented by the chain-level LP flag.
 - Midgard `/v2/churns`: latest successful churn height and timestamp.
+- `/functions/v1/stuck-transactions`: cached BooneTools composition of current swap, streaming, scheduled-outbound, and signing queues with per-inbound transaction status.
 
 The chain table presents one `LP Actions` state. `chain_lp_actions_paused` blocks both adds and withdrawals. Full `Halt<chain>Chain`, solvency, global-chain, and node-pause state also blocks both actions, matching the Thornode handlers. If those flags are clear but any `PauseLPDeposit-<chain>-*` Mimir is positive, the combined chain state is `PARTIAL`.
 
 Signing is independent of trading and LP actions. Global or per-chain `HaltSigning` values become active once their configured height is reached; a full chain halt also reports signing as paused. The top churn card applies the same height-aware rule to `HaltChurning` and shows elapsed time since Midgard's latest successful churn. If churn history is unavailable, the card estimates from the newest active-node `status_since` height without failing current chain status.
+
+The Stuck Transactions section is intentionally narrower than a pending-transaction list. It includes only finalized user obligations that have no matching completed outbound and have exceeded the live protocol window while the relevant operation is enabled. Outbound signing uses the original transaction's scheduled height—not the rolling retry height—and the current `SigningTransactionPeriod + ObservationDelayFlexibility`. Completed sibling outbounds are matched individually so one successful payment cannot hide another unpaid obligation. Active limit orders, progressing streams, calculated security delays, and transactions explained by current trading, streaming, signing, full-chain, or solvency halts are excluded.
+
+The backend composes and caches the fan-out for 30 seconds, bounds per-transaction status lookups, and exposes partial-scan metadata if individual lookups fail. This prevents every browser from querying THORNode once per queued transaction.
 
 ## Historical Sources
 
@@ -25,4 +30,4 @@ The full explorer remains the detail surface:
 
 ## Failure Behavior
 
-THORNode current state and BooneTools vote history load independently. If vote history is unavailable, current chain availability remains visible with a scoped warning. The page refreshes every 60 seconds and supports manual refresh.
+THORNode current state, the BooneTools stuck-transaction scan, and BooneTools vote history load independently. A stuck-scan or vote-history failure leaves current chain availability visible with a scoped warning. The page refreshes every 60 seconds and supports manual refresh.
