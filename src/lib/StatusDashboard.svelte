@@ -685,7 +685,7 @@
   }
 
   .chain-block { margin-bottom: 16px; }
-  .stuck-block { margin-bottom: 16px; }
+  .stuck-block { margin-bottom: 16px; border-color: rgba(0, 204, 102, .18); }
   .stuck-block.has-stuck { border-color: #241518; }
   .stuck-block.has-stuck .block-title h2 span { color: #dc3545; }
   .stuck-count {
