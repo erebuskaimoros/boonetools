@@ -257,8 +257,40 @@
     currency: 'USD',
     maximumFractionDigits: 2
   });
+  const signedUsd2 = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+    signDisplay: 'always'
+  });
   const number2 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
   const number4 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
+  const signedNumber4 = new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: 4,
+    signDisplay: 'always'
+  });
+
+  function collectedFlowTooltip(row, grain, limit = 4) {
+    const entries = Object.entries(row.by_denom || {}).sort(
+      (a, b) => Math.abs(b[1].usd || 0) - Math.abs(a[1].usd || 0)
+    );
+    const shown = entries.slice(0, limit);
+    const remaining = entries.slice(limit);
+    const lines = [
+      `${number2.format(row.transfers || 0)} ${grain === 'weekly' ? 'denom-day' : 'denom'} balance changes`,
+      ...shown.map(
+        ([denom, entry]) =>
+          `${denomLabel(denom)}: ${signedNumber4.format(entry.amount)} · ${signedUsd2.format(entry.usd)}`
+      )
+    ];
+
+    if (remaining.length) {
+      const remainingUsd = remaining.reduce((sum, [, entry]) => sum + (entry.usd || 0), 0);
+      lines.push(`${number2.format(remaining.length)} other net: ${signedUsd2.format(remainingUsd)}`);
+    }
+
+    return lines;
+  }
 
   $: latestWeek = weeklyRows.at(-1) || null;
   $: firstEvent = reserveEvents[0] || null;
@@ -291,7 +323,7 @@
     : `${number2.format(Number(generatedFeeMeta?.pendingBlockCount || 0))} blocks queued`;
 
   // Total benefit to THORChain = 02 realized to the Reserve + 03 realized to
-  // System Income. 01 collected is excluded (it overlaps 02 by construction) and
+  // System Income. 01 accrued is excluded (it overlaps 02 by construction) and
   // so is pending inventory (not yet realized) — only these two are fresh,
   // non-overlapping value that actually reached the network.
   $: totalReservePaidUsd = latestWeek?.cumulative_usd || 0;
@@ -304,7 +336,10 @@
 
   $: inflowRows = inflows?.weekly || [];
   $: inflowMeta = inflows?.meta || null;
-  $: inflowDenomTotals = (inflows?.denomTotals || []).slice(0, 8);
+  $: inflowDenomTotals = (inflows?.denomTotals || [])
+    .slice()
+    .sort((a, b) => Math.abs(b.usd || 0) - Math.abs(a.usd || 0))
+    .slice(0, 8);
   $: totalInflowUsd = inflowMeta?.totalInflowUsd || inflowRows.at(-1)?.cumulative_usd || 0;
   $: inflowOpeningUsd = Number(inflowMeta?.baselineInventoryUsd || 0);
   $: inflowNetNewUsd = Number(inflowMeta?.netNewInflowUsd || 0);
@@ -323,13 +358,7 @@
     ])
   );
   $: baseInventory = collectorInventories.base || EMPTY_INVENTORY;
-  $: pendingRune = baseInventory.eligible.rows
-    .filter((balance) => normalizeDenom(balance.denom) === 'rune')
-    .reduce((sum, balance) => sum + balance.amount, 0);
-  $: stableUsd = baseInventory.conversion.rows
-    .filter((balance) => isStableDenom(balance.denom))
-    .reduce((sum, balance) => sum + balance.usdValue, 0);
-  $: pendingKnownUsd = baseInventory.pricedUsd;
+  $: baseRoutableInventoryUsd = baseInventory.eligible.pricedUsd + baseInventory.conversion.pricedUsd;
   $: appCollectorInventoryUsd = collectors
     .filter((collector) => collector.key !== 'base')
     .reduce((sum, collector) => sum + (collectorInventories[collector.key]?.pricedUsd || 0), 0);
@@ -346,6 +375,12 @@
         ?.percent || 0
     ])
   );
+  $: upstreamBaseBoundUsd = ['trade', 'core'].reduce((sum, key) => {
+    const inventory = collectorInventories[key] || EMPTY_INVENTORY;
+    const routableUsd = inventory.eligible.pricedUsd + inventory.conversion.pricedUsd;
+    return sum + routableUsd * ((baseShares[key] || 0) / 100);
+  }, 0);
+  $: pendingKnownUsd = baseRoutableInventoryUsd + upstreamBaseBoundUsd;
   $: historyLabels = Object.fromEntries(
     collectors.map((collector) => [
       collector.key,
@@ -378,18 +413,9 @@
       colors: SERIES.collected,
       valueField: 'inflow_usd',
       cumulativeField: 'cumulative_usd',
-      barLabel: 'Collected USD at receipt price',
-      cumulativeLabel: 'Cumulative collected USD',
-      afterBody: (row) => [
-        `${number2.format(row.transfers || 0)} denoms moved`,
-        ...Object.entries(row.by_denom || {})
-          .sort((a, b) => (b[1].usd || 0) - (a[1].usd || 0))
-          .slice(0, 4)
-          .map(
-            ([denom, entry]) =>
-              `${denomLabel(denom)}: ${number4.format(entry.amount)} · ${usd2.format(entry.usd)}`
-          )
-      ]
+      barLabel: 'App-layer earnings allocated to Base Layer',
+      cumulativeLabel: 'Cumulative app-layer earnings allocated to Base Layer',
+      afterBody: (row) => collectedFlowTooltip(row, pick.grain)
     });
   }
 
@@ -490,7 +516,7 @@
       }
       if (inflowsResult?.__error) {
         inflows = null;
-        inflowsError = `collected-fee artifact — ${inflowsResult.__error}; run scripts/rujira-base-layer-inflows.mjs to generate it`;
+        inflowsError = `Base Layer earnings artifact — ${inflowsResult.__error}; run scripts/rujira-base-layer-inflows.mjs to generate it`;
       } else {
         inflows = inflowsResult;
         inflowsError = '';
@@ -1130,11 +1156,11 @@
     </div>
     <h1 class="title">APP LAYER <span class="arrow">→</span> BASE LAYER<span class="cursor">_</span></h1>
     <p class="lede">
-      App-layer fees, tracked in three steps: <b class="k-collected">01 collected</b> by the Base
-      Layer collector, <b class="k-paid">02 paid</b> out to the TC Reserve, and
+      App-layer fees, tracked in three steps: <b class="k-collected">01 accrued</b> for the Base
+      Layer, <b class="k-paid">02 paid</b> out to the TC Reserve, and
       <b class="k-generated">03 liquidity fees generated</b> on THORChain pools along the way.
       <b class="k-benefit">Σ total benefit to THORChain</b> = 02 (realized to the Reserve) + 03
-      (realized to System Income). 01 collected approximates 02 plus pending inventory, so it is
+      (realized to System Income). Cumulative 01 approximates 02 plus base-layer-bound inventory, so it is
       not added to the total.
     </p>
     <div class="rule"></div>
@@ -1238,11 +1264,11 @@
       </div>
 
       <a class="fnode amber stage" style="grid-area: base;" href="#chart-collected">
-        <span class="fnode-kicker"><i>01</i> collected</span>
-        <strong class="fnode-name">Base Layer Collector</strong>
+        <span class="fnode-kicker"><i>01</i> accrued</span>
+        <strong class="fnode-name">Base Layer Revenue Share</strong>
         <strong class="fnode-fig">{inflowsLoading ? '—' : totalInflowUsd ? usd2.format(totalInflowUsd) : 'scan pending'}</strong>
         <p class="fnode-sub">
-          holds {liveLoading ? '—' : usd2.format(pendingKnownUsd)} pending · converts everything to RUNE
+          {liveLoading ? '—' : usd2.format(pendingKnownUsd)} remains base-layer-bound upstream or pending here
         </p>
       </a>
 
@@ -1289,7 +1315,7 @@
     </div>
 
     <div class="flow-legend">
-      <span><b class="k-collected">01</b> fees land in the collector</span>
+      <span><b class="k-collected">01</b> Base Layer share accrues in app collectors</span>
       <span class="legend-arrow">→</span>
       <span>held &amp; converted to RUNE</span>
       <span class="legend-arrow">→</span>
@@ -1310,7 +1336,7 @@
       </div>
       <strong class="benefit-hero-value">{totalBenefitLoading ? '—' : usd2.format(totalBenefitUsd)}</strong>
       <small class="metric-foot">
-        <b class="k-paid">02</b> paid to Reserve + <b class="k-generated">03</b> liquidity fees to System Income · excludes 01 collected &amp; pending
+        <b class="k-paid">02</b> paid to Reserve + <b class="k-generated">03</b> liquidity fees to System Income · excludes 01 accrual &amp; pending
       </small>
     </div>
     <div class="benefit-hero-split">
@@ -1332,7 +1358,7 @@
     <article class="metric">
       <div class="metric-head">
         <span class="metric-idx amber-i">01</span>
-        <span class="metric-label">collected by base collector</span>
+        <span class="metric-label">app-layer earnings for base layer</span>
       </div>
       <strong class="metric-value">{inflowsLoading ? '—' : totalInflowUsd ? usd2.format(totalInflowUsd) : '—'}</strong>
       <small class="metric-foot">
@@ -1360,10 +1386,10 @@
     <article class="metric">
       <div class="metric-head">
         <span class="metric-idx dim-i">--</span>
-        <span class="metric-label">pending in base collector</span>
+        <span class="metric-label">pending base-layer-bound</span>
       </div>
       <strong class="metric-value">{liveLoading ? '—' : usd2.format(pendingKnownUsd)}</strong>
-      <small class="metric-foot">{number2.format(pendingRune)} RUNE eligible · {usd2.format(stableUsd)} stables need conversion</small>
+      <small class="metric-foot">{usd2.format(upstreamBaseBoundUsd)} upstream · {usd2.format(baseRoutableInventoryUsd)} in Base collector</small>
     </article>
   </div>
 
@@ -1372,7 +1398,7 @@
     <div class="block-head">
       <div class="block-title">
         <span class="title-marker amber">▌</span>
-        <h2>01 · fees collected by the base layer collector</h2>
+        <h2>01 · app-layer earnings allocated to the base layer</h2>
       </div>
       <div class="chart-controls amber-t">
         <div class="mode-toggle">
@@ -1390,10 +1416,11 @@
       </div>
     </div>
     <p class="block-lede">
-      Net fees collected by the Base Layer collector, derived from daily balance changes plus
-      Reserve payouts and valued at daily prices. By construction this approximates the amount
-      subsequently paid to the Reserve plus the balance still pending conversion. Cumulative
-      totals begin from the inventory held at the first Reserve deposit.
+      Each daily or weekly bar is newly earned app-layer value allocated to the Base Layer: 100%
+      of routable Base Collector inventory changes plus the configured Base Layer share of
+      routable RUJI Trade and Other Core Apps inventory changes. Internal route transfers,
+      conversions, and final Reserve payouts cancel rather than create new earnings. The optional
+      cumulative view rolls up those period earnings and overlaps 02; it is not additive.
       Source: {formatDataSource(inflowMeta?.source)}.
     </p>
 
@@ -1402,25 +1429,26 @@
         {#if inflowsLoading}
           <div class="loading-block">
             <span class="loading-marker">▓░░░░</span>
-            <span>loading collected-fee artifact</span>
+            <span>loading Base Layer earnings artifact</span>
           </div>
         {:else if !inflowRows.length}
           <div class="loading-block">
             <span class="loading-marker">░░░░░</span>
-            <span>no collected-fee rows — run scripts/rujira-base-layer-inflows.mjs</span>
+            <span>no Base Layer earnings rows — run scripts/rujira-base-layer-inflows.mjs</span>
           </div>
         {:else}
-          <canvas bind:this={collectedCanvas} aria-label="Weekly and cumulative fees collected by the Base Layer collector"></canvas>
+          <canvas bind:this={collectedCanvas} aria-label="Daily, weekly, and cumulative app-layer earnings allocated to the Base Layer"></canvas>
         {/if}
       </div>
 
       <div class="side-panel amber-p">
         <div class="side-card">
-          <span>total collected</span>
+          <span>cumulative app-layer earnings</span>
           <strong>{totalInflowUsd ? usd2.format(totalInflowUsd) : '—'}</strong>
-          <small>{inflowMeta ? `${number2.format(inflowDayCount)} days measured · = paid + pending by construction` : 'artifact pending'}</small>
+          <small>{inflowMeta ? `${number2.format(inflowDayCount)} days measured · paid + pending reconciliation` : 'artifact pending'}</small>
         </div>
         {#if inflowDenomTotals.length}
+          <p class="side-table-note">largest net asset flows · + received / − converted or paid</p>
           <div class="table-scroll side-table">
             <table>
               <thead>
@@ -1434,8 +1462,8 @@
                 {#each inflowDenomTotals as row}
                   <tr>
                     <td class="mono ellipsis" title={row.denom}>{denomLabel(row.denom)}</td>
-                    <td class="num">{number4.format(row.amount)}</td>
-                    <td class="num accent-amber">{row.usd ? usd2.format(row.usd) : 'unpriced'}</td>
+                    <td class="num">{signedNumber4.format(row.amount)}</td>
+                    <td class="num accent-amber">{row.priced ? signedUsd2.format(row.usd) : 'unpriced'}</td>
                   </tr>
                 {/each}
               </tbody>
@@ -2826,6 +2854,16 @@
 
   .side-table {
     overflow-x: hidden;
+  }
+
+  .side-table-note {
+    margin: 0;
+    color: #555;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    line-height: 1.35;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
   }
 
   .side-table table {

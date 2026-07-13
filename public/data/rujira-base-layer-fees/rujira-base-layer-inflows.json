@@ -1,35 +1,78 @@
 {
   "meta": {
-    "generatedAt": "2026-07-12T00:59:51.465Z",
+    "generatedAt": "2026-07-13T21:27:42.971Z",
     "source": "static-artifact",
-    "method": "balance-delta",
+    "method": "weighted-routable-balance-delta",
     "collector": "thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr",
+    "routeScopes": [
+      {
+        "key": "trade",
+        "name": "RUJI Trade",
+        "address": "thor1gm8q2gr25nzzsxzdp2mpja4hyvyhjlr4s6krcsgv2y953uu0js3qhwpus7",
+        "baseLayerShare": 0.5,
+        "targetDenomCount": 28,
+        "actionDenomCount": 0
+      },
+      {
+        "key": "core",
+        "name": "Other Core Apps",
+        "address": "thor1jduxxzpyyvrgzx7zcnl7e5cdj34tnq5jxy00a4wp86szye25dndq575c0y",
+        "baseLayerShare": 0.5,
+        "targetDenomCount": 51,
+        "actionDenomCount": 0
+      },
+      {
+        "key": "base",
+        "name": "Base Layer Collector",
+        "address": "thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr",
+        "baseLayerShare": 1,
+        "targetDenomCount": 1,
+        "actionDenomCount": 50
+      }
+    ],
+    "routeConfigBasis": "Current on-chain target weights, target denoms, and conversion actions at generation time are applied to the full measurement window.",
     "firstDay": "2026-04-30",
-    "lastDay": "2026-07-12",
-    "dayCount": 74,
+    "lastDay": "2026-07-13",
+    "dayCount": 75,
     "baselineHeight": 25982819,
-    "baselineInventoryUsd": 18896.810917176717,
-    "tipHeight": 26966413,
+    "baselineInventoryUsd": 18897.25451101322,
+    "tipHeight": 26992259,
     "denomCount": 46,
     "unpricedDenoms": [
       "thor.auto",
       "x/brune"
     ],
-    "totalInflowUsd": 30777.42823003439,
-    "netNewInflowUsd": 11880.617312857674,
-    "totalPaidUsd": 17307.362408380028,
-    "inventoryNowUsd": 12864.390531522931,
-    "priceBasis": "per-denom daily balance change × Midgard daily USD price (RUNE history, pool depth assetPriceUSD, stables at $1), plus each day's Reserve payouts at their deposit-day price",
-    "scope": "Net fees collected by the Base Layer collector measured from daily balance snapshots plus Reserve payouts, with the opening inventory (fees accumulated before the first Reserve deposit) as the cumulative starting point. Captures every inbound source (revenue collectors, direct FIN/Ghost app sends, redemptions) and is net of internal asset→RUNE conversion costs. By-denom rows are net value flow, so conversions shift value into the RUNE line.",
-    "caveat": "Collected fees are held (and partly converted to RUNE) by the collector before Reserve payout; do not add them to Reserve payments. Cumulative collected ≈ cumulative paid + current inventory, up to intraday price movement on held assets."
+    "totalInflowUsd": 31194.807970290443,
+    "netNewInflowUsd": 12297.553459277224,
+    "totalPaidUsd": 17901.73028652002,
+    "inventoryNowUsd": 12535.42841278806,
+    "priceBasis": "per-denom daily change in weighted routable inventory × Midgard daily USD price (RUNE history, pool depth assetPriceUSD, stables at $1), with Reserve payouts added back at deposit-day price solely to cancel value leaving the accounting boundary",
+    "scope": "App-layer earnings allocated to the Base Layer: 100% of routable Base Layer Collector inventory plus the configured Base Layer share of routable RUJI Trade and Other Core Apps inventory. Daily and weekly rows record newly earned value for the period; transfers between scoped collectors and final Reserve payouts do not create new earnings. Swap and Index are excluded because their configured targets do not route to the Base Layer.",
+    "caveat": "01 is an accrual series and overlaps 02: cumulative app-layer earnings ≈ cumulative Reserve payouts + current base-layer-bound inventory, up to intraday price movement. Do not add 01 to 02."
   },
   "weekly": [
     {
       "week_start": "2026-04-27",
       "week_end": "2026-05-04",
       "transfers": 76,
-      "inflow_usd": 1133.7454039146724,
+      "inflow_usd": 1133.297757231353,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 2533.1911852349986,
+          "usd": 2533.4272985003777
+        },
+        "rune": {
+          "amount": 5847.012849945,
+          "usd": 2976.508531372464
+        },
+        "x/ruji": {
+          "amount": -3728.7049811199995,
+          "usd": -1177.5799630138188
+        },
+        "x/ghost-vault/rune": {
+          "amount": -0.0047131099999999995,
+          "usd": -0.0023486851819556473
+        },
         "avax-avax": {
           "amount": -0.00018058000000000006,
           "usd": -0.0016565260702501132
@@ -50,10 +93,6 @@
           "amount": -0.010988149999999999,
           "usd": -25.216303049251124
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 2533.215203579999,
-          "usd": 2533.4513145776914
-        },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.07653144999999958,
           "usd": 0.08122365370700152
@@ -61,10 +100,6 @@
         "gaia-atom": {
           "amount": -4.47886558,
           "usd": -8.484231659355828
-        },
-        "rune": {
-          "amount": 5847.023063549999,
-          "usd": 2976.5141287434762
         },
         "tcy": {
           "amount": -16154.935154329998,
@@ -99,8 +134,8 @@
           "usd": -0.29035292164387483
         },
         "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -31.668561519999997,
-          "usd": -31.668488135422592
+          "amount": -31.668561519999994,
+          "usd": -31.668488122394972
         },
         "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": -4.76287223,
@@ -109,10 +144,6 @@
         "x/ghost-vault/gaia-atom": {
           "amount": -0.00001664,
           "usd": -0.0000314533252950785
-        },
-        "x/ghost-vault/rune": {
-          "amount": -0.00471247,
-          "usd": -0.0023483498482698897
         },
         "x/ghost-vault/tcy": {
           "amount": -0.06325726,
@@ -126,10 +157,6 @@
           "amount": -0.00020942,
           "usd": -0.00028617272275894114
         },
-        "x/ruji": {
-          "amount": -3727.2750779199996,
-          "usd": -1177.1619301011328
-        },
         "xrp-xrp": {
           "amount": -1.29019923,
           "usd": -1.7874829227498379
@@ -139,13 +166,13 @@
           "usd": -10.013438149766634
         }
       },
-      "cumulative_usd": 20030.55632109139
+      "cumulative_usd": 20030.552268244573
     },
     {
       "week_start": "2026-05-04",
       "week_end": "2026-05-11",
       "transfers": 152,
-      "inflow_usd": 2787.671429501877,
+      "inflow_usd": 2787.679779803274,
       "by_denom": {
         "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
           "amount": -0.000034890000000014494,
@@ -156,12 +183,12 @@
           "usd": 0.5466973961639384
         },
         "eth-eth": {
-          "amount": 0.0001741,
-          "usd": 0.41028192380554945
+          "amount": 0.00017409999999999998,
+          "usd": 0.4098411699831073
         },
         "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 1338.1186108300008,
-          "usd": 1338.410109001459
+          "amount": 1338.1186111350016,
+          "usd": 1338.410114578548
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.19646123,
@@ -176,8 +203,8 @@
           "usd": 6111.277176053364
         },
         "tcy": {
-          "amount": -15741.44539699,
-          "usd": -2226.838352041287
+          "amount": -15741.44539416,
+          "usd": -2226.8328568327283
         },
         "x/brune": {
           "amount": 18.325735549999997,
@@ -196,8 +223,8 @@
           "usd": 0.047128102324815464
         },
         "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -0.35086752,
-          "usd": -0.3507585953854315
+          "amount": -0.34964241999999995,
+          "usd": -0.34953349538543155
         },
         "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": -0.06336576000000001,
@@ -212,12 +239,12 @@
           "usd": 0.000005126787235171966
         },
         "x/ghost-vault/x/ruji": {
-          "amount": -8.8e-7,
-          "usd": -4.3611911425538724e-7
+          "amount": -8.800000000000017e-7,
+          "usd": -4.318165328468272e-7
         },
         "x/ruji": {
-          "amount": -6434.38521906,
-          "usd": -2422.3830145885013
+          "amount": -6434.385219060001,
+          "usd": -2422.380949423233
         },
         "gaia-atom": {
           "amount": 2.1e-7,
@@ -304,14 +331,26 @@
           "usd": 2.54772340226958e-8
         }
       },
-      "cumulative_usd": 22818.227750593265
+      "cumulative_usd": 22818.23204804785
     },
     {
       "week_start": "2026-05-11",
       "week_end": "2026-05-18",
       "transfers": 120,
-      "inflow_usd": 1651.883905615875,
+      "inflow_usd": 1651.8826796919354,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -1560.9809280850022,
+          "usd": -1561.0017959758711
+        },
+        "tcy": {
+          "amount": -19.64326177,
+          "usd": -2.6441509545358794
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -0.052878110000000034,
+          "usd": -0.05291052740125783
+        },
         "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
           "amount": -0.000016839999999998057,
           "usd": 0.00038174901126271306
@@ -327,10 +366,6 @@
         "eth-eth": {
           "amount": 0.0008907600000000001,
           "usd": 2.0096430768244926
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -1560.9809277800014,
-          "usd": -1561.001795670838
         },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": -0.000002799999999997999,
@@ -348,12 +383,8 @@
           "amount": 5312.225452459998,
           "usd": 3197.7014052939267
         },
-        "tcy": {
-          "amount": -19.64325894,
-          "usd": -2.6441505662982125
-        },
         "x/brune": {
-          "amount": -21.861928600000002,
+          "amount": -21.839865744999997,
           "usd": 0
         },
         "x/ghost-vault/base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
@@ -367,10 +398,6 @@
         "x/ghost-vault/eth-eth": {
           "amount": -0.000024169999999999997,
           "usd": -0.056454685820359625
-        },
-        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -0.05165301000000003,
-          "usd": -0.051685296732639954
         },
         "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.022649440000000007,
@@ -469,205 +496,574 @@
           "usd": 0
         }
       },
-      "cumulative_usd": 24470.11165620914
+      "cumulative_usd": 24470.114727739783
     },
     {
       "week_start": "2026-05-18",
       "week_end": "2026-05-25",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.11165620914
+      "transfers": 56,
+      "inflow_usd": 202.57376446565837,
+      "by_denom": {
+        "x/brune": {
+          "amount": 16.101273090000003,
+          "usd": 0
+        },
+        "btc-btc": {
+          "amount": 0.00006846,
+          "usd": 5.60028299886264
+        },
+        "eth-eth": {
+          "amount": 0.0007375250000000002,
+          "usd": 1.670643816591158
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 54.15817692999917,
+          "usd": 54.154390507360034
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 1.0689275,
+          "usd": 1.0689275
+        },
+        "gaia-atom": {
+          "amount": 0.00012499,
+          "usd": 0.00025272139380576265
+        },
+        "rune": {
+          "amount": 79.82731120000062,
+          "usd": 46.74853905731282
+        },
+        "tcy": {
+          "amount": 8.904933855,
+          "usd": 1.0279959704951227
+        },
+        "x/ghost-vault/eth-eth": {
+          "amount": 0.000026305,
+          "usd": 0.059586163988245004
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 58.735914035,
+          "usd": 58.73180740851357
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 9.345573795,
+          "usd": 9.345573795
+        },
+        "x/ruji": {
+          "amount": 63.404732195,
+          "usd": 24.069457642019056
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 8.9e-7,
+          "usd": 0.07280531600955076
+        },
+        "thor.nami": {
+          "amount": 0.615903205,
+          "usd": 0
+        },
+        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
+          "amount": 0.023499475,
+          "usd": 0.023501568112337702
+        }
+      },
+      "cumulative_usd": 24672.68849220544
     },
     {
       "week_start": "2026-05-25",
       "week_end": "2026-06-01",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.11165620914
+      "transfers": 71,
+      "inflow_usd": 161.1265436939723,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.00013094500000000001,
+          "usd": 10.71178579360221
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 49.92810540500068,
+          "usd": 49.924613561424756
+        },
+        "rune": {
+          "amount": 37.95575302499856,
+          "usd": 22.227681250848487
+        },
+        "x/brune": {
+          "amount": 2.2868559200000007,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 12.978263539999993,
+          "usd": 4.926757965011694
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 40.325641665000006,
+          "usd": 40.322821576428964
+        },
+        "eth-eth": {
+          "amount": 0.001974045,
+          "usd": 4.471612659666123
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 21.23604573,
+          "usd": 21.236045729999997
+        },
+        "tcy": {
+          "amount": 0.3515386100000004,
+          "usd": 0.040582028589949054
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.000001935,
+          "usd": 0.15829016389033776
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 6.258951345,
+          "usd": 6.258951344999999
+        },
+        "bch-bch": {
+          "amount": 0.00017791,
+          "usd": 0.07792208306326381
+        },
+        "bsc-usdt-0x55d398326f99059ff775485246999027b3197955": {
+          "amount": 0.00798889,
+          "usd": 0.007982480606829675
+        },
+        "ltc-ltc": {
+          "amount": 0.01268211,
+          "usd": 0.750901116192747
+        },
+        "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+          "amount": 0.000037565,
+          "usd": 0.000037578333721196414
+        },
+        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
+          "amount": 0.010180615000000004,
+          "usd": 0.010181521955254525
+        },
+        "base-eth": {
+          "amount": 7.5e-8,
+          "usd": 0.00016985655058237895
+        },
+        "eth-dai-0x6b175474e89094c44da98b954eedeac495271d0f": {
+          "amount": 0.00007504,
+          "usd": 0.00007497502660787197
+        },
+        "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
+          "amount": 0.000049995,
+          "usd": 0.00005010319134714104
+        },
+        "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
+          "amount": 0.00007507,
+          "usd": 0.00007522449170233786
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 9.499999999999994e-8,
+          "usd": 0.0000056249004336274425
+        },
+        "doge-doge": {
+          "amount": 0.000006120000000000002,
+          "usd": 7.038482496286156e-7
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": 0.000003055,
+          "usd": 3.5134908539467643e-7
+        }
+      },
+      "cumulative_usd": 24833.815035899413
     },
     {
       "week_start": "2026-06-01",
       "week_end": "2026-06-08",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.11165620914
+      "transfers": 97,
+      "inflow_usd": 399.6835284844523,
+      "by_denom": {
+        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
+          "amount": 0.000012604999999998867,
+          "usd": 0.000012606122935203
+        },
+        "bch-bch": {
+          "amount": 0.00034022,
+          "usd": 0.1490115850698871
+        },
+        "btc-btc": {
+          "amount": 0.0002689,
+          "usd": 21.997015540109462
+        },
+        "doge-doge": {
+          "amount": 0.44036717,
+          "usd": 0.050645696372288704
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 191.95138569499977,
+          "usd": 191.9379611054346
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 48.27676285500001,
+          "usd": 48.276762855
+        },
+        "ltc-ltc": {
+          "amount": 0.14778932,
+          "usd": 8.750528527931637
+        },
+        "rune": {
+          "amount": 33.63581090500156,
+          "usd": 19.697832971928413
+        },
+        "tcy": {
+          "amount": 26.886695324999998,
+          "usd": 3.1038315773291534
+        },
+        "x/brune": {
+          "amount": 1.8042790099999984,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 129.69271296,
+          "usd": 49.23344364292788
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.000006775,
+          "usd": 0.5542200828718544
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 41.98778132999999,
+          "usd": 41.98484481183386
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 1.5259979550000011,
+          "usd": 1.525997955000001
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 7.000000000000018e-8,
+          "usd": 0.000004144663477409707
+        },
+        "avax-avax": {
+          "amount": 0.000020585,
+          "usd": 0.00020230234138071294
+        },
+        "eth-eth": {
+          "amount": 0.005464095,
+          "usd": 12.377284681187318
+        },
+        "bsc-usdt-0x55d398326f99059ff775485246999027b3197955": {
+          "amount": 0.000003750000000000281,
+          "usd": 0.0000037469914187845277
+        },
+        "x/ghost-vault/bch-bch": {
+          "amount": 0.000017125,
+          "usd": 0.007500509653523651
+        },
+        "avax-usdt-0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7": {
+          "amount": 0.010928335,
+          "usd": 0.010883345265498785
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": 0.00348761,
+          "usd": 0.000401102646060009
+        },
+        "x/ghost-vault/xrp-xrp": {
+          "amount": 0.000007280000000000001,
+          "usd": 0.000010841344857138102
+        },
+        "xrp-xrp": {
+          "amount": 0.01687411,
+          "usd": 0.025128852426824534
+        }
+      },
+      "cumulative_usd": 25233.498564383866
     },
     {
       "week_start": "2026-06-08",
       "week_end": "2026-06-15",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.11165620914
+      "transfers": 63,
+      "inflow_usd": 66.20651648635899,
+      "by_denom": {
+        "bch-bch": {
+          "amount": 0.000138455,
+          "usd": 0.06064134680802103
+        },
+        "btc-btc": {
+          "amount": 0.00008363499999999998,
+          "usd": 6.841652859657977
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 14.948745659999986,
+          "usd": 14.947700183818064
+        },
+        "rune": {
+          "amount": 39.897416194999096,
+          "usd": 23.364759735518373
+        },
+        "tcy": {
+          "amount": 1.6005346299999985,
+          "usd": 0.18476759102513984
+        },
+        "x/ruji": {
+          "amount": 42.811919819999986,
+          "usd": 16.25209461512903
+        },
+        "x/ghost-vault/bch-bch": {
+          "amount": 0.000015465,
+          "usd": 0.006773452951342671
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.000008660000000000002,
+          "usd": 0.7084200843093682
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 2.744072079999995,
+          "usd": 2.7438801667032595
+        },
+        "eth-eth": {
+          "amount": 0.00014182999999999904,
+          "usd": 0.3212601731698131
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.05072413999999981,
+          "usd": 0.05072413999999981
+        },
+        "thor.nami": {
+          "amount": 0.0014115100000000602,
+          "usd": 0
+        },
+        "x/brune": {
+          "amount": 3.259962654999999,
+          "usd": 0
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.2505141349999995,
+          "usd": 0.2505141349999995
+        },
+        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
+          "amount": 0.00009999499999999856,
+          "usd": 0.00010000390821700247
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 0.00005068500000000001,
+          "usd": 0.0030010324054396587
+        },
+        "ltc-ltc": {
+          "amount": 0.00009739500000000012,
+          "usd": 0.005766707134809034
+        },
+        "x/ghost-vault/eth-eth": {
+          "amount": 0.00020505000000000002,
+          "usd": 0.46446025882014147
+        }
+      },
+      "cumulative_usd": 25299.705080870226
     },
     {
       "week_start": "2026-06-15",
       "week_end": "2026-06-22",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.11165620914
+      "transfers": 54,
+      "inflow_usd": 111.2771507465879,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.00003469999999999992,
+          "usd": 2.838588729141127
+        },
+        "eth-eth": {
+          "amount": 0.00010020999999999988,
+          "usd": 0.22698640593204739
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 29.057381325001188,
+          "usd": 29.055349128032443
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.05342985499999031,
+          "usd": 0.05342985499999031
+        },
+        "ltc-ltc": {
+          "amount": 0.000070294999999998,
+          "usd": 0.0041621302740529696
+        },
+        "rune": {
+          "amount": 65.06739535000088,
+          "usd": 38.10482492350455
+        },
+        "tcy": {
+          "amount": 3.491851870000005,
+          "usd": 0.4031034668973419
+        },
+        "x/ruji": {
+          "amount": 68.10590615000004,
+          "usd": 25.85409940242255
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.000005119999999999998,
+          "usd": 0.4188350532814772
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 14.262951654999995,
+          "usd": 14.261954141604193
+        },
+        "x/brune": {
+          "amount": 1.130847720000002,
+          "usd": 0
+        },
+        "thor.auto": {
+          "amount": 291.723021755,
+          "usd": 0
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": 0.064618365,
+          "usd": 0.007431621422423554
+        },
+        "gaia-atom": {
+          "amount": 0.005897165,
+          "usd": 0.011923700454864374
+        },
+        "xrp-xrp": {
+          "amount": 0.022740574999999996,
+          "usd": 0.03386591233547196
+        },
+        "x/ghost-vault/xrp-xrp": {
+          "amount": 0.0017433700000000002,
+          "usd": 0.0025962762853750077
+        }
+      },
+      "cumulative_usd": 25410.982231616814
     },
     {
       "week_start": "2026-06-22",
       "week_end": "2026-06-29",
-      "transfers": 170,
-      "inflow_usd": 4521.190757112564,
+      "transfers": 176,
+      "inflow_usd": 3702.878118734823,
       "by_denom": {
         "avax-avax": {
-          "amount": -2.999999892949745e-8,
-          "usd": 1.1335312318745707
+          "amount": -0.000020615000000390182,
+          "usd": 1.1333957959159022
         },
-        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
-          "amount": -3.4000000000145025e-7,
-          "usd": 0.000004453445275005852
+        "btc-btc": {
+          "amount": -0.0006197849999999994,
+          "usd": -14.616141878466287
+        },
+        "eth-eth": {
+          "amount": -0.009249724999999999,
+          "usd": -15.414221771014398
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -54.91785490500115,
+          "usd": -55.00471175592111
+        },
+        "rune": {
+          "amount": 10303.009640325003,
+          "usd": 4101.600758422325
+        },
+        "tcy": {
+          "amount": -31.815682744999993,
+          "usd": -4.682734431129029
+        },
+        "x/ruji": {
+          "amount": -200.24381591999997,
+          "usd": -55.82561997473282
+        },
+        "x/ghost-vault/bch-bch": {
+          "amount": -0.00003239000000000001,
+          "usd": 0.004862346717720523
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": -0.000023650000000000002,
+          "usd": -1.4846348871966808
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -157.651460505,
+          "usd": -157.65138871277694
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": -17.432250129999996,
+          "usd": -17.395991721780316
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": -0.00005336,
+          "usd": -0.002195248083522726
+        },
+        "x/ghost-vault/rune": {
+          "amount": 0.00005669999999999997,
+          "usd": 0.00002973289656906234
+        },
+        "x/ghost-vault/x/ruji": {
+          "amount": 0.000011050000000000106,
+          "usd": 0.00001521312410092139
         },
         "avax-usdt-0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7": {
-          "amount": -0.00002392000000000019,
-          "usd": -0.000018411665789645065
-        },
-        "base-eth": {
-          "amount": 0.00000675,
-          "usd": 0.010616625917078407
+          "amount": -0.010952255000000001,
+          "usd": -0.010887856236449668
         },
         "bch-bch": {
-          "amount": 0.000001079999999999991,
-          "usd": 0.0011132133054241183
+          "amount": -0.000655505,
+          "usd": -0.12672246964963105
+        },
+        "bsc-usdt-0x55d398326f99059ff775485246999027b3197955": {
+          "amount": -0.00801053,
+          "usd": -0.00790278263533943
+        },
+        "doge-doge": {
+          "amount": -0.39605208999999997,
+          "usd": -0.029926177321049602
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": -70.747215915,
+          "usd": -70.58554692382441
+        },
+        "gaia-atom": {
+          "amount": 0.0034706949999999924,
+          "usd": 0.011571542808970242
+        },
+        "ltc-ltc": {
+          "amount": -0.16344643,
+          "usd": -7.2577498850017035
+        },
+        "thor.auto": {
+          "amount": -291.723004665,
+          "usd": 0
+        },
+        "x/brune": {
+          "amount": -26.11379297,
+          "usd": 0
+        },
+        "xrp-xrp": {
+          "amount": -0.018836585000000107,
+          "usd": 0.5682708431655356
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": -0.06808744000000001,
+          "usd": -0.005403303346967249
+        },
+        "x/ghost-vault/eth-eth": {
+          "amount": -0.00022493499999999997,
+          "usd": -0.37494344462671203
+        },
+        "x/ghost-vault/xrp-xrp": {
+          "amount": -0.0017507800000000002,
+          "usd": -0.001860911200077038
         },
         "bsc-bnb": {
           "amount": -0.00000442,
           "usd": -0.002577090167654428
         },
-        "bsc-usdt-0x55d398326f99059ff775485246999027b3197955": {
-          "amount": -0.00001789,
-          "usd": -0.00001764936668937291
-        },
-        "btc-btc": {
-          "amount": -0.000033139999999999164,
-          "usd": 11.6784520958227
-        },
-        "doge-doge": {
-          "amount": 0.04432119999999997,
-          "usd": 0.005020616020482342
-        },
-        "eth-dai-0x6b175474e89094c44da98b954eedeac495271d0f": {
-          "amount": 0.00007504,
-          "usd": 0.00007529290301603637
-        },
-        "eth-eth": {
-          "amount": -0.0008320200000000002,
-          "usd": -1.395285350321325
-        },
-        "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
-          "amount": -0.000007299999999987872,
-          "usd": -0.0012335260434659379
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 285.1231774200005,
-          "usd": 285.03632082824015
-        },
-        "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
-          "amount": 0.06642421,
-          "usd": 0.06509280933525774
-        },
-        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": -0.06348442999999818,
-          "usd": -0.04125351935820614
-        },
-        "eth-wbtc-0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": {
-          "amount": 1.000000000000001e-8,
-          "usd": 0.0006266215527210168
-        },
-        "gaia-atom": {
-          "amount": 0.009492849999999994,
-          "usd": 0.02192848168452359
-        },
-        "ltc-ltc": {
-          "amount": -0.00280731,
-          "usd": -0.12465434358140377
-        },
-        "rune": {
-          "amount": 10558.758064740001,
-          "usd": 4206.764056602616
-        },
-        "tcy": {
-          "amount": 8.703773910000017,
-          "usd": -0.8545560732915537
-        },
-        "x/brune": {
-          "amount": -1.5085117199999942,
-          "usd": 0
-        },
         "x/ghost-vault/avax-avax": {
           "amount": -8e-8,
           "usd": -5.192587403157358e-7
-        },
-        "x/ghost-vault/bch-bch": {
-          "amount": 2.0000000000000063e-7,
-          "usd": 0.000023699444666382347
-        },
-        "x/ghost-vault/btc-btc": {
-          "amount": -2.7000000000000017e-7,
-          "usd": -0.021623949789630118
-        },
-        "x/ghost-vault/eth-eth": {
-          "amount": 0.00000642,
-          "usd": 0.010361750411559376
-        },
-        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 0.4049002599999999,
-          "usd": 0.40497205222305765
-        },
-        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": -0.0512129,
-          "usd": -0.05110452886514551
         },
         "x/ghost-vault/gaia-atom": {
           "amount": 4.300000000000001e-7,
           "usd": 7.304970912048718e-7
         },
-        "x/ghost-vault/ltc-ltc": {
-          "amount": -0.0000025099999999999993,
-          "usd": 0.00006598041016609665
-        },
-        "x/ghost-vault/rune": {
-          "amount": 0.00005669999999999997,
-          "usd": 0.000029665480302618934
-        },
-        "x/ghost-vault/x/ruji": {
-          "amount": 0.000010760000000000104,
-          "usd": -0.000002820486785066342
-        },
-        "x/ghost-vault/xrp-xrp": {
-          "amount": -1.2999999999979287e-7,
-          "usd": 0.00008215001450467745
-        },
-        "x/ruji": {
-          "amount": 115.37761787000005,
-          "usd": 17.938469552305097
+        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
+          "amount": -0.03379303,
+          "usd": -0.03380280091607959
         },
         "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
-          "amount": 9.800000000000008e-7,
-          "usd": 0.0000010632533994942315
+          "amount": -0.00003659,
+          "usd": -0.00003660062822369978
         },
-        "thor.auto": {
-          "amount": 0.000017089999999997385,
-          "usd": 0
+        "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
+          "amount": -0.000057299999999982365,
+          "usd": -0.0012836166245750735
         },
-        "thor.nami": {
-          "amount": 0.61731472,
-          "usd": 0
-        },
-        "x/ghost-vault/doge-doge": {
-          "amount": 0.00002159,
-          "usd": 0.0000016388921549284898
-        },
-        "xrp-xrp": {
-          "amount": 0.020778099999999987,
-          "usd": 0.612239516487655
+        "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
+          "amount": 0.06634913999999999,
+          "usd": 0.0650175603013636
         },
         "x/ghost-vault/eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
           "amount": -0.00000237,
@@ -677,42 +1073,62 @@
           "amount": 8.7e-7,
           "usd": 8.389243225457693e-8
         },
+        "base-eth": {
+          "amount": 0.000006669999999999999,
+          "usd": 0.010483086984235172
+        },
         "x/ghost-vault/eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": 5.1e-7,
           "usd": 5.074534699868547e-7
         }
       },
-      "cumulative_usd": 28991.302413321704
+      "cumulative_usd": 29113.860350351635
     },
     {
       "week_start": "2026-06-29",
       "week_end": "2026-07-06",
       "transfers": 184,
-      "inflow_usd": 1190.429979973829,
+      "inflow_usd": 1189.819251883449,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -3870.461691424998,
+          "usd": -3870.865171527649
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.18096593500000002,
+          "usd": 0.18053227900901309
+        },
+        "rune": {
+          "amount": 12723.836809879998,
+          "usd": 5075.082520781452
+        },
+        "tcy": {
+          "amount": 28.761555469999962,
+          "usd": 0.6393086233314307
+        },
+        "x/ruji": {
+          "amount": -115.84155448,
+          "usd": -23.099307758679032
+        },
+        "x/ghost-vault/x/ruji": {
+          "amount": -0.00000985,
+          "usd": -0.0000019149865869863137
+        },
         "btc-btc": {
           "amount": 0.0001226,
-          "usd": 7.810508008992673
+          "usd": 7.8104975571864665
         },
         "doge-doge": {
-          "amount": -0.043107049999999994,
-          "usd": -0.003336000944182315
+          "amount": -0.04210173499999999,
+          "usd": -0.003257257031568157
         },
         "eth-eth": {
-          "amount": -0.00022970999999999994,
-          "usd": -0.3775791051491533
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -3870.46388811,
-          "usd": -3870.8673121290763
+          "amount": -0.00022826499999999996,
+          "usd": -0.3750009281050945
         },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": -0.06642591,
           "usd": -0.06643744924329291
-        },
-        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": 0.18312453,
-          "usd": 0.1826845992668089
         },
         "gaia-atom": {
           "amount": -0.00953426,
@@ -721,14 +1137,6 @@
         "ltc-ltc": {
           "amount": 0.0009058899999999995,
           "usd": 0.036099661496558244
-        },
-        "rune": {
-          "amount": 12724.472072139997,
-          "usd": 5075.359228291991
-        },
-        "tcy": {
-          "amount": 29.477638930000012,
-          "usd": 0.705287172950456
         },
         "x/ghost-vault/btc-btc": {
           "amount": 0.00000146,
@@ -763,24 +1171,16 @@
           "usd": 1.0915317636570891e-7
         },
         "x/ghost-vault/rune": {
-          "amount": -0.000057580000000000015,
-          "usd": -0.000022328546175959447
+          "amount": -0.00005756,
+          "usd": -0.000022330967930042542
         },
         "x/ghost-vault/tcy": {
           "amount": 0.00000298,
           "usd": 2.982312746102429e-7
         },
-        "x/ghost-vault/x/ruji": {
-          "amount": -0.00000956,
-          "usd": -0.0000018582807142961405
-        },
         "x/ghost-vault/xrp-xrp": {
           "amount": 5.000000000000005e-8,
           "usd": 5.408316919823849e-8
-        },
-        "x/ruji": {
-          "amount": -114.47069315000002,
-          "usd": -22.82863103726426
         },
         "xrp-xrp": {
           "amount": -0.01919838,
@@ -827,133 +1227,133 @@
           "usd": 0.00001752528372857005
         }
       },
-      "cumulative_usd": 30181.732393295533
+      "cumulative_usd": 30303.679602235083
     },
     {
       "week_start": "2026-07-06",
       "week_end": "2026-07-13",
-      "transfers": 174,
-      "inflow_usd": 595.6958367388519,
+      "transfers": 184,
+      "inflow_usd": 664.9472037361504,
       "by_denom": {
+        "doge-doge": {
+          "amount": -0.0010817150000000109,
+          "usd": 0.00001891465743711178
+        },
+        "eth-eth": {
+          "amount": -0.000026285000000000024,
+          "usd": -0.0661998452937953
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -4394.157219080001,
+          "usd": -4394.534567837155
+        },
+        "tcy": {
+          "amount": 5.640006379999988,
+          "usd": -0.18132725557696405
+        },
+        "x/ruji": {
+          "amount": 126.25910521000002,
+          "usd": 26.681004905058334
+        },
+        "x/ghost-vault/rune": {
+          "amount": -1.2999999999999876e-7,
+          "usd": 2.914743446053253e-8
+        },
         "avax-avax": {
-          "amount": 0.0007640899999999998,
-          "usd": 0.005107417819544971
+          "amount": -0.000006120000000000084,
+          "usd": 0.00011649952607771042
         },
         "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
           "amount": -9.6e-7,
           "usd": -9.59123774716472e-7
         },
         "btc-btc": {
-          "amount": -0.00013399,
-          "usd": -8.570804530261354
-        },
-        "doge-doge": {
-          "amount": 0.11265059,
-          "usd": 0.008428120274397195
+          "amount": -0.00014147,
+          "usd": -9.048058740114785
         },
         "eth-dai-0x6b175474e89094c44da98b954eedeac495271d0f": {
           "amount": -0.0068978500000000005,
           "usd": -0.006892627778701649
         },
-        "eth-eth": {
-          "amount": 0.00079479,
-          "usd": 1.413977648205109
-        },
         "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
           "amount": -0.00156149,
           "usd": -0.0015578552195626252
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -3679.7534185199993,
-          "usd": -3679.9711284614614
-        },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
-          "amount": 0.0000021600000000000005,
-          "usd": 0.0000021173060139695894
+          "amount": -1.6999999999999964e-7,
+          "usd": -2.174237547341944e-7
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": -0.15179061,
-          "usd": -0.15147799372772952
+          "amount": -0.19636344,
+          "usd": -0.1959515244409767
         },
         "eth-wbtc-0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": {
           "amount": 0.00000905,
           "usd": 0.5764708770443512
         },
         "gaia-atom": {
-          "amount": 0.00981595,
-          "usd": 0.01550528960572955
+          "amount": 0.00684209,
+          "usd": 0.010805481734931855
         },
         "ltc-ltc": {
-          "amount": 0.00678683,
-          "usd": 0.30380831497408345
+          "amount": 0.00342004,
+          "usd": 0.1530586203924345
         },
         "rune": {
-          "amount": 10817.686878600003,
-          "usd": 4284.802221242053
-        },
-        "tcy": {
-          "amount": -25.615745770000004,
-          "usd": -3.2423568895338373
+          "amount": 12697.021606745002,
+          "usd": 5041.773127839784
         },
         "thor.auto": {
           "amount": -0.00297929,
           "usd": 0
         },
         "x/ghost-vault/btc-btc": {
-          "amount": 0.0000012300000000000005,
-          "usd": 0.07822135033394037
+          "amount": 0.0000014200000000000004,
+          "usd": 0.09034407814793137
         },
         "x/ghost-vault/doge-doge": {
-          "amount": 0.000025690000000000006,
-          "usd": 0.0000018678743727044093
+          "amount": 0.000026050000000000003,
+          "usd": 0.0000018944229853300852
         },
         "x/ghost-vault/eth-dai-0x6b175474e89094c44da98b954eedeac495271d0f": {
           "amount": 7.199999999999999e-7,
           "usd": 7.206963825689579e-7
         },
         "x/ghost-vault/eth-eth": {
-          "amount": 0.00000403,
-          "usd": 0.007385442454596513
+          "amount": 0.00000842,
+          "usd": 0.015316327875013875
         },
         "x/ghost-vault/eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
           "amount": 5.599999999999999e-7,
           "usd": 5.600947418228796e-7
         },
         "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -0.7242762800000001,
-          "usd": -0.7243724606977384
+          "amount": -0.3551501900000001,
+          "usd": -0.3551638057968533
         },
         "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": 0.0040500499999999995,
-          "usd": 0.0040318524928910715
+          "amount": 0.01067442,
+          "usd": 0.010643712374000294
         },
         "x/ghost-vault/ltc-ltc": {
           "amount": 1.0000000000000005e-7,
           "usd": 0.000004437800121784537
-        },
-        "x/ghost-vault/rune": {
-          "amount": -0.0000013899999999999994,
-          "usd": -4.786117721284763e-7
         },
         "x/ghost-vault/tcy": {
           "amount": 0.000004080000000000001,
           "usd": 3.512044988193395e-7
         },
         "x/ghost-vault/x/ruji": {
-          "amount": 0.00000189,
-          "usd": 3.696500979654928e-7
+          "amount": 0.00000229,
+          "usd": 4.5367206859297505e-7
         },
         "x/ghost-vault/xrp-xrp": {
           "amount": 3.000000000000003e-8,
           "usd": 3.401805016299397e-8
         },
-        "x/ruji": {
-          "amount": 4.711189719999999,
-          "usd": 1.1125865586658286
-        },
         "xrp-xrp": {
-          "amount": 0.02528547,
-          "usd": 0.028266975226262203
+          "amount": 0.01211424,
+          "usd": 0.013855972260133277
         },
         "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
           "amount": 0.00007505,
@@ -964,7 +1364,7 @@
           "usd": 0.008004075221812198
         },
         "x/brune": {
-          "amount": 0.0018378400000000664,
+          "amount": 11.35073556,
           "usd": 0
         },
         "x/ghost-vault/eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
@@ -972,19 +1372,116 @@
           "usd": 4.004901192838259e-7
         },
         "x/ghost-vault/gaia-atom": {
-          "amount": 2.000000000000002e-8,
-          "usd": 3.142242387800226e-8
+          "amount": 3.0000000000000136e-8,
+          "usd": 4.710440741927652e-8
         },
         "avax-usdt-0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7": {
           "amount": -2.3000000000000002e-7,
           "usd": -2.2872802612949566e-7
         },
         "bch-bch": {
-          "amount": 0.00000138,
-          "usd": 0.00032811906771776334
+          "amount": 0.00001695,
+          "usd": 0.004073350075270855
         }
       },
-      "cumulative_usd": 30777.428230034384
+      "cumulative_usd": 30968.626805971235
+    },
+    {
+      "week_start": "2026-07-13",
+      "week_end": "2026-07-20",
+      "transfers": 22,
+      "inflow_usd": 226.18116431920885,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.000056389999999999994,
+          "usd": 3.5978980075313323
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -291.77315320000025,
+          "usd": -291.8384160522546
+        },
+        "rune": {
+          "amount": 1341.203213425002,
+          "usd": 540.2173855258152
+        },
+        "tcy": {
+          "amount": -26.522959455,
+          "usd": -2.5923469249718494
+        },
+        "x/ruji": {
+          "amount": -111.45936995000001,
+          "usd": -23.412589770241425
+        },
+        "avax-avax": {
+          "amount": 0.00031951,
+          "usd": 0.0020503466298890647
+        },
+        "bch-bch": {
+          "amount": 0.0000031600000000000036,
+          "usd": 0.0007601111100750022
+        },
+        "doge-doge": {
+          "amount": 0.023883340000000003,
+          "usd": 0.0017613042829647725
+        },
+        "eth-eth": {
+          "amount": 0.00053098,
+          "usd": 0.9592577541077928
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.017633745,
+          "usd": 0.017600443682827246
+        },
+        "gaia-atom": {
+          "amount": -0.00367561,
+          "usd": -0.005764085552414242
+        },
+        "ltc-ltc": {
+          "amount": -0.0039724899999999995,
+          "usd": -0.17493701584953933
+        },
+        "x/brune": {
+          "amount": -8.52522543,
+          "usd": 0
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 1.6000000000000016e-7,
+          "usd": 0.010208612895992442
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": -0.00001973,
+          "usd": -0.0000014550114641794218
+        },
+        "x/ghost-vault/eth-eth": {
+          "amount": -0.00000783,
+          "usd": -0.014145520009537114
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -0.59309536,
+          "usd": -0.5932280216051816
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": -0.00011450000000000002,
+          "usd": -0.00011428376681661894
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 7.600000000000001e-7,
+          "usd": 0.00003346821063002045
+        },
+        "x/ghost-vault/rune": {
+          "amount": 2.79999999999999e-7,
+          "usd": 1.1277997726459716e-7
+        },
+        "x/ghost-vault/xrp-xrp": {
+          "amount": 1.000000000000001e-8,
+          "usd": 1.0882563761785227e-8
+        },
+        "xrp-xrp": {
+          "amount": 0.00528529,
+          "usd": 0.005751750542452578
+        }
+      },
+      "cumulative_usd": 31194.807970290443
     }
   ],
   "daily": [
@@ -992,8 +1489,24 @@
       "day_start": "2026-04-30",
       "day_end": "2026-05-01",
       "transfers": 26,
-      "inflow_usd": 319.48865924757814,
+      "inflow_usd": 319.0760771989995,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 336.94885363999856,
+          "usd": 336.94885363999856
+        },
+        "rune": {
+          "amount": 510.08772179000005,
+          "usd": 254.1771531411323
+        },
+        "x/ruji": {
+          "amount": 23.557943544999944,
+          "usd": 6.82873588579582
+        },
+        "x/ghost-vault/rune": {
+          "amount": -0.004712274999999999,
+          "usd": -0.0023481307100925376
+        },
         "avax-avax": {
           "amount": 0.00105402,
           "usd": 0.009571037542360803
@@ -1014,10 +1527,6 @@
           "amount": 0.00017956000000000048,
           "usd": 0.4052833053396561
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 336.97236494999925,
-          "usd": 336.97236494999925
-        },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 5.17190744,
           "usd": 5.177331340238739
@@ -1025,10 +1534,6 @@
         "gaia-atom": {
           "amount": 0.0000166699999999409,
           "usd": 0.000031510153735831745
-        },
-        "rune": {
-          "amount": 510.0451979600001,
-          "usd": 254.1559634798469
         },
         "tcy": {
           "amount": -1799.9367164799987,
@@ -1063,8 +1568,8 @@
           "usd": -0.3024050860403597
         },
         "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -32.12952903,
-          "usd": -32.12952903
+          "amount": -32.128348994999996,
+          "usd": -32.128348994999996
         },
         "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": -4.8401619,
@@ -1073,10 +1578,6 @@
         "x/ghost-vault/gaia-atom": {
           "amount": -0.00001667,
           "usd": -0.000031510153735943465
-        },
-        "x/ghost-vault/rune": {
-          "amount": -0.00471334,
-          "usd": -0.002348661400514096
         },
         "x/ghost-vault/tcy": {
           "amount": -0.06325726,
@@ -1090,23 +1591,39 @@
           "amount": -0.00020942,
           "usd": -0.00028617272275894114
         },
-        "x/ruji": {
-          "amount": 24.977342860000135,
-          "usd": 7.240176851349583
-        },
         "xrp-xrp": {
           "amount": 0.0002094200000000157,
           "usd": 0.0002861727227589626
         }
       },
-      "cumulative_usd": 19216.299576424295
+      "cumulative_usd": 19216.33058821222
     },
     {
       "day_start": "2026-05-01",
       "day_end": "2026-05-02",
       "transfers": 21,
-      "inflow_usd": 641.2538190070138,
+      "inflow_usd": 641.222181954309,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 1222.9017486049997,
+          "usd": 1222.8882477381546
+        },
+        "rune": {
+          "amount": 2708.641921335,
+          "usd": 1375.8059835313886
+        },
+        "x/ruji": {
+          "amount": -1427.0960977749983,
+          "usd": -429.6148390004446
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.137825745,
+          "usd": 0.13782422340022046
+        },
+        "x/ghost-vault/rune": {
+          "amount": 0.000042075,
+          "usd": 0.000021371240067632026
+        },
         "avax-avax": {
           "amount": -0.0012346,
           "usd": -0.011227563612610916
@@ -1127,10 +1644,6 @@
           "amount": -0.01084656,
           "usd": -24.877868341875605
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 1222.9022556399996,
-          "usd": 1222.8887547675567
-        },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": -5.17303647,
           "usd": -5.173768169084207
@@ -1138,10 +1651,6 @@
         "gaia-atom": {
           "amount": -4.47888225,
           "usd": -8.484263169509564
-        },
-        "rune": {
-          "amount": 2708.69465877,
-          "usd": 1375.8327705636866
         },
         "tcy": {
           "amount": -5397.345326980001,
@@ -1163,21 +1672,9 @@
           "amount": 0.00000214,
           "usd": 0.004908343129214589
         },
-        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 0.13900578,
-          "usd": 0.1390042453726036
-        },
         "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": -0.007301699999999998,
           "usd": -0.007302732787461315
-        },
-        "x/ghost-vault/rune": {
-          "amount": 0.00004378,
-          "usd": 0.000022237264174947834
-        },
-        "x/ruji": {
-          "amount": -1427.0855938899986,
-          "usd": -429.6116768974369
         },
         "xrp-xrp": {
           "amount": -1.29040865,
@@ -1192,13 +1689,13 @@
           "usd": 4.7263481294799367e-7
         }
       },
-      "cumulative_usd": 19857.55339543131
+      "cumulative_usd": 19857.552770166527
     },
     {
       "day_start": "2026-05-02",
       "day_end": "2026-05-03",
       "transfers": 15,
-      "inflow_usd": 99.85523012428308,
+      "inflow_usd": 99.89896734169088,
       "by_denom": {
         "btc-btc": {
           "amount": -0.00160788,
@@ -1213,8 +1710,8 @@
           "usd": -0.7938407327105337
         },
         "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 628.1976169000009,
-          "usd": 628.4393415769227
+          "amount": 628.2038668200003,
+          "usd": 628.4455939018341
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": -0.00003207,
@@ -1249,8 +1746,8 @@
           "usd": -4.917028000733956e-7
         },
         "x/ruji": {
-          "amount": -1397.6390567500011,
-          "usd": -437.7216800610924
+          "amount": -1397.5193680250013,
+          "usd": -437.6841951685958
         },
         "thor.auto": {
           "amount": 0.00556836,
@@ -1261,14 +1758,22 @@
           "usd": 0
         }
       },
-      "cumulative_usd": 19957.408625555592
+      "cumulative_usd": 19957.451737508218
     },
     {
       "day_start": "2026-05-03",
       "day_end": "2026-05-04",
       "transfers": 14,
-      "inflow_usd": 73.14769553579728,
+      "inflow_usd": 73.10053073635378,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 345.13671617,
+          "usd": 345.1446032203903
+        },
+        "x/ruji": {
+          "amount": -927.6474588649999,
+          "usd": -317.1096647305742
+        },
         "btc-btc": {
           "amount": -2.8000000000000007e-7,
           "usd": -0.02195946719551862
@@ -1276,10 +1781,6 @@
         "eth-eth": {
           "amount": 0.00002161,
           "usd": 0.050122719995360936
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 345.1429660899994,
-          "usd": 345.15085328321265
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.07769255,
@@ -1317,16 +1818,12 @@
           "amount": -0.00000303,
           "usd": -0.0000015599206818432756
         },
-        "x/ruji": {
-          "amount": -927.52777014,
-          "usd": -317.068749993953
-        },
         "x/ghost-vault/x/ruji": {
           "amount": 0.00000309,
           "usd": 0.0000010562944517913827
         }
       },
-      "cumulative_usd": 20030.55632109139
+      "cumulative_usd": 20030.55226824457
     },
     {
       "day_start": "2026-05-04",
@@ -1411,7 +1908,7 @@
           "usd": 0.179903685410069
         }
       },
-      "cumulative_usd": 20164.60020916843
+      "cumulative_usd": 20164.59615632161
     },
     {
       "day_start": "2026-05-05",
@@ -1492,13 +1989,13 @@
           "usd": -549.9831679200855
         }
       },
-      "cumulative_usd": 20356.732327433703
+      "cumulative_usd": 20356.728274586883
     },
     {
       "day_start": "2026-05-06",
       "day_end": "2026-05-07",
       "transfers": 23,
-      "inflow_usd": 158.88538626159138,
+      "inflow_usd": 159.01263589702714,
       "by_denom": {
         "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
           "amount": -0.000006629999999999999,
@@ -1517,8 +2014,8 @@
           "usd": -0.009032176022238707
         },
         "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 626.7018024299996,
-          "usd": 626.8146618342452
+          "amount": 626.7081740350004,
+          "usd": 626.8210345866745
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.08257111,
@@ -1529,11 +2026,11 @@
           "usd": 581.2516141561472
         },
         "tcy": {
-          "amount": -3516.0563474699993,
-          "usd": -486.15235009132766
+          "amount": -3515.3786686799995,
+          "usd": -486.0586499045822
         },
         "x/brune": {
-          "amount": 46.2485205,
+          "amount": 46.295770499999996,
           "usd": 0
         },
         "x/ghost-vault/btc-btc": {
@@ -1565,8 +2062,8 @@
           "usd": 0.0000013020095341728077
         },
         "x/ruji": {
-          "amount": -1457.2576842100002,
-          "usd": -563.0158452783403
+          "amount": -1457.1873425850004,
+          "usd": -562.9886685820794
         },
         "bsc-bnb": {
           "amount": 1e-7,
@@ -1593,14 +2090,30 @@
           "usd": 3.106066003118381e-7
         }
       },
-      "cumulative_usd": 20515.617713695294
+      "cumulative_usd": 20515.74091048391
     },
     {
       "day_start": "2026-05-07",
       "day_end": "2026-05-08",
       "transfers": 27,
-      "inflow_usd": 919.265489037124,
+      "inflow_usd": 919.1370632265308,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 445.5820452749995,
+          "usd": 445.5820452749995
+        },
+        "tcy": {
+          "amount": -1445.4361299600002,
+          "usd": -204.4587740842879
+        },
+        "x/brune": {
+          "amount": -35.41099781,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": -684.6013401849998,
+          "usd": -254.95001582620847
+        },
         "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
           "amount": 0.00002781,
           "usd": 0.00002781513713459019
@@ -1629,10 +2142,6 @@
           "amount": 0.00013041,
           "usd": 0.2987415531398343
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 445.5884168800003,
-          "usd": 445.5884168800003
-        },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": -0.02279949,
           "usd": -0.02279526828169176
@@ -1652,14 +2161,6 @@
         "rune": {
           "amount": 1655.0589907900005,
           "usd": 931.9368602490792
-        },
-        "tcy": {
-          "amount": -1444.7584511700002,
-          "usd": -204.36291555982294
-        },
-        "x/brune": {
-          "amount": -35.36374781,
-          "usd": 0
         },
         "x/ghost-vault/base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
           "amount": 1.9999999999999994e-8,
@@ -1697,10 +2198,6 @@
           "amount": -2.6000000000000005e-7,
           "usd": -9.682570019056855e-8
         },
-        "x/ruji": {
-          "amount": -684.53099856,
-          "usd": -254.92382014508098
-        },
         "avax-avax": {
           "amount": 8.1e-7,
           "usd": 0.000007679738546363787
@@ -1710,13 +2207,13 @@
           "usd": 9.481158699214554e-8
         }
       },
-      "cumulative_usd": 21434.883202732417
+      "cumulative_usd": 21434.87797371044
     },
     {
       "day_start": "2026-05-08",
       "day_end": "2026-05-09",
       "transfers": 20,
-      "inflow_usd": 1154.5838361972847,
+      "inflow_usd": 1154.7903643614895,
       "by_denom": {
         "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
           "amount": -0.029419459999999998,
@@ -1731,12 +2228,12 @@
           "usd": -0.37237242201931103
         },
         "eth-eth": {
-          "amount": -0.00010543,
-          "usd": -0.24325684559978644
+          "amount": -0.00008121,
+          "usd": -0.18737445159023672
         },
         "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -106.60581350999928,
-          "usd": -106.62070150222782
+          "amount": -106.59716852499878,
+          "usd": -106.61205530991539
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": -0.059825489999999995,
@@ -1755,11 +2252,11 @@
           "usd": 1460.6424196500798
         },
         "tcy": {
-          "amount": -14.234053759999998,
-          "usd": -2.0140558489651754
+          "amount": -13.583146704999997,
+          "usd": -1.9219553705379078
         },
         "x/brune": {
-          "amount": -11.703938090000001,
+          "amount": -11.650852650000001,
           "usd": 0
         },
         "x/ghost-vault/btc-btc": {
@@ -1783,12 +2280,12 @@
           "usd": 3.9054100938266574e-8
         },
         "x/ghost-vault/x/ruji": {
-          "amount": 0.0000092,
-          "usd": 0.000003537620570429004
+          "amount": 0.000009714999999999998,
+          "usd": 0.000003735650417578018
         },
         "x/ruji": {
-          "amount": -511.60134775999995,
-          "usd": -196.72298387988894
+          "amount": -511.471579775,
+          "usd": -196.67308497846298
         },
         "x/ghost-vault/rune": {
           "amount": 0.00004396,
@@ -1799,14 +2296,38 @@
           "usd": 2.8376677240087227e-8
         }
       },
-      "cumulative_usd": 22589.467038929703
+      "cumulative_usd": 22589.66833807193
     },
     {
       "day_start": "2026-05-09",
       "day_end": "2026-05-10",
       "transfers": 23,
-      "inflow_usd": 102.95187693189493,
+      "inflow_usd": 102.75365145476667,
       "by_denom": {
+        "eth-eth": {
+          "amount": -0.000049160000000000004,
+          "usd": -0.11432064192488518
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -200.39004433000082,
+          "usd": -200.32240483850268
+        },
+        "tcy": {
+          "amount": 27.282468705,
+          "usd": 3.5395700798633696
+        },
+        "x/brune": {
+          "amount": 25.654768230000002,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": -1361.785921935,
+          "usd": -512.2622586025453
+        },
+        "x/ghost-vault/x/ruji": {
+          "amount": -7.499999999999843e-8,
+          "usd": -2.8212708602978144e-8
+        },
         "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
           "amount": 0.000005800000000000002,
           "usd": 0.000005802395911596626
@@ -1814,14 +2335,6 @@
         "btc-btc": {
           "amount": -0.00000218,
           "usd": -0.17581577897751569
-        },
-        "eth-eth": {
-          "amount": -0.00002494,
-          "usd": -0.05799749409289333
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -200.3814013400006,
-          "usd": -200.3137647658502
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.0720397,
@@ -1834,14 +2347,6 @@
         "rune": {
           "amount": 1365.3952960799988,
           "usd": 810.7105400572757
-        },
-        "tcy": {
-          "amount": 27.93337576,
-          "usd": 3.624017391489086
-        },
-        "x/brune": {
-          "amount": 25.707853670000002,
-          "usd": 0
         },
         "x/ghost-vault/base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
           "amount": 2.3e-7,
@@ -1871,14 +2376,6 @@
           "amount": -0.00004396,
           "usd": -0.000026101478043406312
         },
-        "x/ghost-vault/x/ruji": {
-          "amount": 4.4000000000000087e-7,
-          "usd": 1.6551455713747556e-7
-        },
-        "x/ruji": {
-          "amount": -1361.65615395,
-          "usd": -512.2134438512546
-        },
         "avax-usdt-0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7": {
           "amount": 0.00002447,
           "usd": 0.00002434395972204689
@@ -1900,14 +2397,18 @@
           "usd": 0.00007083091264267027
         }
       },
-      "cumulative_usd": 22692.4189158616
+      "cumulative_usd": 22692.421989526698
     },
     {
       "day_start": "2026-05-10",
       "day_end": "2026-05-11",
       "transfers": 22,
-      "inflow_usd": 125.80883473166932,
+      "inflow_usd": 125.81005852114667,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -428.36274907999905,
+          "usd": -428.36274907999905
+        },
         "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
           "amount": -0.000030469999999999998,
           "usd": -0.00003046983005814298
@@ -1919,10 +2420,6 @@
         "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
           "amount": -0.00019216,
           "usd": -0.00019205515038286266
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -428.36274738999964,
-          "usd": -428.36274738999964
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.20211348,
@@ -1941,8 +2438,8 @@
           "usd": 556.9076856962023
         },
         "tcy": {
-          "amount": -14.29252551,
-          "usd": -1.9164948273348403
+          "amount": -14.292522680000001,
+          "usd": -1.9164944478581443
         },
         "x/brune": {
           "amount": -2.5784553400000014,
@@ -1961,8 +2458,8 @@
           "usd": 0.04160922013601222
         },
         "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 0.025912520000000022,
-          "usd": 0.025912520000000022
+          "amount": 0.02713762000000003,
+          "usd": 0.02713762000000003
         },
         "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.010252979999999998,
@@ -1997,14 +2494,26 @@
           "usd": 2.54772340226958e-8
         }
       },
-      "cumulative_usd": 22818.22775059327
+      "cumulative_usd": 22818.232048047845
     },
     {
       "day_start": "2026-05-11",
       "day_end": "2026-05-12",
       "transfers": 21,
-      "inflow_usd": 1278.1399339571806,
+      "inflow_usd": 1278.138708033241,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -317.9505607150022,
+          "usd": -317.98447317955385
+        },
+        "tcy": {
+          "amount": -19.77063703,
+          "usd": -2.7122636028551255
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -0.18370793000000002,
+          "usd": -0.18372752420562105
+        },
         "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
           "amount": 0.57994008,
           "usd": 0.5800275470294717
@@ -2020,10 +2529,6 @@
         "eth-eth": {
           "amount": -0.00015101999999999997,
           "usd": -0.35347876018233004
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -317.95056041000134,
-          "usd": -317.9844728745204
         },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": 0.02314017,
@@ -2041,10 +2546,6 @@
           "amount": 1367.1800643300003,
           "usd": 859.9053516315854
         },
-        "tcy": {
-          "amount": -19.7706342,
-          "usd": -2.7122632146174586
-        },
         "x/brune": {
           "amount": -16.21930102,
           "usd": 0
@@ -2060,10 +2561,6 @@
         "x/ghost-vault/eth-eth": {
           "amount": -0.000021079999999999998,
           "usd": -0.04934003618489947
-        },
-        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -0.18248283,
-          "usd": -0.18250229353700317
         },
         "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.04680861,
@@ -2090,7 +2587,7 @@
           "usd": 5.4601915247054515
         }
       },
-      "cumulative_usd": 24096.36768455045
+      "cumulative_usd": 24096.370756081087
     },
     {
       "day_start": "2026-05-12",
@@ -2187,7 +2684,7 @@
           "usd": 0.000007579688804397149
         }
       },
-      "cumulative_usd": 24289.550072301874
+      "cumulative_usd": 24289.553143832512
     },
     {
       "day_start": "2026-05-13",
@@ -2319,16 +2816,16 @@
           "amount": 0.01455184,
           "usd": 0.02075044517454945
         },
+        "x/brune": {
+          "amount": 4.535952475,
+          "usd": 0
+        },
         "ltc-ltc": {
           "amount": 0.00000452,
           "usd": 0.00025718816102492136
-        },
-        "x/brune": {
-          "amount": 4.37083619,
-          "usd": 0
         }
       },
-      "cumulative_usd": 24355.75206337996
+      "cumulative_usd": 24355.7551349106
     },
     {
       "day_start": "2026-05-14",
@@ -2336,6 +2833,10 @@
       "transfers": 28,
       "inflow_usd": 97.16404852802422,
       "by_denom": {
+        "x/brune": {
+          "amount": 1.0192879549999994,
+          "usd": 0
+        },
         "avax-avax": {
           "amount": -0.00775397,
           "usd": -0.07675828017414459
@@ -2392,10 +2893,6 @@
           "amount": -19.07095609,
           "usd": -2.2471910559771646
         },
-        "x/brune": {
-          "amount": 1.1844042399999992,
-          "usd": 0
-        },
         "x/ghost-vault/btc-btc": {
           "amount": 1.3000000000000003e-7,
           "usd": 0.010537535087749421
@@ -2449,7 +2946,7 @@
           "usd": 5.8916580935223704e-8
         }
       },
-      "cumulative_usd": 24452.916111907987
+      "cumulative_usd": 24452.919183438626
     },
     {
       "day_start": "2026-05-15",
@@ -2486,7 +2983,7 @@
           "usd": 0
         },
         "x/brune": {
-          "amount": -4.04672871,
+          "amount": -4.024665854999999,
           "usd": 0
         },
         "x/ghost-vault/btc-btc": {
@@ -2522,7 +3019,7 @@
           "usd": 0.16695059169464876
         }
       },
-      "cumulative_usd": 24470.111656209145
+      "cumulative_usd": 24470.114727739783
     },
     {
       "day_start": "2026-05-16",
@@ -2530,7 +3027,7 @@
       "transfers": 0,
       "inflow_usd": 0,
       "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "cumulative_usd": 24470.114727739783
     },
     {
       "day_start": "2026-05-17",
@@ -2538,463 +3035,1895 @@
       "transfers": 0,
       "inflow_usd": 0,
       "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "cumulative_usd": 24470.114727739783
     },
     {
       "day_start": "2026-05-18",
       "day_end": "2026-05-19",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 12,
+      "inflow_usd": 72.79220490536838,
+      "by_denom": {
+        "x/brune": {
+          "amount": 11.15415306,
+          "usd": 0
+        },
+        "btc-btc": {
+          "amount": 0.000025574999999999998,
+          "usd": 2.0921302887014166
+        },
+        "eth-eth": {
+          "amount": 0.00003976499999999998,
+          "usd": 0.0900757958940339
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 39.17174259000058,
+          "usd": 39.16900395863909
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.896485635,
+          "usd": 0.896485635
+        },
+        "gaia-atom": {
+          "amount": 0.00012499,
+          "usd": 0.00025272139380576265
+        },
+        "rune": {
+          "amount": 13.361787055000605,
+          "usd": 7.824941285864417
+        },
+        "tcy": {
+          "amount": 8.42833114,
+          "usd": 0.9729763961192909
+        },
+        "x/ghost-vault/eth-eth": {
+          "amount": 0.000026305,
+          "usd": 0.059586163988245004
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 6.41354262,
+          "usd": 6.413094227158732
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.673413435,
+          "usd": 0.673413435
+        },
+        "x/ruji": {
+          "amount": 38.460551885,
+          "usd": 14.600244997609344
+        }
+      },
+      "cumulative_usd": 24542.90693264515
     },
     {
       "day_start": "2026-05-19",
       "day_end": "2026-05-20",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 11,
+      "inflow_usd": 31.312482266525524,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.000031809999999999995,
+          "usd": 2.602176519397539
+        },
+        "eth-eth": {
+          "amount": 0.0006977600000000002,
+          "usd": 1.580568020697124
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 10.985260589999598,
+          "usd": 10.984492572618274
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.16444709000000002,
+          "usd": 0.16444709000000002
+        },
+        "rune": {
+          "amount": 0.14577290499983064,
+          "usd": 0.08536765464067746
+        },
+        "tcy": {
+          "amount": 0.05081193000000006,
+          "usd": 0.005865788577840066
+        },
+        "x/brune": {
+          "amount": 1.9752736350000006,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 3.4410352000000017,
+          "usd": 1.3062723882803091
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 14.530726685000001,
+          "usd": 14.529710791879769
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 6.550000000000001e-7,
+          "usd": 0.05358144043399523
+        },
+        "thor.nami": {
+          "amount": 0.615903205,
+          "usd": 0
+        }
+      },
+      "cumulative_usd": 24574.219414911677
     },
     {
       "day_start": "2026-05-20",
       "day_end": "2026-05-21",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 10,
+      "inflow_usd": 35.73047399914728,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.00000572000000000002,
+          "usd": 0.4679173118816088
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 1.1375868800005264,
+          "usd": 1.1375073473859427
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.00799477500000001,
+          "usd": 0.00799477500000001
+        },
+        "rune": {
+          "amount": 0.000839714999528951,
+          "usd": 0.0004917546239232003
+        },
+        "x/brune": {
+          "amount": 0.4519986299999985,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 6.305703394999995,
+          "usd": 2.393746577650206
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 2.3499999999999987e-7,
+          "usd": 0.019223875575555528
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 23.009539104999998,
+          "usd": 23.007930428917703
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 8.67216036,
+          "usd": 8.67216036
+        },
+        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
+          "amount": 0.023499475,
+          "usd": 0.023501568112337702
+        }
+      },
+      "cumulative_usd": 24609.949888910825
     },
     {
       "day_start": "2026-05-21",
       "day_end": "2026-05-22",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 7,
+      "inflow_usd": 35.626459368577116,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.0000036299999999999907,
+          "usd": 0.29694749471024373
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.4287530549991061,
+          "usd": 0.4287230736961126
+        },
+        "rune": {
+          "amount": 52.67033396000079,
+          "usd": 30.84484650499156
+        },
+        "tcy": {
+          "amount": 0.0472091850000016,
+          "usd": 0.005449883484885294
+        },
+        "x/brune": {
+          "amount": 1.1681677300000022,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 0.4494427250000044,
+          "usd": 0.17061569779378183
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 3.8801480400000017,
+          "usd": 3.8798767139005363
+        }
+      },
+      "cumulative_usd": 24645.576348279403
     },
     {
       "day_start": "2026-05-22",
       "day_end": "2026-05-23",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 5,
+      "inflow_usd": 8.940512590354043,
+      "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.040093454999805545,
+          "usd": 0.04009065139524019
+        },
+        "rune": {
+          "amount": 0.2696287349990598,
+          "usd": 0.15790021287309342
+        },
+        "x/brune": {
+          "amount": 0.17575703500000017,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 8.785612954999998,
+          "usd": 3.33516019168716
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 5.407739679999999,
+          "usd": 5.407361534398549
+        }
+      },
+      "cumulative_usd": 24654.516860869757
     },
     {
       "day_start": "2026-05-23",
       "day_end": "2026-05-24",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 7,
+      "inflow_usd": 13.376801929477287,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.0000017250000000000013,
+          "usd": 0.14111138417183144
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 2.3908551650001755,
+          "usd": 2.390687980294948
+        },
+        "rune": {
+          "amount": 6.39922198000022,
+          "usd": 3.747517907791751
+        },
+        "tcy": {
+          "amount": 0.37858159999999863,
+          "usd": 0.04370390231310651
+        },
+        "x/brune": {
+          "amount": 0.42569793499999875,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 4.109275165,
+          "usd": 1.5599470426473718
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 5.494217904999999,
+          "usd": 5.493833712258277
+        }
+      },
+      "cumulative_usd": 24667.893662799233
     },
     {
       "day_start": "2026-05-24",
       "day_end": "2026-05-25",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 4,
+      "inflow_usd": 4.79482940620871,
+      "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.0038851949993841117,
+          "usd": 0.003884923330431645
+        },
+        "rune": {
+          "amount": 6.9797268500005885,
+          "usd": 4.087473736527395
+        },
+        "x/brune": {
+          "amount": 0.7502250650000022,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 1.8531108700000019,
+          "usd": 0.7034707463508839
+        }
+      },
+      "cumulative_usd": 24672.68849220544
     },
     {
       "day_start": "2026-05-25",
       "day_end": "2026-05-26",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 6,
+      "inflow_usd": 18.519853350453605,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 5.999999999999604e-8,
+          "usd": 0.00490822213613418
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.04301937500167696,
+          "usd": 0.04301636690850678
+        },
+        "rune": {
+          "amount": 6.710210645000188,
+          "usd": 3.929639421061658
+        },
+        "x/brune": {
+          "amount": 0.8767357199999992,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 1.8991841150000042,
+          "usd": 0.7209608925540405
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 13.822294960000008,
+          "usd": 13.821328447793267
+        }
+      },
+      "cumulative_usd": 24691.208345555897
     },
     {
       "day_start": "2026-05-26",
       "day_end": "2026-05-27",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 15,
+      "inflow_usd": 64.18723020046178,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.00004626499999999998,
+          "usd": 3.7846482854710453
+        },
+        "eth-eth": {
+          "amount": 0.0008127149999999999,
+          "usd": 1.8409644567621273
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 31.202699734998532,
+          "usd": 31.20051749788807
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 10.61373368,
+          "usd": 10.613733679999998
+        },
+        "rune": {
+          "amount": 4.5451471699998365,
+          "usd": 2.6617330570786706
+        },
+        "tcy": {
+          "amount": 0.04462542500000133,
+          "usd": 0.005151611292963464
+        },
+        "x/brune": {
+          "amount": 0.39832296000000156,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 1.431996484999999,
+          "usd": 0.5436089401789492
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.0000010099999999999996,
+          "usd": 0.08262173929159745
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 7.234589409999998,
+          "usd": 7.234083441297817
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 5.595034985,
+          "usd": 5.595034984999999
+        },
+        "bch-bch": {
+          "amount": 0.000154705,
+          "usd": 0.06775861874151103
+        },
+        "bsc-usdt-0x55d398326f99059ff775485246999027b3197955": {
+          "amount": 0.00798889,
+          "usd": 0.007982480606829675
+        },
+        "ltc-ltc": {
+          "amount": 0.00927814,
+          "usd": 0.5493538285184858
+        },
+        "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
+          "amount": 0.000037565,
+          "usd": 0.000037578333721196414
+        }
+      },
+      "cumulative_usd": 24755.39557575636
     },
     {
       "day_start": "2026-05-27",
       "day_end": "2026-05-28",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 8,
+      "inflow_usd": 9.60901190330313,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 4.5000000000003804e-8,
+          "usd": 0.0036811666021011893
+        },
+        "eth-eth": {
+          "amount": 0.0000022300000000002006,
+          "usd": 0.005051402691693784
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.2336471500002517,
+          "usd": 0.23363080931544514
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.10433152999999962,
+          "usd": 0.1043315299999996
+        },
+        "rune": {
+          "amount": 11.95987319499909,
+          "usd": 7.003951390555154
+        },
+        "x/brune": {
+          "amount": 0.07747644999999892,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 0.4215231700000004,
+          "usd": 0.1600169875448901
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 2.098495380000003,
+          "usd": 2.0983486165938467
+        }
+      },
+      "cumulative_usd": 24765.004587659663
     },
     {
       "day_start": "2026-05-28",
       "day_end": "2026-05-29",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 18,
+      "inflow_usd": 54.44375994719934,
+      "by_denom": {
+        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
+          "amount": 0.01013062,
+          "usd": 0.010131522501375462
+        },
+        "bch-bch": {
+          "amount": 0.00002320500000000002,
+          "usd": 0.010163464321752786
+        },
+        "btc-btc": {
+          "amount": 0.00008217000000000001,
+          "usd": 6.721810215436204
+        },
+        "eth-eth": {
+          "amount": 0.0011209099999999997,
+          "usd": 2.539088695581152
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 17.48858317000122,
+          "usd": 17.487360063169852
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 10.471319225000002,
+          "usd": 10.471319225
+        },
+        "ltc-ltc": {
+          "amount": 0.0034039699999999992,
+          "usd": 0.2015472876742612
+        },
+        "rune": {
+          "amount": 8.763908394999817,
+          "usd": 5.132327691862423
+        },
+        "x/brune": {
+          "amount": 0.17982067499999843,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 6.047917494999993,
+          "usd": 2.2958869342103685
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 3.5500000000000084e-7,
+          "usd": 0.02904031430546255
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 9.059038689999994,
+          "usd": 9.058405123975826
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.4863036249999997,
+          "usd": 0.48630362499999963
+        },
+        "base-eth": {
+          "amount": 7.5e-8,
+          "usd": 0.00016985655058237895
+        },
+        "eth-dai-0x6b175474e89094c44da98b954eedeac495271d0f": {
+          "amount": 0.00007504,
+          "usd": 0.00007497502660787197
+        },
+        "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
+          "amount": 0.000049995,
+          "usd": 0.00005010319134714104
+        },
+        "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
+          "amount": 0.00007507,
+          "usd": 0.00007522449170233786
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 9.499999999999994e-8,
+          "usd": 0.0000056249004336274425
+        }
+      },
+      "cumulative_usd": 24819.448347606864
     },
     {
       "day_start": "2026-05-29",
       "day_end": "2026-05-30",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 10,
+      "inflow_usd": 5.889400486510779,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 3.900000000000149e-7,
+          "usd": 0.031903443884875496
+        },
+        "eth-eth": {
+          "amount": 0.00003603000000000026,
+          "usd": 0.08161526603457339
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.055893490000016754,
+          "usd": 0.055889580952109136
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.04256227999999851,
+          "usd": 0.0425622799999985
+        },
+        "rune": {
+          "amount": 0.028248919999896316,
+          "usd": 0.016543157213212423
+        },
+        "x/ruji": {
+          "amount": 0.31084126500000764,
+          "usd": 0.11800035293420304
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 5.365647875000008,
+          "usd": 5.365272615294471
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.1776127350000003,
+          "usd": 0.17761273500000027
+        },
+        "doge-doge": {
+          "amount": 0.000006120000000000002,
+          "usd": 7.038482496286156e-7
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": 0.000003055,
+          "usd": 3.5134908539467643e-7
+        }
+      },
+      "cumulative_usd": 24825.337748093374
     },
     {
       "day_start": "2026-05-30",
       "day_end": "2026-05-31",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 8,
+      "inflow_usd": 7.218979902134001,
+      "by_denom": {
+        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
+          "amount": 0.000049995000000004064,
+          "usd": 0.00004999945387906243
+        },
+        "btc-btc": {
+          "amount": 0.0000020150000000000137,
+          "usd": 0.16483446007185154
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.900240439999834,
+          "usd": 0.900177479483174
+        },
+        "rune": {
+          "amount": 4.6891755950000515,
+          "usd": 2.7460791091740666
+        },
+        "tcy": {
+          "amount": 0.3069131849999991,
+          "usd": 0.03543041729698559
+        },
+        "x/ruji": {
+          "amount": 1.5289050549999956,
+          "usd": 0.5803969948870275
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 5.699999999999996e-7,
+          "usd": 0.04662811029327776
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 2.7455753499999958,
+          "usd": 2.7453833314737395
+        }
+      },
+      "cumulative_usd": 24832.556727995507
     },
     {
       "day_start": "2026-05-31",
       "day_end": "2026-06-01",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 6,
+      "inflow_usd": 1.2583079039096856,
+      "by_denom": {
+        "eth-eth": {
+          "amount": 0.000002159999999999749,
+          "usd": 0.004892838596576652
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.004022044999146601,
+          "usd": 0.004021763707593895
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.004099015000001316,
+          "usd": 0.004099015000001315
+        },
+        "rune": {
+          "amount": 1.2591891049996775,
+          "usd": 0.7374074239032985
+        },
+        "x/brune": {
+          "amount": 0.7545001150000026,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 1.3378959549999934,
+          "usd": 0.5078868627022154
+        }
+      },
+      "cumulative_usd": 24833.815035899417
     },
     {
       "day_start": "2026-06-01",
       "day_end": "2026-06-02",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 16,
+      "inflow_usd": 46.939094297955414,
+      "by_denom": {
+        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
+          "amount": 0.000012604999999998867,
+          "usd": 0.000012606122935203
+        },
+        "bch-bch": {
+          "amount": 0.000009785000000000002,
+          "usd": 0.004285692669181252
+        },
+        "btc-btc": {
+          "amount": 0.000004260000000000017,
+          "usd": 0.34848377166555117
+        },
+        "doge-doge": {
+          "amount": 0.000001009999999999992,
+          "usd": 1.1615796276550586e-7
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 4.255077480000182,
+          "usd": 4.254779890751059
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 18.57066847,
+          "usd": 18.570668469999998
+        },
+        "ltc-ltc": {
+          "amount": 0.028256920000000005,
+          "usd": 1.6730774901155376
+        },
+        "rune": {
+          "amount": 1.10229016500125,
+          "usd": 0.6455241295688638
+        },
+        "tcy": {
+          "amount": 0.3530399099999997,
+          "usd": 0.04075534041911644
+        },
+        "x/brune": {
+          "amount": 1.423694144999999,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 14.516986764999999,
+          "usd": 5.510882095435791
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 7.900000000000001e-7,
+          "usd": 0.06462492479243764
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 15.148927940000007,
+          "usd": 15.14786846267865
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.6779275250000012,
+          "usd": 0.6779275250000011
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 2.5000000000000184e-8,
+          "usd": 0.0000014802369562177597
+        },
+        "avax-avax": {
+          "amount": 0.000020585,
+          "usd": 0.00020230234138071294
+        }
+      },
+      "cumulative_usd": 24880.754130197372
     },
     {
       "day_start": "2026-06-02",
       "day_end": "2026-06-03",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 10,
+      "inflow_usd": 16.50090236247237,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.000022035,
+          "usd": 1.8025445794953967
+        },
+        "eth-eth": {
+          "amount": 0.00006335000000000021,
+          "usd": 0.14350061346905923
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 10.361702964999495,
+          "usd": 10.36097829396366
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.07357612499999533,
+          "usd": 0.07357612499999532
+        },
+        "ltc-ltc": {
+          "amount": 0.004729184999999997,
+          "usd": 0.2800125763916252
+        },
+        "rune": {
+          "amount": 0.07638939499884145,
+          "usd": 0.04473522424548108
+        },
+        "tcy": {
+          "amount": 0.10217933000000023,
+          "usd": 0.011795701449015353
+        },
+        "x/ruji": {
+          "amount": 0.27560342000001015,
+          "usd": 0.10462349916724792
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 4.049999999999995e-7,
+          "usd": 0.03313049941890786
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 3.646260259999991,
+          "usd": 3.6460052498719784
+        }
+      },
+      "cumulative_usd": 24897.255032559846
     },
     {
       "day_start": "2026-06-03",
       "day_end": "2026-06-04",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 14,
+      "inflow_usd": 50.97743264598301,
+      "by_denom": {
+        "bch-bch": {
+          "amount": 0.00014654999999999998,
+          "usd": 0.06418684319555568
+        },
+        "bsc-usdt-0x55d398326f99059ff775485246999027b3197955": {
+          "amount": 0.000003750000000000281,
+          "usd": 0.0000037469914187845277
+        },
+        "btc-btc": {
+          "amount": 0.000025910000000000028,
+          "usd": 2.119533925787419
+        },
+        "eth-eth": {
+          "amount": 0.0006560799999999999,
+          "usd": 1.4861544196492509
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 30.784813825001038,
+          "usd": 30.78266081376361
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.017644150000002412,
+          "usd": 0.01764415000000241
+        },
+        "ltc-ltc": {
+          "amount": 3.750000000038445e-7,
+          "usd": 0.000022203554343493862
+        },
+        "rune": {
+          "amount": 3.264583060001314,
+          "usd": 1.911807984071251
+        },
+        "tcy": {
+          "amount": 1.8947252050000003,
+          "usd": 0.21872929530957352
+        },
+        "x/ruji": {
+          "amount": 6.495490265000001,
+          "usd": 2.4657927696654474
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 6.600000000000005e-7,
+          "usd": 0.05399044349747958
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 11.633855274999988,
+          "usd": 11.633041632881374
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.22004517999999962,
+          "usd": 0.2200451799999996
+        },
+        "x/ghost-vault/bch-bch": {
+          "amount": 0.00000872,
+          "usd": 0.0038192376162759843
+        }
+      },
+      "cumulative_usd": 24948.23246520583
     },
     {
       "day_start": "2026-06-04",
       "day_end": "2026-06-05",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 14,
+      "inflow_usd": 105.41129841496262,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.000013414999999999911,
+          "usd": 1.0973966659373988
+        },
+        "eth-eth": {
+          "amount": 0.00012091000000000011,
+          "usd": 0.27388570125562606
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 50.641290345000016,
+          "usd": 50.63774862251923
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 28.01992769000001,
+          "usd": 28.019927690000006
+        },
+        "ltc-ltc": {
+          "amount": 0.10834505,
+          "usd": 6.415053881330393
+        },
+        "rune": {
+          "amount": 5.160537174999263,
+          "usd": 3.022118289511714
+        },
+        "tcy": {
+          "amount": 7.0026678350000005,
+          "usd": 0.808396171009171
+        },
+        "x/brune": {
+          "amount": 0.003420514999998403,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 27.500780039999995,
+          "usd": 10.439739236956862
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 6.499999999999997e-7,
+          "usd": 0.053172406474790435
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 4.257711134999994,
+          "usd": 4.2574133615597685
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.3755621550000008,
+          "usd": 0.37556215500000073
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 1.4999999999999856e-8,
+          "usd": 8.881421737306409e-7
+        },
+        "avax-usdt-0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7": {
+          "amount": 0.010928335,
+          "usd": 0.010883345265498785
+        }
+      },
+      "cumulative_usd": 25053.643763620792
     },
     {
       "day_start": "2026-06-05",
       "day_end": "2026-06-06",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 12,
+      "inflow_usd": 132.99642814412476,
+      "by_denom": {
+        "bch-bch": {
+          "amount": 0.00000983500000000003,
+          "usd": 0.004307591967439728
+        },
+        "btc-btc": {
+          "amount": 0.000149355,
+          "usd": 12.217791952372814
+        },
+        "eth-eth": {
+          "amount": 0.00445282,
+          "usd": 10.08654146278286
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 87.3674072599988,
+          "usd": 87.36129700671987
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 1.4002097799999973,
+          "usd": 1.400209779999997
+        },
+        "ltc-ltc": {
+          "amount": 0.005880574999999999,
+          "usd": 0.3481857775524075
+        },
+        "rune": {
+          "amount": 10.467880019999939,
+          "usd": 6.130209043763081
+        },
+        "tcy": {
+          "amount": 11.081711424999998,
+          "usd": 1.2792857372762394
+        },
+        "x/ruji": {
+          "amount": 23.54319697999999,
+          "usd": 8.937376936872887
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.000001524999999999999,
+          "usd": 0.12475064596008521
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 4.962022000000019,
+          "usd": 4.961674968857095
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.14479723999999905,
+          "usd": 0.14479723999999902
+        }
+      },
+      "cumulative_usd": 25186.640191764916
     },
     {
       "day_start": "2026-06-06",
       "day_end": "2026-06-07",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 18,
+      "inflow_usd": 19.756614634109376,
+      "by_denom": {
+        "bch-bch": {
+          "amount": 0.00017404999999999998,
+          "usd": 0.07623145723771044
+        },
+        "btc-btc": {
+          "amount": 0.000002695000000000041,
+          "usd": 0.2204609776147115
+        },
+        "doge-doge": {
+          "amount": 0.24999914499999998,
+          "usd": 0.028751872649820324
+        },
+        "eth-eth": {
+          "amount": 0.0000020049999999993684,
+          "usd": 0.004541732123210295
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 4.077769720001015,
+          "usd": 4.077484531203685
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.19473664000000213,
+          "usd": 0.1947366400000021
+        },
+        "ltc-ltc": {
+          "amount": 0.0005732299999999801,
+          "usd": 0.03394064921650683
+        },
+        "rune": {
+          "amount": 4.805356984999889,
+          "usd": 2.8141173563008213
+        },
+        "tcy": {
+          "amount": 6.064568540000003,
+          "usd": 0.7001008904142433
+        },
+        "x/brune": {
+          "amount": 0.0021499250000012182,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 26.588202414999984,
+          "usd": 10.093310065688835
+        },
+        "x/ghost-vault/bch-bch": {
+          "amount": 0.000008405,
+          "usd": 0.003681272037247666
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 5.500000000000015e-7,
+          "usd": 0.04499203624789974
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": 0.000012519999999999999,
+          "usd": 0.0000014398987067565789
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 1.331551289999993,
+          "usd": 1.3314581647042911
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.10766585500000048,
+          "usd": 0.10766585500000046
+        },
+        "x/ghost-vault/xrp-xrp": {
+          "amount": 0.000007280000000000001,
+          "usd": 0.000010841344857138102
+        },
+        "xrp-xrp": {
+          "amount": 0.01687411,
+          "usd": 0.025128852426824534
+        }
+      },
+      "cumulative_usd": 25206.396806399025
     },
     {
       "day_start": "2026-06-07",
       "day_end": "2026-06-08",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 13,
+      "inflow_usd": 27.10175798484475,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.00005122999999999998,
+          "usd": 4.1908036672361755
+        },
+        "doge-doge": {
+          "amount": 0.19036701499999997,
+          "usd": 0.02189370756450561
+        },
+        "eth-eth": {
+          "amount": 0.00016893000000000116,
+          "usd": 0.38266075190731275
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 4.463324099999227,
+          "usd": 4.463011946513479
+        },
+        "ltc-ltc": {
+          "amount": 0.000003985000000011896,
+          "usd": 0.00023594977082181352
+        },
+        "rune": {
+          "amount": 8.758774105001066,
+          "usd": 5.1293209444672
+        },
+        "tcy": {
+          "amount": 0.38780307999999764,
+          "usd": 0.04476844145179439
+        },
+        "x/brune": {
+          "amount": 0.3750144249999998,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 30.772453075000016,
+          "usd": 11.68171903914081
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.000002195,
+          "usd": 0.17955912648025393
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": 0.00347509,
+          "usd": 0.00039966274735325243
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 1.0074534299999982,
+          "usd": 1.007382971280699
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 3.0000000000000136e-8,
+          "usd": 0.0000017762843474613068
+        }
+      },
+      "cumulative_usd": 25233.49856438387
     },
     {
       "day_start": "2026-06-08",
       "day_end": "2026-06-09",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 9,
+      "inflow_usd": 12.54850696299181,
+      "by_denom": {
+        "bch-bch": {
+          "amount": 0.00013833499999999996,
+          "usd": 0.06058878849169015
+        },
+        "btc-btc": {
+          "amount": 0.0000019850000000000293,
+          "usd": 0.16238034900378556
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 2.1766818600008264,
+          "usd": 2.176529628431991
+        },
+        "rune": {
+          "amount": 8.168971614999464,
+          "usd": 4.783920294924617
+        },
+        "tcy": {
+          "amount": 0.10552369500000225,
+          "usd": 0.012181778858962745
+        },
+        "x/ruji": {
+          "amount": 10.32774748,
+          "usd": 3.920579359549627
+        },
+        "x/ghost-vault/bch-bch": {
+          "amount": 0.000015465,
+          "usd": 0.006773452951342671
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 2.649999999999983e-7,
+          "usd": 0.021677981101260586
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 1.4039735199999939,
+          "usd": 1.4038753296785322
+        }
+      },
+      "cumulative_usd": 25246.04707134686
     },
     {
       "day_start": "2026-06-09",
       "day_end": "2026-06-10",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 13,
+      "inflow_usd": 4.222492349182772,
+      "by_denom": {
+        "bch-bch": {
+          "amount": 1.2000000000004628e-7,
+          "usd": 0.00005255831633087925
+        },
+        "btc-btc": {
+          "amount": 0.0000025650000000000542,
+          "usd": 0.2098265032434583
+        },
+        "eth-eth": {
+          "amount": 0.000001939999999998887,
+          "usd": 0.00439430822784938
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.9028605200001039,
+          "usd": 0.9027973763055148
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.00094636999999409,
+          "usd": 0.00094636999999409
+        },
+        "rune": {
+          "amount": 2.035102599998936,
+          "usd": 1.1917985629699457
+        },
+        "tcy": {
+          "amount": 0.12282129500000138,
+          "usd": 0.014178634050510754
+        },
+        "thor.nami": {
+          "amount": 0.0014115100000000602,
+          "usd": 0
+        },
+        "x/brune": {
+          "amount": 0.005259729999998797,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 0.5978635600000075,
+          "usd": 0.22695864108000566
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.000001905000000000003,
+          "usd": 0.15583605796443675
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 1.3400985600000013,
+          "usd": 1.3400048370247273
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.1756984999999993,
+          "usd": 0.1756984999999993
+        }
+      },
+      "cumulative_usd": 25250.26956369604
     },
     {
       "day_start": "2026-06-10",
       "day_end": "2026-06-11",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 9,
+      "inflow_usd": 6.326822540597922,
+      "by_denom": {
+        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
+          "amount": 0.00009999499999999856,
+          "usd": 0.00010000390821700247
+        },
+        "btc-btc": {
+          "amount": 9.74999999999956e-7,
+          "usd": 0.07975861234399934
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 1.3913584999991144,
+          "usd": 1.3912611920382039
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.0014957150000043384,
+          "usd": 0.0014957150000043384
+        },
+        "rune": {
+          "amount": 5.188055245000214,
+          "usd": 3.0382334461187255
+        },
+        "tcy": {
+          "amount": 0.21154107999999638,
+          "usd": 0.024420549872640036
+        },
+        "x/brune": {
+          "amount": 2.9773160500000024,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 4.715635974999998,
+          "usd": 1.7901314017431897
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 0.000024010000000000002,
+          "usd": 0.0014216195729428076
+        }
+      },
+      "cumulative_usd": 25256.59638623664
     },
     {
       "day_start": "2026-06-11",
       "day_end": "2026-06-12",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 10,
+      "inflow_usd": 16.22385549613588,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.000002029999999999979,
+          "usd": 0.1660615210854608
+        },
+        "eth-eth": {
+          "amount": 4.50000000000797e-7,
+          "usd": 0.001019298300265466
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 3.568678794999869,
+          "usd": 3.5684292109734037
+        },
+        "ltc-ltc": {
+          "amount": 0.00009738000000000802,
+          "usd": 0.0057658189926356514
+        },
+        "rune": {
+          "amount": 13.89246831499986,
+          "usd": 8.135719434455536
+        },
+        "tcy": {
+          "amount": 0.4263009650000029,
+          "usd": 0.049212682361919134
+        },
+        "x/brune": {
+          "amount": 0.007386874999998128,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 11.123154659999983,
+          "usd": 4.222528742437985
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.07481563500000021,
+          "usd": 0.07481563500000021
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 0.000005120000000000002,
+          "usd": 0.0003031525286741848
+        }
+      },
+      "cumulative_usd": 25272.820241732778
     },
     {
       "day_start": "2026-06-12",
       "day_end": "2026-06-13",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 6,
+      "inflow_usd": 3.7607637431696777,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.0000011300000000000112,
+          "usd": 0.09243818661407611
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.7764129549996142,
+          "usd": 0.7763586547157724
+        },
+        "ltc-ltc": {
+          "amount": 1.4999999992104662e-8,
+          "usd": 8.881421733826716e-7
+        },
+        "rune": {
+          "amount": 2.9218486250010756,
+          "usd": 1.7110955450078116
+        },
+        "tcy": {
+          "amount": 0.16320879499999563,
+          "usd": 0.018841014321903552
+        },
+        "x/ruji": {
+          "amount": 3.0610646199999962,
+          "usd": 1.1620294543679404
+        }
+      },
+      "cumulative_usd": 25276.581005475946
     },
     {
       "day_start": "2026-06-13",
       "day_end": "2026-06-14",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 6,
+      "inflow_usd": 1.3651041133686814,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 1.349999999999572e-7,
+          "usd": 0.011043500170704598
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.37988621500153386,
+          "usd": 0.37985964675692985
+        },
+        "rune": {
+          "amount": 1.2358843950005394,
+          "usd": 0.7237596993681762
+        },
+        "tcy": {
+          "amount": 0.021941930000004106,
+          "usd": 0.002533002081047738
+        },
+        "x/brune": {
+          "amount": 0.2699999999999996,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 0.6530499000000134,
+          "usd": 0.24790826499182317
+        }
+      },
+      "cumulative_usd": 25277.946109589313
     },
     {
       "day_start": "2026-06-14",
       "day_end": "2026-06-15",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 10,
+      "inflow_usd": 21.758971280912252,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.000074815,
+          "usd": 6.120144187196492
+        },
+        "eth-eth": {
+          "amount": 0.00013943999999999936,
+          "usd": 0.31584656664169825
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 5.752866814998924,
+          "usd": 5.752464474596247
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.04828205500000138,
+          "usd": 0.04828205500000138
+        },
+        "rune": {
+          "amount": 6.455085399999007,
+          "usd": 3.7802327526735584
+        },
+        "tcy": {
+          "amount": 0.5491968699999958,
+          "usd": 0.0633999294781559
+        },
+        "x/ruji": {
+          "amount": 12.333403624999988,
+          "usd": 4.68195875095846
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.0000064900000000000005,
+          "usd": 0.5309060452436709
+        },
+        "x/ghost-vault/eth-eth": {
+          "amount": 0.00020505000000000002,
+          "usd": 0.46446025882014147
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 0.000021555,
+          "usd": 0.0012762603038226662
+        }
+      },
+      "cumulative_usd": 25299.705080870226
     },
     {
       "day_start": "2026-06-15",
       "day_end": "2026-06-16",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 10,
+      "inflow_usd": 29.95886080875146,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.000020755000000000014,
+          "usd": 1.6978358966151612
+        },
+        "eth-eth": {
+          "amount": 0.00003078500000000019,
+          "usd": 0.06973132927470442
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 4.792139635001149,
+          "usd": 4.7918044853353505
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.040812939999995024,
+          "usd": 0.040812939999995024
+        },
+        "ltc-ltc": {
+          "amount": 0.00003637500000000515,
+          "usd": 0.0021537447715869198
+        },
+        "rune": {
+          "amount": 17.675712759999442,
+          "usd": 10.351266352294907
+        },
+        "tcy": {
+          "amount": 0.8701528300000021,
+          "usd": 0.10045146116222098
+        },
+        "x/ruji": {
+          "amount": 14.615316250000006,
+          "usd": 5.5482095531202535
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 5.699999999999996e-7,
+          "usd": 0.04662811183187861
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 7.310478210000014,
+          "usd": 7.309966934345395
+        }
+      },
+      "cumulative_usd": 25329.663941678977
     },
     {
       "day_start": "2026-06-16",
       "day_end": "2026-06-17",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 10,
+      "inflow_usd": 13.413179075832524,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.0000025899999999999057,
+          "usd": 0.21187159586765136
+        },
+        "eth-eth": {
+          "amount": 0.0000694249999999997,
+          "usd": 0.15725507665734298
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 2.697057904999383,
+          "usd": 2.696869279849795
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.012616914999995288,
+          "usd": 0.012616914999995288
+        },
+        "ltc-ltc": {
+          "amount": 0.000033919999999992845,
+          "usd": 0.00200838550246605
+        },
+        "rune": {
+          "amount": 10.526228820001052,
+          "usd": 6.1643793198321495
+        },
+        "tcy": {
+          "amount": 1.2303465099999968,
+          "usd": 0.14203264116872263
+        },
+        "x/brune": {
+          "amount": 0.0038501600000024894,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 7.7097704800000315,
+          "usd": 2.9267531059754304
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 1.0994696499999748,
+          "usd": 1.0993927559789696
+        }
+      },
+      "cumulative_usd": 25343.07712075481
     },
     {
       "day_start": "2026-06-17",
       "day_end": "2026-06-18",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 5,
+      "inflow_usd": 8.448994106027252,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 8.350000000000284e-7,
+          "usd": 0.06830609364845612
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 2.1123953999995138,
+          "usd": 2.1122476646106754
+        },
+        "rune": {
+          "amount": 7.349943985000209,
+          "usd": 4.304280619187173
+        },
+        "tcy": {
+          "amount": 0.13220205000000362,
+          "usd": 0.015261559387379489
+        },
+        "x/ruji": {
+          "amount": 5.133865764999996,
+          "usd": 1.9488981691935667
+        }
+      },
+      "cumulative_usd": 25351.526114860837
     },
     {
       "day_start": "2026-06-18",
       "day_end": "2026-06-19",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 6,
+      "inflow_usd": 16.884860514341486,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.000002979999999999975,
+          "usd": 0.2437750408052582
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 3.9018057200009935,
+          "usd": 3.901532837951915
+        },
+        "rune": {
+          "amount": 8.206985834998704,
+          "usd": 4.806182216302642
+        },
+        "tcy": {
+          "amount": 0.24200534999999945,
+          "usd": 0.02793738085822761
+        },
+        "x/ruji": {
+          "amount": 20.322715845000005,
+          "usd": 7.714830405847518
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.0000023299999999999997,
+          "usd": 0.19060263257592494
+        }
+      },
+      "cumulative_usd": 25368.41097537518
     },
     {
       "day_start": "2026-06-19",
       "day_end": "2026-06-20",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 6,
+      "inflow_usd": 17.305919227851568,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.0000023550000000000003,
+          "usd": 0.1926477252001302
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 10.49705533999986,
+          "usd": 10.496321203506138
+        },
+        "rune": {
+          "amount": 5.499437975000546,
+          "usd": 3.2205856725608952
+        },
+        "tcy": {
+          "amount": 0.4377401550000002,
+          "usd": 0.05053323584447459
+        },
+        "x/ruji": {
+          "amount": 8.813723314999947,
+          "usd": 3.34583139073993
+        },
+        "thor.auto": {
+          "amount": 291.723021755,
+          "usd": 0
+        }
+      },
+      "cumulative_usd": 25385.716894603032
     },
     {
       "day_start": "2026-06-20",
       "day_end": "2026-06-21",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 8,
+      "inflow_usd": 11.799563537612084,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 7.700000000000892e-7,
+          "usd": 0.06298885282552756
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 1.3900028349999047,
+          "usd": 1.3899056218506454
+        },
+        "rune": {
+          "amount": 5.391937835000135,
+          "usd": 3.157631346635694
+        },
+        "tcy": {
+          "amount": 0.15208821000000228,
+          "usd": 0.017557240973458538
+        },
+        "x/brune": {
+          "amount": 1.1269975599999995,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 3.454685815000005,
+          "usd": 1.3114544026245103
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": 0.064618365,
+          "usd": 0.007431621422423554
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 5.8530037950000064,
+          "usd": 5.852594451279827
+        }
+      },
+      "cumulative_usd": 25397.516458140646
     },
     {
       "day_start": "2026-06-21",
       "day_end": "2026-06-22",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 9,
+      "inflow_usd": 13.465773476171536,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.0000044149999999999094,
+          "usd": 0.36116352417894276
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 3.6669244900003832,
+          "usd": 3.6666680349279233
+        },
+        "gaia-atom": {
+          "amount": 0.005897165,
+          "usd": 0.011923700454864374
+        },
+        "rune": {
+          "amount": 10.41714814000079,
+          "usd": 6.100499396691093
+        },
+        "tcy": {
+          "amount": 0.4273167650000005,
+          "usd": 0.04932994750285804
+        },
+        "x/ruji": {
+          "amount": 8.055828680000047,
+          "usd": 3.058122374921334
+        },
+        "xrp-xrp": {
+          "amount": 0.022740574999999996,
+          "usd": 0.03386591233547196
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.000002219999999999999,
+          "usd": 0.18160430887367363
+        },
+        "x/ghost-vault/xrp-xrp": {
+          "amount": 0.0017433700000000002,
+          "usd": 0.0025962762853750077
+        }
+      },
+      "cumulative_usd": 25410.982231616817
     },
     {
       "day_start": "2026-06-22",
       "day_end": "2026-06-23",
-      "transfers": 0,
-      "inflow_usd": 0,
-      "by_denom": {},
-      "cumulative_usd": 24470.111656209145
+      "transfers": 14,
+      "inflow_usd": 2291.6859975843477,
+      "by_denom": {
+        "avax-avax": {
+          "amount": 0.000006369999999999998,
+          "usd": 0.00003952178314522202
+        },
+        "btc-btc": {
+          "amount": 0.008172905,
+          "usd": 522.477038450469
+        },
+        "eth-eth": {
+          "amount": 0.0000025950000000010687,
+          "usd": 0.004470610841828586
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 1643.1343930599996,
+          "usd": 1643.1343930599996
+        },
+        "rune": {
+          "amount": 67.52675538999938,
+          "usd": 30.439550667162575
+        },
+        "tcy": {
+          "amount": 0.43177671499999803,
+          "usd": 0.038367698223991935
+        },
+        "x/ruji": {
+          "amount": 337.58295124,
+          "usd": 91.55513048501885
+        },
+        "x/ghost-vault/bch-bch": {
+          "amount": 0.00016675499999999998,
+          "usd": 0.04365068869750867
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 0.000001335,
+          "usd": 0.08534380937149962
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 3.313664540000019,
+          "usd": 3.313664540000019
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.5906840799999991,
+          "usd": 0.591380554826527
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 0.00006087,
+          "usd": 0.0026996392817787954
+        },
+        "x/ghost-vault/rune": {
+          "amount": 0.0000019650000000000007,
+          "usd": 8.857780403563239e-7
+        },
+        "x/ghost-vault/x/ruji": {
+          "amount": 0.000984385,
+          "usd": 0.00026697289300733017
+        }
+      },
+      "cumulative_usd": 27702.668229201165
     },
     {
       "day_start": "2026-06-23",
       "day_end": "2026-06-24",
-      "transfers": 38,
-      "inflow_usd": 3801.184066678962,
+      "transfers": 30,
+      "inflow_usd": 690.6301230713797,
       "by_denom": {
         "avax-avax": {
-          "amount": 21.33514587,
-          "usd": 138.48076211135842
-        },
-        "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e": {
-          "amount": 0.03379269,
-          "usd": 0.033807254361354594
+          "amount": 21.335118915,
+          "usd": 138.4805871536166
         },
         "avax-usdt-0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7": {
-          "amount": 0.01092889,
-          "usd": 0.010869996579885282
-        },
-        "base-eth": {
-          "amount": 8e-8,
-          "usd": 0.00013353893284323622
+          "amount": 5.54999999999306e-7,
+          "usd": 5.520092252578979e-7
         },
         "bch-bch": {
-          "amount": 0.00020259,
-          "usd": 0.03944383592355084
+          "amount": -0.000453995,
+          "usd": -0.08839184703150435
+        },
+        "bsc-usdt-0x55d398326f99059ff775485246999027b3197955": {
+          "amount": -0.00801053,
+          "usd": -0.00790278263533943
+        },
+        "btc-btc": {
+          "amount": -0.0007928899999999992,
+          "usd": -49.673275143566386
+        },
+        "doge-doge": {
+          "amount": 0.13867437000000005,
+          "usd": 0.011004810373847014
+        },
+        "eth-eth": {
+          "amount": -0.009198360000000001,
+          "usd": -15.31921027785107
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 424.44754830500096,
+          "usd": 424.44754830500096
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": -52.41845662,
+          "usd": -52.315048549999105
+        },
+        "gaia-atom": {
+          "amount": 0.080199565,
+          "usd": 0.1379277007235728
+        },
+        "ltc-ltc": {
+          "amount": -0.16344047,
+          "usd": -7.257488013160419
+        },
+        "rune": {
+          "amount": 928.9413691400005,
+          "usd": 389.6030502574822
+        },
+        "tcy": {
+          "amount": 76.391703425,
+          "usd": 7.229131016082636
+        },
+        "thor.auto": {
+          "amount": -291.650040805,
+          "usd": 0
+        },
+        "x/brune": {
+          "amount": -25.89352337,
+          "usd": 0
+        },
+        "x/ruji": {
+          "amount": 74.028651685,
+          "usd": 18.724953951786734
+        },
+        "xrp-xrp": {
+          "amount": 16.129948385,
+          "usd": 17.902765887012524
+        },
+        "x/ghost-vault/bch-bch": {
+          "amount": -0.000195005,
+          "usd": -0.037967052787758686
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": -0.000026865,
+          "usd": -1.6830487668300929
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": -0.06809973,
+          "usd": -0.0054042042171179895
+        },
+        "x/ghost-vault/eth-eth": {
+          "amount": -0.00023232500000000002,
+          "usd": -0.38692066061795255
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -161.149236495,
+          "usd": -161.149236495
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": -18.016664289999998,
+          "usd": -17.98112206685541
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 1.2000000000000563e-7,
+          "usd": 0.000005328536815754942
+        },
+        "x/ghost-vault/rune": {
+          "amount": 0.000414565,
+          "usd": 0.00017387081025482958
+        },
+        "x/ghost-vault/x/ruji": {
+          "amount": 0.00006359500000000006,
+          "usd": 0.000016085845405248227
+        },
+        "x/ghost-vault/xrp-xrp": {
+          "amount": 0.0004964399999999999,
+          "usd": 0.000551002947115041
         },
         "bsc-bnb": {
           "amount": -0.00000442,
           "usd": -0.002577090167654428
         },
-        "bsc-usdt-0x55d398326f99059ff775485246999027b3197955": {
-          "amount": -0.00001789,
-          "usd": -0.00001764936668937291
-        },
-        "btc-btc": {
-          "amount": 0.00796666,
-          "usd": 499.098354318058
-        },
-        "doge-doge": {
-          "amount": 0.57904766,
-          "usd": 0.04595160371537896
-        },
-        "eth-dai-0x6b175474e89094c44da98b954eedeac495271d0f": {
-          "amount": 0.00007504,
-          "usd": 0.00007529290301603637
-        },
-        "eth-eth": {
-          "amount": -0.00077806,
-          "usd": -1.2958032463161697
-        },
-        "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
-          "amount": 0.000049999999999999996,
-          "usd": 0.000050090581109141766
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 2407.6257363800014,
-          "usd": 2407.6257363800014
-        },
-        "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
-          "amount": 0.00007507,
-          "usd": 0.0000752490338941513
-        },
-        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": 18.26743346,
-          "usd": 18.231396534081664
-        },
-        "eth-wbtc-0x2260fac5e5542a773aa44fbcfedf7c193bc2c599": {
-          "amount": 1.000000000000001e-8,
-          "usd": 0.0006266215527210168
-        },
-        "gaia-atom": {
-          "amount": 0.08622172,
-          "usd": 0.14828463959912616
-        },
-        "ltc-ltc": {
-          "amount": -0.0028013499999999998,
-          "usd": -0.12439247174012004
-        },
-        "rune": {
-          "amount": 1252.795207879999,
-          "usd": 525.4291073193672
-        },
-        "tcy": {
-          "amount": 118.05903443000001,
-          "usd": 11.17221097660948
-        },
-        "x/brune": {
-          "amount": -1.3981876500000001,
-          "usd": 0
-        },
         "x/ghost-vault/avax-avax": {
           "amount": -8e-8,
           "usd": -5.192587403157358e-7
         },
-        "x/ghost-vault/bch-bch": {
-          "amount": 0.000004340000000000001,
-          "usd": 0.0008449886366958424
-        },
-        "x/ghost-vault/btc-btc": {
-          "amount": -0.0000021499999999999997,
-          "usd": -0.13469402005154288
-        },
-        "x/ghost-vault/eth-eth": {
-          "amount": -9.7e-7,
-          "usd": -0.0016154655796811104
-        },
-        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 0.22078881,
-          "usd": 0.22078881
-        },
-        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": -0.04494298,
-          "usd": -0.044854319113709885
-        },
         "x/ghost-vault/gaia-atom": {
           "amount": 3.5999999999999994e-7,
           "usd": 6.19130194290782e-7
-        },
-        "x/ghost-vault/ltc-ltc": {
-          "amount": 0.00011184,
-          "usd": 0.004966196312283373
-        },
-        "x/ghost-vault/rune": {
-          "amount": 0.00041652999999999997,
-          "usd": 0.00017469494191609076
-        },
-        "x/ghost-vault/x/ruji": {
-          "amount": 0.00104798,
-          "usd": 0.00026507813928440944
-        },
-        "x/ghost-vault/xrp-xrp": {
-          "amount": 0.00224709,
-          "usd": 0.0024940641616967565
-        },
-        "x/ruji": {
-          "amount": 728.60513759,
-          "usd": 184.29482828433592
-        },
-        "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": {
-          "amount": 0.00003757,
-          "usd": 0.00003766388162319401
-        },
-        "thor.auto": {
-          "amount": 0.07298095,
-          "usd": 0
-        },
-        "thor.nami": {
-          "amount": 0.61731472,
-          "usd": 0
-        },
-        "x/ghost-vault/doge-doge": {
-          "amount": 0.0000093,
-          "usd": 7.380220041870549e-7
-        },
-        "xrp-xrp": {
-          "amount": 16.16956307,
-          "usd": 17.946734560334644
         }
       },
-      "cumulative_usd": 28271.295722888106
+      "cumulative_usd": 28393.298352272544
     },
     {
       "day_start": "2026-06-24",
       "day_end": "2026-06-25",
       "transfers": 32,
-      "inflow_usd": 234.15102048875556,
+      "inflow_usd": 234.1281103636068,
       "by_denom": {
+        "rune": {
+          "amount": 1896.4276708250009,
+          "usd": 767.5767327313005
+        },
+        "x/brune": {
+          "amount": -0.017119855000000017,
+          "usd": 0
+        },
         "avax-avax": {
           "amount": -21.3351459,
           "usd": -137.34723087948385
@@ -3051,20 +4980,12 @@
           "amount": -0.00001831,
           "usd": -0.000784632951589182
         },
-        "rune": {
-          "amount": 1896.4842741500008,
-          "usd": 767.5996428564492
-        },
         "tcy": {
           "amount": -118.23292976,
           "usd": -12.003321347706438
         },
         "thor.auto": {
           "amount": -0.07296386,
-          "usd": 0
-        },
-        "x/brune": {
-          "amount": -0.11032407,
           "usd": 0
         },
         "x/ghost-vault/bch-bch": {
@@ -3124,17 +5045,21 @@
           "usd": -17.354542648836706
         }
       },
-      "cumulative_usd": 28505.446743376862
+      "cumulative_usd": 28627.42646263615
     },
     {
       "day_start": "2026-06-25",
       "day_end": "2026-06-26",
       "transfers": 22,
-      "inflow_usd": 111.15617224087913,
+      "inflow_usd": 111.19164486011258,
       "by_denom": {
+        "x/brune": {
+          "amount": 7.0430633049999996,
+          "usd": 0
+        },
         "btc-btc": {
-          "amount": 1.2999999999999997e-7,
-          "usd": 0.007775255822152666
+          "amount": 1.45e-7,
+          "usd": 0.008672400724708745
         },
         "eth-eth": {
           "amount": -1.3999999999999998e-7,
@@ -3145,12 +5070,12 @@
           "usd": -0.000020542392748149328
         },
         "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -663.53628751,
-          "usd": -663.53628751
+          "amount": -663.5314328900004,
+          "usd": -663.5314328900004
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": -0.0000012499999999999999,
-          "usd": -0.000001245944272925087
+          "amount": 0.00075102,
+          "usd": 0.0007485832542817591
         },
         "rune": {
           "amount": 1919.1407286200003,
@@ -3197,20 +5122,16 @@
           "usd": 1.4593269582859512e-7
         },
         "x/ruji": {
-          "amount": -27.27913495,
-          "usd": -6.867539222570088
+          "amount": -27.166758385,
+          "usd": -6.839248352304233
+        },
+        "tcy": {
+          "amount": 228.46634473999998,
+          "usd": 21.959599773325174
         },
         "gaia-atom": {
           "amount": 0.01791059,
           "usd": 0.028814683172677717
-        },
-        "tcy": {
-          "amount": 228.45926845,
-          "usd": 21.958919618458353
-        },
-        "x/brune": {
-          "amount": 7.24621305,
-          "usd": 0
         },
         "x/ghost-vault/eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
           "amount": 1e-8,
@@ -3221,14 +5142,34 @@
           "usd": 0.30099262703262186
         }
       },
-      "cumulative_usd": 28616.602915617743
+      "cumulative_usd": 28738.618107496262
     },
     {
       "day_start": "2026-06-26",
       "day_end": "2026-06-27",
       "transfers": 26,
-      "inflow_usd": 93.83248318334901,
+      "inflow_usd": 93.79788477801092,
       "by_denom": {
+        "btc-btc": {
+          "amount": 0.000002855,
+          "usd": 0.17132056287224728
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -420.2253377849993,
+          "usd": -420.2253377849993
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.011230509999999999,
+          "usd": 0.011199523013917875
+        },
+        "tcy": {
+          "amount": -217.72322458999997,
+          "usd": -21.74817202309572
+        },
+        "x/ruji": {
+          "amount": -0.501935075,
+          "usd": -0.12709754345803195
+        },
         "base-eth": {
           "amount": 7e-8,
           "usd": 0.00011060355177235908
@@ -3237,21 +5178,9 @@
           "amount": -1.6e-7,
           "usd": -0.00003153647106526926
         },
-        "btc-btc": {
-          "amount": 0.00000287,
-          "usd": 0.17222067090835366
-        },
         "eth-eth": {
           "amount": 0.00006396,
           "usd": 0.10083165627524578
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -420.2215519700003,
-          "usd": -420.2215519700003
-        },
-        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": 0.01198278,
-          "usd": 0.01194971736641656
         },
         "gaia-atom": {
           "amount": 0.02039782,
@@ -3260,10 +5189,6 @@
         "rune": {
           "amount": 1342.8608110599998,
           "usd": 536.6314323550084
-        },
-        "tcy": {
-          "amount": -217.7161483,
-          "usd": -21.747465179016523
         },
         "x/brune": {
           "amount": 9.055906460000001,
@@ -3313,10 +5238,6 @@
           "amount": 1.2000000000000002e-7,
           "usd": 1.2578447422714034e-7
         },
-        "x/ruji": {
-          "amount": -0.38955851,
-          "usd": -0.09864209958662717
-        },
         "xrp-xrp": {
           "amount": -0.28875436,
           "usd": -0.30267346127828665
@@ -3334,14 +5255,18 @@
           "usd": 0.000014366967125159961
         }
       },
-      "cumulative_usd": 28710.43539880109
+      "cumulative_usd": 28832.415992274273
     },
     {
       "day_start": "2026-06-27",
       "day_end": "2026-06-28",
       "transfers": 26,
-      "inflow_usd": 63.021226686453865,
+      "inflow_usd": 63.1093216719174,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -704.9147562800008,
+          "usd": -704.9147562800008
+        },
         "base-eth": {
           "amount": 0.00000907,
           "usd": 0.014251772405863545
@@ -3362,10 +5287,6 @@
           "amount": 0.15707765,
           "usd": 0.15530347330266842
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -704.9184041999997,
-          "usd": -704.9184041999997
-        },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": 0.1586216,
           "usd": 0.1570101863586372
@@ -3379,12 +5300,12 @@
           "usd": -0.059467323893847956
         },
         "rune": {
-          "amount": 1934.4080201400009,
-          "usd": 760.2494463764253
+          "amount": 1934.419031745001,
+          "usd": 760.2537740914272
         },
         "tcy": {
-          "amount": 5.954560520000001,
-          "usd": 0.6378131942334506
+          "amount": 6.702543080000002,
+          "usd": 0.7179321457869927
         },
         "x/brune": {
           "amount": 35.8297898,
@@ -3423,8 +5344,8 @@
           "usd": 3.1549426065257784e-8
         },
         "x/ghost-vault/rune": {
-          "amount": 0.00011815,
-          "usd": 0.000046434604897358456
+          "amount": 0.00011916499999999999,
+          "usd": 0.000046833514114208376
         },
         "x/ghost-vault/x/ruji": {
           "amount": 0.00000283,
@@ -3447,14 +5368,30 @@
           "usd": 0.0002845716400368071
         }
       },
-      "cumulative_usd": 28773.456625487546
+      "cumulative_usd": 28895.52531394619
     },
     {
       "day_start": "2026-06-28",
       "day_end": "2026-06-29",
       "transfers": 26,
-      "inflow_usd": 217.84578783416546,
+      "inflow_usd": 218.33503640544762,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -654.8913016550014,
+          "usd": -654.9781585059213
+        },
+        "rune": {
+          "amount": 2213.693273545,
+          "usd": 857.4284626456645
+        },
+        "tcy": {
+          "amount": -7.851896355000001,
+          "usd": -0.8762716937456666
+        },
+        "x/ghost-vault/rune": {
+          "amount": -0.00008581499999999999,
+          "usd": -0.000033238671488852094
+        },
         "base-eth": {
           "amount": -0.00000247,
           "usd": -0.0038792889734007322
@@ -3475,17 +5412,13 @@
           "amount": -0.15707799,
           "usd": -0.15653031084113997
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -654.889347620001,
-          "usd": -654.9762042117613
-        },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": -0.09220952,
           "usd": -0.09192985833704267
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": -0.0018344199999999998,
-          "usd": -0.0018288534737848441
+          "amount": 0.00032417499999999946,
+          "usd": 0.000323191294722147
         },
         "gaia-atom": {
           "amount": 0.00896307,
@@ -3494,14 +5427,6 @@
         "ltc-ltc": {
           "amount": 0.000005600000000000001,
           "usd": 0.00023818947026864556
-        },
-        "rune": {
-          "amount": 2213.0690228900003,
-          "usd": 857.1866720210855
-        },
-        "tcy": {
-          "amount": -7.820011430000001,
-          "usd": -0.8727133358698763
         },
         "x/brune": {
           "amount": -52.13190931,
@@ -3539,35 +5464,55 @@
           "amount": 3.0000000000000004e-8,
           "usd": 0.0000012760150192963155
         },
-        "x/ghost-vault/rune": {
-          "amount": -0.0000848,
-          "usd": -0.00003284553215935044
-        },
         "x/ghost-vault/x/ruji": {
-          "amount": 0.00000765,
-          "usd": 0.0000013984136114260635
+          "amount": 0.00000794,
+          "usd": 0.0000014514253692448294
         },
         "x/ghost-vault/xrp-xrp": {
           "amount": 1.000000000000001e-8,
           "usd": 1.0488067443055794e-8
         },
         "x/ruji": {
-          "amount": 112.9778707,
-          "usd": 20.652260415269783
+          "amount": 114.349971575,
+          "usd": 20.903079309367772
         },
         "xrp-xrp": {
           "amount": -0.013974689999999998,
           "usd": -0.014656749121579722
         }
       },
-      "cumulative_usd": 28991.30241332171
+      "cumulative_usd": 29113.860350351635
     },
     {
       "day_start": "2026-06-29",
       "day_end": "2026-06-30",
       "transfers": 26,
-      "inflow_usd": 360.345895841694,
+      "inflow_usd": 359.7531591193953,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -482.02512400999876,
+          "usd": -482.10372520986664
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": -0.015296235,
+          "usd": -0.015251770924377123
+        },
+        "rune": {
+          "amount": 2230.512853729999,
+          "usd": 862.4366641345614
+        },
+        "tcy": {
+          "amount": -7.116237815,
+          "usd": -0.7343568486917762
+        },
+        "x/ruji": {
+          "amount": -88.417349395,
+          "usd": -17.288906753087687
+        },
+        "x/ghost-vault/x/ruji": {
+          "amount": -0.000011380000000000001,
+          "usd": -0.000002225216659359209
+        },
         "btc-btc": {
           "amount": -0.00002802,
           "usd": -1.6854838378410912
@@ -3580,17 +5525,9 @@
           "amount": -0.00016908,
           "usd": -0.27197077656650126
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -482.0223613199996,
-          "usd": -482.1009620693708
-        },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": -0.06401955,
           "usd": -0.06365155331348808
-        },
-        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": -0.01313764,
-          "usd": -0.013099450666581278
         },
         "gaia-atom": {
           "amount": -0.009251549999999999,
@@ -3599,14 +5536,6 @@
         "ltc-ltc": {
           "amount": -0.00000852,
           "usd": -0.0003670012634438507
-        },
-        "rune": {
-          "amount": 2231.1481159899986,
-          "usd": 862.6822908133854
-        },
-        "tcy": {
-          "amount": -6.400140179999999,
-          "usd": -0.6604594865932564
         },
         "x/ghost-vault/btc-btc": {
           "amount": 1.900000000000003e-7,
@@ -3648,17 +5577,9 @@
           "amount": 3.3e-7,
           "usd": 3.4054196384144613e-8
         },
-        "x/ghost-vault/x/ruji": {
-          "amount": -0.00001109,
-          "usd": -0.000002168510786669036
-        },
         "x/ghost-vault/xrp-xrp": {
           "amount": 2.000000000000002e-8,
           "usd": 2.1134783629620644e-8
-        },
-        "x/ruji": {
-          "amount": -87.04524852,
-          "usd": -17.02060958917105
         },
         "xrp-xrp": {
           "amount": -0.01356936,
@@ -3673,13 +5594,13 @@
           "usd": 0
         }
       },
-      "cumulative_usd": 29351.648309163404
+      "cumulative_usd": 29473.61350947103
     },
     {
       "day_start": "2026-06-30",
       "day_end": "2026-07-01",
       "transfers": 26,
-      "inflow_usd": 72.1257019961253,
+      "inflow_usd": 73.2958354967913,
       "by_denom": {
         "base-eth": {
           "amount": -0.00000674,
@@ -3706,8 +5627,8 @@
           "usd": -0.000012961070092606598
         },
         "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -443.2908128800009,
-          "usd": -443.29081288000083
+          "amount": -443.28186981,
+          "usd": -443.28186980999993
         },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": 0.041262219999999995,
@@ -3726,12 +5647,12 @@
           "usd": -0.00015317605534320212
         },
         "rune": {
-          "amount": 1361.7719435700005,
-          "usd": 515.2067225711764
+          "amount": 1364.5784774000008,
+          "usd": 516.2685340610316
         },
         "tcy": {
-          "amount": 34.12009794,
-          "usd": 3.3980187359596608
+          "amount": 34.652600655,
+          "usd": 3.4510506529752947
         },
         "x/brune": {
           "amount": -36.75681125,
@@ -3766,12 +5687,12 @@
           "usd": 0.005336142570161415
         },
         "x/ghost-vault/rune": {
-          "amount": -0.000014670000000000004,
-          "usd": -0.000005550182360058635
+          "amount": -0.000013995000000000004,
+          "usd": -0.000005294805871098882
         },
         "x/ruji": {
-          "amount": -18.677060739999998,
-          "usd": -3.7804439572787976
+          "amount": -18.448087259999998,
+          "usd": -3.734097188860937
         },
         "xrp-xrp": {
           "amount": -0.00720736,
@@ -3786,14 +5707,34 @@
           "usd": 1.99944331367755e-8
         }
       },
-      "cumulative_usd": 29423.77401115953
+      "cumulative_usd": 29546.909344967822
     },
     {
       "day_start": "2026-07-01",
       "day_end": "2026-07-02",
       "transfers": 26,
-      "inflow_usd": 136.27525821439255,
+      "inflow_usd": 135.0957593237656,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -647.3355769350001,
+          "usd": -647.3355769350001
+        },
+        "rune": {
+          "amount": 2002.6271195299987,
+          "usd": 779.8498003092359
+        },
+        "tcy": {
+          "amount": 15.064780110000001,
+          "usd": 1.445513917692676
+        },
+        "x/ruji": {
+          "amount": -5.736125760000002,
+          "usd": -1.2636708724735388
+        },
+        "x/ghost-vault/rune": {
+          "amount": -0.000010624999999999997,
+          "usd": -0.0000041375171877926725
+        },
         "avax-avax": {
           "amount": 0.00010786,
           "usd": 0.0007194123162880147
@@ -3814,10 +5755,6 @@
           "amount": 0.00014708,
           "usd": 0.2366850967178043
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -647.3300543899986,
-          "usd": -647.3300543899986
-        },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": -0.043668849999999995,
           "usd": -0.04357790862846807
@@ -3833,14 +5770,6 @@
         "ltc-ltc": {
           "amount": 0.000011769999999999999,
           "usd": 0.0005031476955499205
-        },
-        "rune": {
-          "amount": 2005.433653359999,
-          "usd": 780.9427021407415
-        },
-        "tcy": {
-          "amount": 15.59727899,
-          "usd": 1.4966088913049895
         },
         "thor.auto": {
           "amount": -0.00001119,
@@ -3874,10 +5803,6 @@
           "amount": 1.0000000000000116e-8,
           "usd": 1.5396346434282533e-8
         },
-        "x/ghost-vault/rune": {
-          "amount": -0.000009949999999999998,
-          "usd": -0.000003874663154685845
-        },
         "x/ghost-vault/tcy": {
           "amount": 8.699999999999999e-7,
           "usd": 8.347928739815027e-8
@@ -3885,10 +5810,6 @@
         "x/ghost-vault/xrp-xrp": {
           "amount": 1.000000000000001e-8,
           "usd": 1.0530891437986147e-8
-        },
-        "x/ruji": {
-          "amount": -5.600042140000001,
-          "usd": -1.233691594819982
         },
         "xrp-xrp": {
           "amount": 0.005190200000000001,
@@ -3899,14 +5820,26 @@
           "usd": 0.0000014177851797382378
         }
       },
-      "cumulative_usd": 29560.04926937392
+      "cumulative_usd": 29682.005104291587
     },
     {
       "day_start": "2026-07-02",
       "day_end": "2026-07-03",
       "transfers": 28,
-      "inflow_usd": 315.66298306360596,
+      "inflow_usd": 315.8681682819877,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -485.49751747499977,
+          "usd": -485.51145620907744
+        },
+        "tcy": {
+          "amount": -32.357557785000004,
+          "usd": -3.1338485413894923
+        },
+        "x/ruji": {
+          "amount": 31.90594892,
+          "usd": 6.434502621089328
+        },
         "avax-avax": {
           "amount": -0.00004021000000000001,
           "usd": -0.0002732728308639873
@@ -3935,10 +5868,6 @@
           "amount": 0.016142780000000002,
           "usd": 0.016144824707697097
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -485.62624275000053,
-          "usd": -485.6401851798074
-        },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": -0.07104830000000001,
           "usd": -0.07082035411392786
@@ -3954,10 +5883,6 @@
         "rune": {
           "amount": 2004.814518530001,
           "usd": 800.9934177803511
-        },
-        "tcy": {
-          "amount": -33.20781944,
-          "usd": -3.216196883777569
         },
         "thor.auto": {
           "amount": 0.00387499,
@@ -4011,23 +5936,31 @@
           "amount": 1.000000000000001e-8,
           "usd": 1.0850032932128269e-8
         },
-        "x/ruji": {
-          "amount": 31.9351653,
-          "usd": 6.440394715825645
-        },
         "xrp-xrp": {
           "amount": 0.009635689999999999,
           "usd": 0.010454755382377891
         }
       },
-      "cumulative_usd": 29875.712252437526
+      "cumulative_usd": 29997.873272573575
     },
     {
       "day_start": "2026-07-03",
       "day_end": "2026-07-04",
       "transfers": 27,
-      "inflow_usd": 77.12701719092261,
+      "inflow_usd": 76.98178705258387,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -692.5667468150004,
+          "usd": -692.877686983706
+        },
+        "tcy": {
+          "amount": -4.677755894999999,
+          "usd": -0.45646059554486484
+        },
+        "x/ruji": {
+          "amount": -34.10764388,
+          "usd": -7.024766417469904
+        },
         "avax-avax": {
           "amount": -0.00007205,
           "usd": -0.0004993463251668352
@@ -4041,8 +5974,8 @@
           "usd": -0.00001712818042227496
         },
         "btc-btc": {
-          "amount": 0.0000027999999999999994,
-          "usd": 0.17509614411584
+          "amount": 0.0000028099999999999994,
+          "usd": 0.1757214874876823
         },
         "doge-doge": {
           "amount": -0.02567343,
@@ -4059,10 +5992,6 @@
         "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
           "amount": -0.01614339,
           "usd": -0.016125907653457616
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -692.4346019099994,
-          "usd": -692.7454827498976
         },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": 0.00215108,
@@ -4083,10 +6012,6 @@
         "rune": {
           "amount": 1891.6907880499998,
           "usd": 776.9007159704095
-        },
-        "tcy": {
-          "amount": -4.67224779,
-          "usd": -0.455923108564984
         },
         "x/ghost-vault/btc-btc": {
           "amount": 2.2999999999999992e-7,
@@ -4117,12 +6042,8 @@
           "usd": 0.000011643026367255569
         },
         "x/ghost-vault/rune": {
-          "amount": -0.00001261,
-          "usd": -0.0000051788157406651845
-        },
-        "x/ruji": {
-          "amount": -34.043970400000006,
-          "usd": -7.01165230951331
+          "amount": -0.000011765,
+          "usd": -0.000004831781696187621
         },
         "xrp-xrp": {
           "amount": -0.00928472,
@@ -4137,14 +6058,30 @@
           "usd": 4.6058282204821256e-7
         }
       },
-      "cumulative_usd": 29952.83926962845
+      "cumulative_usd": 30074.85505962616
     },
     {
       "day_start": "2026-07-04",
       "day_end": "2026-07-05",
       "transfers": 24,
-      "inflow_usd": 165.16084085216525,
+      "inflow_usd": 165.22501660653163,
       "by_denom": {
+        "btc-btc": {
+          "amount": -0.00000436,
+          "usd": -0.2750324337824081
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -693.9308288649991,
+          "usd": -693.9308288649991
+        },
+        "tcy": {
+          "amount": 386.64601580999994,
+          "usd": 32.37273875398495
+        },
+        "x/ghost-vault/rune": {
+          "amount": -0.000008714999999999999,
+          "usd": -0.0000036125173921242366
+        },
         "avax-avax": {
           "amount": 0.00005956,
           "usd": 0.0004149380422163742
@@ -4153,10 +6090,6 @@
           "amount": -0.00000176,
           "usd": -0.003131928172102384
         },
-        "btc-btc": {
-          "amount": -0.00000436,
-          "usd": -0.2750324337824081
-        },
         "doge-doge": {
           "amount": 0.09001874,
           "usd": 0.0070413824182415635
@@ -4164,10 +6097,6 @@
         "eth-eth": {
           "amount": 0.00027817,
           "usd": 0.49472365701015936
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -693.9321347000005,
-          "usd": -693.9321347000005
         },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": -0.00215081,
@@ -4186,12 +6115,8 @@
           "usd": 0.22947522894219882
         },
         "rune": {
-          "amount": 1992.8042214500001,
-          "usd": 826.0516246205577
-        },
-        "tcy": {
-          "amount": 386.50180077,
-          "usd": 32.360664050966136
+          "amount": 1992.925756525001,
+          "usd": 826.1020029994669
         },
         "x/brune": {
           "amount": 2.3532475,
@@ -4221,10 +6146,6 @@
           "amount": 7.000000000000002e-8,
           "usd": 0.0000031374975879685854
         },
-        "x/ghost-vault/rune": {
-          "amount": -0.00000787,
-          "usd": -0.0000032622503586939464
-        },
         "x/ghost-vault/tcy": {
           "amount": -3.6999999999999985e-7,
           "usd": -3.09790165919114e-8
@@ -4234,49 +6155,61 @@
           "usd": 4.2012648878266095e-9
         },
         "x/ruji": {
-          "amount": 1.5490349700000001,
-          "usd": 0.32539531147382694
+          "amount": 1.55102098,
+          "usd": 0.32581249917782057
         },
         "xrp-xrp": {
           "amount": 0.0212451,
           "usd": 0.024571572375534666
         }
       },
-      "cumulative_usd": 30118.000110480614
+      "cumulative_usd": 30240.08007623269
     },
     {
       "day_start": "2026-07-05",
       "day_end": "2026-07-06",
       "transfers": 27,
-      "inflow_usd": 63.73228281492302,
+      "inflow_usd": 63.59952600239351,
       "by_denom": {
+        "btc-btc": {
+          "amount": 0.00015066,
+          "usd": 9.578890152492654
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -425.8240275150001,
+          "usd": -425.8240275150001
+        },
+        "rune": {
+          "amount": 1236.6872961149984,
+          "usd": 512.5313855263959
+        },
+        "tcy": {
+          "amount": -363.45028960999997,
+          "usd": -32.30532871569535
+        },
+        "x/ruji": {
+          "amount": -2.589318085,
+          "usd": -0.5481816470541145
+        },
         "avax-avax": {
           "amount": -0.00003706,
           "usd": -0.0002564938053481944
         },
-        "btc-btc": {
-          "amount": 0.00015067,
-          "usd": 9.579525947670703
-        },
         "doge-doge": {
-          "amount": -0.09088144,
-          "usd": -0.007118525208127544
+          "amount": -0.08987612499999999,
+          "usd": -0.0070397812955133865
         },
         "eth-dai-0x6b175474e89094c44da98b954eedeac495271d0f": {
           "amount": 0.00690322,
           "usd": 0.006903074792788219
         },
         "eth-eth": {
-          "amount": -0.0002537,
-          "usd": -0.4526529523029219
+          "amount": -0.000252255,
+          "usd": -0.4500747752588631
         },
         "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
           "amount": 0.00156999,
           "usd": 0.0015667632315310193
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -425.82768016000045,
-          "usd": -425.82768016000045
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.19635354000000002,
@@ -4289,14 +6222,6 @@
         "ltc-ltc": {
           "amount": -0.00485445,
           "usd": -0.22207165136198287
-        },
-        "rune": {
-          "amount": 1236.8088311899992,
-          "usd": 512.5817543953688
-        },
-        "tcy": {
-          "amount": -362.46133136,
-          "usd": -32.21742502634452
         },
         "x/brune": {
           "amount": -2.39113247,
@@ -4335,8 +6260,8 @@
           "usd": 0.000002744759773345894
         },
         "x/ghost-vault/rune": {
-          "amount": 0.000006469999999999999,
-          "usd": 0.000002681420011903128
+          "amount": 0.000006489999999999999,
+          "usd": 0.00000268970879091983
         },
         "x/ghost-vault/x/ruji": {
           "amount": 1.5000000000000005e-7,
@@ -4345,10 +6270,6 @@
         "x/ghost-vault/xrp-xrp": {
           "amount": 1.000000000000001e-8,
           "usd": 1.1567461198503424e-8
-        },
-        "x/ruji": {
-          "amount": -2.58857162,
-          "usd": -0.5480236137805903
         },
         "xrp-xrp": {
           "amount": -0.02520793,
@@ -4359,14 +6280,38 @@
           "usd": 0.0014979886234442092
         }
       },
-      "cumulative_usd": 30181.732393295537
+      "cumulative_usd": 30303.679602235083
     },
     {
       "day_start": "2026-07-06",
       "day_end": "2026-07-07",
       "transfers": 33,
-      "inflow_usd": 109.82476464250256,
+      "inflow_usd": 109.92568031908434,
       "by_denom": {
+        "doge-doge": {
+          "amount": 0.016792765,
+          "usd": 0.001294026335196256
+        },
+        "eth-eth": {
+          "amount": 0.0000011550000000000016,
+          "usd": 0.0020782233384993645
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -656.0930397250004,
+          "usd": -656.2027852811951
+        },
+        "tcy": {
+          "amount": 183.45995696500003,
+          "usd": 15.545587636883008
+        },
+        "x/ruji": {
+          "amount": 14.896054040000001,
+          "usd": 2.9905421132416588
+        },
+        "x/ghost-vault/rune": {
+          "amount": -0.0000027299999999999993,
+          "usd": -0.000001100749848798449
+        },
         "avax-avax": {
           "amount": 0.00039235999999999996,
           "usd": 0.002720338972884952
@@ -4376,28 +6321,16 @@
           "usd": 3.298463832603226e-7
         },
         "btc-btc": {
-          "amount": -0.00014738000000000002,
-          "usd": -9.425963480330719
-        },
-        "doge-doge": {
-          "amount": 0.01779808,
-          "usd": 0.0013714944641891778
+          "amount": -0.00014735,
+          "usd": -9.424044774234844
         },
         "eth-dai-0x6b175474e89094c44da98b954eedeac495271d0f": {
           "amount": -0.0068966800000000005,
           "usd": -0.006891457856597452
         },
-        "eth-eth": {
-          "amount": 0.000002600000000000002,
-          "usd": 0.004678251671080818
-        },
         "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
           "amount": -0.00156324,
           "usd": -0.0015588518490813317
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -656.1054427999998,
-          "usd": -656.2151904308735
         },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": 0.0000016999999999999998,
@@ -4422,10 +6355,6 @@
         "rune": {
           "amount": 1879.2110926700004,
           "usd": 757.707445391131
-        },
-        "tcy": {
-          "amount": 182.43325856,
-          "usd": 15.458589742107415
         },
         "thor.auto": {
           "amount": -0.00386318,
@@ -4463,10 +6392,6 @@
           "amount": 5e-8,
           "usd": 0.0000022412243729224266
         },
-        "x/ghost-vault/rune": {
-          "amount": -0.0000027099999999999995,
-          "usd": -0.0000010926857473420501
-        },
         "x/ghost-vault/tcy": {
           "amount": 0.0000029800000000000003,
           "usd": 2.5251205725917226e-7
@@ -4478,10 +6403,6 @@
         "x/ghost-vault/xrp-xrp": {
           "amount": 2.000000000000002e-8,
           "usd": 2.289998335538427e-8
-        },
-        "x/ruji": {
-          "amount": 14.884739920000001,
-          "usd": 2.988270682684049
         },
         "xrp-xrp": {
           "amount": 0.00564462,
@@ -4500,14 +6421,30 @@
           "usd": 0
         }
       },
-      "cumulative_usd": 30291.55715793804
+      "cumulative_usd": 30413.605282554166
     },
     {
       "day_start": "2026-07-07",
       "day_end": "2026-07-08",
       "transfers": 31,
-      "inflow_usd": 90.84236392216499,
+      "inflow_usd": 91.74863187376728,
       "by_denom": {
+        "btc-btc": {
+          "amount": 0.0000027149999999999994,
+          "usd": 0.1719916623123708
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -655.6185416950002,
+          "usd": -655.7264724050677
+        },
+        "tcy": {
+          "amount": -205.83448898000003,
+          "usd": -17.749699733062563
+        },
+        "x/ruji": {
+          "amount": -6.261185655000002,
+          "usd": -1.203989246933313
+        },
         "avax-avax": {
           "amount": -0.00037007,
           "usd": -0.002474394929755634
@@ -4520,10 +6457,6 @@
           "amount": -0.00000129,
           "usd": -0.0000012889701579767947
         },
-        "btc-btc": {
-          "amount": 0.0000027399999999999996,
-          "usd": 0.17357537927657313
-        },
         "doge-doge": {
           "amount": -0.00508426,
           "usd": -0.00037883083463600633
@@ -4535,10 +6468,6 @@
         "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
           "amount": 0.00018034,
           "usd": 0.00017980354613969198
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -655.8104971399998,
-          "usd": -655.9184594505883
         },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": 0.00000918,
@@ -4557,12 +6486,8 @@
           "usd": -0.08223027812211194
         },
         "rune": {
-          "amount": 1971.603408350001,
-          "usd": 765.6661753148062
-        },
-        "tcy": {
-          "amount": -205.78131910000002,
-          "usd": -17.74511474145343
+          "amount": 1972.5030003800014,
+          "usd": 766.0155291382193
         },
         "thor.auto": {
           "amount": 0.000016709999999999998,
@@ -4609,8 +6534,8 @@
           "usd": 4.381432026071751e-7
         },
         "x/ghost-vault/rune": {
-          "amount": 0.0000031100000000000007,
-          "usd": 0.000001207759022514355
+          "amount": 0.000003175000000000001,
+          "usd": 0.0000012330015744318575
         },
         "x/ghost-vault/tcy": {
           "amount": 6.699999999999995e-7,
@@ -4624,30 +6549,46 @@
           "amount": 1.000000000000001e-8,
           "usd": 1.1118066807609701e-8
         },
-        "x/ruji": {
-          "amount": -8.191019740000002,
-          "usd": -1.575085012932507
-        },
         "xrp-xrp": {
           "amount": 0.006923029999999999,
           "usd": 0.00769707100510861
         }
       },
-      "cumulative_usd": 30382.399521860207
+      "cumulative_usd": 30505.353914427935
     },
     {
       "day_start": "2026-07-08",
       "day_end": "2026-07-09",
       "transfers": 27,
-      "inflow_usd": 89.53014934237557,
+      "inflow_usd": 88.58488019376719,
       "by_denom": {
+        "btc-btc": {
+          "amount": -0.0000058949999999999995,
+          "usd": -0.36729974349295325
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -682.9250420100007,
+          "usd": -682.9250420100007
+        },
+        "rune": {
+          "amount": 1989.8714129799996,
+          "usd": 764.8714950913904
+        },
+        "tcy": {
+          "amount": 109.21927502999999,
+          "usd": 9.106887333585053
+        },
+        "x/ruji": {
+          "amount": -9.1204305,
+          "usd": -1.7074439720746586
+        },
+        "x/ghost-vault/rune": {
+          "amount": -0.000008155,
+          "usd": -0.000003134638249248225
+        },
         "avax-avax": {
           "amount": -0.00004496,
           "usd": -0.000290809855269845
-        },
-        "btc-btc": {
-          "amount": -0.0000058899999999999995,
-          "usd": -0.366988208511195
         },
         "doge-doge": {
           "amount": -0.01406661,
@@ -4664,10 +6605,6 @@
         "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd": {
           "amount": -0.00018783,
           "usd": -0.00018805926949828347
-        },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -682.7706808600005,
-          "usd": -682.7706808600005
         },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": -0.00001038,
@@ -4686,16 +6623,8 @@
           "usd": -0.009915869243146372
         },
         "ltc-ltc": {
-          "amount": -0.00002565,
-          "usd": -0.0011196737956244889
-        },
-        "rune": {
-          "amount": 1990.77100501,
-          "usd": 765.2172824103307
-        },
-        "tcy": {
-          "amount": 110.19280933,
-          "usd": 9.188062265235583
+          "amount": -0.000025605000000000003,
+          "usd": -0.0011177094556321654
         },
         "thor.auto": {
           "amount": 0.0008671800000000001,
@@ -4737,27 +6666,31 @@
           "amount": 1.000000000000001e-8,
           "usd": 4.3651999829414817e-7
         },
-        "x/ghost-vault/rune": {
-          "amount": -0.00000809,
-          "usd": -0.0000031096533950236836
-        },
-        "x/ruji": {
-          "amount": -7.17804275,
-          "usd": -1.3438078196836987
-        },
         "xrp-xrp": {
           "amount": -0.01414566,
           "usd": -0.015428881799318152
         }
       },
-      "cumulative_usd": 30471.929671202583
+      "cumulative_usd": 30593.938794621703
     },
     {
       "day_start": "2026-07-09",
       "day_end": "2026-07-10",
       "transfers": 23,
-      "inflow_usd": 67.01999133627595,
+      "inflow_usd": 67.04992331746132,
       "by_denom": {
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -440.5834933499991,
+          "usd": -440.58349334999906
+        },
+        "ltc-ltc": {
+          "amount": 0.001327925,
+          "usd": 0.05808894669795293
+        },
+        "tcy": {
+          "amount": -54.324549489999995,
+          "usd": -4.777971383921176
+        },
         "avax-usdt-0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7": {
           "amount": -2.3000000000000002e-7,
           "usd": -2.2872802612949566e-7
@@ -4778,10 +6711,6 @@
           "amount": 7.999999999999999e-8,
           "usd": 7.996893208759461e-8
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -440.5285379899997,
-          "usd": -440.5285379899996
-        },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.03014095,
           "usd": 0.030044856359711512
@@ -4790,17 +6719,9 @@
           "amount": 0.00299861,
           "usd": 0.004640082843933701
         },
-        "ltc-ltc": {
-          "amount": 0.00132797,
-          "usd": 0.05809091518457785
-        },
         "rune": {
-          "amount": 1293.2072580599997,
-          "usd": 511.7306489227628
-        },
-        "tcy": {
-          "amount": -55.28763486999999,
-          "usd": -4.862676999137734
+          "amount": 1293.2077221100008,
+          "usd": 511.73083255041155
         },
         "x/brune": {
           "amount": -1.02813651,
@@ -4839,8 +6760,8 @@
           "usd": -7.981228042184607e-7
         },
         "avax-avax": {
-          "amount": 0.00006227,
-          "usd": 0.00041600129160941667
+          "amount": 0.00006228,
+          "usd": 0.0004160680976623489
         },
         "bch-bch": {
           "amount": 0.00000138,
@@ -4851,25 +6772,37 @@
           "usd": 0.0000011831627380293494
         }
       },
-      "cumulative_usd": 30538.94966253886
+      "cumulative_usd": 30660.988717939163
     },
     {
       "day_start": "2026-07-10",
       "day_end": "2026-07-11",
       "transfers": 26,
-      "inflow_usd": 23.029705145055384,
+      "inflow_usd": 23.032429384710653,
       "by_denom": {
         "avax-avax": {
-          "amount": -0.00006227,
-          "usd": -0.0004197614743827506
+          "amount": -0.00006228,
+          "usd": -0.0004198288842870998
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -697.6321934800008,
+          "usd": -697.6321934800008
+        },
+        "rune": {
+          "amount": 1805.9391771399994,
+          "usd": 725.4870057867013
+        },
+        "tcy": {
+          "amount": -51.189523570000006,
+          "usd": -4.711753211828078
         },
         "base-eth": {
           "amount": 0.0000033300000000000003,
           "usd": 0.005901528128382405
         },
         "btc-btc": {
-          "amount": -0.00000599,
-          "usd": -0.38413499044979205
+          "amount": -0.000005985000000000001,
+          "usd": -0.3838143435462447
         },
         "doge-doge": {
           "amount": -7.999999999999991e-7,
@@ -4887,10 +6820,6 @@
           "amount": 0.00000916,
           "usd": 0.000009172383945210373
         },
-        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -697.63290865,
-          "usd": -697.63290865
-        },
         "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
           "amount": 0.0000016600000000000002,
           "usd": 0.0000016627218280552593
@@ -4906,14 +6835,6 @@
         "ltc-ltc": {
           "amount": -0.0013608499999999998,
           "usd": -0.06096217916866617
-        },
-        "rune": {
-          "amount": 1805.9310602499997,
-          "usd": 725.4837450466408
-        },
-        "tcy": {
-          "amount": -51.15000832000001,
-          "usd": -4.708116020209189
         },
         "x/brune": {
           "amount": -0.0019617,
@@ -4956,37 +6877,49 @@
           "usd": 9.377274661457301e-8
         },
         "x/ruji": {
-          "amount": 1.44233951,
-          "usd": 0.28777050511365415
+          "amount": 1.4526892399999998,
+          "usd": 0.28983544683454615
         },
         "xrp-xrp": {
           "amount": 0.0049051699999999995,
           "usd": 0.0054167716304587355
         }
       },
-      "cumulative_usd": 30561.979367683914
+      "cumulative_usd": 30684.021147323874
     },
     {
       "day_start": "2026-07-11",
       "day_end": "2026-07-12",
       "transfers": 21,
-      "inflow_usd": 212.79515506228327,
+      "inflow_usd": 212.79630360754817,
       "by_denom": {
         "btc-btc": {
-          "amount": 0.000012359999999999999,
-          "usd": 0.7888897265377511
-        },
-        "doge-doge": {
-          "amount": 0.07387684,
-          "usd": 0.005482295155729043
-        },
-        "eth-eth": {
-          "amount": 0.00066259,
-          "usd": 1.1836559613369477
+          "amount": 0.000012539999999999999,
+          "usd": 0.8003784118756795
         },
         "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": -547.5321951099995,
-          "usd": -547.5321951099995
+          "amount": -547.450939254999,
+          "usd": -547.450939254999
+        },
+        "rune": {
+          "amount": 1875.9082568900026,
+          "usd": 758.5703904715492
+        },
+        "tcy": {
+          "amount": -11.462640579999999,
+          "usd": -1.090721310433795
+        },
+        "x/ruji": {
+          "amount": 0.9739674700000005,
+          "usd": 0.19585699532781992
+        },
+        "doge-doge": {
+          "amount": 0.07387756499999999,
+          "usd": 0.005482348956947231
+        },
+        "eth-eth": {
+          "amount": 0.000663365,
+          "usd": 1.1850404274019897
         },
         "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
           "amount": 0.013984440000000002,
@@ -5003,14 +6936,6 @@
         "ltc-ltc": {
           "amount": 0.00397149,
           "usd": 0.1775373600195715
-        },
-        "rune": {
-          "amount": 1875.9168378300033,
-          "usd": 758.5738603891123
-        },
-        "tcy": {
-          "amount": -10.539066209999998,
-          "usd": -1.0028390951537387
         },
         "x/ghost-vault/btc-btc": {
           "amount": 2.2000000000000043e-7,
@@ -5044,10 +6969,6 @@
           "amount": 4.3000000000000097e-7,
           "usd": 4.091641539427322e-8
         },
-        "x/ruji": {
-          "amount": 0.9820651700000003,
-          "usd": 0.19748537742467376
-        },
         "xrp-xrp": {
           "amount": 0.01433292,
           "usd": 0.015743225658426133
@@ -5057,139 +6978,304 @@
           "usd": 0.002831905095714005
         }
       },
-      "cumulative_usd": 30774.774522746196
+      "cumulative_usd": 30896.817450931423
     },
     {
       "day_start": "2026-07-12",
       "day_end": "2026-07-13",
-      "transfers": 13,
-      "inflow_usd": 2.653707288194153,
+      "transfers": 23,
+      "inflow_usd": 71.80935503981138,
       "by_denom": {
-        "avax-avax": {
-          "amount": 0.00035464,
-          "usd": 0.002324138718744827
-        },
         "btc-btc": {
-          "amount": 0.0000013800000000000003,
-          "usd": 0.08807992092411787
+          "amount": -0.000006284999999999998,
+          "usd": -0.4010070753207026
         },
         "doge-doge": {
-          "amount": 0.04012869999999999,
-          "usd": 0.002977893716294633
+          "amount": -0.072599015,
+          "usd": -0.005353897572890716
         },
         "eth-eth": {
-          "amount": 0.00015691000000000001,
-          "usd": 0.2803052519557803
+          "amount": -0.000663495,
+          "usd": -1.1986566792755846
         },
         "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
-          "amount": 0.6268440300000293,
-          "usd": 0.6268440300000293
-        },
-        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
-          "amount": 0.02068389,
-          "usd": 0.020629704962537982
-        },
-        "gaia-atom": {
-          "amount": 0.0030833799999999993,
-          "usd": 0.004871556954541728
-        },
-        "ltc-ltc": {
-          "amount": 0.0037335599999999995,
-          "usd": 0.16690118466234868
-        },
-        "rune": {
-          "amount": 1.0462164299983918,
-          "usd": 0.4230637672691522
+          "amount": -713.8539695650006,
+          "usd": -714.0136420558928
         },
         "tcy": {
-          "amount": 4.51621484,
-          "usd": 0.42973795907725754
+          "amount": 35.771977005,
+          "usd": 3.496343413200586
         },
         "x/ruji": {
-          "amount": 2.9816979099999994,
-          "usd": 0.5995953783013307
+          "amount": 124.52860091500001,
+          "usd": 26.157846120903955
+        },
+        "avax-avax": {
+          "amount": -0.00041557,
+          "usd": -0.0026667789708710167
+        },
+        "bch-bch": {
+          "amount": 0.00001557,
+          "usd": 0.0037452310075530917
+        },
+        "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1": {
+          "amount": -0.00000233,
+          "usd": -0.000002334729768703784
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": -0.02388894,
+          "usd": -0.023843825750709174
+        },
+        "gaia-atom": {
+          "amount": 0.0001095200000000001,
+          "usd": 0.00017174908374403388
+        },
+        "ltc-ltc": {
+          "amount": 0.00036676999999999977,
+          "usd": 0.016151494227332357
+        },
+        "rune": {
+          "amount": 1880.380944574998,
+          "usd": 757.390429410381
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 1.8999999999999987e-7,
+          "usd": 0.012122727813991005
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": 3.5999999999999655e-7,
+          "usd": 2.654861262567597e-8
+        },
+        "x/ghost-vault/eth-eth": {
+          "amount": 0.00000439,
+          "usd": 0.007930885420417361
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": 0.36912609,
+          "usd": 0.3692086549008851
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.006624370000000001,
+          "usd": 0.006611859881109222
+        },
+        "x/ghost-vault/gaia-atom": {
+          "amount": 1.0000000000000116e-8,
+          "usd": 1.5681983541274262e-8
+        },
+        "x/ghost-vault/rune": {
+          "amount": 0.0000012800000000000005,
+          "usd": 5.155656103524461e-7
+        },
+        "x/ghost-vault/x/ruji": {
+          "amount": 4.000000000000004e-7,
+          "usd": 8.402197062748227e-8
         },
         "xrp-xrp": {
-          "amount": 0.00762612,
-          "usd": 0.008376501652017641
+          "amount": -0.005545110000000001,
+          "usd": -0.006034501314111282
         },
         "x/brune": {
-          "amount": 0.00183784,
+          "amount": 11.35073556,
           "usd": 0
         }
       },
-      "cumulative_usd": 30777.42823003439
+      "cumulative_usd": 30968.626805971235
+    },
+    {
+      "day_start": "2026-07-13",
+      "day_end": "2026-07-14",
+      "transfers": 22,
+      "inflow_usd": 226.18116431920885,
+      "by_denom": {
+        "btc-btc": {
+          "amount": 0.000056389999999999994,
+          "usd": 3.5978980075313323
+        },
+        "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -291.77315320000025,
+          "usd": -291.8384160522546
+        },
+        "rune": {
+          "amount": 1341.203213425002,
+          "usd": 540.2173855258152
+        },
+        "tcy": {
+          "amount": -26.522959455,
+          "usd": -2.5923469249718494
+        },
+        "x/ruji": {
+          "amount": -111.45936995000001,
+          "usd": -23.412589770241425
+        },
+        "avax-avax": {
+          "amount": 0.00031951,
+          "usd": 0.0020503466298890647
+        },
+        "bch-bch": {
+          "amount": 0.0000031600000000000036,
+          "usd": 0.0007601111100750022
+        },
+        "doge-doge": {
+          "amount": 0.023883340000000003,
+          "usd": 0.0017613042829647725
+        },
+        "eth-eth": {
+          "amount": 0.00053098,
+          "usd": 0.9592577541077928
+        },
+        "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": 0.017633745,
+          "usd": 0.017600443682827246
+        },
+        "gaia-atom": {
+          "amount": -0.00367561,
+          "usd": -0.005764085552414242
+        },
+        "ltc-ltc": {
+          "amount": -0.0039724899999999995,
+          "usd": -0.17493701584953933
+        },
+        "x/brune": {
+          "amount": -8.52522543,
+          "usd": 0
+        },
+        "x/ghost-vault/btc-btc": {
+          "amount": 1.6000000000000016e-7,
+          "usd": 0.010208612895992442
+        },
+        "x/ghost-vault/doge-doge": {
+          "amount": -0.00001973,
+          "usd": -0.0000014550114641794218
+        },
+        "x/ghost-vault/eth-eth": {
+          "amount": -0.00000783,
+          "usd": -0.014145520009537114
+        },
+        "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": {
+          "amount": -0.59309536,
+          "usd": -0.5932280216051816
+        },
+        "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7": {
+          "amount": -0.00011450000000000002,
+          "usd": -0.00011428376681661894
+        },
+        "x/ghost-vault/ltc-ltc": {
+          "amount": 7.600000000000001e-7,
+          "usd": 0.00003346821063002045
+        },
+        "x/ghost-vault/rune": {
+          "amount": 2.79999999999999e-7,
+          "usd": 1.1277997726459716e-7
+        },
+        "x/ghost-vault/xrp-xrp": {
+          "amount": 1.000000000000001e-8,
+          "usd": 1.0882563761785227e-8
+        },
+        "xrp-xrp": {
+          "amount": 0.00528529,
+          "usd": 0.005751750542452578
+        }
+      },
+      "cumulative_usd": 31194.807970290443
     }
   ],
   "denomTotals": [
     {
       "denom": "rune",
       "pool": "THOR.RUNE",
-      "amount": 55995.920873999996,
-      "usd": 25852.418216227423,
+      "amount": 59216.448601965,
+      "usd": 27194.304543228245,
       "priced": true
     },
     {
       "denom": "avax-avax",
       "pool": "AVAX.AVAX",
-      "amount": 0.0005900099999993659,
-      "usd": 1.1357695227598243,
+      "amount": 0.00013930999999936598,
+      "usd": 1.1328958174789419,
       "priced": true
     },
     {
       "denom": "eth-wbtc-0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
       "pool": "ETH.WBTC-0X2260FAC5E5542A773AA44FBCFEDF7C193BC2C599",
-      "amount": 0.00000947,
-      "usd": 0.5780379942356719,
+      "amount": 0.000009460000000000001,
+      "usd": 0.5774113726829508,
       "priced": true
     },
     {
       "denom": "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
       "pool": "ETH.USDT-0XDAC17F958D2EE523A2206206994597C13D831EC7",
-      "amount": 0.04340946000000229,
-      "usd": 0.07018256830116103,
+      "amount": 0.016470374999995183,
+      "usd": 0.18275383654673188,
       "priced": true
     },
     {
-      "denom": "doge-doge",
-      "pool": "DOGE.DOGE",
-      "amount": 0.09872220999999998,
-      "usd": 0.008473114364337866,
-      "priced": true
-    },
-    {
-      "denom": "base-eth",
-      "pool": "BASE.ETH",
-      "amount": 0.0000045,
-      "usd": 0.007888717475992919,
-      "priced": true
-    },
-    {
-      "denom": "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
-      "pool": "BASE.USDC-0X833589FCD6EDB6E08F4C7C32D4F71B54BDA02913",
-      "amount": -0.000019630000000017798,
-      "usd": 0.00034465527057928757,
-      "priced": true
-    },
-    {
-      "denom": "x/ghost-vault/ltc-ltc",
-      "pool": "LTC.LTC",
-      "amount": -0.0000012899999999999982,
-      "usd": 0.0001299706794904069,
+      "denom": "bch-bch",
+      "pool": "BCH.BCH",
+      "amount": 0.00001546000000000008,
+      "usd": 0.16344012040880182,
       "priced": true
     },
     {
       "denom": "x/ghost-vault/bch-bch",
       "pool": "BCH.BCH",
-      "amount": 2.1000000000000053e-7,
-      "usd": 0.0000280362034838816,
+      "amount": 2.0999999999997004e-7,
+      "usd": 0.019140646081404342,
+      "priced": true
+    },
+    {
+      "denom": "doge-doge",
+      "pool": "DOGE.DOGE",
+      "amount": 0.009878559999999995,
+      "usd": 0.017603563821963094,
+      "priced": true
+    },
+    {
+      "denom": "base-eth",
+      "pool": "BASE.ETH",
+      "amount": 0.000004494999999999999,
+      "usd": 0.007925035093732064,
+      "priced": true
+    },
+    {
+      "denom": "x/ghost-vault/doge-doge",
+      "pool": "DOGE.DOGE",
+      "amount": -0.00008071000000000068,
+      "usd": 0.002418645377296354,
+      "priced": true
+    },
+    {
+      "denom": "x/ghost-vault/ltc-ltc",
+      "pool": "LTC.LTC",
+      "amount": -5.299999999999981e-7,
+      "usd": 0.0009130123657823008,
+      "priced": true
+    },
+    {
+      "denom": "x/ghost-vault/xrp-xrp",
+      "pool": "XRP.XRP",
+      "amount": -0.00020899000000000013,
+      "usd": 0.0004608255568814408,
+      "priced": true
+    },
+    {
+      "denom": "base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
+      "pool": "BASE.USDC-0X833589FCD6EDB6E08F4C7C32D4F71B54BDA02913",
+      "amount": -0.000019635000000017802,
+      "usd": 0.00034456972267729,
+      "priced": true
+    },
+    {
+      "denom": "bsc-usdt-0x55d398326f99059ff775485246999027b3197955",
+      "pool": "BSC.USDT-0X55D398326F99059FF775485246999027B3197955",
+      "amount": 8.000000000004531e-7,
+      "usd": 0.00010215216892213094,
       "priced": true
     },
     {
       "denom": "avax-usdt-0x9702230a8ea53601f5cd2dc00fdbc13d4df4a8c7",
       "pool": "AVAX.USDT-0X9702230A8EA53601F5CD2DC00FDBC13D4DF4A8C7",
       "amount": 3.200000000002031e-7,
-      "usd": 0.000005703565906271652,
+      "usd": 0.00001960426074503355,
       "priced": true
     },
     {
@@ -5221,13 +7307,6 @@
       "priced": true
     },
     {
-      "denom": "bsc-usdt-0x55d398326f99059ff775485246999027b3197955",
-      "pool": "BSC.USDT-0X55D398326F99059FF775485246999027B3197955",
-      "amount": 7.999999999999991e-7,
-      "usd": 0.0000010578393237277003,
-      "priced": true
-    },
-    {
       "denom": "x/ghost-vault/base-usdc-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913",
       "pool": "BASE.USDC-0X833589FCD6EDB6E08F4C7C32D4F71B54BDA02913",
       "amount": 5.2e-7,
@@ -5251,85 +7330,64 @@
     {
       "denom": "thor.nami",
       "pool": "THOR.NAMI",
-      "amount": -4741.45491589,
+      "amount": -4741.454915894999,
       "usd": 0,
       "priced": true
     },
     {
       "denom": "x/brune",
       "pool": "THOR.BRUNE",
-      "amount": -1518.7226449799998,
+      "amount": -1515.8989726900006,
       "usd": 0,
       "priced": false
     },
     {
-      "denom": "x/ghost-vault/doge-doge",
-      "pool": "DOGE.DOGE",
-      "amount": -0.00006134,
-      "usd": -0.0000080593382988741,
-      "priced": true
-    },
-    {
       "denom": "x/ghost-vault/gaia-atom",
       "pool": "GAIA.ATOM",
-      "amount": -0.000014830000000000002,
-      "usd": -0.00002807010206047763,
+      "amount": -0.000014820000000000002,
+      "usd": -0.000028054420076936357,
       "priced": true
     },
     {
       "denom": "eth-dai-0x6b175474e89094c44da98b954eedeac495271d0f",
       "pool": "ETH.DAI-0X6B175474E89094C44DA98B954EEDEAC495271D0F",
       "amount": 0.000008820000000001386,
-      "usd": -0.000031184654325880904,
-      "priced": true
-    },
-    {
-      "denom": "x/ghost-vault/xrp-xrp",
-      "pool": "XRP.XRP",
-      "amount": -0.00020899999999999969,
-      "usd": -0.0002032417413327509,
+      "usd": -0.000031502530734034965,
       "priced": true
     },
     {
       "denom": "x/ghost-vault/x/ruji",
       "pool": "THOR.RUJI",
-      "amount": -0.0021522000000000004,
-      "usd": -0.0006291068963712071,
-      "priced": true
-    },
-    {
-      "denom": "bch-bch",
-      "pool": "BCH.BCH",
-      "amount": -0.0000032700000000000064,
-      "usd": -0.0008045536949430895,
+      "amount": -0.0021518000000000006,
+      "usd": -0.0006110416668058736,
       "priced": true
     },
     {
       "denom": "avax-usdc-0xb97ef9ef8734c71904d8002f8b6bc66dd9c48a6e",
       "pool": "AVAX.USDC-0XB97EF9EF8734C71904D8002F8B6BC66DD9C48A6E",
-      "amount": 0.00003981999999998197,
-      "usd": -0.001001531128227061,
+      "amount": 0.00003981999999998891,
+      "usd": -0.0010130853908372278,
       "priced": true
     },
     {
       "denom": "eth-usdp-0x8e870d67f660d95d5be530380d0ec0bd388289e1",
       "pool": "ETH.USDP-0X8E870D67F660D95D5BE530380D0EC0BD388289E1",
-      "amount": 0.0000027300000000018195,
-      "usd": -0.001057852761357116,
+      "amount": 4.000000000018194e-7,
+      "usd": -0.0010602120333176263,
       "priced": true
     },
     {
       "denom": "eth-gusd-0x056fd409e1d7a124bd7017459dfea2f387b6d5cd",
       "pool": "ETH.GUSD-0X056FD409E1D7A124BD7017459DFEA2F387B6D5CD",
-      "amount": 0.000009310000000000424,
-      "usd": -0.001197303412313008,
+      "amount": 0.000009305000000003056,
+      "usd": -0.0011972908020750153,
       "priced": true
     },
     {
       "denom": "x/ghost-vault/rune",
       "pool": "THOR.RUNE",
-      "amount": -0.00470794,
-      "usd": -0.0023374915709197955,
+      "amount": -0.004707020000000002,
+      "usd": -0.0023371413709093397,
       "priced": true
     },
     {
@@ -5349,36 +7407,36 @@
     {
       "denom": "x/ghost-vault/eth-eth",
       "pool": "ETH.ETH",
-      "amount": -0.00012987999999999997,
-      "usd": -0.29479600414764706,
+      "amount": -0.00013331999999999998,
+      "usd": -0.1622694109666518,
       "priced": true
     },
     {
       "denom": "x/ghost-vault/btc-btc",
       "pool": "BTC.BTC",
-      "amount": -0.00001408,
-      "usd": -1.104015628045669,
+      "amount": -0.00001373,
+      "usd": -0.632124524380147,
       "priced": true
     },
     {
       "denom": "xrp-xrp",
       "pool": "XRP.XRP",
-      "amount": -1.2633340400000006,
-      "usd": -1.1688490365826611,
+      "amount": -1.2712199800000006,
+      "usd": -1.1624821975661606,
       "priced": true
     },
     {
       "denom": "x/ghost-vault/eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
       "pool": "ETH.USDT-0XDAC17F958D2EE523A2206206994597C13D831EC7",
-      "amount": -4.848191590000002,
-      "usd": -4.853195781648551,
+      "amount": -4.841681720000001,
+      "usd": -4.810548168449431,
       "priced": true
     },
     {
       "denom": "gaia-atom",
       "pool": "GAIA.ATOM",
-      "amount": -4.46901029,
-      "usd": -8.46616771535035,
+      "amount": -4.47565976,
+      "usd": -8.474812125800444,
       "priced": true
     },
     {
@@ -5391,50 +7449,50 @@
     {
       "denom": "ltc-ltc",
       "pool": "LTC.LTC",
-      "amount": -0.24078268,
-      "usd": -13.228314993270965,
+      "amount": -0.24812196000000006,
+      "usd": -11.175738763589207,
       "priced": true
     },
     {
       "denom": "eth-eth",
       "pool": "ETH.ETH",
-      "amount": -0.010190230000000003,
-      "usd": -23.155264855886458,
+      "amount": -0.01047888,
+      "usd": -18.625195856202552,
       "priced": true
     },
     {
       "denom": "x/ghost-vault/eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
       "pool": "ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48",
-      "amount": -31.953013520000006,
-      "usd": -31.952808346045174,
+      "amount": -32.17698278999999,
+      "usd": -32.18788049030661,
       "priced": true
     },
     {
       "denom": "btc-btc",
       "pool": "BTC.BTC",
-      "amount": -0.010566420000000002,
-      "usd": -800.0700137910479,
+      "amount": -0.010517515,
+      "usd": -775.2546484980918,
       "priced": true
     },
     {
       "denom": "x/ruji",
       "pool": "THOR.RUJI",
-      "amount": -10156.082158119994,
-      "usd": -3603.1160817385676,
+      "amount": -10147.422276234995,
+      "usd": -3555.075133890778,
       "priced": true
     },
     {
       "denom": "tcy",
       "pool": "THOR.TCY",
-      "amount": -31903.45814319,
-      "usd": -4521.212363037772,
+      "amount": -31898.725336319996,
+      "usd": -4519.87206178159,
       "priced": true
     },
     {
       "denom": "eth-usdc-0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
       "pool": "ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48",
-      "amount": -4954.74124258,
-      "usd": -4954.942491853985,
+      "amount": -5960.937255310002,
+      "usd": -5961.387235583855,
       "priced": true
     }
   ]

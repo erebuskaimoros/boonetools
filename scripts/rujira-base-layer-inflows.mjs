@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-// Measures fees collected by the Base Layer Collector with balance-delta
-// accounting: for each UTC day, net fees collected = (per-denom balance
-// change × that day's USD price) + that day's Reserve payouts. This is exact
-// by construction and independent of HOW value arrives (rujira-revenue
-// distributions from the trade/core collectors, direct sends from FIN
-// markets and Ghost vaults, BRUNE redemptions) and of the collector's
-// internal asset→RUNE conversions, which only shift inventory composition
-// (their swap cost nets out of the total, so "collected" is net of
-// conversion costs).
+// Measures app-layer earnings allocated to THORChain's Base Layer with
+// balance-delta accounting. The accounting boundary contains 100% of
+// routable Base Layer Collector inventory plus the configured Base Layer
+// share of routable Trade/Core collector inventory. For each UTC day:
+//
+// earned = weighted routable inventory delta + that day's Reserve payouts.
+//
+// The payout term is only an accounting add-back: it cancels the inventory
+// decrease when previously earned value leaves for the Reserve. Transfers
+// between an upstream collector and the Base Layer Collector likewise cancel
+// inside the boundary. Daily/weekly rows are the primary earnings metric; a
+// cumulative series is derived from those period rows for optional display.
 //
 // By-denom rows are net value flow per asset: conversions show up as value
 // migrating into the RUNE line, so the denom table reflects where value
@@ -31,6 +34,24 @@ const RPC_BASES = process.env.RPC_BASES
 
 const BASE_LAYER_REVENUE_COLLECTOR =
   "thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr";
+
+const ROUTE_COLLECTORS = [
+  {
+    key: "trade",
+    name: "RUJI Trade",
+    address: "thor1gm8q2gr25nzzsxzdp2mpja4hyvyhjlr4s6krcsgv2y953uu0js3qhwpus7",
+  },
+  {
+    key: "core",
+    name: "Other Core Apps",
+    address: "thor1jduxxzpyyvrgzx7zcnl7e5cdj34tnq5jxy00a4wp86szye25dndq575c0y",
+  },
+  {
+    key: "base",
+    name: "Base Layer Collector",
+    address: BASE_LAYER_REVENUE_COLLECTOR,
+  },
+];
 
 const WEBSITE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUTPUT_DIR = path.join(WEBSITE_ROOT, "docs/rujira-base-layer-fees");
@@ -118,6 +139,54 @@ function denomToPoolAsset(denom) {
 
 function isStableDenom(denom) {
   return /(?:usdc|usdt|dai|gusd|usdp)/i.test(denom || "");
+}
+
+function normalizeDenom(denom) {
+  return String(denom || "").trim().toLowerCase();
+}
+
+function smartQuery(value) {
+  return Buffer.from(JSON.stringify(value)).toString("base64");
+}
+
+async function fetchRouteScopes() {
+  return Promise.all(
+    ROUTE_COLLECTORS.map(async (collector) => {
+      const [configPayload, actionsPayload] = await Promise.all([
+        fetchJson(
+          `${THORNODE_BASE}/cosmwasm/wasm/v1/contract/${collector.address}/smart/${smartQuery({ config: {} })}`,
+        ),
+        fetchJson(
+          `${THORNODE_BASE}/cosmwasm/wasm/v1/contract/${collector.address}/smart/${smartQuery({ actions: {} })}`,
+        ),
+      ]);
+      const config = configPayload?.data || {};
+      const targetAddresses = Array.isArray(config.target_addresses) ? config.target_addresses : [];
+      const totalWeight = targetAddresses.reduce((sum, [, weight]) => sum + Number(weight || 0), 0);
+      const baseWeight = targetAddresses.reduce(
+        (sum, [address, weight]) =>
+          address === BASE_LAYER_REVENUE_COLLECTOR ? sum + Number(weight || 0) : sum,
+        0,
+      );
+      const baseLayerShare = collector.key === "base" ? 1 : baseWeight / totalWeight;
+      const targetDenoms = (config.target_denoms || []).map(([denom]) => normalizeDenom(denom));
+      const actionDenoms = (actionsPayload?.data?.actions || []).map((action) =>
+        normalizeDenom(action?.denom),
+      );
+
+      if (!(baseLayerShare > 0)) {
+        throw new Error(`${collector.key}: current config has no Base Layer allocation`);
+      }
+
+      return {
+        ...collector,
+        baseLayerShare,
+        targetDenoms,
+        actionDenoms,
+        routableDenoms: new Set([...targetDenoms, ...actionDenoms]),
+      };
+    }),
+  );
 }
 
 async function loadWebsiteEnv() {
@@ -232,8 +301,8 @@ async function heightAtTime(targetMs, anchors) {
 // The gateway balances across archival and pruned nodes, so a height can
 // 500 intermittently. Retry, then nudge the height slightly — a few hundred
 // blocks (~minutes) does not matter for daily buckets.
-async function fetchBalancesAt(height) {
-  const url = `${THORNODE_BASE}/cosmos/bank/v1beta1/balances/${BASE_LAYER_REVENUE_COLLECTOR}?pagination.limit=200`;
+async function fetchBalancesAt(address, height) {
+  const url = `${THORNODE_BASE}/cosmos/bank/v1beta1/balances/${address}?pagination.limit=200`;
   let lastError;
   for (const nudge of [0, 0, 1, -1, 51, -51, 301, -301, 901]) {
     try {
@@ -253,6 +322,25 @@ async function fetchBalancesAt(height) {
     }
   }
   throw lastError;
+}
+
+async function fetchScopedBalancesAt(height, routeScopes) {
+  const snapshots = await Promise.all(
+    routeScopes.map(async (scope) => ({
+      scope,
+      balances: await fetchBalancesAt(scope.address, height),
+    })),
+  );
+  const scopedBalances = {};
+
+  for (const { scope, balances } of snapshots) {
+    for (const [denom, amount] of Object.entries(balances)) {
+      if (!scope.routableDenoms.has(denom)) continue;
+      scopedBalances[denom] = (scopedBalances[denom] || 0) + amount * scope.baseLayerShare;
+    }
+  }
+
+  return scopedBalances;
 }
 
 async function fetchDailyPrices(pool, fromTs, count) {
@@ -297,7 +385,7 @@ async function main() {
     [OUTPUT_DIR, WEBSITE_OUTPUT_DIR].map((dir) => mkdir(dir, { recursive: true })),
   );
 
-  const events = await fetchReserveEvents();
+  const [events, routeScopes] = await Promise.all([fetchReserveEvents(), fetchRouteScopes()]);
   if (!events.length) throw new Error("No reserve events available");
   const tip = await fetchLatestHeightAndTime();
   const anchors = [...events.map((e) => ({ height: e.height, timeMs: e.timeMs })), tip];
@@ -338,11 +426,17 @@ async function main() {
     }
   }
 
-  // Balances at each snapshot.
+  process.stderr.write(
+    `scope: ${routeScopes.map((scope) => `${scope.key} ${(scope.baseLayerShare * 100).toFixed(0)}%`).join(", ")}\n`,
+  );
+
+  // Weighted routable balances at each snapshot. Upstream Trade/Core value
+  // enters at its configured Base Layer share before it reaches the Base
+  // Layer Collector; internal route transfers cancel within this boundary.
   const balancesByDay = new Map();
   let done = 0;
   for (const [day, height] of snapshotHeights) {
-    balancesByDay.set(day, await fetchBalancesAt(height));
+    balancesByDay.set(day, await fetchScopedBalancesAt(height, routeScopes));
     done += 1;
     if (done % 15 === 0) process.stderr.write(`balances: ${done}/${snapshotHeights.size}\n`);
     await sleep(60);
@@ -372,15 +466,16 @@ async function main() {
     return 0;
   }
 
-  // Opening inventory: fees already sitting in the collector when the
-  // measurement window starts. Included in cumulative so the collected
-  // series aligns with paid + pending.
+  // Opening base-layer-bound inventory already inside the scoped collectors
+  // when the measurement window starts.
   const baselineUsd = Object.entries(balancesByDay.get("baseline")).reduce(
     (sum, [denom, qty]) => sum + qty * priceFor(denom, days[0]),
     0,
   );
 
-  // Daily rows: collected = Σ Δqty × price(day) + paid(day).
+  // Daily rows: earned = Σ weighted routable Δqty × price(day) +
+  // Reserve payouts. The payout is an add-back for value leaving the scope,
+  // not a second earnings event.
   const dailyRows = [];
   const denomTotals = new Map();
   let cumulativeUsd = baselineUsd;
@@ -454,8 +549,8 @@ async function main() {
       return { ...row, cumulative_usd: weekCum };
     });
 
-  // Identity check: cumulative collected should equal cumulative paid plus
-  // current inventory valued at the latest daily prices.
+  // Reconciliation: cumulative allocated earnings should approximate final
+  // Reserve payouts plus current base-layer-bound inventory.
   const totalPaidUsd = events.reduce((sum, event) => sum + event.amountUsd, 0);
   const lastDay = days.at(-1);
   const inventoryNowUsd = Object.entries(balancesByDay.get(lastDay)).reduce(
@@ -465,8 +560,18 @@ async function main() {
   const meta = {
     generatedAt: new Date().toISOString(),
     source: "static-artifact",
-    method: "balance-delta",
+    method: "weighted-routable-balance-delta",
     collector: BASE_LAYER_REVENUE_COLLECTOR,
+    routeScopes: routeScopes.map((scope) => ({
+      key: scope.key,
+      name: scope.name,
+      address: scope.address,
+      baseLayerShare: scope.baseLayerShare,
+      targetDenomCount: scope.targetDenoms.length,
+      actionDenomCount: scope.actionDenoms.length,
+    })),
+    routeConfigBasis:
+      "Current on-chain target weights, target denoms, and conversion actions at generation time are applied to the full measurement window.",
     firstDay: days[0],
     lastDay,
     dayCount: days.length,
@@ -480,11 +585,11 @@ async function main() {
     totalPaidUsd,
     inventoryNowUsd,
     priceBasis:
-      "per-denom daily balance change × Midgard daily USD price (RUNE history, pool depth assetPriceUSD, stables at $1), plus each day's Reserve payouts at their deposit-day price",
+      "per-denom daily change in weighted routable inventory × Midgard daily USD price (RUNE history, pool depth assetPriceUSD, stables at $1), with Reserve payouts added back at deposit-day price solely to cancel value leaving the accounting boundary",
     scope:
-      "Net fees collected by the Base Layer collector measured from daily balance snapshots plus Reserve payouts, with the opening inventory (fees accumulated before the first Reserve deposit) as the cumulative starting point. Captures every inbound source (revenue collectors, direct FIN/Ghost app sends, redemptions) and is net of internal asset→RUNE conversion costs. By-denom rows are net value flow, so conversions shift value into the RUNE line.",
+      "App-layer earnings allocated to the Base Layer: 100% of routable Base Layer Collector inventory plus the configured Base Layer share of routable RUJI Trade and Other Core Apps inventory. Daily and weekly rows record newly earned value for the period; transfers between scoped collectors and final Reserve payouts do not create new earnings. Swap and Index are excluded because their configured targets do not route to the Base Layer.",
     caveat:
-      "Collected fees are held (and partly converted to RUNE) by the collector before Reserve payout; do not add them to Reserve payments. Cumulative collected ≈ cumulative paid + current inventory, up to intraday price movement on held assets.",
+      "01 is an accrual series and overlaps 02: cumulative app-layer earnings ≈ cumulative Reserve payouts + current base-layer-bound inventory, up to intraday price movement. Do not add 01 to 02.",
   };
 
   const artifact = {
@@ -517,7 +622,7 @@ async function main() {
       `wrote ${WEBSITE_OUTPUT_DIR}/rujira-base-layer-inflows.json`,
       `days: ${days.length}, weeks: ${weeklyRows.length}`,
       `collected: opening ${baselineUsd.toFixed(2)} + net new ${(cumulativeUsd - baselineUsd).toFixed(2)} = ${cumulativeUsd.toFixed(2)}`,
-      `identity: paid ${totalPaidUsd.toFixed(2)} + inventory ${inventoryNowUsd.toFixed(2)} = ${(totalPaidUsd + inventoryNowUsd).toFixed(2)}`,
+      `reconciliation: paid ${totalPaidUsd.toFixed(2)} + bound inventory ${inventoryNowUsd.toFixed(2)} = ${(totalPaidUsd + inventoryNowUsd).toFixed(2)}`,
       "",
     ].join("\n"),
   );

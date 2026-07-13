@@ -33,3 +33,16 @@ The Rujira repo uses the generic `rujira-revenue` contract to route collected re
 ## Scope
 
 This static artifact is a dated fallback. It confirms explicit `RESERVE` deposits on the scheduler cadence, but it is not a live API ledger and its weekly price basis may differ from the API's per-event historical pricing. Collector-distribution context is intentionally not a dashboard revenue total: direct distributions and point-in-time balances are separate, non-additive observations.
+
+## 01 app-layer earnings artifact
+
+`scripts/rujira-base-layer-inflows.mjs` generates the separate daily/weekly 01
+accrual series. Its accounting boundary contains the current configured Base
+Layer share of every routable balance on the path: 50% of RUJI Trade, 50% of
+Other Core Apps, and 100% of the Base Layer Collector. Swap and Index are
+excluded because their configured targets do not route to the Base Layer.
+
+Each period records newly earned value. Transfers within the boundary and
+final Reserve payouts cancel rather than create new earnings. The cumulative
+view is an optional rollup of those period rows and overlaps 02; it is never
+added to the Reserve-payment total.

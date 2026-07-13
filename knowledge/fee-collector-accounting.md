@@ -62,6 +62,32 @@ Any on-chain collector where:
 If none of those apply — a collector with a fixed, small sender list and no
 internal conversions — event-sum accounting is simpler and fine.
 
+## Weighted multi-collector boundaries
+
+When the metric is value **earned for a destination** rather than value that
+has already reached the final collector, put every routable upstream balance
+inside one weighted accounting boundary:
+
+```
+earned(period) = Σ_collector Σ_denom [
+                   allocation_share(collector)
+                   × routable_balance_delta(collector, denom, period)
+                   × price(denom, period)
+                 ]
+                 + payouts_leaving_boundary(period)
+```
+
+For the Rujira Base Layer share, the boundary is currently 50% of routable
+RUJI Trade inventory, 50% of routable Other Core Apps inventory, and 100% of
+routable Base Layer Collector inventory. RUJI Swap and RUJI Index are outside
+the boundary because their configured targets do not lead to the Base Layer.
+
+This makes each daily or weekly row an accrual metric. A Trade/Core → Base
+Collector transfer cancels within the boundary, and a final Reserve payout is
+added back only to cancel the balance leaving the boundary. Neither movement
+creates new earnings. A cumulative view may be derived from the period rows,
+but 01 still overlaps final Reserve payments and must not be added to 02.
+
 ## Implementation notes
 
 - Needs daily (or whatever bucket granularity you're reporting) historical
@@ -74,5 +100,5 @@ internal conversions — event-sum accounting is simpler and fine.
   scanning every block for transfer events.
 - Reference implementation:
   [`scripts/rujira-base-layer-inflows.mjs`](../scripts/rujira-base-layer-inflows.mjs)
-  (Base Layer Collector fee-collected series for the App Layer → Base Layer
-  dashboard).
+  (weighted app-layer earnings allocated to the Base Layer for the App Layer
+  → Base Layer dashboard).
