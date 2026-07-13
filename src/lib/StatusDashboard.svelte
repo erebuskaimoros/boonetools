@@ -42,6 +42,7 @@
   $: governanceVotes = getGovernanceVotes(voteRows);
   $: statusUpdates = getRecentStatusUpdates(voteRows);
   $: stuckTransactions = stuckDashboard?.transactions || [];
+  $: hasStuckTransactions = stuckTransactions.length > 0 || Number(stuckDashboard?.count || 0) > 0;
   $: haltedChains = chainStatuses.filter((chain) => chain.trading === 'paused').map((chain) => chain.chain);
 
   onMount(() => {
@@ -327,7 +328,7 @@
       </div>
     </section>
 
-    <section class="block stuck-block" aria-labelledby="stuck-transactions-title">
+    <section class="block stuck-block" class:has-stuck={hasStuckTransactions} aria-labelledby="stuck-transactions-title">
       <div class="block-title">
         <h2 id="stuck-transactions-title"><span>▌</span> Stuck Transactions</h2>
         {#if stuckDashboard}
@@ -684,14 +685,19 @@
   }
 
   .chain-block { margin-bottom: 16px; }
-  .stuck-block { margin-bottom: 16px; border-color: #241518; }
-  .stuck-block .block-title h2 span { color: #dc3545; }
+  .stuck-block { margin-bottom: 16px; }
+  .stuck-block.has-stuck { border-color: #241518; }
+  .stuck-block.has-stuck .block-title h2 span { color: #dc3545; }
   .stuck-count {
     padding: 3px 7px;
-    border: 1px solid rgba(220, 53, 69, .28);
-    color: #dc3545;
+    border: 1px solid rgba(0, 204, 102, .28);
+    color: #00cc66;
     font: 700 8px/1 'JetBrains Mono', monospace;
     letter-spacing: .1em;
+  }
+  .stuck-block.has-stuck .stuck-count {
+    border-color: rgba(220, 53, 69, .28);
+    color: #dc3545;
   }
   .stuck-criteria {
     margin: 0;
