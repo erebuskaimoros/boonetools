@@ -401,7 +401,7 @@
       <section class="block updates-block">
         <div class="block-title">
           <h2><span>▌</span> Latest Network Changes</h2>
-          <a href="https://thorchain.net/network/votes" target="_blank" rel="noopener noreferrer">[ALL VOTES ↗]</a>
+          <a href="/vote-tracker" target="_blank" rel="noopener noreferrer">[ALL VOTES ↗]</a>
         </div>
         {#if votesError}
           <div class="inline-alert"><span>WRN</span>{votesError}</div>
@@ -434,7 +434,7 @@
       <section class="block votes-block">
         <div class="block-title">
           <h2><span>▌</span> Latest Governance Votes</h2>
-          <a href="https://thorchain.net/network/votes" target="_blank" rel="noopener noreferrer">[EXPLORE ↗]</a>
+          <a href="/vote-tracker" target="_blank" rel="noopener noreferrer">[EXPLORE ↗]</a>
         </div>
         {#if votesError}
           <div class="inline-alert"><span>WRN</span>{votesError}</div>

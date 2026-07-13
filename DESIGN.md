@@ -212,9 +212,11 @@ components but should NOT be used in new work).
 
 The canonical examples of the live style are:
 
-- `src/App.svelte` — terminal home (`terminal-home`, `terminal-hero`,
-  `nav-row`, `terminal-status` classes). This is the welcome screen and sets
-  the entire visual language for the site.
+- `src/App.svelte` — terminal shell: collapsible left sidebar nav on desktop
+  (`sidebar`, `side-item`, `bracket-btn` classes), top bar + dropdown nav on
+  mobile and in desktop-app iframe mode. There is no homepage; `/` defaults
+  to the status dashboard. This shell sets the entire visual language for
+  the site.
 - `src/lib/BondTrackerV2.svelte` — a fully-built terminal tool with mono
   tables, green/amber Chart.js styling, and `#1a1a1a` borders.
 - `src/lib/AppLayerBaseLayerDashboard.svelte` — most recent dashboard built
