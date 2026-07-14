@@ -29,7 +29,7 @@ This repo is a Svelte/Vite frontend with a small Node/Postgres backend for cache
 - Limit Orders
 - App Layer to Base Layer dashboard at `/app-layer-base-layer`
 
-The App Layer dashboard tracks Rujira App Layer fee-share configuration and final transfers into the THORChain Base Layer. Dune is the preferred historical source for Reserve payments and app-attributed THORChain liquidity fees; the API reports when it has fallen back to RPC/Midgard. Generated static artifacts live under `public/data/rujira-base-layer-fees/`, and the page links collector addresses and txs to `thorchain.net`.
+The App Layer dashboard tracks Rujira App Layer fee-share configuration and final transfers into the THORChain Base Layer. Lane 01 is served by the backend from two-minute collector-state snapshots, with the checked-in earnings artifact used only as its historical bootstrap and outage fallback. Dune is the preferred historical source for Reserve payments and app-attributed THORChain liquidity fees; the API reports when it has fallen back to RPC/Midgard. Generated static artifacts live under `public/data/rujira-base-layer-fees/`, and the page links collector addresses and txs to `thorchain.net`.
 
 ## Local Development
 
@@ -114,6 +114,14 @@ Refresh the narrow Base Collector conversion-fee artifact used only as a backend
 ```bash
 node scripts/rujira-app-layer-swap-fees.mjs
 ```
+
+Refresh the lane 01 historical bootstrap and frontend fallback:
+
+```bash
+node scripts/rujira-base-layer-inflows.mjs
+```
+
+Routine runs retain verified older rows and recompute the latest three UTC days so they do not depend on indefinite archive-node retention. Set `RUJIRA_INFLOW_FULL_REBUILD=1` only when a full historical Thornode archive is available. The generator writes the public fallback and `backend/data/rujira-base-layer-inflows.json` together.
 
 The collector-distribution artifact is deliberately not an all-time revenue ledger: it observes direct transfers to the currently configured target addresses since its recorded start height, and records current residual balances separately. Its values are non-additive and use current pricing, not historical USD-at-receipt accounting.
 

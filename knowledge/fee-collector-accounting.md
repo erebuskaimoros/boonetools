@@ -102,3 +102,8 @@ but 01 still overlaps final Reserve payments and must not be added to 02.
   [`scripts/rujira-base-layer-inflows.mjs`](../scripts/rujira-base-layer-inflows.mjs)
   (weighted app-layer earnings allocated to the Base Layer for the App Layer
   → Base Layer dashboard).
+- Production uses the same boundary incrementally: the existing App Layer
+  live-state timer snapshots the current UTC day every two minutes, Postgres
+  preserves the midnight collector-balance baseline, and the API merges those
+  replaceable daily rows over a checked-in historical bootstrap. The frontend
+  artifact is a fallback, not the live source.

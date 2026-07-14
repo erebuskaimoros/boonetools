@@ -1,5 +1,5 @@
 [Unit]
-Description=BooneTools App Layer Live State Scheduler
+Description=BooneTools App Layer Live State and Base Layer Earnings Scheduler
 After=network-online.target docker.service boonetools-api.service
 Wants=network-online.target docker.service
 

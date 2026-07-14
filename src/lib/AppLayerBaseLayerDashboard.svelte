@@ -186,6 +186,7 @@
   let generatedFees = null;
   let staticGeneratedFees = null;
   let inflows = null;
+  let staticInflows = null;
   let meta = null;
   let configs = {};
   let histories = {};
@@ -204,9 +205,11 @@
   let generatedFeesError = '';
   let generatedFeesWarning = '';
   let inflowsError = '';
+  let inflowsWarning = '';
   let liveError = '';
   let liveRouteWarning = '';
   let lastLiveRefresh = null;
+  let dashboardRefreshRunning = false;
 
   let collectedCanvas;
   let collectedChart;
@@ -467,14 +470,34 @@
   $: if (generatedFeesCanvas && generatedPick.rows.length)
     renderGeneratedFeesChart(generatedPick, view.generated);
 
+  async function refreshDashboard() {
+    if (dashboardRefreshRunning) return;
+    dashboardRefreshRunning = true;
+    try {
+      await Promise.all([
+        refreshLiveState(),
+        refreshBaseLayerEarnings(),
+        refreshReservePayments(),
+        refreshGeneratedFees()
+      ]);
+    } finally {
+      dashboardRefreshRunning = false;
+    }
+  }
+
   onMount(() => {
-    loadArtifacts().then(() => {
-      refreshReservePayments();
-      refreshGeneratedFees();
+    let refreshTimer;
+    let mounted = true;
+
+    loadArtifacts().then(async () => {
+      if (!mounted) return;
+      await refreshDashboard();
+      if (mounted) refreshTimer = window.setInterval(refreshDashboard, 120_000);
     });
-    refreshLiveState();
 
     return () => {
+      mounted = false;
+      if (refreshTimer) window.clearInterval(refreshTimer);
       collectedChart?.destroy();
       paymentChart?.destroy();
       generatedFeesChart?.destroy();
@@ -516,13 +539,41 @@
       }
       if (inflowsResult?.__error) {
         inflows = null;
+        staticInflows = null;
         inflowsError = `Base Layer earnings artifact — ${inflowsResult.__error}; run scripts/rujira-base-layer-inflows.mjs to generate it`;
       } else {
         inflows = inflowsResult;
+        staticInflows = inflowsResult;
         inflowsError = '';
       }
     } catch (error) {
       artifactsError = error.message;
+    } finally {
+      if (!staticInflows) inflowsLoading = false;
+    }
+  }
+
+  async function refreshBaseLayerEarnings() {
+    try {
+      inflowsLoading = true;
+      inflowsError = '';
+      inflowsWarning = '';
+      const payload = await fetchAppLayerBaseLayerEarnings();
+      if (!Array.isArray(payload?.daily) || !Array.isArray(payload?.weekly)) {
+        throw new Error('invalid Base Layer earnings payload');
+      }
+      inflows = payload;
+      if (payload?.meta?.stale) {
+        inflowsWarning = `Base Layer earnings backend is stale as of ${formatDateTime(payload.meta.generatedAt)}`;
+      }
+    } catch (error) {
+      if (inflows?.meta?.live) {
+        inflowsWarning = `Base Layer earnings backend — ${error.message}; using last successful backend payload from ${formatDateTime(inflows.meta.generatedAt)}`;
+      } else if (inflows) {
+        inflowsWarning = `Base Layer earnings backend — ${error.message}; using ${staticArtifactLabel(staticInflows?.meta)}`;
+      } else {
+        inflowsError = `Base Layer earnings backend — ${error.message}`;
+      }
     } finally {
       inflowsLoading = false;
     }
@@ -640,6 +691,23 @@
       ? { apikey: APP_LAYER_API_KEY, Authorization: `Bearer ${APP_LAYER_API_KEY}` }
       : {};
     const response = await fetch(`${APP_LAYER_API_BASE}/app-layer-base-fees`, {
+      headers,
+      cache: 'no-store'
+    });
+    const text = await response.text();
+
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 160)}`);
+    }
+
+    return JSON.parse(text);
+  }
+
+  async function fetchAppLayerBaseLayerEarnings() {
+    const headers = APP_LAYER_API_KEY
+      ? { apikey: APP_LAYER_API_KEY, Authorization: `Bearer ${APP_LAYER_API_KEY}` }
+      : {};
+    const response = await fetch(`${APP_LAYER_API_BASE}/app-layer-base-layer-earnings`, {
       headers,
       cache: 'no-store'
     });
@@ -1063,6 +1131,7 @@
     if (value.includes('mixed')) return 'Dune + RPC/Midgard Postgres';
     if (value.includes('dune')) return 'Dune-backed Postgres';
     if (value.includes('postgres')) return 'RPC/Midgard-backed Postgres';
+    if (value.includes('backend-chain-state')) return 'two-minute backend chain snapshots';
     if (value.includes('static')) return 'static artifact';
     return value.replaceAll('-', ' ');
   }
@@ -1148,9 +1217,9 @@
           {liveError ? 'DEGRADED' : liveLoading ? 'SYNCING' : 'LIVE'}
         </span>
         <span class="sep">│</span>
-        <button class="refresh" on:click={refreshLiveState} disabled={liveLoading}>
+        <button class="refresh" on:click={refreshDashboard} disabled={dashboardRefreshRunning}>
           <span class="bracket">[</span><span class="key">R</span><span class="bracket">]</span>
-          {liveLoading ? 'refreshing' : 'refresh'}
+          {dashboardRefreshRunning ? 'refreshing' : 'refresh'}
         </button>
       </div>
     </div>
@@ -1166,7 +1235,7 @@
     <div class="rule"></div>
   </div>
 
-  {#if artifactsError || reservePaymentsError || reservePaymentsWarning || generatedFeesError || generatedFeesWarning || inflowsError || liveError || liveRouteWarning}
+  {#if artifactsError || reservePaymentsError || reservePaymentsWarning || generatedFeesError || generatedFeesWarning || inflowsError || inflowsWarning || liveError || liveRouteWarning}
     <div class="alerts">
       {#if artifactsError}
         <div class="alert err">
@@ -1178,6 +1247,12 @@
         <div class="alert warn">
           <span class="alert-tag">WRN</span>
           <span>{inflowsError}</span>
+        </div>
+      {/if}
+      {#if inflowsWarning}
+        <div class="alert warn">
+          <span class="alert-tag">WRN</span>
+          <span>{inflowsWarning}</span>
         </div>
       {/if}
       {#if generatedFeesError}
@@ -1362,7 +1437,7 @@
       </div>
       <strong class="metric-value">{inflowsLoading ? '—' : totalInflowUsd ? usd2.format(totalInflowUsd) : '—'}</strong>
       <small class="metric-foot">
-        {inflowMeta ? `${usd2.format(inflowOpeningUsd)} opening + ${usd2.format(inflowNetNewUsd)} net new · daily prices` : 'inflow artifact pending'}
+        {inflowMeta ? `${usd2.format(inflowOpeningUsd)} opening + ${usd2.format(inflowNetNewUsd)} net new · ${inflowMeta.live ? '2m chain state' : 'historical fallback'}` : 'earnings data pending'}
       </small>
     </article>
     <article class="metric">
@@ -1429,12 +1504,12 @@
         {#if inflowsLoading}
           <div class="loading-block">
             <span class="loading-marker">▓░░░░</span>
-            <span>loading Base Layer earnings artifact</span>
+            <span>loading Base Layer earnings backend</span>
           </div>
         {:else if !inflowRows.length}
           <div class="loading-block">
             <span class="loading-marker">░░░░░</span>
-            <span>no Base Layer earnings rows — run scripts/rujira-base-layer-inflows.mjs</span>
+            <span>no Base Layer earnings rows available</span>
           </div>
         {:else}
           <canvas bind:this={collectedCanvas} aria-label="Daily, weekly, and cumulative app-layer earnings allocated to the Base Layer"></canvas>
@@ -1445,7 +1520,7 @@
         <div class="side-card">
           <span>cumulative app-layer earnings</span>
           <strong>{totalInflowUsd ? usd2.format(totalInflowUsd) : '—'}</strong>
-          <small>{inflowMeta ? `${number2.format(inflowDayCount)} days measured · paid + pending reconciliation` : 'artifact pending'}</small>
+          <small>{inflowMeta ? `${number2.format(inflowDayCount)} days measured · ${inflowMeta.live ? 'backend refreshed every 2m' : 'historical fallback'}` : 'earnings data pending'}</small>
         </div>
         {#if inflowDenomTotals.length}
           <p class="side-table-note">largest net asset flows · + received / − converted or paid</p>

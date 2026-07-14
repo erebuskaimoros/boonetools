@@ -21,7 +21,7 @@ async function parseResponse(response, responseType) {
   return response.json();
 }
 
-async function fetchFromBase(baseUrl, endpoint, responseType) {
+async function fetchFromBase(baseUrl, endpoint, responseType, headers = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), THORNODE_REQUEST_TIMEOUT_MS);
   let response;
@@ -29,7 +29,8 @@ async function fetchFromBase(baseUrl, endpoint, responseType) {
   try {
     response = await fetch(`${baseUrl}${endpoint}`, {
       headers: {
-        Accept: responseType === 'text' ? 'text/plain' : 'application/json'
+        Accept: responseType === 'text' ? 'text/plain' : 'application/json',
+        ...headers
       },
       signal: controller.signal
     });
@@ -66,7 +67,7 @@ export async function fetchThorchain(endpoint, options = {}) {
     }
 
     try {
-      const payload = await fetchFromBase(base, endpoint, responseType);
+      const payload = await fetchFromBase(base, endpoint, responseType, options.headers);
       if (!options.historical) {
         activeThornodeIndex = base === THORNODE_FALLBACK ? 1 : 0;
       }

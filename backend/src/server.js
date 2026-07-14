@@ -9,6 +9,7 @@ import {
   sendResponse
 } from './lib/http.js';
 import { closePool, query } from './db/pool.js';
+import { handleAppLayerBaseLayerEarnings } from './handlers/app-layer-base-layer-earnings.js';
 import { handleAppLayerBaseFees } from './handlers/app-layer-base-fees.js';
 import { handleAppLayerLiveState } from './handlers/app-layer-live-state.js';
 import { handleAppLayerReservePayments } from './handlers/app-layer-reserve-payments.js';
@@ -35,6 +36,7 @@ const routes = new Map([
   ['/rapid-swaps', { auth: 'public', handler: handleRapidSwaps }],
   ['/rapid-swaps-swap-history', { auth: 'public', handler: handleRapidSwapsSwapHistory }],
   ['/bond-history', { auth: 'public', handler: handleBondHistory }],
+  ['/app-layer-base-layer-earnings', { auth: 'none', handler: handleAppLayerBaseLayerEarnings }],
   ['/app-layer-base-fees', { auth: 'none', handler: handleAppLayerBaseFees }],
   ['/app-layer-live-state', { auth: 'none', handler: handleAppLayerLiveState }],
   ['/app-layer-reserve-payments', { auth: 'none', handler: handleAppLayerReservePayments }],

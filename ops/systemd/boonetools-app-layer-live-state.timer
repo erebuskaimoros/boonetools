@@ -1,5 +1,5 @@
 [Unit]
-Description=Refresh BooneTools App Layer live state every two minutes
+Description=Refresh BooneTools App Layer live state and Base Layer earnings every two minutes
 
 [Timer]
 OnBootSec=30

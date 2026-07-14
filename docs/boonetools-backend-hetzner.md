@@ -8,6 +8,7 @@ BooneTools now has a dedicated Hetzner-hosted backend stack for all current DB-b
 - `nodeop-meta`
 - `rapid-swaps`
 - `stock-prices`
+- `app-layer-base-layer-earnings`
 - local scheduler jobs for NodeOp and Rapid Swaps
 - Dune-backed historical/canonical ingestion with THORNode/Midgard live tails where current data matters
 
@@ -39,6 +40,14 @@ Public GETs continue to accept:
 - `Authorization: Bearer <PUBLIC_API_KEY>`
 
 The public `/functions/v1/stuck-transactions` endpoint powers the `/status` dashboard's high-confidence stuck-payment list. It composes current THORNode queue and transaction-stage state behind a 30-second in-process cache; it requires no database migration or additional environment variable.
+
+The public `/functions/v1/app-layer-base-layer-earnings` endpoint powers lane
+01 of the App Layer dashboard. Migration `023_rujira_base_layer_earnings.sql`
+stores one midnight balance baseline and one replaceable accrual row per UTC
+day. `boonetools-app-layer-live-state.timer` refreshes the current row every
+two minutes from the existing live-state snapshot; no second timer or new env
+variable is required. `backend/data/rujira-base-layer-inflows.json` supplies
+the immutable historical bootstrap, and DB rows override matching seed days.
 
 ## Local / Server Runtime Env
 
@@ -96,7 +105,7 @@ That script:
 2. Installs backend dependencies
 3. Starts the dedicated Postgres container
 4. Applies canonical DB migrations
-5. Installs/restarts the backend API, schedulers, and backup timer
+5. Installs/restarts the backend API, schedulers, and backup timer; the App Layer live-state prime also writes the current lane 01 accrual row
 
 When `RAPID_SWAPS_DUNE_QUERY_ID` is configured, deploy disables the legacy
 `rapid-swap-listener.service`; the scheduler live tail is the fresh-data path.

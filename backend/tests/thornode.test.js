@@ -59,3 +59,26 @@ test('fetchThorchain falls back to the archive endpoint on historical requests w
     globalThis.fetch = originalFetch;
   }
 });
+
+test('fetchThorchain forwards historical height headers', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return createJsonResponse({ balances: [] });
+  };
+
+  try {
+    await fetchThorchain('/cosmos/bank/v1beta1/balances/thor1collector', {
+      historical: true,
+      headers: { 'x-cosmos-block-height': '26990000' }
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].options.headers['x-cosmos-block-height'], '26990000');
+    assert.equal(calls[0].options.headers.Accept, 'application/json');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

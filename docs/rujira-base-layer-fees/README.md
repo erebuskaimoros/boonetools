@@ -34,10 +34,10 @@ The Rujira repo uses the generic `rujira-revenue` contract to route collected re
 
 This static artifact is a dated fallback. It confirms explicit `RESERVE` deposits on the scheduler cadence, but it is not a live API ledger and its weekly price basis may differ from the API's per-event historical pricing. Collector-distribution context is intentionally not a dashboard revenue total: direct distributions and point-in-time balances are separate, non-additive observations.
 
-## 01 app-layer earnings artifact
+## 01 app-layer earnings series
 
-`scripts/rujira-base-layer-inflows.mjs` generates the separate daily/weekly 01
-accrual series. Its accounting boundary contains the current configured Base
+The production `/functions/v1/app-layer-base-layer-earnings` endpoint serves
+the daily/weekly 01 accrual series. Its accounting boundary contains the current configured Base
 Layer share of every routable balance on the path: 50% of RUJI Trade, 50% of
 Other Core Apps, and 100% of the Base Layer Collector. Swap and Index are
 excluded because their configured targets do not route to the Base Layer.
@@ -46,3 +46,16 @@ Each period records newly earned value. Transfers within the boundary and
 final Reserve payouts cancel rather than create new earnings. The cumulative
 view is an optional rollup of those period rows and overlaps 02; it is never
 added to the Reserve-payment total.
+
+`boonetools-app-layer-live-state.timer` refreshes current balances, route
+configs, conversion actions, and prices every two minutes. The same run
+recomputes the current UTC day from a persisted midnight balance baseline and
+canonical Reserve-payment add-backs, then replaces that day's Postgres row.
+The frontend refetches on the same cadence.
+
+`scripts/rujira-base-layer-inflows.mjs` still generates the checked-in
+historical bootstrap and frontend outage fallback. Routine runs recompute the
+latest three days and retain older verified rows; use
+`RUJIRA_INFLOW_FULL_REBUILD=1` only with a full historical archive. The
+generator writes `backend/data/rujira-base-layer-inflows.json` and the public
+fallback together.
