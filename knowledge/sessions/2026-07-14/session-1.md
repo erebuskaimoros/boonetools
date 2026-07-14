@@ -16,7 +16,7 @@ Restored lane 01 of the App Layer dashboard to the existing two-minute backend l
 - Switched the frontend to backend-first loading, two-minute polling, unified manual refresh, stale warnings, and static fallback behavior.
 - Made the historical generator recompute recent days incrementally so routine refreshes do not require indefinite archive-node retention.
 - Regenerated the historical bootstrap through July 14; completed July 13 now measures $1,106.26 instead of the stale partial-day $226.18.
-- Added backend accounting/header tests, refreshed documentation, and verified 153 tests plus the production build.
+- Added backend accounting/header/JSON-parameter tests, refreshed documentation, and verified 154 tests plus the production build.
 
 ## Discoveries
 
@@ -24,6 +24,7 @@ Restored lane 01 of the App Layer dashboard to the existing two-minute backend l
 - The Rujira Trade page is narrower than BooneTools lane 01: it reports RUJI Trade, while BooneTools includes the configured Base Layer allocation from both RUJI Trade and Other Core Apps.
 - Liquify's current Thornode API retains recent historical state but not the April baseline height, so routine artifact generation must retain verified older rows and recompute a bounded recent window.
 - Historical balance requests require forwarding `x-cosmos-block-height`; the shared Thornode client previously discarded caller-provided headers.
+- Node-postgres treats JavaScript arrays as Postgres array parameters, so arrays destined for `jsonb` columns must be explicitly `JSON.stringify`-serialized.
 
 ## Files Changed
 

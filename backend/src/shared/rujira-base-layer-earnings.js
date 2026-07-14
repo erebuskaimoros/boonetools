@@ -51,6 +51,10 @@ function safeNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
+export function serializeRujiraBaseLayerEarningsJson(value) {
+  return JSON.stringify(value);
+}
+
 function dateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
   return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : '';
@@ -407,9 +411,9 @@ export async function refreshRujiraBaseLayerEarnings(livePayload) {
         dayEnd,
         observedAt.toISOString(),
         baseline.snapshot_height,
-        routeScopeMeta,
+        serializeRujiraBaseLayerEarningsJson(routeScopeMeta),
         result.byDenom,
-        result.unpricedDenoms,
+        serializeRujiraBaseLayerEarningsJson(result.unpricedDenoms),
         result.denomChangeCount,
         result.inventoryDeltaUsd,
         result.reservePayoutRune,

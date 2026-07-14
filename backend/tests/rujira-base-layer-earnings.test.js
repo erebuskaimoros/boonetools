@@ -7,7 +7,8 @@ const {
   buildRujiraBaseLayerEarningsPayload,
   buildWeightedRoutableBalances,
   calculateRujiraBaseLayerEarningsDay,
-  deriveRujiraBaseLayerRouteScopes
+  deriveRujiraBaseLayerRouteScopes,
+  serializeRujiraBaseLayerEarningsJson
 } = await import('../src/shared/rujira-base-layer-earnings.js');
 
 const BASE_COLLECTOR = 'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
@@ -59,6 +60,20 @@ test('route scopes follow the configured Base Layer share and routable denoms', 
     'rune',
     'eth-usdc-token'
   ]);
+});
+
+test('JSON array parameters are serialized for Postgres jsonb columns', () => {
+  const scopes = [{ key: 'trade', baseLayerShare: 0.5 }];
+  const unpriced = ['thor.auto', 'x/brune'];
+
+  assert.equal(
+    serializeRujiraBaseLayerEarningsJson(scopes),
+    '[{"key":"trade","baseLayerShare":0.5}]'
+  );
+  assert.equal(
+    serializeRujiraBaseLayerEarningsJson(unpriced),
+    '["thor.auto","x/brune"]'
+  );
 });
 
 test('transfers between scoped collectors do not create Base Layer earnings', () => {
