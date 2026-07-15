@@ -677,7 +677,7 @@
   {:else if error}
     <div class="loading-wrap err-text">{error}</div>
   {:else}
-    <div class="sticky-header">
+    <div class="dashboard-header">
       <div class="metrics">
         <div class="metric">
           <div class="metric-val accent">{formatUSD(totalSummary.totalValue)}</div>
@@ -947,10 +947,7 @@
 
   .err-text { color: #cc4444; }
 
-  .sticky-header {
-    position: sticky;
-    top: 36px;
-    z-index: 10;
+  .dashboard-header {
     background: #0d0d0d;
   }
 

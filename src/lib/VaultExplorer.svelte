@@ -213,8 +213,8 @@
   {:else if error}
     <div class="error-wrap">Error: {error}</div>
   {:else if data}
-    <!-- Sticky header: metrics + tabs -->
-    <div class="sticky-header">
+    <!-- Dashboard header: metrics + tabs -->
+    <div class="dashboard-header">
     <div class="metrics">
       <div class="metric">
         <div class="metric-val accent">{formatUSDCompact(data.summary.totalVaultValueUSD)}</div>
@@ -254,7 +254,7 @@
         {refreshing ? 'Refreshing...' : 'Refresh'}
       </button>
     </div>
-    </div><!-- /sticky-header -->
+    </div><!-- /dashboard-header -->
 
     {#if activeTab === 'overview'}
       <!-- Pool Grid Visualizations -->
@@ -520,11 +520,8 @@
     color: #666;
   }
 
-  /* ---- STICKY HEADER ---- */
-  .sticky-header {
-    position: sticky;
-    top: 36px; /* below the fixed site navbar (36px) */
-    z-index: 10;
+  /* ---- DASHBOARD HEADER ---- */
+  .dashboard-header {
     background: #0d0d0d;
   }
 
