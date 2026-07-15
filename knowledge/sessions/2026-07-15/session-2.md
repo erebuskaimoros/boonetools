@@ -5,7 +5,7 @@
 
 ## Summary
 
-Added an Assets tab to Vault Explorer that lists every current non-RUNE asset in the explorer model and breaks each balance into pooled, trade, and secured amounts with USD values. The view uses the same live THORChain state and prices as Overview, while keeping its exogenous-only totals separate from the RUNE-inclusive dashboard metrics.
+Added and deployed an Assets tab to Vault Explorer that lists every current non-RUNE asset in the explorer model and breaks each balance into pooled, trade, and secured amounts with USD values. The view uses the same live THORChain state and prices as Overview, while keeping its exogenous-only totals separate from the RUNE-inclusive dashboard metrics.
 
 ## Work Done
 
@@ -14,6 +14,7 @@ Added an Assets tab to Vault Explorer that lists every current non-RUNE asset in
 - Added a pure aggregation layer that excludes `THOR.RUNE`, maps the existing native balance type to pooled, and reconciles category values to each asset total.
 - Added focused tests for RUNE exclusion, category bucketing, sorting, empty categories, and summary reconciliation.
 - Verified 100 frontend tests, a production build, `git diff --check`, live mainnet rendering, horizontal overflow behavior, and final-row visibility above the fixed footer.
+- Pushed `main@ba990b4`, deployed the frontend through the canonical guarded script, and verified the live bundle, 41-row production Assets table, and fixed-footer spacing.
 
 ## Discoveries
 
@@ -32,10 +33,10 @@ Added an Assets tab to Vault Explorer that lists every current non-RUNE asset in
 
 ## In Progress
 
-Production frontend deployment and live smoke verification are queued immediately after this session commit and push.
+None - session complete. The feature is committed, pushed, deployed, and verified in production.
 
 ## Next Steps
 
-- [ ] Deploy the pushed frontend with the canonical guarded deployment script.
-- [ ] Verify the production Vault Explorer opens the Assets tab with current mainnet data.
-- [ ] Confirm the production page has no new browser errors and the final table row remains reachable above the footer.
+- [ ] Consider adding client-side search or sorting if the exogenous asset set grows materially.
+- [ ] Extend the category mapping if THORChain introduces another custody/accounting type.
+- [ ] Address the repository's pre-existing Svelte accessibility and unused-selector build warnings separately.
