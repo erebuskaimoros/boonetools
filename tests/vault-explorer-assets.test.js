@@ -3,8 +3,48 @@ import assert from 'node:assert/strict';
 
 import {
   buildCustodiedAssetRows,
+  buildPooledBalanceMap,
+  getPooledRuneAmount,
   summarizeCustodiedAssetRows
 } from '../src/lib/vault-explorer/assets.js';
+
+test('uses pool depth for pooled balances and vault inventory only for distribution', () => {
+  const pooled = buildPooledBalanceMap(
+    [{ asset: 'BTC.BTC', balance_asset: '1000000000' }],
+    { 'BTC.BTC': 50_000 },
+    {
+      'BTC.BTC': {
+        0: { amount: 12, valueUSD: 600_000 },
+        1: { amount: 8, valueUSD: 400_000 }
+      }
+    },
+    2
+  );
+
+  assert.equal(pooled['BTC.BTC'][0].amount, 6);
+  assert.equal(pooled['BTC.BTC'][1].amount, 4);
+  assert.equal(pooled['BTC.BTC'][0].valueUSD, 300_000);
+  assert.equal(pooled['BTC.BTC'][1].valueUSD, 200_000);
+  assert.equal(
+    pooled['BTC.BTC'][0].amount + pooled['BTC.BTC'][1].amount,
+    10
+  );
+});
+
+test('pooled RUNE uses the same eligible pool rows as exogenous pool depth', () => {
+  const pools = [
+    { balance_asset: '1000000000', balance_rune: '2000000000' },
+    { balance_asset: '500000000', balance_rune: '1500000000' },
+    { balance_asset: '0', balance_rune: '9000000000' }
+  ];
+
+  assert.equal(getPooledRuneAmount(pools), 35);
+
+  const exogenousValueUSD = 700;
+  const effectiveRunePrice = exogenousValueUSD / getPooledRuneAmount(pools);
+  const totalPooledUSD = exogenousValueUSD + getPooledRuneAmount(pools) * effectiveRunePrice;
+  assert.equal(totalPooledUSD, exogenousValueUSD * 2);
+});
 
 test('builds exogenous custody rows from pooled, trade, and secured balances', () => {
   const assets = buildCustodiedAssetRows([

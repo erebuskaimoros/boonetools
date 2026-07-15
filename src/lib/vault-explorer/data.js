@@ -10,7 +10,12 @@ import { fetchJSONWithFallback } from '$lib/utils/api';
 import { fromBaseUnit, getAssetType, normalizeAsset } from '$lib/utils/blockchain';
 import { getNodes } from '$lib/utils/nodes';
 import { getAssetDisplayName } from '$lib/constants';
-import { buildCustodiedAssetRows, summarizeCustodiedAssetRows } from './assets.js';
+import {
+  buildCustodiedAssetRows,
+  buildPooledBalanceMap,
+  getPooledRuneAmount,
+  summarizeCustodiedAssetRows
+} from './assets.js';
 import { hydrateEthOnChainBalances } from './eth-balances.js';
 import { hydrateUtxoOnChainBalances } from './utxo-balances.js';
 
@@ -100,8 +105,9 @@ export async function fetchVaultExplorerData() {
     securedByPool[poolAsset].valueUSD += depth * prices[poolAsset];
   }
 
-  // Build per-pool per-vault aggregation from vault coins (actual L1 balances)
-  const poolMap = {};
+  // Actual L1 vault inventory is broader than pool depth: it also contains
+  // trade and secured assets. Keep it only as the physical distribution basis.
+  const vaultInventoryMap = {};
 
   for (let vi = 0; vi < activeVaults.length; vi++) {
     const vault = activeVaults[vi];
@@ -112,14 +118,19 @@ export async function fetchVaultExplorerData() {
       const amount = fromBaseUnit(coin.amount);
       const valueUSD = amount * prices[poolAsset];
 
-      if (!poolMap[poolAsset]) poolMap[poolAsset] = {};
-      const existing = poolMap[poolAsset][vi] || { amount: 0, valueUSD: 0 };
-      poolMap[poolAsset][vi] = {
+      if (!vaultInventoryMap[poolAsset]) vaultInventoryMap[poolAsset] = {};
+      const existing = vaultInventoryMap[poolAsset][vi] || { amount: 0, valueUSD: 0 };
+      vaultInventoryMap[poolAsset][vi] = {
         amount: existing.amount + amount,
         valueUSD: existing.valueUSD + valueUSD
       };
     }
   }
+
+  // Pooled asset amounts come from pool state, not total vault inventory. The
+  // vault weights preserve the per-vault overview without misclassifying trade
+  // and secured inventory as pooled.
+  const poolMap = buildPooledBalanceMap(poolsData, prices, vaultInventoryMap, activeVaults.length);
 
   // RUNE amounts from real API data, valued at effectiveRunePrice for consistency
   // Pool ratio: RUNE per unit of asset in each pool (for deriving trade/secured RUNE)
@@ -130,11 +141,11 @@ export async function fetchVaultExplorerData() {
     if (balAsset > 0) poolRuneRatio[pool.asset] = balRune / balAsset;
   }
 
-  // Pooled RUNE: available_pools_rune from network endpoint
-  // Defined as "RUNE in Available pools (equal in value to the Assets in those pools)"
-  const availablePoolsRune = fromBaseUnit(networkData.available_pools_rune);
-  if (availablePoolsRune > 0) {
-    const perVault = availablePoolsRune / activeVaults.length;
+  // Pooled RUNE uses the same pool rows as pooled exogenous assets. This keeps
+  // the two sides in identical scope and preserves the AMM's 2x relationship.
+  const pooledRuneAmount = getPooledRuneAmount(poolsData);
+  if (pooledRuneAmount > 0 && activeVaults.length > 0) {
+    const perVault = pooledRuneAmount / activeVaults.length;
     const perVaultUSD = perVault * effectiveRunePrice;
     poolMap['THOR.RUNE'] = {};
     for (let vi = 0; vi < activeVaults.length; vi++) {

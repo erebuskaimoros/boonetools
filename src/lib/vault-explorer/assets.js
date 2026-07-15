@@ -4,8 +4,55 @@ const ASSET_BUCKETS = {
   secured: 'secured'
 };
 
+const THOR_BASE = 1e8;
+
 function emptyBucket() {
   return { amount: 0, valueUSD: 0 };
+}
+
+/**
+ * Build true pool balances from /thorchain/pools while retaining the physical
+ * vault distribution for the overview mosaic. Vault inventory is broader than
+ * pooled inventory because it also contains trade and secured assets.
+ */
+export function buildPooledBalanceMap(pools = [], prices = {}, vaultInventoryMap = {}, vaultCount = 0) {
+  const pooledBalanceMap = {};
+
+  for (const pool of pools) {
+    const amount = Number(pool?.balance_asset || 0) / THOR_BASE;
+    const price = Number(prices[pool?.asset]) || 0;
+    if (!pool?.asset || amount <= 0 || price <= 0) continue;
+
+    const inventoryByVault = vaultInventoryMap[pool.asset] || {};
+    const weights = Array.from({ length: vaultCount }, (_, vaultIndex) => (
+      Math.max(Number(inventoryByVault[vaultIndex]?.amount) || 0, 0)
+    ));
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+
+    pooledBalanceMap[pool.asset] = {};
+    for (let vaultIndex = 0; vaultIndex < vaultCount; vaultIndex++) {
+      const share = totalWeight > 0 ? weights[vaultIndex] / totalWeight : 1 / vaultCount;
+      pooledBalanceMap[pool.asset][vaultIndex] = {
+        amount: amount * share,
+        valueUSD: amount * price * share
+      };
+    }
+  }
+
+  return pooledBalanceMap;
+}
+
+/**
+ * Use the same pool rows for the RUNE side so pooled RUNE and exogenous pool
+ * depth have identical scope. The shared effective RUNE price then makes the
+ * total pooled value exactly twice the exogenous side.
+ */
+export function getPooledRuneAmount(pools = []) {
+  return pools.reduce((total, pool) => {
+    const assetAmount = Number(pool?.balance_asset || 0) / THOR_BASE;
+    const runeAmount = Number(pool?.balance_rune || 0) / THOR_BASE;
+    return assetAmount > 0 && runeAmount > 0 ? total + runeAmount : total;
+  }, 0);
 }
 
 /**
