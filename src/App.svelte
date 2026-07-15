@@ -403,14 +403,18 @@
     --sidebar-width: 232px;
     --sidebar-width-collapsed: 56px;
     --topbar-height: 40px;
+    --footer-height: 41px;
   }
 
   main {
     text-align: left;
     background-color: var(--background-color);
     min-height: 100vh;
+    height: 100vh;
+    height: 100dvh;
     color: var(--text-color);
     position: relative;
+    overflow: hidden;
   }
 
   /* ---- SHARED TERMINAL BITS ---- */
@@ -789,9 +793,27 @@
 
   .content {
     margin-left: var(--sidebar-width);
-    padding-bottom: 56px;
+    height: calc(100vh - var(--footer-height));
+    height: calc(100dvh - var(--footer-height));
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-color: #242424 #080808;
+    scrollbar-width: thin;
     position: relative;
     z-index: 1;
+  }
+
+  .content::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .content::-webkit-scrollbar-track {
+    background: #080808;
+  }
+
+  .content::-webkit-scrollbar-thumb {
+    background: #242424;
+    border: 2px solid #080808;
   }
 
   main.collapsed .content {
@@ -820,6 +842,8 @@
 
   main.desktop-app .content {
     margin-left: 0;
+    height: 100vh;
+    height: 100dvh;
     padding-top: var(--topbar-height);
   }
 
@@ -841,6 +865,12 @@
 
     main.collapsed .content {
       margin-left: 0;
+    }
+  }
+
+  @media (max-width: 600px) {
+    :root {
+      --footer-height: 32px;
     }
   }
 </style>
