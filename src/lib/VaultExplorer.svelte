@@ -192,7 +192,8 @@
     if (amount >= 1000000) return formatNumber(amount, { maximumFractionDigits: 0 });
     if (amount >= 1000) return formatNumber(amount, { maximumFractionDigits: 1 });
     if (amount >= 1) return formatNumber(amount, { maximumFractionDigits: 2 });
-    return formatNumber(amount, { maximumFractionDigits: 4 });
+    if (amount >= 0.0001) return formatNumber(amount, { maximumFractionDigits: 4 });
+    return formatNumber(amount, { maximumFractionDigits: 8 });
   }
 
   function getBalanceSourceLabel(coin) {
@@ -243,9 +244,10 @@
     </div>
 
     <!-- Tab bar -->
-    <div class="tab-bar">
-      <button class="tab-btn" class:tab-active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}>Overview</button>
-      <button class="tab-btn" class:tab-active={activeTab === 'details'} on:click={() => activeTab = 'details'}>Vault Details</button>
+    <div class="tab-bar" role="tablist" aria-label="Vault Explorer sections">
+      <button class="tab-btn" role="tab" aria-selected={activeTab === 'overview'} class:tab-active={activeTab === 'overview'} on:click={() => activeTab = 'overview'}>Overview</button>
+      <button class="tab-btn" role="tab" aria-selected={activeTab === 'assets'} class:tab-active={activeTab === 'assets'} on:click={() => activeTab = 'assets'}>Assets</button>
+      <button class="tab-btn" role="tab" aria-selected={activeTab === 'details'} class:tab-active={activeTab === 'details'} on:click={() => activeTab = 'details'}>Vault Details</button>
       <div class="tab-spacer"></div>
       {#if lastUpdated}
         <span class="last-updated">Updated {formatLastUpdated(lastUpdated)}</span>
@@ -352,6 +354,103 @@
         </section>
       {/each}
       </div>
+
+    {:else if activeTab === 'assets'}
+      <section class="assets-panel" aria-label="Assets">
+        <div class="asset-summary-grid">
+          <div class="asset-summary-cell">
+            <span class="asset-summary-value">{formatUSDCompact(data.assetSummary.totalValueUSD)}</span>
+            <span class="asset-summary-label">EXOGENOUS TOTAL</span>
+          </div>
+          <div class="asset-summary-cell pooled">
+            <span class="asset-summary-value">{formatUSDCompact(data.assetSummary.pooledTotalUSD)}</span>
+            <span class="asset-summary-label">POOLED</span>
+          </div>
+          <div class="asset-summary-cell trade">
+            <span class="asset-summary-value">{formatUSDCompact(data.assetSummary.tradeTotalUSD)}</span>
+            <span class="asset-summary-label">TRADE</span>
+          </div>
+          <div class="asset-summary-cell secured">
+            <span class="asset-summary-value">{formatUSDCompact(data.assetSummary.securedTotalUSD)}</span>
+            <span class="asset-summary-label">SECURED</span>
+          </div>
+        </div>
+
+        <div class="assets-heading">
+          <div>
+            <div class="assets-title-row">
+              <span class="assets-title-marker"></span>
+              <h2>EXOGENOUS ASSET CUSTODY</h2>
+            </div>
+            <p>Current non-RUNE inventory across pooled, trade, and secured balances. Values use the same live state and prices as Overview.</p>
+          </div>
+          <span class="assets-count">{data.assetSummary.assetCount} ASSETS</span>
+        </div>
+
+        <div class="assets-table-wrap">
+          <table class="assets-table">
+            <thead>
+              <tr>
+                <th scope="col">ASSET</th>
+                <th scope="col">TOTAL CUSTODIED</th>
+                <th scope="col" class="pooled-col">POOLED</th>
+                <th scope="col" class="trade-col">TRADE</th>
+                <th scope="col" class="secured-col">SECURED</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each data.assets as asset (asset.poolAsset)}
+                <tr>
+                  <td>
+                    <div class="asset-identity">
+                      {#if getAssetLogo(asset.poolAsset)}
+                        <img src={getAssetLogo(asset.poolAsset)} alt="" class="custody-asset-logo" on:error={handleIconError} />
+                      {/if}
+                      <div class="asset-identity-text">
+                        <div class="asset-name-row">
+                          <a href="https://thorchain.net/pool/{asset.poolAsset}" target="_blank" rel="noopener noreferrer">{asset.displayName}</a>
+                          {#if asset.status !== 'Available'}
+                            <span class="pool-inactive-badge">{asset.status}</span>
+                          {/if}
+                        </div>
+                        <span class="asset-code">{asset.poolAsset}</span>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="amount-cell total-cell">
+                    <span class="bucket-amount">{formatAssetAmount(asset.totalAmount)} {asset.displayName}</span>
+                    <span class="bucket-usd">{formatUSD(asset.totalValueUSD)}</span>
+                  </td>
+                  <td class="amount-cell pooled-cell">
+                    {#if asset.pooled.amount > 0}
+                      <span class="bucket-amount">{formatAssetAmount(asset.pooled.amount)} {asset.displayName}</span>
+                      <span class="bucket-usd">{formatUSD(asset.pooled.valueUSD)}</span>
+                    {:else}
+                      <span class="bucket-empty">—</span>
+                    {/if}
+                  </td>
+                  <td class="amount-cell trade-cell">
+                    {#if asset.trade.amount > 0}
+                      <span class="bucket-amount">{formatAssetAmount(asset.trade.amount)} {asset.displayName}</span>
+                      <span class="bucket-usd">{formatUSD(asset.trade.valueUSD)}</span>
+                    {:else}
+                      <span class="bucket-empty">—</span>
+                    {/if}
+                  </td>
+                  <td class="amount-cell secured-cell">
+                    {#if asset.secured.amount > 0}
+                      <span class="bucket-amount">{formatAssetAmount(asset.secured.amount)} {asset.displayName}</span>
+                      <span class="bucket-usd">{formatUSD(asset.secured.valueUSD)}</span>
+                    {:else}
+                      <span class="bucket-empty">—</span>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
     {:else if activeTab === 'details'}
       <!-- Vault Details (ported from Vaults.svelte) -->
@@ -865,6 +964,232 @@
     white-space: nowrap;
   }
 
+  /* ---- ASSETS TAB ---- */
+  .assets-panel {
+    background: #0a0a0a;
+    min-width: 0;
+  }
+
+  .asset-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    background: #1a1a1a;
+    gap: 1px;
+    border-bottom: 1px solid #1a1a1a;
+  }
+
+  .asset-summary-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 16px;
+    background: #0d0d0d;
+    text-align: center;
+  }
+
+  .asset-summary-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 20px;
+    font-weight: 700;
+    line-height: 1;
+    color: #e0e0e0;
+  }
+
+  .asset-summary-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: #555;
+  }
+
+  .asset-summary-cell.pooled .asset-summary-value { color: #00cc66; }
+  .asset-summary-cell.trade .asset-summary-value { color: #5588cc; }
+  .asset-summary-cell.secured .asset-summary-value { color: #d4a017; }
+
+  .assets-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 16px;
+    border-bottom: 1px solid #1a1a1a;
+    background: #080808;
+  }
+
+  .assets-title-row {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+
+  .assets-title-marker {
+    width: 3px;
+    height: 14px;
+    background: #00cc66;
+  }
+
+  .assets-title-row h2 {
+    margin: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: #c8c8c8;
+  }
+
+  .assets-heading p {
+    margin: 7px 0 0 12px;
+    max-width: 760px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #666;
+  }
+
+  .assets-count {
+    flex-shrink: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    color: #00cc66;
+    border: 1px solid rgba(0, 204, 102, 0.25);
+    padding: 4px 7px;
+  }
+
+  .assets-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+  }
+
+  .assets-table {
+    width: 100%;
+    min-width: 960px;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .assets-table th,
+  .assets-table td {
+    border-right: 1px solid #161616;
+    border-bottom: 1px solid #161616;
+    text-align: left;
+  }
+
+  .assets-table th:last-child,
+  .assets-table td:last-child {
+    border-right: 0;
+  }
+
+  .assets-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 9px 14px;
+    background: #0d0d0d;
+    color: #555;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+  }
+
+  .assets-table th:first-child { width: 24%; }
+  .assets-table th:not(:first-child) { width: 19%; }
+  .assets-table th.pooled-col { color: #008844; }
+  .assets-table th.trade-col { color: #456faa; }
+  .assets-table th.secured-col { color: #9a7511; }
+
+  .assets-table td {
+    padding: 11px 14px;
+    background: #0a0a0a;
+    vertical-align: middle;
+  }
+
+  .assets-table tbody tr:hover td {
+    background: #0e0e0e;
+  }
+
+  .asset-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .custody-asset-logo {
+    width: 24px;
+    height: 24px;
+    flex: 0 0 24px;
+    border-radius: 50%;
+    object-fit: contain;
+  }
+
+  .asset-identity-text {
+    min-width: 0;
+  }
+
+  .asset-name-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+
+  .asset-name-row a {
+    color: #c8c8c8;
+    font-size: 12px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+
+  .asset-name-row a:hover { color: #00cc66; }
+
+  .asset-code {
+    display: block;
+    max-width: 100%;
+    margin-top: 3px;
+    overflow: hidden;
+    color: #4f4f4f;
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .amount-cell {
+    white-space: nowrap;
+  }
+
+  .bucket-amount,
+  .bucket-usd {
+    display: block;
+  }
+
+  .bucket-amount {
+    color: #9a9a9a;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .bucket-usd {
+    margin-top: 3px;
+    color: #555;
+    font-size: 10px;
+  }
+
+  .total-cell .bucket-amount { color: #d0d0d0; }
+  .total-cell .bucket-usd { color: #777; }
+  .pooled-cell .bucket-amount { color: #00cc66; }
+  .trade-cell .bucket-amount { color: #5588cc; }
+  .secured-cell .bucket-amount { color: #d4a017; }
+
+  .bucket-empty {
+    color: #333;
+    font-size: 12px;
+  }
+
   /* ---- VAULT DETAILS TAB ---- */
   .vaults-grid {
     display: grid;
@@ -1239,6 +1564,10 @@
     .pool-type-pills {
       margin-left: 0;
     }
+
+    .asset-summary-value {
+      font-size: 17px;
+    }
   }
 
   @media (max-width: 600px) {
@@ -1265,6 +1594,23 @@
       order: 3;
       width: 100%;
       margin: 0;
+    }
+
+    .asset-summary-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .asset-summary-cell {
+      padding: 13px 10px;
+    }
+
+    .assets-heading {
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .assets-heading p {
+      margin-left: 0;
     }
   }
 </style>

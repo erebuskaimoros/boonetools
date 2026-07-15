@@ -10,6 +10,7 @@ import { fetchJSONWithFallback } from '$lib/utils/api';
 import { fromBaseUnit, getAssetType, normalizeAsset } from '$lib/utils/blockchain';
 import { getNodes } from '$lib/utils/nodes';
 import { getAssetDisplayName } from '$lib/constants';
+import { buildCustodiedAssetRows, summarizeCustodiedAssetRows } from './assets.js';
 import { hydrateEthOnChainBalances } from './eth-balances.js';
 import { hydrateUtxoOnChainBalances } from './utxo-balances.js';
 
@@ -287,6 +288,8 @@ export async function fetchVaultExplorerData() {
     .sort((a, b) => b.totalValueUSD - a.totalValueUSD);
 
   const totalVaultValueUSD = pools.reduce((s, p) => s + p.totalValueUSD, 0);
+  const assets = buildCustodiedAssetRows(pools);
+  const assetSummary = summarizeCustodiedAssetRows(assets);
 
   const vaultModels = activeVaults.map(v => ({
     name: formatVaultName(v.pub_key),
@@ -298,6 +301,8 @@ export async function fetchVaultExplorerData() {
   return {
     vaults: vaultModels,
     pools,
+    assets,
+    assetSummary,
     summary: {
       totalVaultValueUSD,
       activeVaultCount: activeVaults.length,
