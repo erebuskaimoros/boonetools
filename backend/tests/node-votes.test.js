@@ -148,6 +148,38 @@ test('classifyMimirKey mirrors operational and economic mimir behavior', async (
   assert.equal(classifyMimirKey('NodePauseChainBlocks'), 'economic');
 });
 
+test('buildActiveNodeOperators returns one operator record per active node', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { buildActiveNodeOperators } = await import('../src/handlers/node-votes.js');
+  const nodes = [
+    {
+      node_address: 'thor-node-2',
+      node_operator_address: 'thor-operator-2222',
+      status: 'Active'
+    },
+    {
+      node_address: 'thor-node-standby',
+      node_operator_address: 'thor-operator-standby',
+      status: 'Standby'
+    },
+    {
+      node_address: 'thor-node-1',
+      node_operator_address: 'thor-operator-1111',
+      status: 'Active'
+    },
+    {
+      node_address: 'thor-node-1',
+      node_operator_address: 'thor-operator-1111',
+      status: 'Active'
+    }
+  ];
+
+  assert.deepEqual(buildActiveNodeOperators(nodes), [
+    { node_address: 'thor-node-1', operator_address: 'thor-operator-1111' },
+    { node_address: 'thor-node-2', operator_address: 'thor-operator-2222' }
+  ]);
+});
+
 test('buildVoteGroups applies operational and economic thresholds separately', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { buildVoteGroups } = await import('../src/handlers/node-votes.js');

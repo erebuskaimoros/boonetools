@@ -119,6 +119,28 @@ function buildNodeMetadataByAddress(nodes) {
   return metadata;
 }
 
+export function buildActiveNodeOperators(nodes) {
+  const activeNodesByAddress = new Map();
+
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    const nodeAddress = nodeAddressFromNode(node);
+    if (!nodeAddress || node?.status !== 'Active') {
+      continue;
+    }
+
+    const operatorAddress = String(node?.node_operator_address || '').trim();
+    activeNodesByAddress.set(nodeAddress, {
+      node_address: nodeAddress,
+      operator_address: operatorAddress || nodeAddress
+    });
+  }
+
+  return [...activeNodesByAddress.values()].sort((left, right) => (
+    left.operator_address.localeCompare(right.operator_address) ||
+    left.node_address.localeCompare(right.node_address)
+  ));
+}
+
 function normalizeNodeMimirValues(payload, nodeMetadataByAddress = new Map()) {
   const byKeyAndNode = new Map();
   const rows = Array.isArray(payload?.mimirs)
@@ -839,7 +861,8 @@ async function loadCurrentChainState() {
   const nodes = nodesResult.status === 'fulfilled' && Array.isArray(nodesResult.value)
     ? nodesResult.value
     : [];
-  const activeNodeCount = nodes.filter((node) => node?.status === 'Active').length;
+  const activeNodes = buildActiveNodeOperators(nodes);
+  const activeNodeCount = activeNodes.length;
   const nodeMetadataByAddress = buildNodeMetadataByAddress(nodes);
   const currentNodeMimirsAvailable = (
     nodeMimirResult.status === 'fulfilled' &&
@@ -852,7 +875,8 @@ async function loadCurrentChainState() {
       ? normalizeNodeMimirValues(nodeMimirResult.value, nodeMetadataByAddress)
       : {},
     currentNodeMimirsAvailable,
-    activeNodeCount
+    activeNodeCount,
+    activeNodes
   };
 }
 
@@ -977,6 +1001,7 @@ export async function handleNodeVotes(_request, url) {
         truncated: rows.length >= MAX_ROWS
       },
       stats: buildStats(rows, latestRows, byVote, byNode, chainState.activeNodeCount, operationalVotesMin),
+      active_nodes: chainState.activeNodes,
       by_vote: byVote,
       by_node: byNode,
       latest_events: rows.slice(0, 50),

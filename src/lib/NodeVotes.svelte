@@ -1,6 +1,7 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
   import { fetchNodeVotesDashboard } from './node-votes/api.js';
+  import { findMissingVoters } from './node-votes/missing-voters.js';
   import { formatNumber } from '$lib/utils/formatting';
 
   const REFRESH_INTERVAL_MS = 60000;
@@ -12,6 +13,7 @@
   let activeTab = 'vote';
   let categoryFilter = 'all';
   let expandedVoteKey = '';
+  let missingVotersKey = '';
   let expandedNodeAddress = '';
   let voteSortMode = 'last-vote';
   let nodeSortMode = 'last-vote';
@@ -22,6 +24,7 @@
   $: categoryStats = stats.categories || {};
   $: backend = dashboard?.backend || {};
   $: voteRows = dashboard?.by_vote || [];
+  $: activeNodes = dashboard?.active_nodes || [];
   $: nodeRows = dashboard?.by_node || [];
   $: latestEvents = dashboard?.latest_events || [];
   $: filteredVoteRows = sortVoteRows(filterVoteRows(voteRows, searchTerm, categoryFilter), voteSortMode);
@@ -306,6 +309,14 @@
     expandedVoteKey = expandedVoteKey === key ? '' : key;
   }
 
+  function canInspectMissingVoters(row) {
+    return row?.current_vote_source === 'thornode-active-node-mimir' && activeNodes.length > 0;
+  }
+
+  function toggleMissingVoters(key) {
+    missingVotersKey = missingVotersKey === key ? '' : key;
+  }
+
   function toggleNode(address) {
     expandedNodeAddress = expandedNodeAddress === address ? '' : address;
   }
@@ -485,7 +496,20 @@
                     <small>{formatNumber(row.value_change_events ?? 0)} changes | {formatNumber(row.recent_7d_votes || 0)} in 7d</small>
                   </td>
                   <td>
-                    <strong class:ready={row.consensus_ready}>{row.consensus_ready ? 'PASSED' : `${formatNumber(row.votes_to_consensus || 0)} short`}</strong>
+                    {#if row.consensus_ready}
+                      <strong class="ready">PASSED</strong>
+                    {:else if canInspectMissingVoters(row)}
+                      <button
+                        class="shortfall-button"
+                        class:active={missingVotersKey === row.mimir_key}
+                        aria-expanded={missingVotersKey === row.mimir_key}
+                        aria-controls="missing-voters-{row.mimir_key}"
+                        on:click={() => toggleMissingVoters(row.mimir_key)}
+                        title="List active node operators without a current vote"
+                      >{formatNumber(row.votes_to_consensus || 0)} short</button>
+                    {:else}
+                      <strong>{formatNumber(row.votes_to_consensus || 0)} short</strong>
+                    {/if}
                     <small>{consensusTimingLabel(row)}</small>
                   </td>
                   <td>
@@ -493,6 +517,32 @@
                     <small>height {formatNumber(row.latest_height || 0)}</small>
                   </td>
                 </tr>
+                {#if missingVotersKey === row.mimir_key}
+                  {@const missingVoters = findMissingVoters(activeNodes, row.values)}
+                  <tr class="missing-voters-row" id="missing-voters-{row.mimir_key}">
+                    <td colspan="6">
+                      <div class="missing-voters-panel">
+                        <div class="missing-voters-heading">
+                          <strong>Operators without a current vote</strong>
+                          <span>{formatNumber(missingVoters.length)} of {formatNumber(activeNodes.length)} active</span>
+                        </div>
+                        <p>
+                          {formatNumber(row.votes_to_consensus || 0)} more matching <strong>{row.leader_value || 'leader'}</strong> votes are needed.
+                          Operators currently voting another value are not listed.
+                        </p>
+                        {#if missingVoters.length}
+                          <div class="missing-voter-list" aria-label="Node operators without a current vote for {row.mimir_key}">
+                            {#each missingVoters as voter}
+                              <span title="Operator {voter.operator_address} · Node {voter.node_address}">{shortAddress(voter.operator_address || voter.node_address)}</span>
+                            {/each}
+                          </div>
+                        {:else}
+                          <div class="empty-detail">Every active node has a current vote; the shortfall is caused by split vote values.</div>
+                        {/if}
+                      </div>
+                    </td>
+                  </tr>
+                {/if}
                 {#if expandedVoteKey === row.mimir_key}
                   <tr class="detail-row">
                     <td colspan="6">
@@ -1075,6 +1125,24 @@
     color: var(--amber);
   }
 
+  .shortfall-button {
+    padding: 0;
+    border: 0;
+    border-bottom: 1px dashed rgba(212, 160, 23, 0.7);
+    background: transparent;
+    color: var(--amber);
+    font: 800 11px/1.4 'JetBrains Mono', monospace;
+    cursor: pointer;
+  }
+
+  .shortfall-button:hover,
+  .shortfall-button:focus-visible,
+  .shortfall-button.active {
+    border-bottom-color: var(--accent);
+    color: var(--accent);
+    outline: none;
+  }
+
   td {
     color: var(--body);
     font-size: 11px;
@@ -1204,6 +1272,59 @@
   .detail-row > td {
     padding: 0;
     background: #070707;
+  }
+
+  .missing-voters-row > td {
+    padding: 0;
+    background: #070907;
+  }
+
+  .missing-voters-panel {
+    padding: 14px;
+    border-top: 1px solid rgba(212, 160, 23, 0.35);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .missing-voters-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--text);
+    font: 800 10px/1.3 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .missing-voters-heading span {
+    color: var(--amber);
+    white-space: nowrap;
+  }
+
+  .missing-voters-panel p {
+    margin: 8px 0 12px;
+    color: var(--dim);
+    font: 600 10px/1.5 'JetBrains Mono', monospace;
+  }
+
+  .missing-voters-panel p strong {
+    color: var(--amber);
+  }
+
+  .missing-voter-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .missing-voter-list span {
+    min-width: 52px;
+    padding: 5px 7px;
+    border: 1px solid var(--border);
+    background: #050505;
+    color: var(--body);
+    font: 800 10px/1 'JetBrains Mono', monospace;
+    text-align: center;
   }
 
   .detail-grid {

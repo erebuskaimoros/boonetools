@@ -41,6 +41,12 @@ Public GETs continue to accept:
 
 The public `/functions/v1/stuck-transactions` endpoint powers the `/status` dashboard's high-confidence stuck-payment list. It composes current THORNode queue and transaction-stage state behind a 30-second in-process cache; it requires no database migration or additional environment variable.
 
+The public `/functions/v1/node-votes` payload includes one deduplicated
+`active_nodes` roster from the same THORNode state used for current vote
+rollups. The Vote Tracker compares that roster with each key's current voter
+addresses so a consensus shortfall can list active node operators that have no
+current vote without repeating the full roster inside every vote-key row.
+
 The public `/functions/v1/app-layer-base-layer-earnings` endpoint powers lane
 01 of the App Layer dashboard. Migration `023_rujira_base_layer_earnings.sql`
 stores one midnight balance baseline and one replaceable accrual row per UTC
