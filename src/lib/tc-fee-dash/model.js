@@ -1,4 +1,5 @@
 const BILLION = 1_000_000_000;
+const BASIS_POINTS = 10_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const HACK_HALT_ZERO_FEE_START = '2026-05-01';
@@ -120,6 +121,17 @@ export function computeFeesPerBillionUsd(tcFeesUsd, globalExchangeVolumeUsd) {
   return (fees / volume) * BILLION;
 }
 
+export function computeIncomeVolumeBps(incomeUsd, thorchainVolumeUsd) {
+  const income = toFiniteNumber(incomeUsd);
+  const volume = toFiniteNumber(thorchainVolumeUsd);
+
+  if (income < 0 || !(volume > 0)) {
+    return null;
+  }
+
+  return (income / volume) * BASIS_POINTS;
+}
+
 function isHackHaltZeroFeeDay(row) {
   const startMs = dateMs(row.windowStart);
   return row.period === 'day' &&
@@ -135,6 +147,9 @@ export function normalizeTcFeeRows(rows = []) {
     .map((row, index) => {
       const tcFeesUsd = toFiniteNumber(row.tcFeesUsd);
       const globalExchangeVolumeUsd = toFiniteNumber(row.globalExchangeVolumeUsd);
+      const thorchainVolumeUsd = row.thorchainVolumeUsd == null
+        ? null
+        : toFiniteNumber(row.thorchainVolumeUsd);
       const computedFeesPerBillionUsd = computeFeesPerBillionUsd(
         tcFeesUsd,
         globalExchangeVolumeUsd
@@ -152,7 +167,9 @@ export function normalizeTcFeeRows(rows = []) {
         cmcVolume24hUsd: toFiniteNumber(row.cmcVolume24hUsd),
         defillamaDexVolumeUsd: toFiniteNumber(row.defillamaDexVolumeUsd),
         globalExchangeVolumeUsd,
+        thorchainVolumeUsd,
         feesPerBillionUsd: computedFeesPerBillionUsd,
+        incomeVolumeBps: computeIncomeVolumeBps(tcFeesUsd, thorchainVolumeUsd),
         displayFeesPerBillionUsd: toFiniteNumber(
           row.displayFeesPerBillionUsd,
           computedFeesPerBillionUsd
@@ -211,6 +228,7 @@ export function buildTcFeeChartSeries(rows = []) {
     rows: normalizedRows,
     labels: normalizedRows.map((row) => row.windowLabel),
     feesPerBillionUsd: normalizedRows.map((row) => row.feesPerBillionUsd),
+    incomeVolumeBps: normalizedRows.map((row) => row.incomeVolumeBps),
     feeBps: normalizedRows.map((row) => row.feeBps),
     dailyMedianFeesPerBillionUsd: normalizedRows.map((row) => row.dailyMedianFeesPerBillionUsd),
     dailyRangeLowFeesPerBillionUsd: normalizedRows.map((row) => row.dailyRangeLowFeesPerBillionUsd),
@@ -257,6 +275,11 @@ export function aggregateTcFeeRows(rows = [], granularity = 'day') {
         (sum, row) => sum + row.globalExchangeVolumeUsd,
         0
       );
+      const hasThorchainVolumeData = group.rows.some((row) => row.thorchainVolumeUsd != null);
+      const thorchainVolumeUsd = group.rows.reduce(
+        (sum, row) => sum + row.thorchainVolumeUsd,
+        0
+      );
       const haltDayCount = group.rows.reduce((sum, row) => sum + row.haltDayCount, 0);
 
       return {
@@ -274,7 +297,11 @@ export function aggregateTcFeeRows(rows = [], granularity = 'day') {
         cmcVolume24hUsd,
         defillamaDexVolumeUsd,
         globalExchangeVolumeUsd,
+        thorchainVolumeUsd: hasThorchainVolumeData ? thorchainVolumeUsd : null,
         feesPerBillionUsd: computeFeesPerBillionUsd(tcFeesUsd, globalExchangeVolumeUsd),
+        incomeVolumeBps: hasThorchainVolumeData
+          ? computeIncomeVolumeBps(tcFeesUsd, thorchainVolumeUsd)
+          : null,
         dailyMedianFeesPerBillionUsd: 0,
         dailyRangeLowFeesPerBillionUsd: 0,
         dailyRangeHighFeesPerBillionUsd: 0,
@@ -321,6 +348,40 @@ export function buildRollingAverageSeries(sourceRows = [], targetRows = [], days
   });
 }
 
+export function buildIncomeVolumeRollingAverageSeries(sourceRows = [], targetRows = [], days = 30) {
+  const normalizedSourceRows = normalizeTcFeeRows(sourceRows)
+    .filter((row) => !row.rollingAverageExcluded)
+    .map((row) => ({
+      ...row,
+      startMs: dateMs(row.windowStart)
+    }))
+    .filter((row) => Number.isFinite(row.startMs));
+  const normalizedTargetRows = normalizeTcFeeRows(targetRows);
+  const windowDays = Math.max(1, Math.trunc(Number(days) || 1));
+
+  const sourceStartMs = normalizedSourceRows.map((row) => row.startMs);
+  const incomePrefix = [0];
+  const volumePrefix = [0];
+  for (const row of normalizedSourceRows) {
+    incomePrefix.push(incomePrefix.at(-1) + row.tcFeesUsd);
+    volumePrefix.push(volumePrefix.at(-1) + row.thorchainVolumeUsd);
+  }
+
+  return normalizedTargetRows.map((targetRow) => {
+    const endMs = getWindowEndMs(targetRow);
+    if (!Number.isFinite(endMs)) return null;
+
+    const startMs = endMs - windowDays * DAY_MS;
+    const fromIndex = lowerBound(sourceStartMs, startMs);
+    const toIndex = lowerBound(sourceStartMs, endMs);
+    if (toIndex <= fromIndex) return null;
+
+    const incomeUsd = incomePrefix[toIndex] - incomePrefix[fromIndex];
+    const thorchainVolumeUsd = volumePrefix[toIndex] - volumePrefix[fromIndex];
+    return computeIncomeVolumeBps(incomeUsd, thorchainVolumeUsd);
+  });
+}
+
 export function summarizeTcFeeRows(rows = []) {
   const normalizedRows = normalizeTcFeeRows(rows);
   if (!normalizedRows.length) {
@@ -328,7 +389,9 @@ export function summarizeTcFeeRows(rows = []) {
       windowCount: 0,
       totalTcFeesUsd: 0,
       totalGlobalExchangeVolumeUsd: 0,
+      totalThorchainVolumeUsd: 0,
       weightedFeesPerBillionUsd: 0,
+      weightedIncomeVolumeBps: null,
       latest: null,
       peak: null
     };
@@ -339,6 +402,10 @@ export function summarizeTcFeeRows(rows = []) {
     (sum, row) => sum + row.globalExchangeVolumeUsd,
     0
   );
+  const totalThorchainVolumeUsd = normalizedRows.reduce(
+    (sum, row) => sum + row.thorchainVolumeUsd,
+    0
+  );
   const peak = normalizedRows.reduce((best, row) => (
     row.feesPerBillionUsd > best.feesPerBillionUsd ? row : best
   ), normalizedRows[0]);
@@ -347,9 +414,14 @@ export function summarizeTcFeeRows(rows = []) {
     windowCount: normalizedRows.length,
     totalTcFeesUsd,
     totalGlobalExchangeVolumeUsd,
+    totalThorchainVolumeUsd,
     weightedFeesPerBillionUsd: computeFeesPerBillionUsd(
       totalTcFeesUsd,
       totalGlobalExchangeVolumeUsd
+    ),
+    weightedIncomeVolumeBps: computeIncomeVolumeBps(
+      totalTcFeesUsd,
+      totalThorchainVolumeUsd
     ),
     latest: normalizedRows.at(-1),
     peak

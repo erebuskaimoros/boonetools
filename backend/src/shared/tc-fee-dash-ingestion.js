@@ -2,7 +2,7 @@ import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
 import { safeNumber, sleep } from '../lib/utils.js';
 import { executeDuneQueryRows, isDuneLimitError, summarizeDuneError } from './dune.js';
-import { fetchMidgard } from './midgard.js';
+import { fetchMidgard, fetchMidgardSwapHistory } from './midgard.js';
 import { computeFeesPerBillionUsd } from './tc-fee-dash.js';
 
 const BILLION = 1_000_000_000;
@@ -205,14 +205,51 @@ function dexVolumeForDay(dexVolumesByDate, day) {
   };
 }
 
+export function parseMidgardSwapVolumeDays(intervals = []) {
+  const entries = [];
+
+  for (const interval of intervals) {
+    try {
+      const day = dateKey(Number(interval.startTime) * 1000);
+      entries.push([day, {
+        thorchainVolumeUsd: safeNumber(interval.totalVolumeUSD) / 100,
+        raw: interval
+      }]);
+    } catch {
+      // Ignore malformed provider rows rather than failing an otherwise usable batch.
+    }
+  }
+
+  return new Map(entries);
+}
+
+async function fetchMidgardSwapVolumeDays(startDate, count) {
+  const history = await fetchMidgardSwapHistory({
+    interval: 'day',
+    from: String(unixStart(startDate)),
+    to: String(unixStart(addDays(startDate, count)))
+  });
+  return parseMidgardSwapVolumeDays(history.intervals);
+}
+
+function thorchainVolumeForDay(volumesByDate, day) {
+  const entry = volumesByDate?.get?.(day);
+  return {
+    value: entry ? safeNumber(entry.thorchainVolumeUsd) : null,
+    raw: entry?.raw || null
+  };
+}
+
 export function buildTcFeeDailyRowsFromDune(duneRows = [], options = {}) {
   const queryId = String(options.queryId || config.tcFeeDashDuneQueryId || '');
   const queryUrl = queryId ? `https://dune.com/queries/${queryId}` : '';
   const cmcVolumesByDate = options.cmcVolumesByDate || new Map();
+  const thorchainVolumesByDate = options.thorchainVolumesByDate || new Map();
 
   return duneRows.map((row) => {
     const day = dateKey(parseDateKey(firstValue(row, ['day', 'window_start', 'date'])));
     const cmcVolume = cmcVolumesByDate.get(day);
+    const thorchainVolume = thorchainVolumeForDay(thorchainVolumesByDate, day);
     const tcFeesRune = safeNumber(firstValue(row, ['tc_fees_rune', 'tcFeesRune', 'liquidity_fees']));
     const tcFeesUsd = safeNumber(firstValue(row, ['tc_fees_usd', 'tcFeesUsd', 'liquidity_fees_usd']));
     const runePriceUsd = safeNumber(firstValue(row, ['rune_price_usd', 'runePriceUsd']))
@@ -254,6 +291,7 @@ export function buildTcFeeDailyRowsFromDune(duneRows = [], options = {}) {
       cmc_volume_24h_usd: cmcVolume24hUsd,
       defillama_dex_volume_usd: dexVolumeUsd,
       global_exchange_volume_usd: exchangeVolumeUsd,
+      thorchain_volume_usd: thorchainVolume.value,
       daily_median_fees_per_billion_usd: null,
       daily_range_low_fees_per_billion_usd: null,
       daily_range_high_fees_per_billion_usd: null,
@@ -264,6 +302,7 @@ export function buildTcFeeDailyRowsFromDune(duneRows = [], options = {}) {
       source_json: {
         dune: row,
         cmc: cmcVolume?.raw || null,
+        midgardSwaps: thorchainVolume.raw,
         duneQueryId: queryId,
         feesPerBillionUsd: computeFeesPerBillionUsd(tcFeesUsd, exchangeVolumeUsd),
         denominatorBasis
@@ -281,6 +320,7 @@ export function buildTcFeeDailyRowsFromDune(duneRows = [], options = {}) {
 export function buildTcFeeDailyRowsFromMidgard(earningsIntervals = [], runeIntervals = [], options = {}) {
   const cmcVolumesByDate = options.cmcVolumesByDate || new Map();
   const dexVolumesByDate = options.dexVolumesByDate || new Map();
+  const thorchainVolumesByDate = options.thorchainVolumesByDate || new Map();
   const runePriceByDate = new Map();
 
   for (const interval of runeIntervals) {
@@ -295,6 +335,7 @@ export function buildTcFeeDailyRowsFromMidgard(earningsIntervals = [], runeInter
     const day = dateKey(Number(interval.startTime) * 1000);
     const cmcVolume = cmcVolumesByDate.get(day);
     const dexVolume = dexVolumeForDay(dexVolumesByDate, day);
+    const thorchainVolume = thorchainVolumeForDay(thorchainVolumesByDate, day);
     const runeInterval = runePriceByDate.get(day) || {};
     const tcFeesRune = safeNumber(interval.liquidityFees) / RUNE_BASE;
     const runePriceUsd = safeNumber(runeInterval.runePriceUSD);
@@ -316,6 +357,7 @@ export function buildTcFeeDailyRowsFromMidgard(earningsIntervals = [], runeInter
       cmc_volume_24h_usd: cmcVolume24hUsd,
       defillama_dex_volume_usd: dexVolume.value,
       global_exchange_volume_usd: globalExchangeVolumeUsd,
+      thorchain_volume_usd: thorchainVolume.value,
       daily_median_fees_per_billion_usd: null,
       daily_range_low_fees_per_billion_usd: null,
       daily_range_high_fees_per_billion_usd: null,
@@ -328,6 +370,7 @@ export function buildTcFeeDailyRowsFromMidgard(earningsIntervals = [], runeInter
         midgardRune: runeInterval,
         cmc: cmcVolume?.raw || null,
         defillama: dexVolume.raw,
+        midgardSwaps: thorchainVolume.raw,
         feesPerBillionUsd: computeFeesPerBillionUsd(tcFeesUsd, globalExchangeVolumeUsd),
         denominatorBasis: hasDexVolume
           ? 'CMC historical global volume plus DeFiLlama DEX volume'
@@ -389,15 +432,20 @@ async function fetchDuneTcFeeRows(startDate, count) {
   if (config.tcFeeDashRequestDelayMs > 0) {
     await sleep(config.tcFeeDashRequestDelayMs);
   }
-  const cmcVolumesByDate = await fetchCmcGlobalVolumeDays(startDate, count);
+  const [cmcVolumesByDate, thorchainVolumesByDate] = await Promise.all([
+    fetchCmcGlobalVolumeDays(startDate, count),
+    fetchMidgardSwapVolumeDays(startDate, count)
+  ]);
 
   return {
     executionId: result.executionId,
     duneRows: result.rows.length,
     cmcRows: cmcVolumesByDate.size,
+    thorchainVolumeRows: thorchainVolumesByDate.size,
     rows: buildTcFeeDailyRowsFromDune(result.rows, {
       queryId: config.tcFeeDashDuneQueryId,
-      cmcVolumesByDate
+      cmcVolumesByDate,
+      thorchainVolumesByDate
     })
   };
 }
@@ -409,13 +457,14 @@ async function fetchMidgardTcFeeRows(startDate, count) {
     to: String(unixStart(addDays(startDate, count)))
   });
 
-  const [earnings, runeHistory, cmcVolumesByDate, dexVolumeResult] = await Promise.all([
+  const [earnings, runeHistory, swaps, cmcVolumesByDate, dexVolumeResult] = await Promise.all([
     fetchMidgard(`/history/earnings?${params.toString()}`, {
       validateResponse: (_path, data) => !Array.isArray(data?.intervals)
     }),
     fetchMidgard(`/history/rune?${params.toString()}`, {
       validateResponse: (_path, data) => !Array.isArray(data?.intervals)
     }),
+    fetchMidgardSwapHistory(Object.fromEntries(params)),
     fetchCmcGlobalVolumeDays(startDate, count),
     fetchDefiLlamaDexVolumeDays(startDate, count)
       .then((rows) => ({ rows, error: null }))
@@ -425,12 +474,14 @@ async function fetchMidgardTcFeeRows(startDate, count) {
   return {
     earningsRows: earnings.intervals.length,
     runeRows: runeHistory.intervals.length,
+    swapRows: swaps.intervals.length,
     cmcRows: cmcVolumesByDate.size,
     dexRows: dexVolumeResult.rows.size,
     dexError: dexVolumeResult.error?.message || '',
     rows: buildTcFeeDailyRowsFromMidgard(earnings.intervals, runeHistory.intervals, {
       cmcVolumesByDate,
-      dexVolumesByDate: dexVolumeResult.rows
+      dexVolumesByDate: dexVolumeResult.rows,
+      thorchainVolumesByDate: parseMidgardSwapVolumeDays(swaps.intervals)
     })
   };
 }
@@ -467,11 +518,61 @@ async function findEarliestMissingDailyDate(client, startDate, endDate) {
        on existing.period = 'day'
       and existing.window_start = expected.day
      where existing.id is null
+        or existing.thorchain_volume_usd is null
      order by expected.day asc
      limit 1`,
     [startDate, endDate]
   );
   return rows[0]?.day ? dateKey(rows[0].day) : '';
+}
+
+async function backfillMissingThorchainVolumes(client) {
+  const { rows } = await client.query(
+    `select min(window_start) as earliest_date,
+            count(*)::int as missing_count
+     from tc_fee_dash_windows
+     where period = 'day'
+       and thorchain_volume_usd is null`
+  );
+  const earliestDate = rows[0]?.earliest_date ? dateKey(rows[0].earliest_date) : '';
+  if (!earliestDate) return null;
+
+  const batchDays = 400;
+  const volumesByDate = await fetchMidgardSwapVolumeDays(earliestDate, batchDays);
+  const volumeRows = [...volumesByDate].map(([day, entry]) => ({
+    day,
+    thorchainVolumeUsd: safeNumber(entry.thorchainVolumeUsd)
+  }));
+  if (!volumeRows.length) {
+    throw new Error(`Midgard returned no THORChain swap volume rows from ${earliestDate}`);
+  }
+
+  const params = [];
+  const tuples = volumeRows.map((row) => {
+    params.push(row.day, row.thorchainVolumeUsd);
+    return `($${params.length - 1}::date, $${params.length}::numeric)`;
+  });
+  const updated = await client.query(
+    `update tc_fee_dash_windows target
+     set thorchain_volume_usd = source.thorchain_volume_usd,
+         fetched_at = coalesce(target.fetched_at, now()),
+         updated_at = now()
+     from (values ${tuples.join(', ')}) as source(window_start, thorchain_volume_usd)
+     where target.period = 'day'
+       and target.window_start = source.window_start
+       and target.thorchain_volume_usd is null`,
+    params
+  );
+
+  return {
+    source: 'midgard_swaps',
+    status: 'backfilling_income_volume',
+    start_date: earliestDate,
+    requested_days: batchDays,
+    midgard_rows: volumeRows.length,
+    updated_rows: updated.rowCount,
+    missing_rows_before: safeNumber(rows[0]?.missing_count)
+  };
 }
 
 async function putCooldown(client, error) {
@@ -609,6 +710,9 @@ async function persistDailyRows(client, payload) {
 
 export async function runTcFeeDashDailyBackfill(client) {
   const syncState = await getSyncState(client);
+  const volumeBackfill = await backfillMissingThorchainVolumes(client);
+  if (volumeBackfill) return volumeBackfill;
+
   if (!config.duneApiKey) {
     return {
       skipped: true,
@@ -695,12 +799,14 @@ export async function runTcFeeDashDailyBackfill(client) {
         dune_execution_id: result.executionId,
         dune_rows: result.duneRows,
         cmc_rows: result.cmcRows,
+        midgard_swap_rows: result.thorchainVolumeRows,
         dune_missing_days: merged.primaryMissingDays.length,
         dune_missing_day_list: merged.primaryMissingDays,
         ...(fallback ? {
           fallback_source: 'midgard+cmc+defillama',
           fallback_earnings_rows: fallback.earningsRows,
           fallback_rune_rows: fallback.runeRows,
+          fallback_swap_rows: fallback.swapRows,
           fallback_cmc_rows: fallback.cmcRows,
           fallback_dex_rows: fallback.dexRows,
           ...(fallback.dexError ? { fallback_dex_error: fallback.dexError } : {})
@@ -724,6 +830,7 @@ export async function runTcFeeDashDailyBackfill(client) {
             dune_error: summarizeDuneError(error),
             fallback_earnings_rows: fallback.earningsRows,
             fallback_rune_rows: fallback.runeRows,
+            fallback_swap_rows: fallback.swapRows,
             fallback_cmc_rows: fallback.cmcRows,
             fallback_dex_rows: fallback.dexRows,
             ...(fallback.dexError ? { fallback_dex_error: fallback.dexError } : {})

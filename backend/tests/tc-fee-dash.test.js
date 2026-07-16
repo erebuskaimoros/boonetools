@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   computeFeesPerBillionUsd,
+  computeIncomeVolumeBps,
   normalizeTcFeeDashRow,
   summarizeTcFeeDashRows
 } from '../src/shared/tc-fee-dash.js';
@@ -11,11 +12,17 @@ import {
   buildTcFeeDailyRowsFromDune,
   mergeTcFeeRowsForDays,
   parseDefiLlamaDexVolumeDays,
+  parseMidgardSwapVolumeDays,
   parseCmcGlobalVolumeDays
 } from '../src/shared/tc-fee-dash-ingestion.js';
 
 test('computeFeesPerBillionUsd normalizes TC fees against global exchange volume', () => {
   assert.equal(Math.round(computeFeesPerBillionUsd(375_700, 1_033_000_000_000)), 364);
+});
+
+test('computeIncomeVolumeBps normalizes income against native THORChain volume', () => {
+  assert.equal(computeIncomeVolumeBps(25_000, 10_000_000), 25);
+  assert.equal(computeIncomeVolumeBps(25_000, 0), null);
 });
 
 test('normalizeTcFeeDashRow converts DB row shape to API row shape', () => {
@@ -32,6 +39,7 @@ test('normalizeTcFeeDashRow converts DB row shape to API row shape', () => {
     cmc_volume_24h_usd: '1000000000000',
     defillama_dex_volume_usd: '33000000000',
     global_exchange_volume_usd: '1033000000000',
+    thorchain_volume_usd: '25000000',
     daily_median_fees_per_billion_usd: '273',
     daily_range_low_fees_per_billion_usd: '97',
     daily_range_high_fees_per_billion_usd: '711',
@@ -46,6 +54,8 @@ test('normalizeTcFeeDashRow converts DB row shape to API row shape', () => {
   assert.equal(row.runePriceUsd, 3.757);
   assert.equal(row.cmcVolume24hUsd, 1_000_000_000_000);
   assert.equal(row.defillamaDexVolumeUsd, 33_000_000_000);
+  assert.equal(row.thorchainVolumeUsd, 25_000_000);
+  assert.equal(row.incomeVolumeBps, 150.28);
   assert.equal(Math.round(row.feesPerBillionUsd), 364);
   assert.equal(row.dailyRangeHighFeesPerBillionUsd, 711);
 });
@@ -56,12 +66,14 @@ test('summarizeTcFeeDashRows returns weighted aggregate and peak window', () => 
       windowLabel: 'low',
       tcFeesUsd: 103_500,
       globalExchangeVolumeUsd: 1_242_000_000_000,
+      thorchainVolumeUsd: 50_000_000,
       feesPerBillionUsd: computeFeesPerBillionUsd(103_500, 1_242_000_000_000)
     },
     {
       windowLabel: 'high',
       tcFeesUsd: 749_000,
       globalExchangeVolumeUsd: 1_479_000_000_000,
+      thorchainVolumeUsd: 75_000_000,
       feesPerBillionUsd: computeFeesPerBillionUsd(749_000, 1_479_000_000_000)
     }
   ];
@@ -69,6 +81,8 @@ test('summarizeTcFeeDashRows returns weighted aggregate and peak window', () => 
 
   assert.equal(summary.windowCount, 2);
   assert.equal(summary.totalTcFeesUsd, 852_500);
+  assert.equal(summary.totalThorchainVolumeUsd, 125_000_000);
+  assert.ok(Math.abs(summary.weightedIncomeVolumeBps - 68.2) < 0.00000001);
   assert.equal(summary.peak.windowLabel, 'high');
   assert.equal(Math.round(summary.weightedFeesPerBillionUsd), 313);
 });
@@ -93,7 +107,11 @@ test('TC Fee Dash ingestion builds daily DB rows from Dune query rows', () => {
     denominator_basis: 'Dune indexed DEX trade volume'
   }], {
     queryId: '7619850',
-    cmcVolumesByDate
+    cmcVolumesByDate,
+    thorchainVolumesByDate: new Map([['2022-06-22', {
+      thorchainVolumeUsd: 12_500_000,
+      raw: { totalVolumeUSD: '1250000000' }
+    }]])
   });
 
   assert.equal(rows.length, 1);
@@ -104,6 +122,7 @@ test('TC Fee Dash ingestion builds daily DB rows from Dune query rows', () => {
   assert.ok(Math.abs(rows[0].tc_fees_usd - 20388.212794875) < 0.00000001);
   assert.equal(rows[0].cmc_volume_24h_usd, 1_000_000_000_000);
   assert.equal(rows[0].global_exchange_volume_usd, 1_001_050_000_000);
+  assert.equal(rows[0].thorchain_volume_usd, 12_500_000);
   assert.equal(rows[0].source_thread, 'https://dune.com/queries/7619850');
   assert.equal(rows[0].source_json.cmc.timestamp, '2022-06-22T00:00:00.000Z');
   assert.equal(rows[0].source_json.denominatorBasis, 'CMC historical global volume plus Dune indexed DEX trade volume');
@@ -161,7 +180,11 @@ test('TC Fee Dash ingestion builds zero-fee fallback rows from Midgard', () => {
     runePriceUSD: '0.585620855154257'
   }], {
     cmcVolumesByDate,
-    dexVolumesByDate
+    dexVolumesByDate,
+    thorchainVolumesByDate: new Map([['2026-05-16', {
+      thorchainVolumeUsd: 0,
+      raw: { totalVolumeUSD: '0' }
+    }]])
   });
 
   assert.equal(rows.length, 1);
@@ -169,6 +192,7 @@ test('TC Fee Dash ingestion builds zero-fee fallback rows from Midgard', () => {
   assert.equal(rows[0].tc_fees_rune, 0);
   assert.equal(rows[0].tc_fees_usd, 0);
   assert.equal(rows[0].defillama_dex_volume_usd, 7_000_000_000);
+  assert.equal(rows[0].thorchain_volume_usd, 0);
   assert.equal(rows[0].source_json.denominatorBasis, 'CMC historical global volume plus DeFiLlama DEX volume');
 });
 
@@ -215,4 +239,14 @@ test('TC Fee Dash DeFiLlama parser accepts total data chart shape', () => {
 
   assert.equal(parsed.size, 1);
   assert.equal(parsed.get('2026-05-16').dexVolumeUsd, 7_000_000_000);
+});
+
+test('TC Fee Dash Midgard swap parser converts USD cents to dollars', () => {
+  const parsed = parseMidgardSwapVolumeDays([{
+    startTime: '1778889600',
+    totalVolumeUSD: '123456789'
+  }]);
+
+  assert.equal(parsed.size, 1);
+  assert.equal(parsed.get('2026-05-16').thorchainVolumeUsd, 1_234_567.89);
 });

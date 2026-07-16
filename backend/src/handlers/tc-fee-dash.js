@@ -22,7 +22,7 @@ export async function handleTcFeeDash() {
      select id, period, window_start, window_end, window_label, fee_bps,
             tc_fees_rune, rune_price_usd, tc_fees_usd,
             cmc_volume_24h_usd, defillama_dex_volume_usd,
-            global_exchange_volume_usd,
+            global_exchange_volume_usd, thorchain_volume_usd,
             daily_median_fees_per_billion_usd,
             daily_range_low_fees_per_billion_usd,
             daily_range_high_fees_per_billion_usd,
@@ -44,6 +44,7 @@ export async function handleTcFeeDash() {
       volumeScope: period === 'day'
         ? 'CMC historical global volume plus Dune indexed DEX exchange volume'
         : 'Global exchange volume, CEX plus DEX',
+      incomeVolumeScope: 'Midgard liquidity fees divided by Midgard THORChain swap volume',
       updatedAt: new Date().toISOString(),
       ...summarizeTcFeeDashRows(rows)
     },

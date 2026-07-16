@@ -17,6 +17,7 @@
   import { fetchTcFeeDash } from './tc-fee-dash/api.js';
   import {
     aggregateTcFeeRows,
+    buildIncomeVolumeRollingAverageSeries,
     buildRollingAverageSeries,
     buildTcFeeChartSeries,
     normalizeTcFeeRows,
@@ -149,6 +150,8 @@
   let error = '';
   let chartCanvas;
   let chartShell;
+  let incomeVolumeCanvas;
+  let incomeVolumeChartInstance;
   let navCanvas;
   let chartInstance;
   let resizeTimer;
@@ -173,10 +176,15 @@
   $: selectedRows = rows.slice(normalizedStartIndex, normalizedEndIndex + 1);
   $: displayRows = aggregateTcFeeRows(selectedRows, granularity);
   $: series = buildTcFeeChartSeries(displayRows);
+  $: hasIncomeVolumeData = displayRows.some((row) => row.thorchainVolumeUsd != null);
   $: activeRollingAverages = ROLLING_AVERAGES.filter((option) => rollingAverageState[option.days]);
   $: rollingSeries = activeRollingAverages.map((option) => ({
     ...option,
     data: buildRollingAverageSeries(rows, displayRows, option.days)
+  }));
+  $: incomeVolumeRollingSeries = activeRollingAverages.map((option) => ({
+    ...option,
+    data: buildIncomeVolumeRollingAverageSeries(rows, displayRows, option.days)
   }));
   $: summary = summarizeTcFeeRows(displayRows);
   $: latest = summary.latest || displayRows.at(-1) || null;
@@ -201,7 +209,7 @@
     window.removeEventListener('resize', handleResize);
     clearTimeout(resizeTimer);
     clearTimeout(renderTimer);
-    destroyChart();
+    destroyCharts();
   });
 
   async function loadDashboard(options = {}) {
@@ -214,7 +222,7 @@
       loading = false;
       refreshing = false;
       await tick();
-      renderChart();
+      renderCharts();
     } catch (loadError) {
       error = loadError.message || String(loadError);
     } finally {
@@ -230,10 +238,22 @@
     }
   }
 
+  function destroyIncomeVolumeChart() {
+    if (incomeVolumeChartInstance) {
+      incomeVolumeChartInstance.destroy();
+      incomeVolumeChartInstance = null;
+    }
+  }
+
+  function destroyCharts() {
+    destroyChart();
+    destroyIncomeVolumeChart();
+  }
+
   function handleResize() {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
-      renderChart();
+      renderCharts();
       drawNavigator();
     }, 150);
   }
@@ -241,7 +261,7 @@
   function queueRenderChart() {
     clearTimeout(renderTimer);
     renderTimer = setTimeout(() => {
-      renderChart();
+      renderCharts();
     }, 0);
   }
 
@@ -537,6 +557,11 @@
     return '#dc3545';
   }
 
+  function renderCharts() {
+    renderChart();
+    renderIncomeVolumeChart();
+  }
+
   function renderChart() {
     if (!chartCanvas || !series.rows.length) {
       destroyChart();
@@ -680,6 +705,130 @@
     });
   }
 
+  function renderIncomeVolumeChart() {
+    if (!incomeVolumeCanvas || !series.rows.length || !hasIncomeVolumeData) {
+      destroyIncomeVolumeChart();
+      return;
+    }
+
+    const isNarrowChart = incomeVolumeCanvas.clientWidth < 520;
+    const isDenseChart = series.rows.length > 90;
+
+    destroyIncomeVolumeChart();
+    incomeVolumeChartInstance = new Chart(incomeVolumeCanvas.getContext('2d'), {
+      type: 'line',
+      plugins: [haltBandPlugin, activePointPlugin],
+      data: {
+        labels: series.labels,
+        datasets: [
+          {
+            label: 'Liquidity fee income / THORChain volume',
+            data: series.incomeVolumeBps,
+            borderColor: '#d4a017',
+            backgroundColor: 'rgba(212, 160, 23, 0.08)',
+            pointBackgroundColor: series.rows.map((row) => row.hasHaltDays ? '#d4a017' : '#00cc66'),
+            pointBorderColor: '#080808',
+            pointBorderWidth: isDenseChart ? 0 : 2,
+            pointRadius: isDenseChart ? 0 : 4,
+            pointHoverRadius: isDenseChart ? 5 : 7,
+            borderWidth: isDenseChart ? 1.5 : 2,
+            tension: isDenseChart ? 0.08 : 0.25,
+            spanGaps: false,
+            fill: true
+          },
+          ...incomeVolumeRollingSeries.map((option) => ({
+            label: `${option.label} rolling avg`,
+            data: option.data,
+            borderColor: option.color,
+            backgroundColor: 'transparent',
+            borderDash: option.dash,
+            borderWidth: isDenseChart ? 1.6 : 1.9,
+            fill: false,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            tension: isDenseChart ? 0.08 : 0.18,
+            rollingDays: option.days
+          }))
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {
+          intersect: false,
+          mode: 'index'
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#080808',
+            borderColor: '#1a1a1a',
+            borderWidth: 1,
+            titleColor: '#ffffff',
+            bodyColor: '#c8c8c8',
+            displayColors: false,
+            position: 'cursor',
+            caretSize: 0,
+            caretPadding: 14,
+            xAlign: 'left',
+            yAlign: 'bottom',
+            callbacks: {
+              title(items) {
+                return items[0]?.label || '';
+              },
+              label(context) {
+                if (context.dataset.rollingDays) {
+                  if (context.parsed.y == null) return '';
+                  return `${context.dataset.rollingDays}d rolling avg: ${formatBps(context.parsed.y)} · halt days excluded`;
+                }
+
+                const row = series.rows[context.dataIndex];
+                if (!row || row.incomeVolumeBps == null) return 'income / volume: unavailable';
+                return [
+                  `income / volume: ${formatBps(row.incomeVolumeBps)}`,
+                  `liquidity fee income: ${formatUSD(row.tcFeesUsd)}`,
+                  `THORChain swap volume: ${formatUsdCompact(row.thorchainVolumeUsd)}`
+                ];
+              }
+            }
+          },
+          tcFeeHaltBand: {
+            bands: series.haltBands || []
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: '#111111' },
+            ticks: {
+              color: '#666666',
+              maxTicksLimit: isNarrowChart ? 5 : 7,
+              maxRotation: 0,
+              autoSkip: !isNarrowChart,
+              font: { family: 'JetBrains Mono', size: 10 },
+              callback(value, index) {
+                const label = series.labels[index] || this.getLabelForValue(value);
+                if (!isNarrowChart) return label;
+                if (index % 4 !== 0) return '';
+                return label.split('-')[0]?.trim() || label;
+              }
+            }
+          },
+          y: {
+            beginAtZero: true,
+            grid: { color: '#111111' },
+            ticks: {
+              color: '#666666',
+              font: { family: 'JetBrains Mono', size: 10 },
+              callback(value) {
+                return formatBps(value);
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
   function formatUsdCompact(value) {
     const numeric = Number(value) || 0;
     if (Math.abs(numeric) >= 1_000_000_000_000) {
@@ -689,6 +838,12 @@
       return `$${formatNumber(numeric / 1_000_000_000, { maximumFractionDigits: 2 })}B`;
     }
     return formatUSD(numeric);
+  }
+
+  function formatBps(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '—';
+    return `${formatNumber(numeric, { maximumFractionDigits: 2 })} bps`;
   }
 
   function formatDate(value) {
@@ -727,8 +882,8 @@
     <h1 class="title">TC FEE <span class="accent">CAPTURE</span><span class="cursor">_</span></h1>
     <p class="lede">
       Protocol fee-capture efficiency — THORChain system fees collected per $1B of global
-      exchange volume (CoinMarketCap spot + Dune DEX). Higher values mean the network is
-      extracting more revenue per unit of market activity.
+      exchange volume (CoinMarketCap spot + Dune DEX), with native income-to-volume yield
+      shown below. Higher values mean the network is extracting more revenue per unit of activity.
     </p>
     <div class="rule"></div>
   </div>
@@ -885,6 +1040,41 @@
           on:dblclick={resetWindow}
           aria-label="Drag handles or window to adjust visible range"
         ></canvas>
+      </div>
+
+      <div class="secondary-chart">
+        <div class="block-head secondary-chart-head">
+          <div class="block-title">
+            <span class="block-marker block-marker--amber">▌</span>
+            <span>LIQUIDITY FEE INCOME / THORCHAIN SWAP VOLUME</span>
+          </div>
+          <div class="meta-strip">
+            <span>[{granularity}]</span>
+            {#if summary.weightedIncomeVolumeBps != null}
+              <span>weighted {formatBps(summary.weightedIncomeVolumeBps)}</span>
+            {/if}
+            <span>{formatUsdCompact(summary.totalTcFeesUsd || 0)} income</span>
+            {#if hasIncomeVolumeData}
+              <span>{formatUsdCompact(summary.totalThorchainVolumeUsd || 0)} volume</span>
+            {:else}
+              <span>volume backfill pending</span>
+            {/if}
+          </div>
+        </div>
+        <p class="secondary-chart-note">
+          Liquidity fee income divided by THORChain swap volume for the same selected window.
+          Values are weighted by volume when grouped by week or month.
+        </p>
+        {#if hasIncomeVolumeData}
+          <div class="income-volume-chart-shell">
+            <canvas
+              bind:this={incomeVolumeCanvas}
+              aria-label="THORChain liquidity fee income divided by THORChain swap volume over time"
+            ></canvas>
+          </div>
+        {:else}
+          <div class="income-volume-state">SYNCING MIDGARD SWAP VOLUME HISTORY</div>
+        {/if}
       </div>
 
     {:else}
@@ -1186,6 +1376,10 @@
     color: #00cc66;
   }
 
+  .block-marker--amber {
+    color: #d4a017;
+  }
+
   .meta-strip {
     color: #666666;
     display: flex;
@@ -1479,6 +1673,46 @@
     width: 100%;
   }
 
+  .secondary-chart {
+    border-top: 1px solid #1a1a1a;
+    margin-top: 18px;
+  }
+
+  .secondary-chart-head {
+    border-bottom: 0;
+  }
+
+  .secondary-chart-note {
+    color: #666666;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    line-height: 1.5;
+    margin: 0;
+    padding: 0 16px 4px;
+  }
+
+  .income-volume-chart-shell {
+    height: min(48vh, 480px);
+    min-height: 340px;
+    padding: 14px 18px 18px;
+  }
+
+  .income-volume-chart-shell canvas {
+    height: 100%;
+    width: 100%;
+  }
+
+  .income-volume-state {
+    align-items: center;
+    color: #d4a017;
+    display: flex;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    height: 220px;
+    justify-content: center;
+    letter-spacing: 0.08em;
+  }
+
   .chart-foot {
     align-items: center;
     border-top: 1px solid #111111;
@@ -1592,6 +1826,12 @@
       height: 440px;
       min-height: 360px;
       padding: 12px 8px 4px;
+    }
+
+    .income-volume-chart-shell {
+      height: 380px;
+      min-height: 320px;
+      padding: 12px 8px 14px;
     }
   }
 </style>

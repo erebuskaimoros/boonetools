@@ -3,15 +3,23 @@ import assert from 'node:assert/strict';
 
 import {
   aggregateTcFeeRows,
+  buildIncomeVolumeRollingAverageSeries,
   buildRollingAverageSeries,
   buildTcFeeChartSeries,
   computeFeesPerBillionUsd,
+  computeIncomeVolumeBps,
   normalizeTcFeeRows,
   summarizeTcFeeRows
 } from '../src/lib/tc-fee-dash/model.js';
 
 test('computeFeesPerBillionUsd normalizes fees against global exchange volume', () => {
   assert.equal(Math.round(computeFeesPerBillionUsd(375_700, 1_033_000_000_000)), 364);
+});
+
+test('computeIncomeVolumeBps normalizes liquidity fee income against THORChain volume', () => {
+  assert.equal(computeIncomeVolumeBps(25_000, 10_000_000), 25);
+  assert.equal(computeIncomeVolumeBps(0, 10_000_000), 0);
+  assert.equal(computeIncomeVolumeBps(25_000, 0), null);
 });
 
 test('normalizeTcFeeRows computes metric values and sorts by window start', () => {
@@ -26,6 +34,7 @@ test('normalizeTcFeeRows computes metric values and sorts by window start', () =
       cmcVolume24hUsd: 1_200_000_000_000,
       defillamaDexVolumeUsd: 103_000_000_000,
       globalExchangeVolumeUsd: 1_303_000_000_000,
+      thorchainVolumeUsd: 40_000_000,
       feeBps: 10
     },
     {
@@ -44,6 +53,8 @@ test('normalizeTcFeeRows computes metric values and sorts by window start', () =
   assert.equal(rows[1].runePriceUsd, 3.104);
   assert.equal(rows[1].cmcVolume24hUsd, 1_200_000_000_000);
   assert.equal(rows[1].defillamaDexVolumeUsd, 103_000_000_000);
+  assert.equal(rows[1].thorchainVolumeUsd, 40_000_000);
+  assert.ok(Math.abs(rows[1].incomeVolumeBps - 77.6) < 0.00000001);
   assert.equal(Math.round(rows[0].feesPerBillionUsd), 364);
 });
 
@@ -54,6 +65,7 @@ test('buildTcFeeChartSeries returns aligned labels and data arrays', () => {
       windowStart: '2025-09-02',
       tcFeesUsd: 375_700,
       globalExchangeVolumeUsd: 1_033_000_000_000,
+      thorchainVolumeUsd: 20_000_000,
       feeBps: 10,
       dailyMedianFeesPerBillionUsd: 273
     }
@@ -62,6 +74,7 @@ test('buildTcFeeChartSeries returns aligned labels and data arrays', () => {
   assert.deepEqual(series.labels, ['Sep 2-Sep 9']);
   assert.deepEqual(series.feeBps, [10]);
   assert.equal(Math.round(series.feesPerBillionUsd[0]), 364);
+  assert.equal(series.incomeVolumeBps[0], 187.85);
   assert.equal(series.dailyMedianFeesPerBillionUsd[0], 273);
 });
 
@@ -102,7 +115,8 @@ test('buildTcFeeChartSeries exposes contiguous halt bands', () => {
       windowEnd: '2026-05-16',
       period: 'day',
       tcFeesUsd: 100,
-      globalExchangeVolumeUsd: 1000
+      globalExchangeVolumeUsd: 1000,
+      thorchainVolumeUsd: 100
     },
     {
       windowLabel: 'May 16',
@@ -110,7 +124,8 @@ test('buildTcFeeChartSeries exposes contiguous halt bands', () => {
       windowEnd: '2026-05-17',
       period: 'day',
       tcFeesUsd: 0,
-      globalExchangeVolumeUsd: 1000
+      globalExchangeVolumeUsd: 1000,
+      thorchainVolumeUsd: 300
     },
     {
       windowLabel: 'May 17',
@@ -149,7 +164,8 @@ test('aggregateTcFeeRows groups daily rows into weighted weekly and monthly buck
       tcFeesUsd: 200,
       cmcVolume24hUsd: 900,
       defillamaDexVolumeUsd: 100,
-      globalExchangeVolumeUsd: 1000
+      globalExchangeVolumeUsd: 1000,
+      thorchainVolumeUsd: 100
     },
     {
       period: 'day',
@@ -161,7 +177,8 @@ test('aggregateTcFeeRows groups daily rows into weighted weekly and monthly buck
       tcFeesUsd: 600,
       cmcVolume24hUsd: 100,
       defillamaDexVolumeUsd: 900,
-      globalExchangeVolumeUsd: 1000
+      globalExchangeVolumeUsd: 1000,
+      thorchainVolumeUsd: 300
     },
     {
       period: 'day',
@@ -173,7 +190,8 @@ test('aggregateTcFeeRows groups daily rows into weighted weekly and monthly buck
       tcFeesUsd: 1000,
       cmcVolume24hUsd: 1500,
       defillamaDexVolumeUsd: 500,
-      globalExchangeVolumeUsd: 2000
+      globalExchangeVolumeUsd: 2000,
+      thorchainVolumeUsd: 600
     }
   ];
 
@@ -184,6 +202,8 @@ test('aggregateTcFeeRows groups daily rows into weighted weekly and monthly buck
   assert.equal(weekly[0].windowStart, '2022-06-20');
   assert.equal(weekly[0].tcFeesUsd, 800);
   assert.equal(weekly[0].globalExchangeVolumeUsd, 2000);
+  assert.equal(weekly[0].thorchainVolumeUsd, 400);
+  assert.equal(weekly[0].incomeVolumeBps, 20_000);
   assert.equal(Math.round(weekly[0].feesPerBillionUsd), 400_000_000);
   assert.equal(weekly[0].cmcVolume24hUsd, 1000);
   assert.equal(weekly[0].defillamaDexVolumeUsd, 1000);
@@ -248,6 +268,33 @@ test('buildRollingAverageSeries uses trailing daily source rows for target windo
   assert.equal(Math.round(dailySeries[1]), 150_000_000);
   assert.equal(Math.round(dailySeries[3]), 400_000_000);
   assert.equal(Math.round(weeklySeries[0]), 400_000_000);
+});
+
+test('buildIncomeVolumeRollingAverageSeries weights trailing income by THORChain volume', () => {
+  const rows = [
+    {
+      period: 'day',
+      windowLabel: 'Jan 1',
+      windowStart: '2024-01-01',
+      windowEnd: '2024-01-02',
+      tcFeesUsd: 100,
+      globalExchangeVolumeUsd: 1000,
+      thorchainVolumeUsd: 1000
+    },
+    {
+      period: 'day',
+      windowLabel: 'Jan 2',
+      windowStart: '2024-01-02',
+      windowEnd: '2024-01-03',
+      tcFeesUsd: 300,
+      globalExchangeVolumeUsd: 1000,
+      thorchainVolumeUsd: 3000
+    }
+  ];
+
+  const rolling = buildIncomeVolumeRollingAverageSeries(rows, rows, 2);
+  assert.equal(rolling[0], 1000);
+  assert.equal(rolling[1], 1000);
 });
 
 test('buildRollingAverageSeries excludes May/June 2026 halt days', () => {
