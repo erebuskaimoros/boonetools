@@ -321,6 +321,97 @@ test('buildVoteGroups treats negative node mimir values as removed votes', async
   assert.equal(group.node_votes.find((vote) => vote.node_address === 'thor-node-1').vote_removed, true);
 });
 
+test('buildVoteGroups counts changed operational votes once from live active node mimirs', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { buildVoteGroups } = await import('../src/handlers/node-votes.js');
+  const rows = [
+    {
+      mimir_key: 'HALTTRADING',
+      vote_value: '1',
+      node_address: 'thor-node-1',
+      operator_address: 'thor-operator-1',
+      block_time: '2026-05-26T00:00:00.000Z',
+      height: 100
+    },
+    {
+      mimir_key: 'HALTTRADING',
+      vote_value: '1',
+      node_address: 'thor-node-1',
+      operator_address: 'thor-operator-1',
+      block_time: '2026-05-26T00:01:00.000Z',
+      height: 101
+    },
+    {
+      mimir_key: 'HALTTRADING',
+      vote_value: '2',
+      node_address: 'thor-node-1',
+      operator_address: 'thor-operator-1',
+      block_time: '2026-05-26T00:02:00.000Z',
+      height: 102
+    },
+    {
+      mimir_key: 'HALTTRADING',
+      vote_value: '2',
+      node_address: 'thor-node-2',
+      operator_address: 'thor-operator-2',
+      block_time: '2026-05-26T00:03:00.000Z',
+      height: 103
+    },
+    {
+      mimir_key: 'HALTTRADING',
+      vote_value: '1',
+      node_address: 'thor-node-3',
+      operator_address: 'thor-operator-3',
+      block_time: '2026-05-26T00:04:00.000Z',
+      height: 104
+    }
+  ];
+
+  const [group] = buildVoteGroups(
+    rows,
+    [rows[2], rows[3], rows[4]],
+    { HALTTRADING: 2 },
+    2,
+    2,
+    {
+      HALTTRADING: [
+        {
+          mimir_key: 'HALTTRADING',
+          node_address: 'thor-node-1',
+          node_status: 'Active',
+          is_active: true,
+          vote_value: '2'
+        },
+        {
+          mimir_key: 'HALTTRADING',
+          node_address: 'thor-node-2',
+          node_status: 'Active',
+          is_active: true,
+          vote_value: '2'
+        },
+        {
+          mimir_key: 'HALTTRADING',
+          node_address: 'thor-node-3',
+          node_status: 'Standby',
+          is_active: false,
+          vote_value: '1'
+        }
+      ]
+    },
+    { currentNodeMimirsAvailable: true }
+  );
+
+  assert.equal(group.current_vote_source, 'thornode-active-node-mimir');
+  assert.equal(group.stored_latest_stance_count, 3);
+  assert.equal(group.latest_stance_count, 2);
+  assert.deepEqual(group.values.map(({ value, count }) => ({ value, count })), [
+    { value: '2', count: 2 }
+  ]);
+  assert.equal(group.consensus_ready, true);
+  assert.equal(group.repeated_vote_events, 2);
+  assert.equal(group.value_change_events, 1);
+});
+
 test('buildEffectiveValueHistory records effective value changes over time', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { buildEffectiveValueHistory } = await import('../src/handlers/node-votes.js');
@@ -373,7 +464,7 @@ test('buildEffectiveValueHistory records effective value changes over time', asy
   assert.equal(history[1].height, 101);
 });
 
-test('buildVoteGroups records operational current value change from current node mimirs', async () => {
+test('buildVoteGroups records operational current value and votes from current node mimirs', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { buildVoteGroups } = await import('../src/handlers/node-votes.js');
   const zeroVotes = Array.from({ length: 4 }, (_, index) => ({
@@ -403,13 +494,17 @@ test('buildVoteGroups records operational current value change from current node
       WASMARBSLIPMINBPS: currentVotes.map((row) => ({
         mimir_key: row.mimir_key,
         node_address: row.node_address,
+        node_status: 'Active',
+        is_active: true,
         vote_value: row.vote_value
       }))
-    }
+    },
+    { currentNodeMimirsAvailable: true }
   );
 
-  assert.equal(group.leader_value, '0');
-  assert.equal(group.leader_count, 4);
+  assert.equal(group.leader_value, '7');
+  assert.equal(group.leader_count, 3);
+  assert.equal(group.current_vote_source, 'thornode-active-node-mimir');
   assert.equal(group.current_value_changed_at, '2026-05-26T01:02:00.000+00:00');
   assert.equal(group.effective_history[0].effective_value, '7');
   assert.equal(group.effective_history[0].inferred_from_current_node_mimirs, true);

@@ -482,7 +482,7 @@
                   </td>
                   <td>
                     <strong>{formatNumber(row.historical_vote_events || 0)}</strong>
-                    <small>{formatNumber(row.repeated_vote_events || 0)} changes | {formatNumber(row.recent_7d_votes || 0)} in 7d</small>
+                    <small>{formatNumber(row.value_change_events ?? 0)} changes | {formatNumber(row.recent_7d_votes || 0)} in 7d</small>
                   </td>
                   <td>
                     <strong class:ready={row.consensus_ready}>{row.consensus_ready ? 'PASSED' : `${formatNumber(row.votes_to_consensus || 0)} short`}</strong>

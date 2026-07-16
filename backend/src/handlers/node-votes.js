@@ -120,7 +120,7 @@ function buildNodeMetadataByAddress(nodes) {
 }
 
 function normalizeNodeMimirValues(payload, nodeMetadataByAddress = new Map()) {
-  const byKey = {};
+  const byKeyAndNode = new Map();
   const rows = Array.isArray(payload?.mimirs)
     ? payload.mimirs
     : (Array.isArray(payload) ? payload : []);
@@ -132,9 +132,11 @@ function normalizeNodeMimirValues(payload, nodeMetadataByAddress = new Map()) {
       continue;
     }
 
-    byKey[mimirKey] ||= [];
+    if (!byKeyAndNode.has(mimirKey)) {
+      byKeyAndNode.set(mimirKey, new Map());
+    }
     const metadata = nodeMetadataByAddress.get(nodeAddress) || {};
-    byKey[mimirKey].push({
+    byKeyAndNode.get(mimirKey).set(nodeAddress, {
       mimir_key: mimirKey,
       node_address: nodeAddress,
       operator_address: metadata.operator_address || nodeAddress,
@@ -145,7 +147,11 @@ function normalizeNodeMimirValues(payload, nodeMetadataByAddress = new Map()) {
     });
   }
 
-  return byKey;
+  return Object.fromEntries(
+    [...byKeyAndNode.entries()].map(([mimirKey, rowsByNode]) => (
+      [mimirKey, [...rowsByNode.values()]]
+    ))
+  );
 }
 
 function parseOperationalVotesMin(currentMimirValues) {
@@ -199,6 +205,22 @@ function latestVoteStances(rows) {
   }
 
   return [...latest.values()];
+}
+
+function countValueChanges(rows) {
+  const latestValueByNode = new Map();
+  let changes = 0;
+
+  for (const row of sortRowsAsc(rows)) {
+    const previousValue = latestValueByNode.get(row.node_address);
+    const nextValue = String(row.vote_value ?? '');
+    if (previousValue !== undefined && previousValue !== nextValue) {
+      changes += 1;
+    }
+    latestValueByNode.set(row.node_address, nextValue);
+  }
+
+  return changes;
 }
 
 function compareRowsAsc(left, right) {
@@ -471,8 +493,8 @@ function liveActiveNodeMimirRows(rows) {
     .filter((row) => row?.is_active && !isVoteRemoval(row));
 }
 
-function economicConsensusRows({ category, historicalStances, currentNodeMimirs, currentNodeMimirsAvailable }) {
-  if (category !== 'economic' || !currentNodeMimirsAvailable) {
+function currentConsensusRows({ historicalStances, currentNodeMimirs, currentNodeMimirsAvailable }) {
+  if (!currentNodeMimirsAvailable) {
     return historicalStances;
   }
 
@@ -528,8 +550,7 @@ export function buildVoteGroups(
       const threshold = category === 'operational' ? operationalVotesMin : economicThreshold;
       const stances = latestByKey.get(mimirKey) || [];
       const currentNodeMimirs = currentNodeMimirsByKey[mimirKey] || [];
-      const consensusRows = economicConsensusRows({
-        category,
+      const consensusRows = currentConsensusRows({
         historicalStances: stances,
         currentNodeMimirs,
         currentNodeMimirsAvailable
@@ -571,7 +592,7 @@ export function buildVoteGroups(
         currentNodeMimirs
       });
       const effectiveHistory = mergeEffectiveHistory(rawEffectiveHistory, currentValueChange);
-      const currentVoteSource = category === 'economic' && currentNodeMimirsAvailable
+      const currentVoteSource = currentNodeMimirsAvailable
         ? 'thornode-active-node-mimir'
         : 'stored-latest-stance';
 
@@ -586,6 +607,7 @@ export function buildVoteGroups(
         stored_latest_stance_count: stances.length,
         current_vote_source: currentVoteSource,
         repeated_vote_events: Math.max(0, historicalRows.length - uniqueNodeKeyPairs),
+        value_change_events: countValueChanges(historicalRows),
         recent_7d_votes: recentVotes,
         unique_nodes: uniqueCount(historicalRows, 'node_address'),
         unique_operators: uniqueCount(historicalRows, 'operator_address'),
