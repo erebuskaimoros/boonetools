@@ -151,6 +151,7 @@
   let chartCanvas;
   let chartShell;
   let incomeVolumeCanvas;
+  let incomeVolumeChartShell;
   let incomeVolumeChartInstance;
   let navCanvas;
   let chartInstance;
@@ -161,7 +162,7 @@
   let windowStartIndex = 0;
   let windowEndIndex = 0;
   let rangeInitialized = false;
-  let brush = { active: false, startX: 0, currentX: 0 };
+  let brush = { active: false, chartType: 'fees', startX: 0, currentX: 0 };
   let navDrag = null;
 
   $: rows = normalizeTcFeeRows(dashboard?.rows || []);
@@ -207,6 +208,8 @@
 
   onDestroy(() => {
     window.removeEventListener('resize', handleResize);
+    window.removeEventListener('mousemove', chartBrushMove);
+    window.removeEventListener('mouseup', chartBrushUp);
     clearTimeout(resizeTimer);
     clearTimeout(renderTimer);
     destroyCharts();
@@ -485,20 +488,32 @@
     }
   }
 
-  function chartBrushDown(event) {
-    if (!chartInstance || !chartShell) return;
+  function getChartBrushTarget(chartType = 'fees') {
+    return chartType === 'income-volume'
+      ? {
+          instance: incomeVolumeChartInstance,
+          canvas: incomeVolumeCanvas,
+          shell: incomeVolumeChartShell
+        }
+      : { instance: chartInstance, canvas: chartCanvas, shell: chartShell };
+  }
+
+  function chartBrushDown(event, chartType = 'fees') {
+    const target = getChartBrushTarget(chartType);
+    if (!target.instance || !target.shell) return;
     if (event.button !== 0) return;
-    const rect = chartShell.getBoundingClientRect();
+    const rect = target.shell.getBoundingClientRect();
     const x = event.clientX - rect.left;
-    brush = { active: true, startX: x, currentX: x };
+    brush = { active: true, chartType, startX: x, currentX: x };
     window.addEventListener('mousemove', chartBrushMove);
     window.addEventListener('mouseup', chartBrushUp);
     event.preventDefault();
   }
 
   function chartBrushMove(event) {
-    if (!brush.active || !chartShell) return;
-    const rect = chartShell.getBoundingClientRect();
+    const target = getChartBrushTarget(brush.chartType);
+    if (!brush.active || !target.shell) return;
+    const rect = target.shell.getBoundingClientRect();
     brush = { ...brush, currentX: event.clientX - rect.left };
   }
 
@@ -511,18 +526,20 @@
     const dragged = Math.abs(brush.currentX - brush.startX) > 4;
     const sx = Math.min(brush.startX, brush.currentX);
     const ex = Math.max(brush.startX, brush.currentX);
-    brush = { active: false, startX: 0, currentX: 0 };
+    const chartType = brush.chartType;
+    brush = { active: false, chartType: 'fees', startX: 0, currentX: 0 };
     window.removeEventListener('mousemove', chartBrushMove);
     window.removeEventListener('mouseup', chartBrushUp);
-    if (dragged) applyChartBrush(sx, ex);
+    if (dragged) applyChartBrush(sx, ex, chartType);
   }
 
-  function applyChartBrush(sx, ex) {
-    if (!chartInstance) return;
-    const canvasRect = chartCanvas.getBoundingClientRect();
-    const shellRect = chartShell.getBoundingClientRect();
+  function applyChartBrush(sx, ex, chartType = 'fees') {
+    const target = getChartBrushTarget(chartType);
+    if (!target.instance || !target.canvas || !target.shell) return;
+    const canvasRect = target.canvas.getBoundingClientRect();
+    const shellRect = target.shell.getBoundingClientRect();
     const offsetX = canvasRect.left - shellRect.left;
-    const xScale = chartInstance.scales.x;
+    const xScale = target.instance.scales.x;
     if (!xScale) return;
     const lo = Math.max(xScale.left, Math.min(sx - offsetX, xScale.right));
     const hi = Math.max(xScale.left, Math.min(ex - offsetX, xScale.right));
@@ -1004,7 +1021,7 @@
             <span class="window-label">
               {formatDate(selectedStartRow?.windowStart)} — {formatDate(selectedEndRow?.windowStart)}
             </span>
-            <span class="window-hint" aria-hidden="true">drag chart · dbl-click resets</span>
+            <span class="window-hint" aria-hidden="true">drag either chart · dbl-click resets</span>
             <button type="button" class="reset-button" on:click={resetWindow} disabled={isFullWindow}>all</button>
           </div>
         </div>
@@ -1013,12 +1030,12 @@
       <div
         class="chart-shell"
         bind:this={chartShell}
-        on:mousedown={chartBrushDown}
+        on:mousedown={(event) => chartBrushDown(event, 'fees')}
         on:dblclick={chartDblClick}
         role="presentation"
       >
         <canvas bind:this={chartCanvas} aria-label="TC fees per $1B CMC plus Dune exchange volume over time"></canvas>
-        {#if brush.active}
+        {#if brush.active && brush.chartType === 'fees'}
           {@const left = Math.min(brush.startX, brush.currentX)}
           {@const width = Math.abs(brush.currentX - brush.startX)}
           <div class="brush-overlay" style="left: {left}px; width: {width}px;" aria-hidden="true">
@@ -1066,11 +1083,25 @@
           Values are weighted by volume when grouped by week or month.
         </p>
         {#if hasIncomeVolumeData}
-          <div class="income-volume-chart-shell">
+          <div
+            class="income-volume-chart-shell"
+            bind:this={incomeVolumeChartShell}
+            on:mousedown={(event) => chartBrushDown(event, 'income-volume')}
+            on:dblclick={chartDblClick}
+            role="presentation"
+          >
             <canvas
               bind:this={incomeVolumeCanvas}
               aria-label="THORChain liquidity fee income divided by THORChain swap volume over time"
             ></canvas>
+            {#if brush.active && brush.chartType === 'income-volume'}
+              {@const left = Math.min(brush.startX, brush.currentX)}
+              {@const width = Math.abs(brush.currentX - brush.startX)}
+              <div class="brush-overlay" style="left: {left}px; width: {width}px;" aria-hidden="true">
+                <span class="brush-bracket brush-bracket--l">[</span>
+                <span class="brush-bracket brush-bracket--r">]</span>
+              </div>
+            {/if}
           </div>
         {:else}
           <div class="income-volume-state">SYNCING MIDGARD SWAP VOLUME HISTORY</div>
@@ -1695,11 +1726,19 @@
     height: min(48vh, 480px);
     min-height: 340px;
     padding: 14px 18px 18px;
+    position: relative;
+    cursor: crosshair;
+    user-select: none;
   }
 
   .income-volume-chart-shell canvas {
     height: 100%;
     width: 100%;
+  }
+
+  .income-volume-chart-shell .brush-overlay {
+    top: 14px;
+    bottom: 18px;
   }
 
   .income-volume-state {

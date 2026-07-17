@@ -11,8 +11,8 @@
 
 | Date | Focus | Summary | Link |
 |------|-------|---------|------|
+| 2026-07-16 #4 | TC Fee Chart Synchronized Zoom | Made either TC Fee Dash chart control the shared visible date window | `sessions/2026-07-16/session-4.md` |
 | 2026-07-16 #3 | TC Fee Native Yield Chart | Added and deployed a volume-weighted liquidity-fee income / THORChain swap volume chart | `sessions/2026-07-16/session-3.md` |
 | 2026-07-16 #2 | Vote Shortfall Operator List | Made consensus shortfalls reveal every active node operator without a current vote | `sessions/2026-07-16/session-2.md` |
 | 2026-07-16 #1 | Live Node Vote Stances | Corrected current vote rollups for nodes changing or repeating operational and economic Mimir votes | `sessions/2026-07-16/session-1.md` |
 | 2026-07-15 #2 | Vault Explorer Asset Custody | Added and deployed a live exogenous asset inventory with pooled, trade, and secured balances | `sessions/2026-07-15/session-2.md` |
-| 2026-07-15 #1 | Dashboard Header Overlap | Removed obsolete sticky summary headers from Vault Explorer and Treasury so dashboard content is no longer obscured while scrolling | `sessions/2026-07-15/session-1.md` |
