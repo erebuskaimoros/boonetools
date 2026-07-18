@@ -30,6 +30,14 @@ function inferAsOf(body, now) {
   const candidates = [
     body?.meta?.asOf,
     body?.meta?.as_of,
+    body?.meta?.generatedAt,
+    body?.meta?.generated_at,
+    body?.meta?.updatedAt,
+    body?.meta?.updated_at,
+    body?.meta?.fetchedAt,
+    body?.meta?.fetched_at,
+    body?.meta?.sourceUpdatedAt,
+    body?.meta?.source_updated_at,
     body?.asOf,
     body?.as_of,
     body?.generatedAt,
@@ -37,7 +45,9 @@ function inferAsOf(body, now) {
     body?.updatedAt,
     body?.updated_at,
     body?.fetchedAt,
-    body?.fetched_at
+    body?.fetched_at,
+    body?.read_model?.generated_at,
+    body?.read_model?.source_updated_at
   ];
   const first = candidates.find((value) => value != null && value !== '');
   return normalizeTimestamp(first, now);
@@ -55,6 +65,25 @@ export function wantsApiSchemaV2(request, url) {
   if (queryVersion === String(API_SCHEMA_VERSION)) return true;
   const accept = headerValue(request, 'accept').toLowerCase();
   return accept.includes(API_V2_MEDIA_TYPE);
+}
+
+function representationEtag(value, versioned) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const weak = raw.startsWith('W/') ? 'W/' : '';
+  const quoted = weak ? raw.slice(2) : raw;
+  const opaque = quoted.startsWith('"') && quoted.endsWith('"')
+    ? quoted.slice(1, -1)
+    : quoted;
+  return `${weak}"${opaque};representation=${versioned ? 'v2' : 'legacy'}"`;
+}
+
+function requestMatchesEtag(request, etag) {
+  if (!etag) return false;
+  return headerValue(request, 'if-none-match')
+    .split(',')
+    .map((value) => value.trim())
+    .some((value) => value === '*' || value === etag);
 }
 
 export function createApiMeta(body, options = {}) {
@@ -80,11 +109,21 @@ export function createApiMeta(body, options = {}) {
 
 export function applyApiContract(result, options = {}) {
   if (!result || Number(result.status || 200) >= 400) return result;
+  const versioned = wantsApiSchemaV2(options.request, options.url);
+  const etag = representationEtag(result.headers?.ETag, versioned);
+  const headers = {
+    ...result.headers,
+    ...(etag ? { ETag: etag } : {}),
+    ...(versioned ? { 'Content-Type': API_V2_MEDIA_TYPE } : {}),
+    'X-Boone-Schema-Version': String(API_SCHEMA_VERSION),
+    Vary: result.headers?.Vary
+      ? `${result.headers.Vary}, Accept`
+      : 'Accept'
+  };
   const body = result.body;
-  if (body == null || typeof body !== 'object') return result;
+  if (body == null || typeof body !== 'object') return { ...result, headers };
 
   const meta = createApiMeta(body, options);
-  const versioned = wantsApiSchemaV2(options.request, options.url);
   let contractedBody;
 
   if (versioned) {
@@ -103,16 +142,13 @@ export function applyApiContract(result, options = {}) {
     };
   }
 
-  return {
+  const contracted = {
     ...result,
     body: contractedBody,
-    headers: {
-      ...result.headers,
-      ...(versioned ? { 'Content-Type': API_V2_MEDIA_TYPE } : {}),
-      'X-Boone-Schema-Version': String(API_SCHEMA_VERSION),
-      Vary: result.headers?.Vary
-        ? `${result.headers.Vary}, Accept`
-        : 'Accept'
-    }
+    headers
   };
+  if (Number(result.status || 200) === 200 && requestMatchesEtag(options.request, etag)) {
+    return { ...contracted, status: 304, body: null };
+  }
+  return contracted;
 }

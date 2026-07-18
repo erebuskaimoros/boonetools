@@ -34,9 +34,10 @@ export function createFixedWindowRateLimiter(options = {}) {
     }
   }
 
-  return function check(request) {
+  return function check(request, requestedCost = 1) {
     const timestamp = Number(now());
     const key = getRequestClientId(request);
+    const cost = Math.max(1, Math.trunc(Number(requestedCost) || 1));
     let bucket = buckets.get(key);
     if (!bucket || timestamp >= bucket.resetAt) {
       if (bucket) buckets.delete(key);
@@ -45,16 +46,51 @@ export function createFixedWindowRateLimiter(options = {}) {
       buckets.set(key, bucket);
     }
 
-    bucket.count += 1;
+    bucket.count += cost;
     const remaining = Math.max(0, maxRequests - bucket.count);
     const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - timestamp) / 1000));
 
     return {
       allowed: bucket.count <= maxRequests,
+      cost,
       limit: maxRequests,
       remaining,
       resetAt: bucket.resetAt,
       retryAfterSeconds
+    };
+  };
+}
+
+export function createConcurrencyLimiter() {
+  const activeByKey = new Map();
+
+  return function acquire(key, requestedLimit = 1) {
+    const normalizedKey = String(key || 'default');
+    const limit = Math.max(1, Math.trunc(Number(requestedLimit) || 1));
+    const active = activeByKey.get(normalizedKey) || 0;
+
+    if (active >= limit) {
+      return {
+        allowed: false,
+        active,
+        limit,
+        release() {}
+      };
+    }
+
+    activeByKey.set(normalizedKey, active + 1);
+    let released = false;
+    return {
+      allowed: true,
+      active: active + 1,
+      limit,
+      release() {
+        if (released) return;
+        released = true;
+        const current = activeByKey.get(normalizedKey) || 0;
+        if (current <= 1) activeByKey.delete(normalizedKey);
+        else activeByKey.set(normalizedKey, current - 1);
+      }
     };
   };
 }

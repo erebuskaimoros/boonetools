@@ -27,12 +27,25 @@ are monotonic under replay and concurrent writers.
 
 ## Expensive reads
 
-- Status uses `/network-snapshot`, with per-field partial failure and stale
-  cache fallback.
+- Dashboard GETs are provider-free. Status, Treasury, Node Votes, Rapid Swaps,
+  App Layer, and TC Fee summaries are scheduled into the shared
+  `api_read_models` table and served through a three-second single-flight row
+  cache. Stale/partial source lanes remain explicit and failed builds preserve
+  the prior model.
+- Provider-backed Node Votes and Rapid market-history publishers have separate
+  systemd units, advisory locks, deadlines, and cadences so Dune or THORNode
+  latency cannot block database-only summaries. Rapid market history chunks
+  Midgard fallback ranges at its 400-interval provider limit.
+- Summary payloads contain bounded aggregates. Raw vote/event detail remains on
+  cursor-paginated routes, and the common Rapid first page is embedded in its
+  summary model.
 - Bond History normal reads only return cached data and enqueue durable work.
   Cold misses return `202`; the frontend polls the cache-only status mode.
 - Provider requests share ordered fallback, challenge detection, response
   validation, caller cancellation, and transport deadlines.
+- Caddy compresses API responses, deploys enforce public latency/payload gates,
+  and failed rollouts restore backend/shared code, systemd state, the API
+  process, and Caddy.
 
 ## Frontend surface
 

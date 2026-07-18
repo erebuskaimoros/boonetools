@@ -19,6 +19,8 @@ boonewheeler.com, www.boonewheeler.com {
 }
 
 boone.tools {
+    encode zstd gzip
+
     route {
         handle_path /functions/v1/* {
             reverse_proxy 127.0.0.1:8787

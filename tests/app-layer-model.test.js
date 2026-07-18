@@ -6,6 +6,7 @@ import {
   fillBucketGaps,
   getTargetsForConfig,
   parseCsv,
+  pickPaidRows,
   summarizeCollectorInventory
 } from '../src/lib/app-layer/model.js';
 
@@ -28,6 +29,29 @@ test('app-layer CSV and reserve event normalization remain deterministic', () =>
   assert.equal(buckets[0].payment_rune, 3);
   assert.equal(buckets[0].payment_usd, 10);
   assert.equal(buckets[0].rune_price_usd, 10 / 3);
+});
+
+test('app-layer paid charts use durable full-history aggregates before bounded events', () => {
+  const events = [
+    { date: '2026-07-18T01:00:00Z', amountRune: 1, runePriceUsd: 2, amountUsd: 2 }
+  ];
+  const daily = [
+    { day_start: '2026-01-01', payment_usd: 5, cumulative_usd: 5 },
+    { day_start: '2026-07-18', payment_usd: 2, cumulative_usd: 7 }
+  ];
+  const weekly = [
+    { week_start: '2025-12-29', payment_usd: 5, cumulative_usd: 5 },
+    { week_start: '2026-07-13', payment_usd: 2, cumulative_usd: 7 }
+  ];
+
+  assert.deepEqual(pickPaidRows(events, weekly, 'daily', daily), {
+    rows: daily.map((row) => ({ ...row, bucket_start: row.day_start })),
+    grain: 'daily'
+  });
+  assert.deepEqual(pickPaidRows(events, weekly, 'weekly', daily), {
+    rows: weekly.map((row) => ({ ...row, bucket_start: row.week_start })),
+    grain: 'weekly'
+  });
 });
 
 test('app-layer chart model keeps scheduler gaps visible', () => {

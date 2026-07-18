@@ -204,10 +204,10 @@ test('active feature adapters retain their public functions and endpoint shapes'
 
   assert.deepEqual(requests.map((request) => request.url), [
     '/functions/v1/stuck-transactions',
-    '/functions/v1/node-votes?days=45',
+    '/functions/v1/node-votes-summary?days=45',
     '/functions/v1/tc-fee-dash',
     '/functions/v1/app-layer-live-state'
   ]);
-  assert.equal(requests[3].options.cache, 'no-store');
+  assert.notEqual(requests[3].options.cache, 'no-store');
   assert.equal(requests.every((request) => request.options.headers.Accept === 'application/json'), true);
 });

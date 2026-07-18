@@ -113,9 +113,21 @@ export function bucketReserveEvents(events, grain) {
     });
 }
 
-export function pickPaidRows(events, weeklyFallback, grain) {
+export function pickPaidRows(events, weeklyFallback, grain, dailyFallback = []) {
+  if (grain === 'daily' && dailyFallback?.length) {
+    return { rows: normalizeBuckets(dailyFallback, 'daily'), grain: 'daily' };
+  }
+  if (grain === 'weekly' && weeklyFallback?.length) {
+    return { rows: normalizeBuckets(weeklyFallback, 'weekly'), grain: 'weekly' };
+  }
+  if (dailyFallback?.length) {
+    return { rows: normalizeBuckets(dailyFallback, 'daily'), grain: 'daily' };
+  }
+  if (weeklyFallback?.length) {
+    return { rows: normalizeBuckets(weeklyFallback, 'weekly'), grain: 'weekly' };
+  }
   if (events?.length) return { rows: bucketReserveEvents(events, grain), grain };
-  return { rows: normalizeBuckets(weeklyFallback || [], 'weekly'), grain: 'weekly' };
+  return { rows: [], grain };
 }
 
 export function fillBucketGaps(rows, valueField, cumulativeField, stepDays) {

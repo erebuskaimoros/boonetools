@@ -97,3 +97,65 @@ export function summarizeTcFeeDashRows(rows) {
     peak
   };
 }
+
+export async function buildTcFeeDashPayload(client, options = {}) {
+  if (!client || typeof client.query !== 'function') {
+    throw new Error('TC Fee Dash payload builder requires a database client');
+  }
+  const result = await client.query(
+    `with selected_period as (
+       select case
+                when exists (
+                  select 1
+                  from tc_fee_dash_sync_state
+                  where sync_key = 'daily' and complete = true
+                )
+                and exists (select 1 from tc_fee_dash_windows where period = 'day')
+                  then 'day'
+                else 'weekly_seed'
+              end as period
+     )
+     select id, period, window_start, window_end, window_label, fee_bps,
+            tc_fees_rune, rune_price_usd, tc_fees_usd,
+            cmc_volume_24h_usd, defillama_dex_volume_usd,
+            global_exchange_volume_usd, thorchain_volume_usd,
+            daily_median_fees_per_billion_usd,
+            daily_range_low_fees_per_billion_usd,
+            daily_range_high_fees_per_billion_usd,
+            source_label, source_thread, updated_at
+     from tc_fee_dash_windows
+     where period = (select period from selected_period)
+     order by window_start asc, window_end asc`
+  );
+  const rows = result.rows.map(normalizeTcFeeDashRow);
+  const period = rows[0]?.period || 'weekly_seed';
+  const sourceUpdatedAt = result.rows.reduce((latest, row) => {
+    const value = Date.parse(row.updated_at || '');
+    return Number.isFinite(value) && value > latest ? value : latest;
+  }, 0);
+  const updatedAt = options.generatedAt || new Date().toISOString();
+  return {
+    payload: {
+      meta: {
+        source: 'boonetools-postgres',
+        metric: period === 'day'
+          ? 'tc_fees_per_billion_cmc_plus_dune_exchange_volume'
+          : 'tc_fees_per_billion_global_exchange_volume',
+        period,
+        volumeScope: period === 'day'
+          ? 'CMC historical global volume plus Dune indexed DEX exchange volume'
+          : 'Global exchange volume, CEX plus DEX',
+        incomeVolumeScope: 'Midgard liquidity fees divided by Midgard THORChain swap volume',
+        updatedAt,
+        ...summarizeTcFeeDashRows(rows)
+      },
+      rows
+    },
+    generatedAt: updatedAt,
+    sourceUpdatedAt: sourceUpdatedAt > 0 ? new Date(sourceUpdatedAt).toISOString() : null,
+    stats: {
+      period,
+      rows: rows.length
+    }
+  };
+}

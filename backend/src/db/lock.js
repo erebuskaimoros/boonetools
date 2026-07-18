@@ -1,6 +1,7 @@
-import { pool } from './pool.js';
-
 export async function withAdvisoryLock(lockKey, callback) {
+  // Resolve the configured pool only when a job actually takes a lock. Pure
+  // builders can then be imported without production database credentials.
+  const { pool } = await import('./pool.js');
   const client = await pool.connect();
   let locked = false;
 

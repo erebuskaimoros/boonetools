@@ -9,6 +9,14 @@ export async function fetchNetworkSnapshot(options = {}) {
   });
 }
 
+export async function fetchStatusDashboard(options = {}) {
+  return booneToolsApi.get('/status-dashboard', {
+    cache: options.forceRefresh ? 'no-cache' : undefined,
+    errorMessage: ({ response }) => `Status dashboard failed (${response.status})`,
+    challengeMessage: 'Status dashboard backend returned a challenge response'
+  });
+}
+
 export async function fetchStuckTransactions(options = {}) {
   return booneToolsApi.get('/stuck-transactions', {
     forceRefresh: options.forceRefresh,

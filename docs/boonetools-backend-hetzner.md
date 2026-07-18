@@ -9,6 +9,7 @@ BooneTools now has a dedicated Hetzner-hosted backend stack for all current DB-b
 - `rapid-swaps`
 - `stock-prices`
 - `app-layer-base-layer-earnings`
+- compact Status, Treasury, Node Votes, App Layer, Rapid Swaps, and TC Fee read models
 - local scheduler jobs for NodeOp and Rapid Swaps
 - Dune-backed historical/canonical ingestion with THORNode/Midgard live tails where current data matters
 
@@ -59,7 +60,7 @@ independently, so a churn outage does not erase healthy node/Mimir state. A
 forced refresh retains the previous snapshot as stale fallback if every
 provider is unavailable.
 
-The public `/functions/v1/node-votes` payload includes one deduplicated
+The public `/functions/v1/node-votes-summary` payload includes one deduplicated
 `active_nodes` roster from the same THORNode state used for current vote
 rollups. The Vote Tracker compares that roster with each key's current voter
 addresses so a consensus shortfall can list active node operators that have no
@@ -72,6 +73,11 @@ day. `boonetools-app-layer-live-state.timer` refreshes the current row every
 two minutes from the existing live-state snapshot; no second timer or new env
 variable is required. `backend/data/rujira-base-layer-inflows.json` supplies
 the immutable historical bootstrap, and DB rows override matching seed days.
+The public request is served from `app-layer-base-layer-earnings:v1`; the
+analytics publisher materializes it from those canonical rows.
+
+The performance and freshness contract for every dashboard read model is in
+[`performance-architecture.md`](./performance-architecture.md).
 
 ## Local / Server Runtime Env
 
@@ -125,14 +131,16 @@ npm run boonetools:deploy:backend
 
 That script:
 
-1. Snapshots the current backend/shared tree and quiesces writer timers and listeners
+1. Snapshots the current backend/shared tree, systemd unit state, and Caddy config, then quiesces writer timers and listeners
 2. Syncs backend code, the neutral `shared/` domain package, scripts, and ops assets to `/opt/boonetools-backend`; production does not copy or import frontend `src/` modules
 3. Installs backend dependencies and starts the dedicated Postgres container
 4. Applies each canonical DB migration and its applied marker in one transaction
-5. Installs/restarts the backend API, schedulers, Bond History refresh worker, and backup timer; the App Layer live-state prime also writes the current lane 01 accrual row
+5. Installs/restarts the backend API, isolated read-model publishers, schedulers, Bond History refresh worker, and backup timer
+6. Primes dependency-ordered snapshots, reloads compressed delivery, and enforces public latency/payload gates
 
 If deployment exits after writers are quiesced, the EXIT trap restores the
-snapshotted backend/shared tree and starts the previous writer set.
+snapshotted backend/shared tree, prior systemd files and active/enabled state,
+the previous API process, and the prior Caddy config.
 
 Cached Bond History requests enqueue one refresh per address and scope in
 `bond_history_refresh_queue`. `boonetools-bond-history-refresh.timer` drains
@@ -146,10 +154,22 @@ Reserve payments a unique canonical identity plus per-provider observation
 history. Canonical upserts enforce source precedence and monotonic first/last
 seen timestamps atomically in Postgres.
 
-When `RAPID_SWAPS_DUNE_QUERY_ID` is configured, deploy disables the legacy
-`rapid-swap-listener.service`; the scheduler live tail is the fresh-data path.
+Migration `027_api_read_models.sql` adds the shared `api_read_models` snapshot
+store and bounded publisher-run history. Migration
+`028_analytics_read_paths.sql` adds the ordered/cursor indexes used by compact
+summary and drill-down routes. The additive public routes are
+`/status-dashboard`, `/treasury-snapshot`, `/node-votes-summary`, and
+`/rapid-swaps-summary`; the established Node/Rapid routes remain compatibility
+surfaces during frontend rollout but never contact providers on a GET.
 
-After deploy, install the Caddy config in `ops/caddy/Caddyfile.boone.tools` if the API proxy is not already live.
+Rapid-Swap websocket ingestion is disabled by default in the shared
+`rapid-swap-listener.service`, while Node-Vote websocket ingestion remains
+enabled. The deploy keeps that shared process running whenever either lane is
+enabled; the Rapid scheduler/live tail remains its normal fresh-data path.
+
+Deploy validates, installs, and reloads
+`ops/caddy/Caddyfile.boone.tools` automatically before running the compressed
+public performance gate.
 
 ## Notes
 

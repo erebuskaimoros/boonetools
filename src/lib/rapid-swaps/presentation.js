@@ -1,4 +1,4 @@
-import { getRapidSwapComparableVolumeUsd } from './volume.js';
+import { getRapidSwapComparableVolumeUsd } from '../../../shared/rapid-swaps/volume.js';
 
 const AFFILIATE_NAMES = {
   t: 'THORSwap',
@@ -230,6 +230,35 @@ export function computeDistributions(swaps) {
   };
 }
 
+export function distributionsFromPreaggregates(preaggregates = {}) {
+  const distributions = preaggregates.distributions || {};
+  const subRows = [...(distributions.sub_swaps || [])]
+    .sort((left, right) => Number(left.sort_order) - Number(right.sort_order));
+  const timeRows = [...(distributions.time_saved_seconds || [])]
+    .sort((left, right) => Number(left.sort_order) - Number(right.sort_order));
+  const affiliates = Array.isArray(preaggregates.affiliates) ? preaggregates.affiliates : [];
+  const byCount = [...affiliates].sort((left, right) => (
+    Number(right.swap_count) - Number(left.swap_count)
+  ));
+  const byVolume = [...affiliates].sort((left, right) => (
+    Number(right.volume_usd) - Number(left.volume_usd)
+  ));
+
+  return {
+    subLabels: subRows.map((row) => row.bucket),
+    subsByVolume: subRows.map((row) => Number(row.volume_usd) || 0),
+    subsByCount: subRows.map((row) => Number(row.swap_count) || 0),
+    timeLabels: timeRows.map((row) => row.bucket),
+    timeSavedDist: timeRows.map((row) => Number(row.swap_count) || 0),
+    affCountCodes: byCount.map((row) => row.affiliate),
+    affCountLabels: byCount.map((row) => affiliateDisplayName(row.affiliate)),
+    affCountValues: byCount.map((row) => Number(row.swap_count) || 0),
+    affVolumeCodes: byVolume.map((row) => row.affiliate),
+    affVolumeLabels: byVolume.map((row) => affiliateDisplayName(row.affiliate)),
+    affVolumeValues: byVolume.map((row) => Number(row.volume_usd) || 0)
+  };
+}
+
 export function computeSwapPathData(swaps) {
   const pathMap = {};
   const flowMap = {};
@@ -271,6 +300,35 @@ export function computeSwapPathData(swaps) {
     volumeValues: byVolume.map(([, value]) => value.volume),
     timeSavedLabels: byTimeSaved.map(([pair]) => pair),
     timeSavedValues: byTimeSaved.map(([, value]) => Math.round(value.totalTimeSaved / value.count)),
+    sankeyFlows
+  };
+}
+
+export function swapPathDataFromPreaggregates(preaggregates = {}) {
+  const paths = Array.isArray(preaggregates.paths) ? preaggregates.paths : [];
+  const label = (row) => `${formatAsset(row.source_asset)} → ${formatAsset(row.target_asset)}`;
+  const byVolume = [...paths]
+    .sort((left, right) => Number(right.volume_usd) - Number(left.volume_usd))
+    .slice(0, 10);
+  const byTimeSaved = [...paths]
+    .filter((row) => Number(row.avg_time_saved_seconds) > 0)
+    .sort((left, right) => Number(right.avg_time_saved_seconds) - Number(left.avg_time_saved_seconds))
+    .slice(0, 10);
+  const flows = [...(preaggregates.sankey || [])]
+    .sort((left, right) => Number(right.volume_usd) - Number(left.volume_usd));
+  const sankeyFlows = flows.slice(0, 10).map((row) => ({
+    from: formatAsset(row.source_asset).split('.').pop() || '?',
+    to: formatAsset(row.target_asset).split('.').pop() || '?',
+    flow: Math.round(Number(row.volume_usd) || 0)
+  }));
+  const otherVolume = flows.slice(10).reduce((sum, row) => sum + (Number(row.volume_usd) || 0), 0);
+  if (otherVolume > 0) sankeyFlows.push({ from: 'Others', to: 'Others ', flow: Math.round(otherVolume) });
+
+  return {
+    volumeLabels: byVolume.map(label),
+    volumeValues: byVolume.map((row) => Number(row.volume_usd) || 0),
+    timeSavedLabels: byTimeSaved.map(label),
+    timeSavedValues: byTimeSaved.map((row) => Math.round(Number(row.avg_time_saved_seconds) || 0)),
     sankeyFlows
   };
 }

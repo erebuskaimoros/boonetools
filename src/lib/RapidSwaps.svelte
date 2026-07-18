@@ -8,6 +8,7 @@
     getRapidSwapsApiConfigError
   } from './rapid-swaps/api.js';
   import {
+    computeDailyBucketData,
     computeDailyData,
     getSeriesAxisBounds,
     getChartDateRangeUnixSeconds,
@@ -16,20 +17,18 @@
   import {
     computeDistributions,
     computeSwapPathData,
+    distributionsFromPreaggregates,
     formatTimeSaved,
     getTxUrl,
     shortPair,
     swapPctFaster,
     swapTimeSaved,
-    swapVolumeUsd
+    swapVolumeUsd,
+    swapPathDataFromPreaggregates
   } from './rapid-swaps/presentation.js';
   import { createRapidSwapChartRenderer } from './rapid-swaps/chart-renderer.js';
 
   const REFRESH_INTERVAL_MS = 120000;
-  const RPC_WS_URL = 'wss://gateway.liquify.com/chain/thorchain_rpc/websocket';
-  const RECONNECT_BASE_MS = 2000;
-  const RECONNECT_MAX_MS = 30000;
-  const REFRESH_DEBOUNCE_MS = 8000;
   const TABLE_RELOAD_DEBOUNCE_MS = 350;
   const PAGE_SIZE = 20;
 
@@ -39,11 +38,6 @@
   let dashboard = null;
   let dashboardError = '';
   let refreshInterval;
-  let rpcWs = null;
-  let rpcReconnectAttempt = 0;
-  let rpcConnected = false;
-  let rpcLastBlock = 0;
-  let pendingRefreshTimer = null;
   let tableReloadTimer = null;
   let dashboardRequestId = 0;
   let midgardHistoryRequestId = 0;
@@ -72,7 +66,12 @@
   // Backend-cached total swap history (for market share charts)
   let midgardSwapHistory = null;
 
-  $: allSwaps = dashboard?.chart_swaps || dashboard?.all_swaps || dashboard?.recent_24h || [];
+  $: chartBuckets = dashboard?.chart_buckets || [];
+  $: allSwaps = dashboard?.chart_swaps?.length
+    ? dashboard.chart_swaps
+    : dashboard?.recent_24h?.length
+      ? dashboard.recent_24h
+      : dashboard?.all_swaps || [];
   $: tableSwaps = dashboard?.all_swaps || [];
   $: paginationMeta = dashboard?.pagination || {};
   $: topSwaps = dashboard?.top_20 || [];
@@ -100,13 +99,22 @@
     const d = toChartDateKey(s.action_date);
     return d >= overviewDateFrom && d <= overviewDateTo;
   });
+  $: overviewBuckets = chartBuckets.filter((bucket) => {
+    const key = String(bucket?.bucket_start || '').slice(0, 10);
+    return key >= overviewDateFrom && key <= overviewDateTo;
+  });
 
   // Daily aggregates for charts (includes market share when midgard data available)
-  $: dailyData = computeDailyData(overviewSwaps, midgardSwapHistory, allSwaps, {
-    useCumulativeSeeds: Boolean(dashboard?.chart),
-    cumulativeCountBefore: dashboard?.chart?.cumulative_count_before || 0,
-    cumulativeVolumeBefore: dashboard?.chart?.cumulative_volume_usd_before || 0
-  });
+  $: dailyData = chartBuckets.length
+    ? computeDailyBucketData(overviewBuckets, midgardSwapHistory, {
+        cumulativeCountBefore: dashboard?.chart?.cumulative_count_before || 0,
+        cumulativeVolumeBefore: dashboard?.chart?.cumulative_volume_usd_before || 0
+      })
+    : computeDailyData(overviewSwaps, midgardSwapHistory, allSwaps, {
+        useCumulativeSeeds: Boolean(dashboard?.chart),
+        cumulativeCountBefore: dashboard?.chart?.cumulative_count_before || 0,
+        cumulativeVolumeBefore: dashboard?.chart?.cumulative_volume_usd_before || 0
+      });
   $: cumulativeVolumeAxisBounds = getSeriesAxisBounds(dailyData.cumVolume, {
     clampMin: 0,
     minSpan: 1
@@ -120,9 +128,15 @@
     dailyData.volumePct.some(value => Number.isFinite(value)) ||
     dailyData.countPct.some(value => Number.isFinite(value));
   // Distribution data
-  $: distributions = computeDistributions(overviewSwaps);
+  $: distributions = dashboard?.preaggregates
+    ? distributionsFromPreaggregates(dashboard.preaggregates)
+    : computeDistributions(overviewSwaps);
+  $: hasDistributionData = Boolean(distributions.subLabels?.length || distributions.timeLabels?.length);
   // Swap path data
-  $: swapPathData = computeSwapPathData(overviewSwaps);
+  $: swapPathData = dashboard?.preaggregates
+    ? swapPathDataFromPreaggregates(dashboard.preaggregates)
+    : computeSwapPathData(overviewSwaps);
+  $: hasPathData = Boolean(swapPathData.volumeLabels?.length || swapPathData.sankeyFlows?.length);
 
   // --- Helpers ---
   function formatAmount(amountBase, maxFractionDigits = 4) {
@@ -272,83 +286,14 @@
     renderChartsForTab(activeTab);
   }
 
-  // --- WebSocket ---
-  function tryDecodeAttr(val) {
-    if (!val) return '';
-    try {
-      if (/^[A-Za-z0-9+/]+=*$/.test(val) && val.length > 1) {
-        const decoded = atob(val);
-        if (/^[\x20-\x7E]*$/.test(decoded) && decoded.length > 0) return decoded;
-      }
-    } catch (_) {}
-    return val;
-  }
-
-  function checkBlockForRapidSwaps(msg) {
-    try {
-      const data = msg.result?.data?.value;
-      if (!data) return;
-      const blockHeight = Number(data.block?.header?.height) || 0;
-      if (blockHeight > 0) rpcLastBlock = blockHeight;
-      const events = data.result_finalize_block?.events || data.result_end_block?.events || [];
-      for (const event of events) {
-        if (event.type !== 'streaming_swap') continue;
-        const attrs = {};
-        for (const attr of event.attributes || []) {
-          attrs[tryDecodeAttr(attr.key)] = tryDecodeAttr(attr.value);
-        }
-        if (Number(attrs.interval) === 0 && Number(attrs.quantity) > 1 && Number(attrs.count) > 0) {
-          scheduleRefresh();
-          return;
-        }
-      }
-    } catch (_) {}
-  }
-
-  function scheduleRefresh() {
-    clearTimeout(pendingRefreshTimer);
-    pendingRefreshTimer = setTimeout(() => loadData(false), REFRESH_DEBOUNCE_MS);
-  }
-
-  function connectRpcWs() {
-    try {
-      rpcWs = new WebSocket(RPC_WS_URL);
-      rpcWs.onopen = () => {
-        rpcConnected = true;
-        rpcReconnectAttempt = 0;
-        rpcWs.send(JSON.stringify({
-          jsonrpc: '2.0', method: 'subscribe', id: 1,
-          params: { query: "tm.event='NewBlock'" }
-        }));
-      };
-      rpcWs.onmessage = (e) => { try { checkBlockForRapidSwaps(JSON.parse(e.data)); } catch (_) {} };
-      rpcWs.onclose = () => { rpcConnected = false; reconnectRpcWs(); };
-      rpcWs.onerror = () => { rpcConnected = false; };
-    } catch (_) {
-      rpcConnected = false;
-      reconnectRpcWs();
-    }
-  }
-
-  function reconnectRpcWs() {
-    const delay = Math.min(RECONNECT_BASE_MS * Math.pow(2, rpcReconnectAttempt), RECONNECT_MAX_MS);
-    rpcReconnectAttempt++;
-    setTimeout(connectRpcWs, delay);
-  }
-
-  function disconnectRpcWs() {
-    if (rpcWs) { rpcWs.onclose = null; rpcWs.close(); rpcWs = null; }
-    rpcConnected = false;
-  }
-
   async function loadMidgardSwapHistory() {
     const swaps = allSwaps;
-    if (!swaps.length || !overviewDateFrom || !overviewDateTo || overviewDateFrom > overviewDateTo) {
+    if ((!swaps.length && !chartBuckets.length) || !overviewDateFrom || !overviewDateTo || overviewDateFrom > overviewDateTo) {
       midgardSwapHistory = null;
       return;
     }
 
-    const range = getChartDateRangeUnixSeconds(overviewDateFrom, overviewDateTo);
+    const range = getChartDateRangeUnixSeconds(overviewDateFrom, overviewDateTo, { utc: true });
     if (!range) {
       midgardSwapHistory = null;
       return;
@@ -399,7 +344,7 @@
       params.min_subs = Number(filterMinSubs);
     }
 
-    const chartRange = getChartDateRangeUnixSeconds(overviewDateFrom, overviewDateTo);
+    const chartRange = getChartDateRangeUnixSeconds(overviewDateFrom, overviewDateTo, { utc: true });
     if (chartRange) {
       params.chart_from = chartRange.from;
       params.chart_to = chartRange.to;
@@ -487,13 +432,10 @@
 
   onMount(() => {
     loadData(true);
-    connectRpcWs();
     refreshInterval = setInterval(() => loadData(false), REFRESH_INTERVAL_MS);
     return () => {
       clearInterval(refreshInterval);
-      clearTimeout(pendingRefreshTimer);
       clearTimeout(tableReloadTimer);
-      disconnectRpcWs();
       chartRenderer.destroyAll();
     };
   });
@@ -540,13 +482,9 @@
       {/if}
     </span>
     <span class="status-right">
-      <span class="ws-badge" class:ws-ok={rpcConnected} class:ws-down={!rpcConnected}>
+      <span class="ws-badge ws-ok">
         <span class="ws-dot"></span>
-        {rpcConnected ? 'LIVE' : 'CONNECTING'}
-        {#if rpcConnected && rpcLastBlock}
-          <span class="sep">|</span>
-          BLK {rpcLastBlock.toLocaleString()}
-        {/if}
+        CACHED READ MODEL
       </span>
       {#if refreshing}
         <span class="sep">|</span> REFRESHING...
@@ -617,11 +555,15 @@
       <button class="tab-btn" class:tab-active={activeTab === 'distributions'} on:click={() => activeTab = 'distributions'}>Distributions</button>
       <button class="tab-btn" class:tab-active={activeTab === 'paths'} on:click={() => activeTab = 'paths'}>Swap Paths</button>
     </div>
-    <div class="date-range">
-      <input type="date" class="date-input" bind:value={overviewDateFrom} max={todayDateKey} on:change={handleOverviewDateFromChange} />
-      <span class="date-sep">–</span>
-      <input type="date" class="date-input" bind:value={overviewDateTo} max={todayDateKey} on:change={handleOverviewDateToChange} />
-    </div>
+    {#if activeTab === 'overview'}
+      <div class="date-range">
+        <input type="date" class="date-input" bind:value={overviewDateFrom} max={todayDateKey} on:change={handleOverviewDateFromChange} />
+        <span class="date-sep">–</span>
+        <input type="date" class="date-input" bind:value={overviewDateTo} max={todayDateKey} on:change={handleOverviewDateToChange} />
+      </div>
+    {:else}
+      <div class="date-range">ALL RECORDED SWAPS</div>
+    {/if}
   </div>
   </div><!-- /sticky-header -->
 
@@ -631,11 +573,11 @@
     <section class="data-section">
       <div class="section-head">
         <h3>DAILY TRENDS</h3>
-        <span class="section-sub">Grouped by your local day</span>
+        <span class="section-sub">Grouped by UTC day</span>
       </div>
       {#if loading && !dashboard}
         <div class="empty">Loading...</div>
-      {:else if !allSwaps.length}
+      {:else if !dailyData.labels.length}
         <div class="empty">No swap data available.</div>
       {:else}
         <div class="chart-grid">
@@ -656,7 +598,7 @@
       <section class="data-section">
         <div class="section-head">
           <h3>ADOPTION</h3>
-          <span class="section-sub">Rapid swaps as percentage of total THORChain activity, grouped by your local day</span>
+          <span class="section-sub">Rapid swaps as percentage of total THORChain activity, grouped by UTC day</span>
         </div>
         {#if hasAdoptionData}
           <div class="chart-grid">
@@ -681,7 +623,7 @@
         <h3>EXECUTION EFFICIENCY</h3>
         <span class="section-sub">Sub-swaps per block used (higher is better)</span>
       </div>
-      {#if allSwaps.length}
+      {#if dailyData.labels.length}
         <div class="chart-grid">
           <div class="chart-card">
             <div class="chart-title">Efficiency Ratio</div>
@@ -774,8 +716,9 @@
     <section class="data-section">
       <div class="section-head">
         <h3>SUB SWAPS DISTRIBUTION</h3>
+        <span class="section-sub">All recorded rapid swaps</span>
       </div>
-      {#if !allSwaps.length}
+      {#if !hasDistributionData}
         <div class="empty">No swap data available.</div>
       {:else}
         <div class="chart-grid">
@@ -795,7 +738,7 @@
       <div class="section-head">
         <h3>TIME SAVED DISTRIBUTION</h3>
       </div>
-      {#if allSwaps.length}
+      {#if hasDistributionData}
         <div class="chart-grid chart-grid-single">
           <div class="chart-card">
             <div class="chart-title">Time Saved Distribution</div>
@@ -829,8 +772,9 @@
     <section class="data-section">
       <div class="section-head">
         <h3>SWAP PATH FLOWS</h3>
+        <span class="section-sub">All recorded rapid swaps</span>
       </div>
-      {#if !allSwaps.length}
+      {#if !hasPathData}
         <div class="empty">No swap data available.</div>
       {:else}
         <div class="chart-grid chart-grid-single">
@@ -846,7 +790,7 @@
       <div class="section-head">
         <h3>SWAP PATH ANALYSIS</h3>
       </div>
-      {#if allSwaps.length}
+      {#if hasPathData}
         <div class="chart-grid">
           <div class="chart-card">
             <div class="chart-title">Top 10 Swap Paths by Volume</div>
@@ -946,14 +890,6 @@
 
   .ws-ok {
     color: #00cc66;
-  }
-
-  .ws-down .ws-dot {
-    background: #cc3333;
-  }
-
-  .ws-down {
-    color: #cc3333;
   }
 
   @keyframes pulse-dot {

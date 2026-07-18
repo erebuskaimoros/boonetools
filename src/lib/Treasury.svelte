@@ -1,6 +1,5 @@
 <script>
   import { onMount } from 'svelte';
-  import { thornode } from '$lib/api';
   import { getAssetLogo, getChainLogo, getAssetDisplayName } from '$lib/constants/assets';
   import {
     formatCryptoAmount,
@@ -9,33 +8,18 @@
     getAddressSuffix,
     shortenAddress
   } from '$lib/utils/formatting';
-  import { denomToAsset } from '$lib/utils/wallet';
-  import { fromBaseUnit } from '$lib/utils/blockchain';
-  import { calculateTotalBondValue, getBondsForAddresses } from '$lib/utils/nodes';
-  import { getExplorerUrl, getRunePrice } from '$lib/utils/network';
-  import {
-    getThorTreasuryAddresses,
-    NATIVE_ASSET_BY_CHAIN,
-    TREASURY_SECTIONS
-  } from '$lib/treasury/config';
-  import {
-    fetchEthHoldings,
-    fetchEvmChainHoldings,
-    fetchNativeBalance,
-    hydrateMissingEvmTokenPrices
-  } from '$lib/treasury/fetchers';
+  import { getExplorerUrl } from '$lib/utils/network';
+  import { fetchTreasurySnapshot } from '$lib/treasury/api';
 
   const NOTE_TEXT =
     'The Original section shows the live treasury module address, including module balances, LP positions, and any node bonds. Active THOR addresses include THOR balances, LP positions, and node bonds. External-chain addresses show native balances, and the New ETH Treasury also lists Ethereum ERC-20 holdings plus supported BSC, Avalanche, and Base balances for the same EVM address.';
-  const LP_CONCURRENCY = 8;
 
   let loading = true;
   let error = null;
   let runePrice = 0;
-  let assetPrices = {};
-  let lpAssets = [];
   let sections = [];
   let consolidatedSection = null;
+  let snapshotWarning = '';
   let viewportWidth = 1440;
 
   function formatUsdValue(value) {
@@ -89,37 +73,6 @@
     return formatCryptoAmount(value, 8);
   }
 
-  function isNotFoundError(err) {
-    const message = err?.message || String(err);
-    return message.includes('404') || message.toLowerCase().includes('not found');
-  }
-
-  function sumUsd(items, key = 'usdValue') {
-    return items.reduce((total, item) => total + Number(item[key] || 0), 0);
-  }
-
-  function getAssetUsdValue(asset, amount) {
-    const price = assetPrices[asset];
-    if (!price && price !== 0) return null;
-    return amount * price;
-  }
-
-  function summarizeEntry(entry) {
-    const walletValue = sumUsd(entry.balances);
-    const lpValue = entry.lpPositions.reduce(
-      (total, position) => total + Number(position.totalUsdValue || 0),
-      0
-    );
-    const bondValue = calculateTotalBondValue(entry.bonds, runePrice);
-
-    return {
-      walletValue,
-      lpValue,
-      bondValue,
-      totalValue: walletValue + lpValue + bondValue
-    };
-  }
-
   function summarizeSection(entries) {
     return entries.reduce(
       (summary, entry) => {
@@ -137,65 +90,6 @@
         totalValue: 0
       }
     );
-  }
-
-  function buildBondsByAddress(bonds) {
-    return bonds.reduce((map, bond) => {
-      const key = bond.bondAddress.toLowerCase();
-      if (!map.has(key)) {
-        map.set(key, []);
-      }
-      map.get(key).push(bond);
-      return map;
-    }, new Map());
-  }
-
-  function buildTrackedEvmAssetsByChain(pools) {
-    const chains = ['BSC', 'AVAX', 'BASE'];
-
-    return chains.reduce((map, chain) => {
-      map[chain] = pools
-        .filter((pool) => pool.asset.startsWith(`${chain}.`) && pool.asset.includes('-0X'))
-        .map((pool) => pool.asset);
-      return map;
-    }, {});
-  }
-
-  function resolveSectionEntry(entry, treasuryModule) {
-    if (entry.addressSource !== 'treasury-module') {
-      return entry;
-    }
-
-    return {
-      ...entry,
-      address: treasuryModule?.address || entry.address,
-      moduleBalances: treasuryModule?.coins || []
-    };
-  }
-
-  function buildResolvedSections(treasuryModule) {
-    return TREASURY_SECTIONS.map((section) => ({
-      ...section,
-      addresses: section.addresses.map((entry) => resolveSectionEntry(entry, treasuryModule))
-    }));
-  }
-
-  function mergeBalances(primaryBalances = [], secondaryBalances = []) {
-    const balancesByDenom = new Map();
-
-    for (const balance of secondaryBalances) {
-      if (balance?.denom) {
-        balancesByDenom.set(balance.denom, balance);
-      }
-    }
-
-    for (const balance of primaryBalances) {
-      if (balance?.denom) {
-        balancesByDenom.set(balance.denom, balance);
-      }
-    }
-
-    return Array.from(balancesByDenom.values());
   }
 
   function hasVisibleBalances(entry) {
@@ -217,61 +111,6 @@
         hasVisibleBonds(entry) &&
         (entry.lpPositions.length > 0 || entry.showLpSection)
     );
-  }
-
-  function finalizeEntry(entry) {
-    const summary = summarizeEntry(entry);
-
-    return {
-      ...entry,
-      explorerUrl: getExplorerUrl(entry.chain, entry.address),
-      primaryAsset: entry.primaryAsset || entry.balances[0]?.asset || NATIVE_ASSET_BY_CHAIN[entry.chain],
-      summary
-    };
-  }
-
-  function buildThorHolding(balance) {
-    const asset = denomToAsset(balance.denom);
-    const amount = fromBaseUnit(balance.amount);
-    const usdValue = getAssetUsdValue(asset, amount);
-
-    return {
-      asset,
-      chain: asset.split('.')[0],
-      amount,
-      usdValue,
-      hasMissingPrice: !hasKnownUsdValue(usdValue)
-    };
-  }
-
-  function buildNativeHolding(entry, amount) {
-    const asset = NATIVE_ASSET_BY_CHAIN[entry.chain];
-    const usdValue = getAssetUsdValue(asset, amount);
-
-    return {
-      asset,
-      chain: entry.chain,
-      amount,
-      usdValue,
-      hasMissingPrice: !hasKnownUsdValue(usdValue)
-    };
-  }
-
-  function enrichHolding(holding) {
-    if (hasKnownUsdValue(holding.usdValue)) {
-      return {
-        ...holding,
-        hasMissingPrice: false
-      };
-    }
-
-    const usdValue = getAssetUsdValue(holding.asset, holding.amount);
-
-    return {
-      ...holding,
-      usdValue,
-      hasMissingPrice: !hasKnownUsdValue(usdValue)
-    };
   }
 
   function sortHoldingsByValue(holdings) {
@@ -443,238 +282,39 @@
     return buildEntryColumns(section.entries, getActiveTileColumnCount());
   }
 
-  async function mapWithConcurrency(items, concurrency, worker) {
-    const results = new Array(items.length);
-    let index = 0;
-
-    async function runWorker() {
-      while (index < items.length) {
-        const currentIndex = index++;
-        results[currentIndex] = await worker(items[currentIndex], currentIndex);
-      }
-    }
-
-    const workers = Array.from(
-      { length: Math.min(concurrency, items.length) },
-      () => runWorker()
-    );
-
-    await Promise.all(workers);
-    return results;
-  }
-
-  function toLpPosition(data) {
-    const assetAmount = fromBaseUnit(data.asset_redeem_value);
-    const runeAmount = fromBaseUnit(data.rune_redeem_value);
-    const assetUsdValue = getAssetUsdValue(data.asset, assetAmount) || 0;
-    const runeUsdValue = runeAmount * runePrice;
-
+  function hydrateSnapshotEntry(entry) {
     return {
-      pool: data.asset.split('.')[1]?.split('-')[0] || data.asset,
-      fullPool: data.asset,
-      assetAmount,
-      runeAmount,
-      assetUsdValue,
-      runeUsdValue,
-      totalUsdValue: assetUsdValue + runeUsdValue
+      ...entry,
+      explorerUrl: getExplorerUrl(entry.chain, entry.address)
     };
-  }
-
-  function isVisibleLpPosition(position) {
-    return position.totalUsdValue >= 1;
-  }
-
-  async function fetchThorLpPositions(address) {
-    if (!lpAssets.length) return [];
-
-    if (import.meta.env.DEV) {
-      const response = await fetch(`/__treasury_lp_scan?address=${encodeURIComponent(address)}`);
-
-      if (!response.ok) {
-        throw new Error(`Failed to scan LP positions for ${address}`);
-      }
-
-      const data = await response.json();
-      return data
-        .map(toLpPosition)
-        .filter(isVisibleLpPosition)
-        .sort((left, right) => right.totalUsdValue - left.totalUsdValue);
-    }
-
-    const positions = await mapWithConcurrency(lpAssets, LP_CONCURRENCY, async (asset) => {
-      try {
-        const data = await thornode.getLiquidityProvider(asset, address);
-        if (!data?.units || Number(data.units) === 0) {
-          return null;
-        }
-
-        return toLpPosition(data);
-      } catch (err) {
-        if (!isNotFoundError(err)) {
-          console.warn(`Failed to fetch LP position for ${address} in ${asset}:`, err);
-        }
-        return null;
-      }
-    });
-
-    return positions
-      .filter(Boolean)
-      .filter(isVisibleLpPosition)
-      .sort((left, right) => right.totalUsdValue - left.totalUsdValue);
-  }
-
-  async function fetchThorEntry(entry, bondsByAddress) {
-    const balancePromise = thornode
-      .getBalance(entry.address)
-      .catch((err) => (isNotFoundError(err) ? { balances: [] } : Promise.reject(err)));
-
-    const [balanceData, lpPositions] = await Promise.all([balancePromise, fetchThorLpPositions(entry.address)]);
-
-    const balances = mergeBalances(entry.moduleBalances, balanceData?.balances || [])
-      .map(buildThorHolding)
-      .filter((holding) => holding.amount > 0)
-      .sort((left, right) => {
-        const leftValue = left.usdValue ?? left.amount;
-        const rightValue = right.usdValue ?? right.amount;
-        return rightValue - leftValue;
-      });
-
-    const bonds = (bondsByAddress.get(entry.address.toLowerCase()) || []).filter(
-      (bond) => bond.amount > 0
-    );
-
-    return finalizeEntry({
-      ...entry,
-      balances,
-      lpPositions,
-      bonds,
-      entryError: null
-    });
-  }
-
-  async function fetchNativeEntry(entry, evmAssetsByChain = {}) {
-    if (entry.chain === 'ETH' && entry.includeTokenBalances) {
-      const [ethBalances, extraEvmBalances] = await Promise.all([
-        fetchEthHoldings(entry.address),
-        entry.includeEvmChainBalances?.length
-          ? Promise.all(
-              entry.includeEvmChainBalances.map((chain) =>
-                fetchEvmChainHoldings(entry.address, chain, evmAssetsByChain[chain] || [])
-              )
-            )
-          : Promise.resolve([])
-      ]);
-
-      const balances = sortHoldingsByValue(
-        await hydrateMissingEvmTokenPrices(
-          [...ethBalances, ...extraEvmBalances.flat()]
-          .map(enrichHolding)
-          .filter((holding) => holding.amount > 0)
-        )
-      );
-
-      return finalizeEntry({
-        ...entry,
-        primaryAsset: NATIVE_ASSET_BY_CHAIN[entry.chain],
-        balances,
-        lpPositions: [],
-        bonds: [],
-        entryError: null
-      });
-    }
-
-    const amount = await fetchNativeBalance(entry);
-
-    return finalizeEntry({
-      ...entry,
-      balances: sortHoldingsByValue([buildNativeHolding(entry, amount)]),
-      lpPositions: [],
-      bonds: [],
-      entryError: null
-    });
-  }
-
-  async function loadEntry(entry, bondsByAddress, evmAssetsByChain) {
-    try {
-      return entry.chain === 'THOR'
-        ? await fetchThorEntry(entry, bondsByAddress)
-        : await fetchNativeEntry(entry, evmAssetsByChain);
-    } catch (err) {
-      console.error(`Failed to load treasury entry for ${entry.label}:`, err);
-
-      return finalizeEntry({
-        ...entry,
-        balances: [],
-        lpPositions: [],
-        bonds: [],
-        entryError: `Failed to load ${entry.label}.`
-      });
-    }
   }
 
   async function loadTracker() {
     loading = true;
     error = null;
+    snapshotWarning = '';
 
     try {
-      const [currentRunePrice, pools, treasuryModule] = await Promise.all([
-        getRunePrice(),
-        thornode.getPools(),
-        thornode.fetch('/thorchain/balance/module/treasury').catch((err) => {
-          console.error('Failed to fetch treasury module address:', err);
-          return null;
-        })
-      ]);
+      const payload = await fetchTreasurySnapshot();
+      if (!Array.isArray(payload?.sections)) {
+        throw new Error('Treasury snapshot returned an invalid payload');
+      }
 
-      runePrice = currentRunePrice;
-      const resolvedSections = buildResolvedSections(treasuryModule);
-      const bonds = await getBondsForAddresses(getThorTreasuryAddresses(resolvedSections)).catch((err) => {
-        console.error('Failed to fetch treasury bonds:', err);
-        return [];
-      });
-
-      const availablePools = pools.filter((pool) => pool.status === 'Available');
-      assetPrices = availablePools.reduce(
-        (priceMap, pool) => {
-          const price = fromBaseUnit(pool.asset_tor_price);
-          const assetPart = pool.asset.split('.').slice(1).join('.');
-
-          priceMap[pool.asset] = price;
-
-          // THOR synth balances use THOR.<asset-part> bank denoms but should
-          // inherit the redeemable pool price from the underlying L1 asset.
-          if (assetPart) {
-            priceMap[`THOR.${assetPart}`] = price;
-          }
-
-          return priceMap;
-        },
-        {
-          'THOR.RUNE': currentRunePrice
-        }
-      );
-      lpAssets = availablePools.map((pool) => pool.asset);
-
-      const bondsByAddress = buildBondsByAddress(bonds);
-      const evmAssetsByChain = buildTrackedEvmAssetsByChain(availablePools);
-
-      sections = await Promise.all(
-        resolvedSections.map(async (section) => {
-          const entries = await Promise.all(
-            section.addresses.map((entry) => loadEntry(entry, bondsByAddress, evmAssetsByChain))
-          );
-
-          return {
-            ...section,
-            entries,
-            summary: summarizeSection(entries)
-          };
-        })
-      );
-      consolidatedSection = buildConsolidatedSection(sections);
+      runePrice = Number(payload.runePrice || 0);
+      sections = payload.sections.map((section) => ({
+        ...section,
+        entries: (section.entries || []).map(hydrateSnapshotEntry)
+      }));
+      consolidatedSection = payload.consolidatedSection || buildConsolidatedSection(sections);
+      snapshotWarning = payload.stale
+        ? 'Showing the last successful Treasury snapshot while providers recover.'
+        : payload.partial
+          ? `${payload.warnings?.length || 1} provider segment${payload.warnings?.length === 1 ? '' : 's'} reused last successful data.`
+          : '';
     } catch (err) {
-      console.error('Failed to load Treasury Tracker:', err);
+      console.error('Failed to load Treasury snapshot:', err);
       error = 'Failed to load Treasury Tracker.';
+      sections = [];
       consolidatedSection = null;
     } finally {
       loading = false;
@@ -722,6 +362,10 @@
       <div class="scope-note warn-text">
         {unpricedBalanceCount} balance{unpricedBalanceCount === 1 ? '' : 's'} lack reliable pricing — excluded from USD totals.
       </div>
+    {/if}
+
+    {#if snapshotWarning}
+      <div class="scope-note warn-text">{snapshotWarning}</div>
     {/if}
 
       {#if consolidatedSection}

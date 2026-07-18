@@ -3,7 +3,7 @@ import { config } from './config.js';
 export const CORS_HEADERS = Object.freeze({
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'accept, authorization, x-client-info, apikey, content-type, prefer, x-nodeop-secret',
-  'Access-Control-Expose-Headers': 'preference-applied, retry-after, x-boone-schema-version, x-ratelimit-limit, x-ratelimit-remaining',
+  'Access-Control-Expose-Headers': 'etag, preference-applied, retry-after, server-timing, x-boone-age, x-boone-cache, x-boone-schema-version, x-ratelimit-limit, x-ratelimit-remaining',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
 });
 
@@ -77,13 +77,18 @@ export function isAuthorizedPublicRequest(request) {
 }
 
 export function sendResponse(response, result) {
-  const payload = JSON.stringify(result.body ?? {});
+  const status = Number(result?.status) || 200;
+  const bodyless = status === 204 || status === 304;
+  const payload = bodyless ? '' : JSON.stringify(result?.body ?? {});
+  const bytes = Buffer.byteLength(payload);
   const headers = {
     ...CORS_HEADERS,
-    'Content-Type': 'application/json',
-    ...result.headers
+    ...(bodyless ? {} : { 'Content-Type': 'application/json' }),
+    ...result?.headers,
+    ...(bodyless ? {} : { 'Content-Length': String(bytes) })
   };
 
-  response.writeHead(result.status || 200, headers);
+  response.writeHead(status, headers);
   response.end(payload);
+  return { status, bytes };
 }

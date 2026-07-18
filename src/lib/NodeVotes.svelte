@@ -1,6 +1,10 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
-  import { fetchNodeVotesDashboard } from './node-votes/api.js';
+  import {
+    fetchNodeVoteDetails,
+    fetchNodeVoteNodeDetails,
+    fetchNodeVotesDashboard
+  } from './node-votes/api.js';
   import { findMissingVoters } from './node-votes/missing-voters.js';
   import { formatNumber } from '$lib/utils/formatting';
 
@@ -19,6 +23,10 @@
   let nodeSortMode = 'last-vote';
   let searchTerm = '';
   let refreshTimer = null;
+  let voteDetailLoading = {};
+  let voteDetailErrors = {};
+  let nodeDetailLoading = {};
+  let nodeDetailErrors = {};
 
   $: stats = dashboard?.stats || {};
   $: categoryStats = stats.categories || {};
@@ -305,20 +313,112 @@
     return formatDuration(numeric);
   }
 
-  function toggleVoteKey(key) {
-    expandedVoteKey = expandedVoteKey === key ? '' : key;
+  function updateVoteRow(key, values) {
+    dashboard = {
+      ...dashboard,
+      by_vote: (dashboard?.by_vote || []).map((row) => (
+        row.mimir_key === key ? { ...row, ...values } : row
+      ))
+    };
+  }
+
+  function updateNodeRow(address, values) {
+    dashboard = {
+      ...dashboard,
+      by_node: (dashboard?.by_node || []).map((row) => (
+        row.node_address === address ? { ...row, ...values } : row
+      ))
+    };
+  }
+
+  async function loadVoteDetails(key, append = false) {
+    const row = dashboard?.by_vote?.find((candidate) => candidate.mimir_key === key);
+    if (!row || voteDetailLoading[key]) return;
+    voteDetailLoading = { ...voteDetailLoading, [key]: true };
+    voteDetailErrors = { ...voteDetailErrors, [key]: '' };
+    try {
+      const payload = await fetchNodeVoteDetails(key, {
+        cursor: append ? row.detail_pagination?.next_cursor : '',
+        limit: 200
+      });
+      updateVoteRow(key, {
+        node_votes: payload.node_votes || [],
+        vote_history: append
+          ? [...(row.vote_history || []), ...(payload.vote_history || [])]
+          : payload.vote_history || [],
+        effective_history: payload.effective_history?.length
+          ? payload.effective_history
+          : row.effective_history || [],
+        detail_pagination: payload.pagination || null
+      });
+    } catch (detailError) {
+      voteDetailErrors = {
+        ...voteDetailErrors,
+        [key]: detailError?.message || 'Unable to load vote details.'
+      };
+    } finally {
+      voteDetailLoading = { ...voteDetailLoading, [key]: false };
+    }
+  }
+
+  async function toggleVoteKey(key) {
+    if (expandedVoteKey === key) {
+      expandedVoteKey = '';
+      return;
+    }
+    expandedVoteKey = key;
+    const row = dashboard?.by_vote?.find((candidate) => candidate.mimir_key === key);
+    if (!Array.isArray(row?.vote_history)) await loadVoteDetails(key);
   }
 
   function canInspectMissingVoters(row) {
     return row?.current_vote_source === 'thornode-active-node-mimir' && activeNodes.length > 0;
   }
 
-  function toggleMissingVoters(key) {
-    missingVotersKey = missingVotersKey === key ? '' : key;
+  async function toggleMissingVoters(key) {
+    if (missingVotersKey === key) {
+      missingVotersKey = '';
+      return;
+    }
+    missingVotersKey = key;
+    const row = dashboard?.by_vote?.find((candidate) => candidate.mimir_key === key);
+    if (!Array.isArray(row?.node_votes)) await loadVoteDetails(key);
   }
 
-  function toggleNode(address) {
-    expandedNodeAddress = expandedNodeAddress === address ? '' : address;
+  async function loadNodeDetails(address, append = false) {
+    const row = dashboard?.by_node?.find((candidate) => candidate.node_address === address);
+    if (!row || nodeDetailLoading[address]) return;
+    nodeDetailLoading = { ...nodeDetailLoading, [address]: true };
+    nodeDetailErrors = { ...nodeDetailErrors, [address]: '' };
+    try {
+      const payload = await fetchNodeVoteNodeDetails(address, {
+        cursor: append ? row.detail_pagination?.next_cursor : '',
+        limit: 200
+      });
+      updateNodeRow(address, {
+        vote_history: append
+          ? [...(row.vote_history || []), ...(payload.vote_history || [])]
+          : payload.vote_history || [],
+        detail_pagination: payload.pagination || null
+      });
+    } catch (detailError) {
+      nodeDetailErrors = {
+        ...nodeDetailErrors,
+        [address]: detailError?.message || 'Unable to load node details.'
+      };
+    } finally {
+      nodeDetailLoading = { ...nodeDetailLoading, [address]: false };
+    }
+  }
+
+  async function toggleNode(address) {
+    if (expandedNodeAddress === address) {
+      expandedNodeAddress = '';
+      return;
+    }
+    expandedNodeAddress = address;
+    const row = dashboard?.by_node?.find((candidate) => candidate.node_address === address);
+    if (!Array.isArray(row?.vote_history)) await loadNodeDetails(address);
   }
 
   function toggleConsensusSort() {
@@ -518,10 +618,15 @@
                   </td>
                 </tr>
                 {#if missingVotersKey === row.mimir_key}
-                  {@const missingVoters = findMissingVoters(activeNodes, row.values)}
                   <tr class="missing-voters-row" id="missing-voters-{row.mimir_key}">
                     <td colspan="6">
                       <div class="missing-voters-panel">
+                        {#if voteDetailLoading[row.mimir_key] && !Array.isArray(row.node_votes)}
+                          <div class="empty-detail">Loading complete current-voter details...</div>
+                        {:else if voteDetailErrors[row.mimir_key] && !Array.isArray(row.node_votes)}
+                          <div class="empty-detail err-detail">{voteDetailErrors[row.mimir_key]}</div>
+                        {:else}
+                          {@const missingVoters = findMissingVoters(activeNodes, row.values, row.node_votes)}
                         <div class="missing-voters-heading">
                           <strong>Operators without a current vote</strong>
                           <span>{formatNumber(missingVoters.length)} of {formatNumber(activeNodes.length)} active</span>
@@ -539,6 +644,7 @@
                         {:else}
                           <div class="empty-detail">Every active node has a current vote; the shortfall is caused by split vote values.</div>
                         {/if}
+                        {/if}
                       </div>
                     </td>
                   </tr>
@@ -547,6 +653,11 @@
                   <tr class="detail-row">
                     <td colspan="6">
                       <div class="detail-grid">
+                        {#if voteDetailLoading[row.mimir_key] && !row.vote_history?.length}
+                          <div class="empty-detail detail-status">Loading vote details...</div>
+                        {:else if voteDetailErrors[row.mimir_key]}
+                          <div class="empty-detail detail-status err-detail">{voteDetailErrors[row.mimir_key]}</div>
+                        {/if}
                         <section class="detail-panel">
                           <div class="detail-title">
                             <span>Node Votes</span>
@@ -590,6 +701,13 @@
                             </div>
                           {:else}
                             <div class="empty-detail">No vote events in window.</div>
+                          {/if}
+                          {#if row.detail_pagination?.has_next}
+                            <button
+                              class="detail-load"
+                              disabled={voteDetailLoading[row.mimir_key]}
+                              on:click={() => loadVoteDetails(row.mimir_key, true)}
+                            >{voteDetailLoading[row.mimir_key] ? 'Loading...' : 'Load older events'}</button>
                           {/if}
                         </section>
 
@@ -766,7 +884,18 @@
                               </table>
                             </div>
                           {:else}
-                            <div class="empty-detail">No vote events in window.</div>
+                            <div class="empty-detail">
+                              {nodeDetailLoading[row.node_address]
+                                ? 'Loading node details...'
+                                : nodeDetailErrors[row.node_address] || 'No vote events in window.'}
+                            </div>
+                          {/if}
+                          {#if row.detail_pagination?.has_next}
+                            <button
+                              class="detail-load"
+                              disabled={nodeDetailLoading[row.node_address]}
+                              on:click={() => loadNodeDetails(row.node_address, true)}
+                            >{nodeDetailLoading[row.node_address] ? 'Loading...' : 'Load older events'}</button>
                           {/if}
                         </section>
                       </div>
@@ -1454,6 +1583,31 @@
     padding: 16px 12px;
     color: var(--dim);
     font: 700 11px/1.4 'JetBrains Mono', monospace;
+  }
+
+  .detail-status {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .err-detail {
+    color: var(--err);
+  }
+
+  .detail-load {
+    margin: 10px 12px 12px;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    background: #050505;
+    color: var(--accent);
+    font: 800 10px/1 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .detail-load:disabled {
+    color: var(--dim);
+    cursor: wait;
   }
 
   .event-grid {

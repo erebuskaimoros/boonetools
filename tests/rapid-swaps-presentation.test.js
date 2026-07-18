@@ -5,9 +5,11 @@ import {
   affiliateDisplayName,
   computeDistributions,
   computeSwapPathData,
+  distributionsFromPreaggregates,
   formatTimeSaved,
   shortenAsset,
   sortSwaps,
+  swapPathDataFromPreaggregates,
   swapPctFaster,
   swapTimeSaved
 } from '../src/lib/rapid-swaps/presentation.js';
@@ -61,4 +63,42 @@ test('rapid-swap table sorting shares the same presentation calculations', () =>
     { tx_id: 'fast', streaming_count: 10, blocks_used: 2, input_estimated_usd: 10 }
   ];
   assert.deepEqual(sortSwaps(rows, 'pctFaster', false).map((row) => row.tx_id), ['fast', 'slow']);
+});
+
+test('compact rapid-swap preaggregates preserve all-time distribution and path views', () => {
+  const preaggregates = {
+    distributions: {
+      sub_swaps: [
+        { bucket: '4-5', sort_order: 2, swap_count: 3, volume_usd: 150 },
+        { bucket: '2-3', sort_order: 1, swap_count: 2, volume_usd: 100 }
+      ],
+      time_saved_seconds: [
+        { bucket: '<1m', sort_order: 2, swap_count: 4, volume_usd: 200 }
+      ]
+    },
+    affiliates: [
+      { affiliate: 't', swap_count: 5, volume_usd: 250 }
+    ],
+    paths: [
+      {
+        source_asset: 'BTC.BTC',
+        target_asset: 'ETH.ETH',
+        volume_usd: 250,
+        avg_time_saved_seconds: 42
+      }
+    ],
+    sankey: [
+      { source_asset: 'BTC.BTC', target_asset: 'ETH.ETH', volume_usd: 250 }
+    ]
+  };
+
+  const distributions = distributionsFromPreaggregates(preaggregates);
+  assert.deepEqual(distributions.subLabels, ['2-3', '4-5']);
+  assert.deepEqual(distributions.subsByCount, [2, 3]);
+  assert.deepEqual(distributions.affCountLabels, ['THORSwap']);
+
+  const paths = swapPathDataFromPreaggregates(preaggregates);
+  assert.deepEqual(paths.volumeLabels, ['BTC.BTC → ETH.ETH']);
+  assert.deepEqual(paths.timeSavedValues, [42]);
+  assert.deepEqual(paths.sankeyFlows, [{ from: 'BTC', to: 'ETH', flow: 250 }]);
 });

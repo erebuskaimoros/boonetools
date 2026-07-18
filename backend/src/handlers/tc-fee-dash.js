@@ -1,53 +1,50 @@
 import { query } from '../db/pool.js';
 import { json } from '../lib/http.js';
-import {
-  normalizeTcFeeDashRow,
-  summarizeTcFeeDashRows
-} from '../shared/tc-fee-dash.js';
+import { ANALYTICS_READ_MODEL_KEYS } from '../shared/analytics-read-model-keys.js';
+import { getReadModel } from '../shared/read-models.js';
+import { buildTcFeeDashPayload } from '../shared/tc-fee-dash.js';
 
-export async function handleTcFeeDash() {
-  const result = await query(
-    `with selected_period as (
-       select case
-                when exists (
-                  select 1
-                  from tc_fee_dash_sync_state
-                  where sync_key = 'daily' and complete = true
-                )
-                and exists (select 1 from tc_fee_dash_windows where period = 'day')
-                  then 'day'
-                else 'weekly_seed'
-              end as period
-     )
-     select id, period, window_start, window_end, window_label, fee_bps,
-            tc_fees_rune, rune_price_usd, tc_fees_usd,
-            cmc_volume_24h_usd, defillama_dex_volume_usd,
-            global_exchange_volume_usd, thorchain_volume_usd,
-            daily_median_fees_per_billion_usd,
-            daily_range_low_fees_per_billion_usd,
-            daily_range_high_fees_per_billion_usd,
-            source_label, source_thread
-     from tc_fee_dash_windows
-     where period = (select period from selected_period)
-     order by window_start asc, window_end asc`
-  );
+export const TC_FEE_DASH_READ_MODEL_KEY = ANALYTICS_READ_MODEL_KEYS.tcFeeDash;
 
-  const rows = result.rows.map(normalizeTcFeeDashRow);
-  const period = rows[0]?.period || 'weekly_seed';
-  return json({
+function isEnabled(value) {
+  return ['1', 'true', 'yes'].includes(String(value || '').trim().toLowerCase());
+}
+
+export async function handleTcFeeDash(request, url) {
+  const legacy = isEnabled(url?.searchParams?.get('legacy'));
+  if (legacy) {
+    const result = await buildTcFeeDashPayload({ query });
+    return json(result.payload, 200, { 'Cache-Control': 'private, no-store' });
+  }
+
+  const model = await getReadModel(TC_FEE_DASH_READ_MODEL_KEY);
+  if (!model) {
+    return json({
+      error: 'TC Fee Dash snapshot is warming',
+      retryable: true,
+      model_key: TC_FEE_DASH_READ_MODEL_KEY
+    }, 503, {
+      'Cache-Control': 'no-store',
+      'Retry-After': '60'
+    });
+  }
+
+  const headers = {
+    'Cache-Control': 'public, max-age=300',
+    ...(!model.stale ? { ETag: model.etag } : {}),
+    'X-Boone-Cache': model.stale ? 'read-model-stale' : 'read-model',
+    'X-Boone-Age': String(model.ageSeconds ?? 0)
+  };
+  if (!model.stale && String(request?.headers?.['if-none-match'] || '') === model.etag) {
+    return json({}, 304, headers);
+  }
+
+  return json(model.stale ? {
+    ...model.payload,
     meta: {
-      source: 'boonetools-postgres',
-      metric: period === 'day'
-        ? 'tc_fees_per_billion_cmc_plus_dune_exchange_volume'
-        : 'tc_fees_per_billion_global_exchange_volume',
-      period,
-      volumeScope: period === 'day'
-        ? 'CMC historical global volume plus Dune indexed DEX exchange volume'
-        : 'Global exchange volume, CEX plus DEX',
-      incomeVolumeScope: 'Midgard liquidity fees divided by Midgard THORChain swap volume',
-      updatedAt: new Date().toISOString(),
-      ...summarizeTcFeeDashRows(rows)
-    },
-    rows
-  });
+      ...(model.payload?.meta || {}),
+      stale: true,
+      warning: model.payload?.meta?.warning || 'Serving the last successful TC Fee Dash snapshot'
+    }
+  } : model.payload, 200, headers);
 }

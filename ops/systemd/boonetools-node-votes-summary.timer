@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh the BooneTools Node Votes live summary every minute
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=1min
+AccuracySec=5s
+Persistent=true
+Unit=boonetools-node-votes-summary.service
+
+[Install]
+WantedBy=timers.target

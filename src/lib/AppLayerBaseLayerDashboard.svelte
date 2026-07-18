@@ -170,7 +170,9 @@
   ];
 
   let weeklyRows = [];
+  let reserveDailyRows = [];
   let reserveEvents = [];
+  let reserveRecentEvents = [];
   let staticWeeklyRows = [];
   let staticReserveEvents = [];
   let staticReserveMeta = null;
@@ -260,10 +262,12 @@
   });
 
   $: latestWeek = weeklyRows.at(-1) || null;
-  $: firstEvent = reserveEvents[0] || null;
-  $: latestEvent = reserveEvents.at(-1) || null;
-  $: recentEvents = reserveEvents.slice(-8).reverse();
   $: reservePaymentMeta = meta || {};
+  $: reserveFirstPaymentAt = reservePaymentMeta.firstPaymentAt || reserveEvents[0]?.date || null;
+  $: reserveLatestPaymentAt = reservePaymentMeta.latestPaymentAt || reserveEvents.at(-1)?.date || null;
+  $: recentEvents = reserveRecentEvents.length
+    ? reserveRecentEvents.slice(0, 8)
+    : reserveEvents.slice(-8).reverse();
   $: reservePaymentPendingBlocks = Number(reservePaymentMeta.pendingBlockCount || 0);
   $: reservePaymentBackfillLabel = reservePaymentMeta.backfillComplete
     ? 'backfill complete'
@@ -426,7 +430,7 @@
   }
 
   $: collectedPick = pickAggRows(inflows, granularity.collected);
-  $: paidPick = pickPaidRows(reserveEvents, weeklyRows, granularity.paid);
+  $: paidPick = pickPaidRows(reserveEvents, weeklyRows, granularity.paid, reserveDailyRows);
   $: generatedPick = pickAggRows(generatedFees, granularity.generated);
 
   $: if (collectedCanvas && collectedPick.rows.length) renderCollectedChart(collectedPick, view.collected);
@@ -438,12 +442,13 @@
     if (dashboardRefreshRunning) return;
     dashboardRefreshRunning = true;
     try {
-      await Promise.all([
+      const results = await Promise.all([
         refreshLiveState(),
         refreshBaseLayerEarnings(),
         refreshReservePayments(),
         refreshGeneratedFees()
       ]);
+      return results.every(Boolean);
     } finally {
       dashboardRefreshRunning = false;
     }
@@ -453,9 +458,12 @@
     let refreshTimer;
     let mounted = true;
 
-    loadArtifacts().then(async () => {
+    refreshDashboard().then(async (complete) => {
       if (!mounted) return;
-      await refreshDashboard();
+      if (!complete) {
+        await loadArtifacts();
+        if (mounted) await refreshDashboard();
+      }
       if (mounted) refreshTimer = window.setInterval(refreshDashboard, 120_000);
     });
 
@@ -530,6 +538,7 @@
       if (payload?.meta?.stale) {
         inflowsWarning = `Base Layer earnings backend is stale as of ${formatDateTime(payload.meta.generatedAt)}`;
       }
+      return true;
     } catch (error) {
       if (inflows?.meta?.live) {
         inflowsWarning = `Base Layer earnings backend — ${error.message}; using last successful backend payload from ${formatDateTime(inflows.meta.generatedAt)}`;
@@ -538,6 +547,7 @@
       } else {
         inflowsError = `Base Layer earnings backend — ${error.message}`;
       }
+      return false;
     } finally {
       inflowsLoading = false;
     }
@@ -556,7 +566,9 @@
       const dbEventCount = Number(payload?.meta?.eventCount || 0);
       if (staticEventCount > dbEventCount && !payload?.meta?.backfillComplete && staticWeeklyRows.length) {
         weeklyRows = staticWeeklyRows;
+        reserveDailyRows = [];
         reserveEvents = staticReserveEvents;
+        reserveRecentEvents = staticReserveEvents.slice().reverse();
         meta = {
           ...staticReserveMeta,
           dbBackfill: payload.meta || {},
@@ -568,19 +580,28 @@
         return;
       }
       weeklyRows = payload.weekly;
+      reserveDailyRows = Array.isArray(payload.daily) ? payload.daily : [];
       reserveEvents = payload.events.map((event) => normalizeReserveEvent(event, payload.weekly));
+      reserveRecentEvents = (Array.isArray(payload.recent_events)
+        ? payload.recent_events
+        : payload.events.slice().reverse())
+        .map((event) => normalizeReserveEvent(event, payload.weekly));
       meta = payload.meta || {};
+      return true;
     } catch (error) {
       if (weeklyRows.length) {
         reservePaymentsWarning = `reserve-payment DB — ${error.message}; using last successful payload`;
       } else if (staticWeeklyRows.length) {
         weeklyRows = staticWeeklyRows;
+        reserveDailyRows = [];
         reserveEvents = staticReserveEvents;
+        reserveRecentEvents = staticReserveEvents.slice().reverse();
         meta = staticReserveMeta;
         reservePaymentsWarning = `reserve-payment DB — ${error.message}; using ${staticArtifactLabel(staticReserveMeta)}`;
       } else {
         reservePaymentsError = `reserve-payment DB — ${error.message}`;
       }
+      return false;
     } finally {
       reservePaymentsLoading = false;
     }
@@ -596,6 +617,7 @@
         throw new Error('invalid generated-fee payload');
       }
       generatedFees = payload;
+      return true;
     } catch (error) {
       if (generatedFees) {
         generatedFeesWarning = `generated-fee DB — ${error.message}; using last successful payload`;
@@ -605,6 +627,7 @@
       } else {
         generatedFeesError = `generated-fee DB — ${error.message}`;
       }
+      return false;
     } finally {
       generatedFeesLoading = false;
     }
@@ -626,8 +649,10 @@
       histories = liveState.histories || {};
       liveRouteWarning = liveState.warning || '';
       lastLiveRefresh = new Date(liveState.as_of || liveState.fetched_at || Date.now());
+      return true;
     } catch (error) {
       liveError = error.message;
+      return false;
     } finally {
       liveLoading = false;
     }
@@ -1019,8 +1044,8 @@
     <p class="block-lede">
       RESERVE deposits from the Base Layer collector, valued as RUNE deposited × the historical
       RUNE/USD rate at the time of each deposit rather than its current value. Range:
-      {#if firstEvent && latestEvent}
-        {formatWeekLabel(firstEvent.date.slice(0, 10))} → {formatWeekLabel(latestEvent.date.slice(0, 10))}.
+      {#if reserveFirstPaymentAt && reserveLatestPaymentAt}
+        {formatWeekLabel(reserveFirstPaymentAt.slice(0, 10))} → {formatWeekLabel(reserveLatestPaymentAt.slice(0, 10))}.
       {:else}
         loading.
       {/if}

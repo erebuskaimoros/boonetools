@@ -1,28 +1,12 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
 
-  import { thornode } from './api/thornode.js';
-  import { midgard } from './api/midgard.js';
-  import { fetchNodeVotesDashboard } from './node-votes/api.js';
-  import { fetchNetworkSnapshot, fetchStuckTransactions } from './status/api.js';
-  import {
-    buildChainStatuses,
-    buildChurnStatus,
-    getGovernanceVotes,
-    getRecentStatusUpdates,
-    summarizeNetwork
-  } from './status/model.js';
+  import { fetchStatusDashboard } from './status/api.js';
 
   const REFRESH_INTERVAL_MS = 60_000;
   const number = new Intl.NumberFormat('en-US');
 
-  let inboundAddresses = [];
-  let mimir = {};
-  let lastBlocks = [];
-  let nodes = [];
-  let churns = [];
-  let stuckDashboard = null;
-  let voteDashboard = null;
+  let dashboard = null;
   let lastUpdated = null;
   let loading = true;
   let refreshing = false;
@@ -32,15 +16,33 @@
   let stuckError = '';
   let refreshTimer;
 
-  $: chainStatuses = buildChainStatuses(inboundAddresses, mimir, lastBlocks);
-  $: networkSummary = summarizeNetwork(chainStatuses);
-  $: activeNodes = nodes.filter((node) => node.status === 'Active');
-  $: networkVersion = getMajorityVersion(activeNodes);
-  $: thorchainHeight = Math.max(0, ...lastBlocks.map((row) => Number(row.thorchain || 0)));
-  $: churnStatus = buildChurnStatus(mimir, thorchainHeight, churns, activeNodes);
-  $: voteRows = voteDashboard?.by_vote || [];
-  $: governanceVotes = getGovernanceVotes(voteRows);
-  $: statusUpdates = getRecentStatusUpdates(voteRows);
+  $: chainStatuses = dashboard?.chains || [];
+  $: networkSummary = dashboard?.network?.summary || {
+    total: 0,
+    tradingEnabled: 0,
+    depositsEnabled: 0,
+    withdrawalsEnabled: 0,
+    lpEnabled: 0,
+    lpPartial: 0,
+    signingEnabled: 0,
+    degradedChains: [],
+    tone: 'err',
+    label: 'Unavailable'
+  };
+  $: activeNodeCount = Number(dashboard?.network?.active_node_count || 0);
+  $: networkVersion = dashboard?.network?.majority_version || '-';
+  $: thorchainHeight = Number(dashboard?.network?.height || 0);
+  $: churnStatus = dashboard?.churn || {
+    isPaused: false,
+    mimirValue: 0,
+    lastChurnHeight: 0,
+    lastChurnTimestampMs: 0,
+    blocksSince: 0,
+    estimated: true
+  };
+  $: governanceVotes = dashboard?.votes?.governance || [];
+  $: statusUpdates = dashboard?.votes?.status_updates || [];
+  $: stuckDashboard = dashboard?.stuck_transactions || null;
   $: stuckTransactions = stuckDashboard?.transactions || [];
   $: hasStuckTransactions = stuckTransactions.length > 0 || Number(stuckDashboard?.count || 0) > 0;
   $: haltedChains = chainStatuses.filter((chain) => chain.trading === 'paused').map((chain) => chain.chain);
@@ -52,41 +54,10 @@
 
   onDestroy(() => clearInterval(refreshTimer));
 
-  async function fetchDirectNetworkSnapshot() {
-    const fields = [
-      { key: 'inbound_addresses', request: () => thornode.getInboundAddresses({ cache: false }), fallback: [] },
-      { key: 'nodes', request: () => thornode.getNodes({ cache: false }), fallback: [] },
-      { key: 'mimir', request: () => thornode.getAllMimir({ cache: false }), fallback: {} },
-      { key: 'lastblock', request: () => thornode.fetch('/thorchain/lastblock', { cache: false }), fallback: [] },
-      { key: 'churns', request: () => midgard.getChurns({ cache: false }), fallback: [] }
-    ];
-    const results = await Promise.allSettled(fields.map((field) => field.request()));
-    const payload = { errors: {}, partial: false };
-
-    results.forEach((result, index) => {
-      const { key, fallback } = fields[index];
-      if (result.status === 'fulfilled') {
-        payload[key] = result.value;
-      } else {
-        payload[key] = fallback;
-        payload.errors[key] = result.reason?.message || `${key} is unavailable`;
-      }
-    });
-
-    if (Object.keys(payload.errors).length === fields.length) {
-      throw new Error(`Live network status is unavailable: ${Object.values(payload.errors).join('; ')}`);
-    }
-
-    payload.partial = Object.keys(payload.errors).length > 0;
-    return payload;
-  }
-
   async function loadStatus(options = {}) {
     if (!options.silent) {
       loading = chainStatuses.length === 0;
       refreshing = chainStatuses.length > 0;
-      thornode.clearCache();
-      midgard.clearCache();
     }
 
     coreError = '';
@@ -94,53 +65,24 @@
     churnError = '';
     stuckError = '';
 
-    const [coreResult, votesResult, stuckResult] = await Promise.allSettled([
-      fetchNetworkSnapshot({ forceRefresh: !options.silent }).catch(fetchDirectNetworkSnapshot),
-      fetchNodeVotesDashboard({ days: 45, forceRefresh: !options.silent }),
-      fetchStuckTransactions({ forceRefresh: !options.silent })
-    ]);
-
-    if (coreResult.status === 'fulfilled') {
-      inboundAddresses = coreResult.value.inbound_addresses || [];
-      nodes = coreResult.value.nodes || [];
-      mimir = coreResult.value.mimir || {};
-      lastBlocks = coreResult.value.lastblock || [];
-      churns = coreResult.value.churns || [];
-      const snapshotErrors = coreResult.value.errors || {};
-      const coreMessages = ['inbound_addresses', 'nodes', 'mimir', 'lastblock']
-        .map((key) => snapshotErrors[key])
-        .filter(Boolean);
-      coreError = coreMessages.join('; ') || (coreResult.value.stale ? coreResult.value.warning : '');
-      churnError = snapshotErrors.churns || '';
-      const snapshotTime = Date.parse(coreResult.value.as_of || '');
+    try {
+      const nextDashboard = await fetchStatusDashboard({ forceRefresh: !options.silent });
+      dashboard = nextDashboard;
+      const warnings = Array.isArray(nextDashboard?.warnings) ? nextDashboard.warnings : [];
+      coreError = nextDashboard?.partial || nextDashboard?.stale ? warnings.join('; ') : '';
+      votesError = nextDashboard?.votes ? '' : 'Vote and Mimir history is unavailable.';
+      churnError = nextDashboard?.churn ? '' : 'Churn history is unavailable.';
+      stuckError = nextDashboard?.stuck_transactions?.partial
+        ? `${nextDashboard.stuck_transactions.failed_lookups || 0} transaction lookups failed; this scan may be incomplete.`
+        : '';
+      const snapshotTime = Date.parse(nextDashboard?.as_of || '');
       lastUpdated = Number.isFinite(snapshotTime) ? new Date(snapshotTime) : new Date();
-    } else {
-      coreError = coreResult.reason?.message || 'Live THORNode status is unavailable.';
-    }
-
-    if (votesResult.status === 'fulfilled') {
-      voteDashboard = votesResult.value;
-    } else {
-      votesError = votesResult.reason?.message || 'Vote and Mimir history is unavailable.';
-    }
-
-    if (stuckResult.status === 'fulfilled') {
-      stuckDashboard = stuckResult.value;
-    } else {
-      stuckError = stuckResult.reason?.message || 'Stuck transaction scan is unavailable.';
+    } catch (loadError) {
+      coreError = loadError?.message || 'Cached network status is unavailable.';
     }
 
     loading = false;
     refreshing = false;
-  }
-
-  function getMajorityVersion(rows) {
-    const counts = new Map();
-    for (const row of rows) {
-      if (!row.version) continue;
-      counts.set(row.version, (counts.get(row.version) || 0) + 1);
-    }
-    return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || '-';
   }
 
   function formatDateTime(value) {
@@ -308,7 +250,7 @@
       <div class="metric">
         <span class="metric-index">02</span>
         <span class="metric-label">Active Nodes</span>
-        <strong>{number.format(activeNodes.length)}</strong>
+        <strong>{number.format(activeNodeCount)}</strong>
         <small>version {networkVersion}</small>
       </div>
       <div class="metric">

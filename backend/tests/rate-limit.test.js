@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  createConcurrencyLimiter,
   createFixedWindowRateLimiter,
   getRequestClientId
 } from '../src/lib/rate-limit.js';
@@ -49,4 +50,31 @@ test('fixed-window limiter evicts the oldest live bucket at its memory cap', () 
   // The first live bucket was evicted to keep the map bounded, so this client
   // starts a fresh window rather than retaining its previous count forever.
   assert.equal(check(requestFor('192.0.2.0')).allowed, true);
+});
+
+test('fixed-window limiter charges weighted route costs', () => {
+  const check = createFixedWindowRateLimiter({ maxRequests: 5, now: () => 1_000 });
+  const request = { headers: {}, socket: { remoteAddress: '127.0.0.1' } };
+
+  const first = check(request, 3);
+  assert.equal(first.allowed, true);
+  assert.equal(first.cost, 3);
+  assert.equal(first.remaining, 2);
+
+  const limited = check(request, 3);
+  assert.equal(limited.allowed, false);
+  assert.equal(limited.remaining, 0);
+});
+
+test('concurrency limiter rejects saturation and releases exactly once', () => {
+  const acquire = createConcurrencyLimiter();
+  const first = acquire('/expensive', 1);
+  assert.equal(first.allowed, true);
+  assert.equal(acquire('/expensive', 1).allowed, false);
+
+  first.release();
+  first.release();
+  const next = acquire('/expensive', 1);
+  assert.equal(next.allowed, true);
+  next.release();
 });

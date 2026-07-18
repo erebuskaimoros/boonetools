@@ -2,6 +2,8 @@ import { withAdvisoryLock } from '../db/lock.js';
 import { query } from '../db/pool.js';
 import { config } from '../lib/config.js';
 import { toIsoString } from '../lib/utils.js';
+import { ANALYTICS_READ_MODEL_KEYS } from './analytics-read-model-keys.js';
+import { publishReadModel } from './read-models.js';
 import { fetchThorchain } from './thornode.js';
 
 // The v2 snapshot adds per-collector balances and conversion actions. Keep it
@@ -200,6 +202,16 @@ export async function refreshAppLayerLiveState() {
   return withAdvisoryLock(LOCK_KEY, async (client) => {
     const payload = await fetchAppLayerLiveStatePayload();
     const snapshot = await writeCachedSnapshot(client, payload);
+    await publishReadModel(ANALYTICS_READ_MODEL_KEYS.appLayerLiveState, snapshot, {
+      client,
+      ttlMs: Math.max(config.appLayerLiveStateTtlMs, 5 * 60 * 1000),
+      schemaVersion: 1,
+      generatedAt: payload.as_of,
+      sourceUpdatedAt: payload.as_of,
+      metadata: {
+        route_query_failures: payload.route_query_failures?.length || 0
+      }
+    });
 
     return {
       ok: true,
@@ -208,6 +220,8 @@ export async function refreshAppLayerLiveState() {
     };
   });
 }
+
+export const refreshAppLayerLiveStateReadModel = refreshAppLayerLiveState;
 
 export async function getAppLayerLiveState() {
   const cached = await readCachedSnapshot();

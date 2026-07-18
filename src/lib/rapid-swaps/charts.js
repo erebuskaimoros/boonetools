@@ -1,4 +1,4 @@
-import { getRapidSwapComparableVolumeUsd } from './volume.js';
+import { getRapidSwapComparableVolumeUsd } from '../../../shared/rapid-swaps/volume.js';
 
 export function toChartDateKey(value) {
   const date = typeof value === 'string' ? new Date(value) : value;
@@ -21,20 +21,23 @@ export function dateFromChartDateKey(key) {
 }
 
 export function getChartDateRangeUnixSeconds(fromKey, toKey, options = {}) {
-  const fromDate = dateFromChartDateKey(fromKey);
-  const toDate = dateFromChartDateKey(toKey);
-  if (!fromDate || !toDate) {
+  const fromMatch = String(fromKey || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const toMatch = String(toKey || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!fromMatch || !toMatch) {
     return null;
   }
-
-  const endExclusive = new Date(
-    toDate.getFullYear(),
-    toDate.getMonth(),
-    toDate.getDate() + 1
-  );
+  const fromDate = dateFromChartDateKey(fromKey);
+  const toDate = dateFromChartDateKey(toKey);
+  const useUtc = options.utc === true;
+  const rangeStartMs = useUtc
+    ? Date.UTC(Number(fromMatch[1]), Number(fromMatch[2]) - 1, Number(fromMatch[3]))
+    : fromDate.getTime();
+  const rangeEndMs = useUtc
+    ? Date.UTC(Number(toMatch[1]), Number(toMatch[2]) - 1, Number(toMatch[3]) + 1)
+    : new Date(toDate.getFullYear(), toDate.getMonth(), toDate.getDate() + 1).getTime();
   const nowSec = Math.floor(Date.now() / 1000);
-  const rangeStart = Math.floor(fromDate.getTime() / 1000);
-  const rawRangeEnd = Math.floor(endExclusive.getTime() / 1000);
+  const rangeStart = Math.floor(rangeStartMs / 1000);
+  const rawRangeEnd = Math.floor(rangeEndMs / 1000);
   const clampToNow = options.clampToNow !== false;
   const rangeEnd = clampToNow ? Math.min(rawRangeEnd, nowSec) : rawRangeEnd;
 
@@ -190,4 +193,60 @@ export function computeDailyData(swaps, midgardHistory, allSwaps = swaps, option
   }
 
   return { labels, volume, cumVolume, count, cumCount, efficiency, pctFaster, volumePct, countPct };
+}
+
+export function computeDailyBucketData(buckets, midgardHistory, options = {}) {
+  const rows = (Array.isArray(buckets) ? buckets : [])
+    .map((bucket) => ({
+      ...bucket,
+      key: String(bucket?.bucket_start || '').slice(0, 10)
+    }))
+    .filter((bucket) => /^\d{4}-\d{2}-\d{2}$/.test(bucket.key))
+    .sort((left, right) => left.key.localeCompare(right.key));
+
+  if (!rows.length) {
+    return {
+      labels: [], volume: [], cumVolume: [], count: [], cumCount: [],
+      efficiency: [], pctFaster: [], volumePct: [], countPct: []
+    };
+  }
+
+  const midgardByDay = {};
+  for (const interval of midgardHistory?.intervals || []) {
+    const date = new Date(Number(interval.startTime) * 1000);
+    if (!Number.isFinite(date.getTime())) continue;
+    const key = date.toISOString().slice(0, 10);
+    if (!midgardByDay[key]) midgardByDay[key] = { volume: 0, count: 0 };
+    midgardByDay[key].volume += (Number(interval.totalVolumeUSD) || 0) / 1e2;
+    midgardByDay[key].count += Number(interval.totalCount) || 0;
+  }
+
+  let cumulativeVolume = Number(options.cumulativeVolumeBefore) || 0;
+  let cumulativeCount = Number(options.cumulativeCountBefore) || 0;
+  const output = {
+    labels: [], volume: [], cumVolume: [], count: [], cumCount: [],
+    efficiency: [], pctFaster: [], volumePct: [], countPct: []
+  };
+
+  for (const bucket of rows) {
+    const volume = Number(bucket.comparable_volume_usd) || 0;
+    const count = Number(bucket.swap_count) || 0;
+    const totalSubs = Number(bucket.total_subs) || 0;
+    const totalBlocks = Number(bucket.total_blocks_used) || 0;
+    const midgard = midgardByDay[bucket.key];
+    cumulativeVolume += volume;
+    cumulativeCount += count;
+
+    output.labels.push(formatChartLabel(bucket.key));
+    output.volume.push(volume);
+    output.cumVolume.push(cumulativeVolume);
+    output.count.push(count);
+    output.cumCount.push(cumulativeCount);
+    output.efficiency.push(totalBlocks > 0 ? +(totalSubs / totalBlocks).toFixed(2) : 1);
+    output.pctFaster.push(totalSubs > 0 ? +((1 - totalBlocks / totalSubs) * 100).toFixed(1) : 0);
+    output.volumePct.push(midgard?.volume > 0 ? +((volume / midgard.volume) * 100).toFixed(2) : null);
+    output.countPct.push(midgard?.count > 0 ? +((count / midgard.count) * 100).toFixed(2) : null);
+  }
+
+  return output;
 }

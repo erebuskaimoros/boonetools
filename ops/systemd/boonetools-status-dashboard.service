@@ -1,0 +1,17 @@
+[Unit]
+Description=BooneTools Compact Status Dashboard Read Model Scheduler
+After=network-online.target docker.service boonetools-api.service boonetools-node-votes-summary.service
+Wants=network-online.target docker.service boonetools-node-votes-summary.service
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/opt/boonetools-backend/backend
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--dns-result-order=ipv4first
+EnvironmentFile=/opt/boonetools-backend/backend/.env
+ExecStart=/usr/bin/node src/run-job.js status-dashboard-scheduler
+TimeoutStartSec=60s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=boonetools-status-dashboard

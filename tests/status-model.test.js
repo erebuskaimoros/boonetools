@@ -8,7 +8,7 @@ import {
   getRecentStatusUpdates,
   isHeightMimirActive,
   summarizeNetwork
-} from '../src/lib/status/model.js';
+} from '../shared/status/model.js';
 
 test('height Mimirs activate only after a positive activation height', () => {
   assert.equal(isHeightMimirActive(1, 100), true);

@@ -21,21 +21,15 @@ const ACTION_PAGE_LIMIT = 50;
 const RPC_REQUEST_TIMEOUT_MS = 10000;
 const CANONICAL_RESERVE_PAYMENT_EVENTS_CTE = `
 with canonical_events as (
-  select *
-  from (
-    select event.*,
-           row_number() over (
-             partition by height, tx_id, amount_base, sender, recipient, memo
-             order by
-               case when source = 'dune' then 0 else 1 end,
-               block_time desc,
-               updated_at desc,
-               event_key desc
-           ) as canonical_rank
-    from rujira_reserve_payment_events event
-  ) ranked
-  where canonical_rank = 1
+  -- Migration 026 makes canonical_key unique and source-precedence upserts
+  -- replace the preferred row atomically, so request-time window ranking is no
+  -- longer necessary.
+  select * from rujira_reserve_payment_events
 )`;
+
+const DEFAULT_DASHBOARD_EVENT_LIMIT = 100;
+const DEFAULT_EVENT_PAGE_SIZE = 50;
+const MAX_EVENT_PAGE_SIZE = 200;
 
 export const BASE_LAYER_REVENUE_COLLECTOR =
   'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
@@ -944,6 +938,28 @@ function normalizeWeeklyRows(rows) {
   });
 }
 
+function normalizeDailyPaymentRows(rows) {
+  let cumulativeRune = 0;
+  let cumulativeUsd = 0;
+  return rows.map((row) => {
+    const paymentRune = Number(row.payment_rune) || 0;
+    const paymentUsd = Number(row.payment_usd) || 0;
+    cumulativeRune += paymentRune;
+    cumulativeUsd += paymentUsd;
+    const dayStart = dateKey(row.day_start);
+    return {
+      day_start: dayStart,
+      day_end: dateKey(addDays(new Date(`${dayStart}T00:00:00.000Z`), 1)),
+      payments: Number(row.payments) || 0,
+      payment_rune: roundNumber(paymentRune, 8),
+      rune_price_usd: Number(row.rune_price_usd) || 0,
+      payment_usd: roundNumber(paymentUsd, 8),
+      cumulative_rune: roundNumber(cumulativeRune, 8),
+      cumulative_usd: roundNumber(cumulativeUsd, 8)
+    };
+  });
+}
+
 async function fetchDashboardStats(client) {
   const [blocks, events, actionSync, scheduleSync, listener] = await Promise.all([
     client.query(
@@ -959,6 +975,8 @@ async function fetchDashboardStats(client) {
               coalesce(sum(amount_usd), 0) as payment_usd,
               min(height)::bigint as min_height,
               max(height)::bigint as max_height,
+              min(block_time) as first_payment_at,
+              max(block_time) as latest_payment_at,
               max(updated_at) as updated_at
        from canonical_events`
     ),
@@ -994,8 +1012,98 @@ async function fetchDashboardStats(client) {
   };
 }
 
-export async function getRujiraReservePaymentsDashboardPayload(client = { query }) {
-  const [weeklyResult, recentResult, stats] = await Promise.all([
+function normalizeReservePaymentDashboardEvent(row) {
+  return {
+    event_key: String(row.event_key || ''),
+    height: Number(row.height) || 0,
+    date: toIsoString(row.block_time),
+    id: String(row.tx_id || ''),
+    amountBase: Number(row.amount_base) || 0,
+    amountRune: roundNumber(row.amount_rune, 8),
+    runePriceUsd: roundNumber(row.rune_price_usd, 8),
+    amountUsd: roundNumber(row.amount_usd, 8),
+    coin: String(row.coin || ''),
+    source: String(row.source || '')
+  };
+}
+
+function encodeReservePaymentCursor(row) {
+  if (!row?.block_time || !row?.event_key) return '';
+  return Buffer.from(JSON.stringify({
+    time: toIsoString(row.block_time),
+    height: Number(row.height) || 0,
+    key: String(row.event_key)
+  })).toString('base64url');
+}
+
+export function decodeReservePaymentCursor(value) {
+  if (!value) return null;
+  try {
+    const cursor = JSON.parse(Buffer.from(String(value), 'base64url').toString('utf8'));
+    const time = toIsoString(cursor?.time);
+    const height = Number(cursor?.height);
+    const key = String(cursor?.key || '');
+    if (!time || !Number.isFinite(height) || height < 0 || !key) return null;
+    return { time, height: Math.trunc(height), key };
+  } catch {
+    return null;
+  }
+}
+
+export async function getRujiraReservePaymentEventPage(client = { query }, options = {}) {
+  const limit = Math.min(
+    MAX_EVENT_PAGE_SIZE,
+    Math.max(1, Math.trunc(Number(options.limit) || DEFAULT_EVENT_PAGE_SIZE))
+  );
+  const cursor = decodeReservePaymentCursor(options.cursor);
+  if (options.cursor && !cursor) {
+    const error = new Error('Invalid reserve payment cursor');
+    error.status = 400;
+    throw error;
+  }
+
+  const params = [];
+  let cursorSql = '';
+  if (cursor) {
+    params.push(cursor.time, cursor.height, cursor.key);
+    cursorSql = `where (block_time, height, event_key) < ($1::timestamptz, $2::bigint, $3::text)`;
+  }
+  params.push(limit + 1);
+  const limitParam = `$${params.length}`;
+  const result = await client.query(
+    `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE}
+     select event_key, height, block_time, tx_id, amount_base, amount_rune,
+            rune_price_usd, amount_usd, coin, source
+     from canonical_events
+     ${cursorSql}
+     order by block_time desc, height desc, event_key desc
+     limit ${limitParam}`,
+    params
+  );
+
+  const hasNext = result.rows.length > limit;
+  const pageRows = result.rows.slice(0, limit);
+  return {
+    schema_version: 3,
+    events: pageRows.map(normalizeReservePaymentDashboardEvent),
+    pagination: {
+      limit,
+      returned: pageRows.length,
+      has_next: hasNext,
+      next_cursor: hasNext ? encodeReservePaymentCursor(pageRows.at(-1)) : ''
+    }
+  };
+}
+
+export async function getRujiraReservePaymentsDashboardPayload(client = { query }, options = {}) {
+  const includeAllEvents = options.includeAllEvents === true;
+  const eventLimit = includeAllEvents
+    ? null
+    : Math.min(
+        MAX_EVENT_PAGE_SIZE,
+        Math.max(1, Math.trunc(Number(options.eventLimit) || DEFAULT_DASHBOARD_EVENT_LIMIT))
+      );
+  const [weeklyResult, dailyResult, recentResult, stats] = await Promise.all([
     client.query(
       `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE}
        select date_trunc('week', block_time at time zone 'UTC')::date as week_start,
@@ -1014,20 +1122,44 @@ export async function getRujiraReservePaymentsDashboardPayload(client = { query 
     ),
     client.query(
       `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE}
+       select date_trunc('day', block_time at time zone 'UTC')::date as day_start,
+              count(*)::bigint as payments,
+              coalesce(sum(amount_rune), 0) as payment_rune,
+              coalesce(sum(amount_usd), 0) as payment_usd,
+              case
+                when coalesce(sum(amount_rune), 0) > 0
+                  then coalesce(sum(amount_usd), 0) / sum(amount_rune)
+                else coalesce(avg(nullif(rune_price_usd, 0)), 0)
+              end as rune_price_usd
+       from canonical_events
+       where block_time is not null
+       group by 1
+       order by 1 asc`
+    ),
+    client.query(
+      `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE}
        select event_key, height, block_time, tx_id, amount_base, amount_rune, rune_price_usd, amount_usd, coin, source
        from canonical_events
-       order by block_time asc, height asc`
+       order by block_time ${includeAllEvents ? 'asc' : 'desc'}, height ${includeAllEvents ? 'asc' : 'desc'}, event_key ${includeAllEvents ? 'asc' : 'desc'}
+       ${eventLimit == null ? '' : 'limit $1'}`,
+      eventLimit == null ? [] : [eventLimit]
     ),
     fetchDashboardStats(client)
   ]);
 
   const weekly = normalizeWeeklyRows(weeklyResult.rows);
+  const daily = normalizeDailyPaymentRows(dailyResult.rows);
   const blockCounts = stats.blockCounts || {};
   const totalBlocks = Object.values(blockCounts).reduce((sum, count) => sum + count, 0);
   const eventStats = stats.events || {};
   const sourceProvider = String(stats.actionSync?.stats_json?.source || '') === 'dune' ? 'dune' : 'legacy';
   const pendingBlockCount = blockCounts.pending || 0;
   const errorBlockCount = blockCounts.error || 0;
+  const fetchedEvents = recentResult.rows.map(normalizeReservePaymentDashboardEvent);
+  const compatibilityEvents = includeAllEvents ? fetchedEvents : [...fetchedEvents].reverse();
+  const recentEvents = includeAllEvents
+    ? fetchedEvents.slice(-DEFAULT_DASHBOARD_EVENT_LIMIT).reverse()
+    : fetchedEvents;
 
   return {
     schema_version: 2,
@@ -1062,6 +1194,8 @@ export async function getRujiraReservePaymentsDashboardPayload(client = { query 
       totalPaymentUsd: roundNumber(eventStats.payment_usd, 8),
       firstHeight: Number(eventStats.min_height) || 0,
       latestHeight: Number(eventStats.max_height) || 0,
+      firstPaymentAt: toIsoString(eventStats.first_payment_at),
+      latestPaymentAt: toIsoString(eventStats.latest_payment_at),
       updatedAt: toIsoString(eventStats.updated_at || stats.scheduleSync?.updated_at || stats.actionSync?.updated_at),
       wsListener: stats.listener
         ? {
@@ -1072,18 +1206,22 @@ export async function getRujiraReservePaymentsDashboardPayload(client = { query 
         : null
     },
     weekly,
-    events: recentResult.rows.map((row) => ({
-      event_key: String(row.event_key || ''),
-      height: Number(row.height) || 0,
-      date: toIsoString(row.block_time),
-      id: String(row.tx_id || ''),
-      amountBase: Number(row.amount_base) || 0,
-      amountRune: roundNumber(row.amount_rune, 8),
-      runePriceUsd: roundNumber(row.rune_price_usd, 8),
-      amountUsd: roundNumber(row.amount_usd, 8),
-      coin: String(row.coin || ''),
-      source: String(row.source || '')
-    }))
+    daily,
+    // Keep the compatibility field chronological, while making its bounded
+    // latest-event scope explicit. Charts should consume daily/weekly.
+    events: compatibilityEvents,
+    recent_events: recentEvents,
+    events_page: {
+      returned: recentResult.rows.length,
+      limit: eventLimit,
+      scope: eventLimit == null ? 'all' : 'latest',
+      order: 'ascending',
+      recent_events_order: 'descending',
+      has_more: eventLimit != null && Number(eventStats.event_count || 0) > recentResult.rows.length,
+      next_cursor: eventLimit != null && Number(eventStats.event_count || 0) > recentResult.rows.length
+        ? encodeReservePaymentCursor(recentResult.rows.at(-1))
+        : ''
+    }
   };
 }
 

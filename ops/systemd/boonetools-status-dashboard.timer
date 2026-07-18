@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh the BooneTools compact status dashboard every minute
+
+[Timer]
+OnBootSec=20
+OnUnitActiveSec=1min
+AccuracySec=5s
+Persistent=true
+Unit=boonetools-status-dashboard.service
+
+[Install]
+WantedBy=timers.target

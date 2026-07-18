@@ -13,6 +13,7 @@
     "check:surface": "node ./scripts/audit-frontend-surface.mjs --check",
     "check:svelte": "node ./scripts/check-svelte-diagnostics.mjs",
     "design:lint": "npx --yes @google/design.md@0.1.1 lint DESIGN.md",
+    "perf:smoke": "node ./scripts/perf-smoke.mjs",
     "backend:test": "npm --prefix ./backend test",
     "boonetools:deploy:frontend": "bash ./scripts/deploy-boonetools-frontend.sh",
     "boonetools:deploy:backend": "bash ./scripts/deploy-boonetools-backend.sh",

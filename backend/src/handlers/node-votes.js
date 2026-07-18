@@ -3,6 +3,10 @@ import { json, parseIntegerParam } from '../lib/http.js';
 import { toIsoString } from '../lib/utils.js';
 import { fetchNodes, fetchThorchain } from '../shared/thornode.js';
 import { NODE_VOTES_SYNC_KEY } from '../shared/node-votes.js';
+import { ANALYTICS_READ_MODEL_KEYS } from '../shared/analytics-read-model-keys.js';
+import { getReadModel } from '../shared/read-models.js';
+
+export const NODE_VOTES_READ_MODEL_KEY = ANALYTICS_READ_MODEL_KEYS.nodeVotes;
 
 const DEFAULT_DAYS = 183;
 const MAX_ROWS = 10000;
@@ -848,7 +852,7 @@ function buildStats(rows, latestRows, voteGroups, nodeGroups, activeNodeCount, o
   };
 }
 
-async function loadCurrentChainState() {
+export async function loadCurrentNodeVoteChainState() {
   const [mimirResult, nodesResult, nodeMimirResult] = await Promise.allSettled([
     fetchThorchain('/thorchain/mimir'),
     fetchNodes(),
@@ -865,6 +869,7 @@ async function loadCurrentChainState() {
   const activeNodeCount = activeNodes.length;
   const nodeMetadataByAddress = buildNodeMetadataByAddress(nodes);
   const currentNodeMimirsAvailable = (
+    mimirResult.status === 'fulfilled' &&
     nodeMimirResult.status === 'fulfilled' &&
     nodesResult.status === 'fulfilled'
   );
@@ -880,9 +885,9 @@ async function loadCurrentChainState() {
   };
 }
 
-async function loadBackendState() {
+async function loadBackendState(client = { query }) {
   const [backfillResult, wsResult, syncResult] = await Promise.all([
-    query(
+    client.query(
       `select started_at, finished_at, status, error, stats_json
        from node_vote_job_runs
        where job_name = $1
@@ -890,7 +895,7 @@ async function loadBackendState() {
        limit 1`,
       ['node-votes-backfill']
     ),
-    query(
+    client.query(
       `select started_at, finished_at, status, error, stats_json
        from node_vote_job_runs
        where job_name = $1
@@ -898,7 +903,7 @@ async function loadBackendState() {
        limit 1`,
       ['node-votes-ws-listener']
     ),
-    query(
+    client.query(
       `select start_height, last_scanned_height, end_height, start_time, end_time, complete, updated_at, stats_json
        from node_vote_sync_state
        where sync_key = $1
@@ -947,69 +952,341 @@ async function loadBackendState() {
   };
 }
 
-export async function handleNodeVotes(_request, url) {
-  const explicitDays = url.searchParams.has('days');
-  const days = parseIntegerParam(url.searchParams.get('days'), DEFAULT_DAYS, {
-    min: 1,
-    max: 366
-  });
-  const backend = await loadBackendState();
-  const since = explicitDays
-    ? new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
-    : (
-        backend.sync?.start_time ||
-        subtractMonths(new Date(), 6).toISOString()
-      );
+function isEnabled(value) {
+  return ['1', 'true', 'yes'].includes(String(value || '').trim().toLowerCase());
+}
 
-  const [rowsResult, chainState] = await Promise.all([
-    query(
-      `select event_key, tx_id, height, block_time, event_index, node_address,
-              node_operator_address, node_status, mimir_key, vote_value,
-              vote_value_numeric, source, observed_at
-       from node_votes
-       where block_time is null or block_time >= $1
-       order by block_time desc nulls last, height desc, tx_id desc, event_index desc
-       limit $2`,
-      [since, MAX_ROWS]
-    ),
-    loadCurrentChainState()
-  ]);
+function deriveChainStateFromRows(rows) {
+  const latestByNode = new Map();
+  for (const row of sortRowsAsc(rows)) latestByNode.set(row.node_address, row);
+  const activeNodes = [...latestByNode.values()]
+    .filter((row) => row.node_status === 'Active')
+    .map((row) => ({
+      node_address: row.node_address,
+      operator_address: row.operator_address || row.node_address
+    }))
+    .sort((left, right) => left.operator_address.localeCompare(right.operator_address));
+  return {
+    currentMimirValues: {},
+    currentNodeMimirsByKey: {},
+    currentNodeMimirsAvailable: false,
+    activeNodeCount: activeNodes.length,
+    activeNodes,
+    source: 'stored-node-vote-metadata'
+  };
+}
 
-  const rows = rowsResult.rows.map(normalizeVoteRow);
+function compactVoteGroup(group) {
+  const { node_votes, vote_history, effective_history, ...summary } = group;
+  return {
+    ...summary,
+    effective_history: Array.isArray(effective_history) ? effective_history.slice(0, 20) : [],
+    detail: {
+      node_vote_count: Array.isArray(node_votes) ? node_votes.length : 0,
+      event_count: Array.isArray(vote_history) ? vote_history.length : 0,
+      effective_change_count: Array.isArray(effective_history) ? effective_history.length : 0
+    }
+  };
+}
+
+function compactNodeGroup(group) {
+  const { vote_history, ...summary } = group;
+  return {
+    ...summary,
+    detail: {
+      event_count: Array.isArray(vote_history) ? vote_history.length : 0
+    }
+  };
+}
+
+async function loadNodeVoteRows(client, since) {
+  const result = await client.query(
+    `select event_key, tx_id, height, block_time, event_index, node_address,
+            node_operator_address, node_status, mimir_key, vote_value,
+            vote_value_numeric, source, observed_at
+     from node_votes
+     where block_time is null or block_time >= $1
+     order by block_time desc nulls last, height desc, tx_id desc, event_index desc
+     limit $2`,
+    [since, MAX_ROWS]
+  );
+  return result.rows.map(normalizeVoteRow);
+}
+
+async function buildNodeVotesPayload(client, options = {}) {
+  const now = options.now instanceof Date ? options.now : new Date();
+  const days = Math.min(366, Math.max(1, Number(options.days) || DEFAULT_DAYS));
+  const backend = await loadBackendState(client);
+  const since = options.since || backend.sync?.start_time || subtractMonths(now, 6).toISOString();
+  const rows = await loadNodeVoteRows(client, since);
+  let chainState = options.chainState || null;
+  if (!chainState && options.allowProvider === true) {
+    chainState = await loadCurrentNodeVoteChainState();
+    chainState.source = 'thornode';
+  }
+  chainState ||= deriveChainStateFromRows(rows);
+
   const latestRows = latestVoteStances(rows);
   const operationalVotesMin = parseOperationalVotesMin(chainState.currentMimirValues);
   const byVote = buildVoteGroups(
     rows,
     latestRows,
-    chainState.currentMimirValues,
-    chainState.activeNodeCount,
+    chainState.currentMimirValues || {},
+    Number(chainState.activeNodeCount) || 0,
     operationalVotesMin,
-    chainState.currentNodeMimirsByKey,
-    {
-      currentNodeMimirsAvailable: chainState.currentNodeMimirsAvailable
-    }
+    chainState.currentNodeMimirsByKey || {},
+    { currentNodeMimirsAvailable: Boolean(chainState.currentNodeMimirsAvailable) }
   );
   const byNode = buildNodeGroups(rows, latestRows);
-
-  return json(
-    {
-      as_of: new Date().toISOString(),
+  return {
+    payload: {
+      schema_version: 3,
+      as_of: now.toISOString(),
       window: {
-        days: explicitDays ? days : null,
+        days,
         since,
         returned_rows: rows.length,
         truncated: rows.length >= MAX_ROWS
       },
-      stats: buildStats(rows, latestRows, byVote, byNode, chainState.activeNodeCount, operationalVotesMin),
-      active_nodes: chainState.activeNodes,
-      by_vote: byVote,
-      by_node: byNode,
-      latest_events: rows.slice(0, 50),
-      backend
+      stats: buildStats(
+        rows,
+        latestRows,
+        byVote,
+        byNode,
+        Number(chainState.activeNodeCount) || 0,
+        operationalVotesMin
+      ),
+      active_nodes: chainState.activeNodes || [],
+      by_vote: options.compact === false ? byVote : byVote.map(compactVoteGroup),
+      by_node: options.compact === false ? byNode : byNode.map(compactNodeGroup),
+      latest_events: rows.slice(0, options.compact === false ? 50 : 20),
+      backend,
+      chain_state: {
+        source: chainState.source || 'unknown',
+        complete: Boolean(chainState.currentNodeMimirsAvailable),
+        current_mimir_values: chainState.currentMimirValues || {},
+        active_node_count: Number(chainState.activeNodeCount) || 0
+      }
     },
-    200,
-    {
-      'Cache-Control': 'public, max-age=30'
+    sourceUpdatedAt: rows[0]?.observed_at || rows[0]?.block_time || backend.sync?.updated_at || null,
+    generatedAt: now.toISOString(),
+    stats: {
+      events: rows.length,
+      vote_keys: byVote.length,
+      nodes: byNode.length,
+      chain_state_source: chainState.source || 'unknown'
     }
+  };
+}
+
+export async function buildNodeVotesSummaryPayload(client = { query }, options = {}) {
+  return buildNodeVotesPayload(client, { ...options, compact: true });
+}
+
+export async function buildNodeVotesLegacyPayload(client = { query }, options = {}) {
+  return buildNodeVotesPayload(client, {
+    ...options,
+    compact: false,
+    allowProvider: options.allowProvider !== false
+  });
+}
+
+function encodeNodeVoteCursor(row) {
+  if (!row?.event_key) return '';
+  return Buffer.from(JSON.stringify({
+    time: toIsoString(row.block_time) || '1970-01-01T00:00:00.000Z',
+    height: Number(row.height) || 0,
+    key: String(row.event_key)
+  })).toString('base64url');
+}
+
+function decodeNodeVoteCursor(value) {
+  if (!value) return null;
+  try {
+    const cursor = JSON.parse(Buffer.from(String(value), 'base64url').toString('utf8'));
+    const time = toIsoString(cursor?.time);
+    const height = Number(cursor?.height);
+    const key = String(cursor?.key || '');
+    if (!time || !Number.isFinite(height) || !key) return null;
+    return { time, height: Math.max(0, Math.trunc(height)), key };
+  } catch {
+    return null;
+  }
+}
+
+async function loadNodeVoteDetailPage({ column, value, cursor, limit }) {
+  const decoded = decodeNodeVoteCursor(cursor);
+  if (cursor && !decoded) {
+    const error = new Error('Invalid node-vote cursor');
+    error.status = 400;
+    throw error;
+  }
+  const safeLimit = Math.min(200, Math.max(1, Number(limit) || 50));
+  const params = [value];
+  let cursorSql = '';
+  if (decoded) {
+    params.push(decoded.time, decoded.height, decoded.key);
+    cursorSql = `and (coalesce(block_time, 'epoch'::timestamptz), height, event_key)
+      < ($2::timestamptz, $3::bigint, $4::text)`;
+  }
+  params.push(safeLimit + 1);
+  const result = await query(
+    `select event_key, tx_id, height, block_time, event_index, node_address,
+            node_operator_address, node_status, mimir_key, vote_value,
+            vote_value_numeric, source, observed_at
+     from node_votes
+     where ${column} = $1
+       ${cursorSql}
+     order by coalesce(block_time, 'epoch'::timestamptz) desc, height desc, event_key desc
+     limit $${params.length}`,
+    params
   );
+  const hasNext = result.rows.length > safeLimit;
+  const pageRows = result.rows.slice(0, safeLimit);
+  return {
+    events: pageRows.map(normalizeVoteRow),
+    pagination: {
+      limit: safeLimit,
+      returned: pageRows.length,
+      has_next: hasNext,
+      next_cursor: hasNext ? encodeNodeVoteCursor(pageRows.at(-1)) : ''
+    }
+  };
+}
+
+export async function handleNodeVoteDetails(_request, url) {
+  const key = normalizeMimirKey(url.searchParams.get('key') || url.searchParams.get('mimir_key'));
+  if (!key || key.length > 180) return json({ error: 'Valid Mimir key is required' }, 400);
+  const cursor = url.searchParams.get('cursor') || '';
+  if (cursor && !decodeNodeVoteCursor(cursor)) return json({ error: 'Invalid node-vote cursor' }, 400);
+  const model = await getReadModel(NODE_VOTES_READ_MODEL_KEY);
+  const [page, stancesResult] = await Promise.all([
+    loadNodeVoteDetailPage({
+      column: 'mimir_key',
+      value: key,
+      cursor,
+      limit: parseIntegerParam(url.searchParams.get('limit'), 50, { min: 1, max: 200 })
+    }),
+    query(
+      `with ranked as (
+         select event_key, tx_id, height, block_time, event_index, node_address,
+                node_operator_address, node_status, mimir_key, vote_value,
+                vote_value_numeric, source, observed_at,
+                count(*) over (partition by node_address) as event_count,
+                row_number() over (
+                  partition by node_address
+                  order by coalesce(block_time, 'epoch'::timestamptz) desc, height desc, event_key desc
+                ) as stance_rank
+         from node_votes
+         where mimir_key = $1
+       )
+       select * from ranked where stance_rank = 1
+       order by coalesce(block_time, 'epoch'::timestamptz) desc, height desc
+       limit 200`,
+      [key]
+    )
+  ]);
+  const summary = model?.payload?.by_vote?.find((row) => row.mimir_key === key) || null;
+  const nodeVotes = stancesResult.rows.map((row) => {
+    const normalized = normalizeVoteRow(row);
+    return {
+      node_address: normalized.node_address,
+      operator_address: normalized.operator_address,
+      node_status: normalized.node_status,
+      vote_value: isVoteRemoval(normalized) ? null : normalized.vote_value,
+      latest_action_value: normalized.vote_value,
+      vote_removed: isVoteRemoval(normalized),
+      event_count: Number(row.event_count) || 0,
+      block_time: normalized.block_time,
+      height: normalized.height,
+      tx_id: normalized.tx_id
+    };
+  });
+  return json({
+    schema_version: 3,
+    mimir_key: key,
+    summary,
+    ...page,
+    node_votes: nodeVotes,
+    vote_history: voteEventHistoryRows(page.events),
+    effective_history: summary?.effective_history || []
+  }, 200, { 'Cache-Control': 'public, max-age=30' });
+}
+
+export async function handleNodeVoteNodeDetails(_request, url) {
+  const address = String(url.searchParams.get('address') || url.searchParams.get('node_address') || '').trim();
+  if (!/^thor[a-z0-9]{20,80}$/i.test(address)) {
+    return json({ error: 'Valid node address is required' }, 400);
+  }
+  const cursor = url.searchParams.get('cursor') || '';
+  if (cursor && !decodeNodeVoteCursor(cursor)) return json({ error: 'Invalid node-vote cursor' }, 400);
+  const model = await getReadModel(NODE_VOTES_READ_MODEL_KEY);
+  const page = await loadNodeVoteDetailPage({
+    column: 'node_address',
+    value: address,
+    cursor,
+    limit: parseIntegerParam(url.searchParams.get('limit'), 50, { min: 1, max: 200 })
+  });
+  return json({
+    schema_version: 3,
+    node_address: address,
+    summary: model?.payload?.by_node?.find((row) => row.node_address === address) || null,
+    ...page,
+    vote_history: voteEventHistoryRows(page.events)
+  }, 200, { 'Cache-Control': 'public, max-age=30' });
+}
+
+export async function handleNodeVotesSummary(request, _url) {
+  const model = await getReadModel(NODE_VOTES_READ_MODEL_KEY);
+  if (!model) {
+    return json({
+      error: 'Node votes snapshot is warming',
+      retryable: true,
+      model_key: NODE_VOTES_READ_MODEL_KEY
+    }, 503, { 'Cache-Control': 'no-store', 'Retry-After': '30' });
+  }
+  const headers = {
+    'Cache-Control': 'public, max-age=30',
+    ...(!model.stale ? { ETag: model.etag } : {}),
+    'X-Boone-Cache': model.stale ? 'read-model-stale' : 'read-model',
+    'X-Boone-Age': String(model.ageSeconds ?? 0)
+  };
+  if (!model.stale && String(request?.headers?.['if-none-match'] || '') === model.etag) {
+    return json({}, 304, headers);
+  }
+  return json(model.stale ? {
+    ...model.payload,
+    stale: true,
+    warning: model.payload?.warning || 'Serving the last successful node-votes snapshot'
+  } : model.payload, 200, headers);
+}
+
+export async function handleNodeVotes(request, url) {
+  const view = String(url.searchParams.get('view') || '').toLowerCase();
+  if (view === 'vote') return handleNodeVoteDetails(request, url);
+  if (view === 'node') return handleNodeVoteNodeDetails(request, url);
+  if (isEnabled(url.searchParams.get('compact'))) {
+    return handleNodeVotesSummary(request, url);
+  }
+
+  // Preserve the established endpoint for already-open hashed frontend
+  // bundles while the new UI moves to the additive compact summary route.
+  const days = parseIntegerParam(url.searchParams.get('days'), DEFAULT_DAYS, { min: 1, max: 366 });
+  const chainStateModel = await getReadModel(ANALYTICS_READ_MODEL_KEYS.nodeVotesChainState);
+  if (!chainStateModel) {
+    return json({
+      error: 'Node-vote compatibility snapshot is warming',
+      retryable: true,
+      model_key: ANALYTICS_READ_MODEL_KEYS.nodeVotesChainState
+    }, 503, { 'Cache-Control': 'no-store', 'Retry-After': '30' });
+  }
+  const result = await buildNodeVotesLegacyPayload(undefined, {
+    days,
+    since: url.searchParams.has('days')
+      ? new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
+      : undefined,
+    chainState: chainStateModel.payload,
+    allowProvider: false
+  });
+  return json(result.payload, 200, { 'Cache-Control': 'private, no-store' });
 }

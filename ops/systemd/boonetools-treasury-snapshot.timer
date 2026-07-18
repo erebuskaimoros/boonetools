@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh BooneTools Treasury read model every five minutes
+
+[Timer]
+OnBootSec=10s
+OnUnitActiveSec=5min
+AccuracySec=10s
+Persistent=true
+Unit=boonetools-treasury-snapshot.service
+
+[Install]
+WantedBy=timers.target

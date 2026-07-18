@@ -2,7 +2,7 @@ import { booneToolsApi } from '../api/boonetools.js';
 
 function fetchAppLayerEndpoint(path, options = {}) {
   return booneToolsApi.get(path, {
-    cache: 'no-store',
+    cache: options.forceRefresh ? 'no-cache' : undefined,
     signal: options.signal,
     preferPayloadError: false,
     errorMessage: ({ response, body }) => (

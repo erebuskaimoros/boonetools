@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getSeriesAxisBounds } from '../src/lib/rapid-swaps/charts.js';
+import { computeDailyBucketData, getSeriesAxisBounds } from '../src/lib/rapid-swaps/charts.js';
 
 const websiteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -250,6 +250,49 @@ test('computeDailyData can seed cumulative totals from backend aggregates', () =
   assert.deepEqual(result.cumCount, [2, 3]);
   assert.deepEqual(result.volume, [100, 298]);
   assert.deepEqual(result.cumVolume, [199, 497]);
+});
+
+test('computeDailyBucketData renders compact UTC aggregates with cumulative seeds', () => {
+  const result = computeDailyBucketData([
+    {
+      bucket_start: '2026-03-28T00:00:00.000Z',
+      swap_count: 2,
+      comparable_volume_usd: 300,
+      total_subs: 10,
+      total_blocks_used: 5
+    },
+    {
+      bucket_start: '2026-03-29T00:00:00.000Z',
+      swap_count: 3,
+      comparable_volume_usd: 450,
+      total_subs: 12,
+      total_blocks_used: 4
+    }
+  ], null, {
+    cumulativeCountBefore: 5,
+    cumulativeVolumeBefore: 700
+  });
+
+  assert.deepEqual(result.count, [2, 3]);
+  assert.deepEqual(result.cumCount, [7, 10]);
+  assert.deepEqual(result.cumVolume, [1000, 1450]);
+  assert.deepEqual(result.efficiency, [2, 3]);
+  assert.deepEqual(result.pctFaster, [50, 66.7]);
+});
+
+test('UTC bucket ranges stay aligned through a daylight-saving boundary', () => {
+  const script = `
+    import { getChartDateRangeUnixSeconds } from './src/lib/rapid-swaps/charts.js';
+    console.log(JSON.stringify(getChartDateRangeUnixSeconds('2026-03-08', '2026-03-09', { utc: true })));
+  `;
+  const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: websiteRoot,
+    env: { ...process.env, TZ: 'America/New_York' }
+  });
+  const result = JSON.parse(stdout.toString());
+
+  assert.equal(result.from, Date.UTC(2026, 2, 8) / 1000);
+  assert.equal(result.to, Date.UTC(2026, 2, 10) / 1000);
 });
 
 test('getSeriesAxisBounds keeps cumulative axes off zero when the visible range is already positive', () => {

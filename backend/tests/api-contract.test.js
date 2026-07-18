@@ -77,3 +77,43 @@ test('error responses remain backward-compatible', () => {
     url: new URL('http://localhost/missing?schema_version=2')
   }), result);
 });
+
+test('contract timestamps are stable when source time lives inside meta', () => {
+  const input = {
+    status: 200,
+    body: { rows: [1], meta: { generatedAt: '2026-07-17T12:34:56Z' } },
+    headers: { ETag: '"snapshot"' }
+  };
+  const options = {
+    route: '/app-layer-base-fees',
+    request: { headers: {} },
+    url: new URL('http://localhost/app-layer-base-fees')
+  };
+  const first = applyApiContract(input, { ...options, now: '2026-07-17T13:00:00Z' });
+  const second = applyApiContract(input, { ...options, now: '2026-07-18T13:00:00Z' });
+
+  assert.equal(first.body.meta.asOf, '2026-07-17T12:34:56.000Z');
+  assert.deepEqual(first.body, second.body);
+});
+
+test('ETags are representation-specific and conditional requests remain valid', () => {
+  const base = {
+    status: 200,
+    body: { rows: [1], as_of: '2026-07-17T12:00:00Z' },
+    headers: { ETag: '"snapshot"' }
+  };
+  const url = new URL('http://localhost/rapid-swaps');
+  const legacy = applyApiContract(base, { request: { headers: {} }, url });
+  const v2 = applyApiContract(base, {
+    request: { headers: { accept: API_V2_MEDIA_TYPE } },
+    url
+  });
+  assert.notEqual(legacy.headers.ETag, v2.headers.ETag);
+
+  const conditional = applyApiContract(base, {
+    request: { headers: { 'if-none-match': legacy.headers.ETag } },
+    url
+  });
+  assert.equal(conditional.status, 304);
+  assert.equal(conditional.body, null);
+});

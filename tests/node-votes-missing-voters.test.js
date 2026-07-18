@@ -25,3 +25,18 @@ test('findMissingVoters returns every active node when a key has no current vote
 
   assert.deepEqual(findMissingVoters(activeNodes, []), activeNodes);
 });
+
+test('findMissingVoters prefers complete detail stances over compact value samples', () => {
+  const activeNodes = Array.from({ length: 14 }, (_, index) => ({
+    node_address: `thor-node-${index + 1}`,
+    operator_address: `thor-operator-${index + 1}`
+  }));
+  const compactValues = [{ value: '1', nodes: activeNodes.slice(0, 12).map((node) => node.node_address) }];
+  const nodeVotes = activeNodes.map((node) => ({
+    node_address: node.node_address,
+    vote_value: '1',
+    vote_removed: false
+  }));
+
+  assert.deepEqual(findMissingVoters(activeNodes, compactValues, nodeVotes), []);
+});

@@ -5,10 +5,13 @@
   "exports": {
     "./blockchain": "./blockchain.js",
     "./provider-client": "./provider-client.js",
+    "./treasury/config": "./treasury/config.js",
+    "./treasury/model": "./treasury/model.js",
     "./rapid-swaps/backend": "./rapid-swaps/backend.js",
     "./rapid-swaps/ingestion": "./rapid-swaps/ingestion.js",
     "./rapid-swaps/model": "./rapid-swaps/model.js",
     "./rapid-swaps/reconciliation": "./rapid-swaps/reconciliation.js",
-    "./rapid-swaps/volume": "./rapid-swaps/volume.js"
+    "./rapid-swaps/volume": "./rapid-swaps/volume.js",
+    "./status/model": "./status/model.js"
   }
 }

@@ -7,8 +7,8 @@ import {
   normalizeRapidSwapHintAction,
   normalizeRapidSwapAction,
   rankRapidSwapsByUsd
-} from '../src/lib/rapid-swaps/model.js';
-import { getRapidSwapComparableVolumeUsd } from '../src/lib/rapid-swaps/volume.js';
+} from '../shared/rapid-swaps/model.js';
+import { getRapidSwapComparableVolumeUsd } from '../shared/rapid-swaps/volume.js';
 
 test('parseStreamingParamsFromMemo reads explicit rapid streaming params', () => {
   const details = parseStreamingParamsFromMemo('=:ETH.ETH:0xabc:2000000000/0/5');
