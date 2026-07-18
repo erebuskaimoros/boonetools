@@ -1,12 +1,11 @@
+import { TtlSingleFlightCache } from '../lib/ttl-cache.js';
 import { extractThorHeight, fetchThorchain } from './thornode.js';
 
 const CACHE_TTL_MS = 30_000;
 const STATUS_CONCURRENCY = 6;
 const MARKET_SWAP_GRACE_BLOCKS = 300;
 
-let cachedSnapshot = null;
-let cachedAt = 0;
-let refreshPromise = null;
+const snapshotCache = new TtlSingleFlightCache({ ttlMs: CACHE_TTL_MS });
 
 function numberValue(value) {
   const numeric = Number(value);
@@ -446,35 +445,16 @@ export async function buildStuckTransactionSnapshot(fetcher = fetchThorchain) {
 }
 
 export async function getStuckTransactionSnapshot() {
-  const now = Date.now();
-  if (cachedSnapshot && (now - cachedAt) < CACHE_TTL_MS) return cachedSnapshot;
-  if (refreshPromise) return refreshPromise;
-
-  refreshPromise = buildStuckTransactionSnapshot()
-    .then((snapshot) => {
-      cachedSnapshot = snapshot;
-      cachedAt = Date.now();
-      return snapshot;
+  return snapshotCache.getOrLoad('snapshot', buildStuckTransactionSnapshot, {
+    staleIfError: true,
+    onStale: (snapshot, error) => ({
+      ...snapshot,
+      stale: true,
+      warning: `Serving the last successful stuck-transaction scan: ${error.message}`
     })
-    .catch((error) => {
-      if (cachedSnapshot) {
-        return {
-          ...cachedSnapshot,
-          stale: true,
-          warning: `Serving the last successful stuck-transaction scan: ${error.message}`
-        };
-      }
-      throw error;
-    })
-    .finally(() => {
-      refreshPromise = null;
-    });
-
-  return refreshPromise;
+  });
 }
 
 export function resetStuckTransactionCache() {
-  cachedSnapshot = null;
-  cachedAt = 0;
-  refreshPromise = null;
+  snapshotCache.clear();
 }

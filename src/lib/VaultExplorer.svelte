@@ -3,6 +3,7 @@
   import { slide } from 'svelte/transition';
   import { formatNumber, formatUSD, formatUSDCompact, formatThorAmount, copyToClipboard as copyToClipboardUtil, shortenAddress as shortenAddressUtil, getAddressSuffix } from '$lib/utils/formatting';
   import { fromBaseUnit } from '$lib/utils/blockchain';
+  import { hideBrokenImage } from '$lib/utils/dom';
   import {
     CHAIN_ICONS,
     CHAIN_EXPLORERS,
@@ -265,7 +266,7 @@
         <section class="pool-section">
           <div class="pool-header">
             {#if getAssetLogo(pool.poolAsset)}
-              <img src={getAssetLogo(pool.poolAsset)} alt={pool.displayName} class="pool-icon" on:error={(e) => { e.target.style.display = 'none'; }} />
+              <img src={getAssetLogo(pool.poolAsset)} alt={pool.displayName} class="pool-icon" on:error={hideBrokenImage} />
             {/if}
             <a class="pool-name" href="https://thorchain.net/pool/{pool.poolAsset}" target="_blank" rel="noopener noreferrer">{pool.displayName}</a>
             {#if pool.status !== 'Available'}

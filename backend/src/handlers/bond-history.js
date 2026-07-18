@@ -2,12 +2,14 @@ import { getClient, query } from '../db/pool.js';
 import { upsertRows } from '../db/sql.js';
 import { error, isValidThorAddress, json } from '../lib/http.js';
 import { config } from '../lib/config.js';
+import { requestFromProviders } from '../lib/provider-client.js';
 import {
   calculateBondHistoryRow,
   hasBondHistoryValue,
   isPoisonedBondHistoryRow,
   isTransientHistoricalFetchError
 } from '../shared/bond-history.js';
+import { enqueueBondHistoryRefresh } from '../shared/bond-history-refresh-queue.js';
 import { fetchMidgardActions } from '../shared/midgard.js';
 import { executeDuneQueryRows, summarizeDuneError } from '../shared/dune.js';
 import { fetchStockPrices } from '../shared/stock-prices.js';
@@ -19,6 +21,16 @@ const BOND_HISTORY_SCOPE_LEGACY = 'legacy';
 const BOND_TX_EVENT_SYNC_TTL_MS = 6 * 60 * 60 * 1000;
 const BOND_TX_EVENT_PAGE_SIZE = 50;
 const BOND_TX_EVENT_MAX_PAGES = 20;
+const COINGECKO_BASE = 'https://api.coingecko.com';
+
+function fetchCoinGecko(path) {
+  return requestFromProviders({
+    bases: [COINGECKO_BASE],
+    path,
+    timeoutMs: 10_000,
+    headers: { Accept: 'application/json' }
+  });
+}
 
 async function fetchNodeAtHeight(nodeAddress, height) {
   return fetchThorchain(`/thorchain/node/${nodeAddress}?height=${height}`, { historical: true });
@@ -340,15 +352,15 @@ async function getAllNodeAddresses(bondAddress) {
 async function fetchRatesJson() {
   try {
     const [fiatResponse, cryptoResponse, stockResponse] = await Promise.allSettled([
-      fetch('https://api.coingecko.com/api/v3/simple/price?ids=thorchain&vs_currencies=eur,gbp,jpy,btc,xau'),
-      fetch('https://api.coingecko.com/api/v3/simple/price?ids=monero,zcash&vs_currencies=usd'),
+      fetchCoinGecko('/api/v3/simple/price?ids=thorchain&vs_currencies=eur,gbp,jpy,btc,xau'),
+      fetchCoinGecko('/api/v3/simple/price?ids=monero,zcash&vs_currencies=usd'),
       fetchStockPrices(['SPY', 'VT', 'GC=F'])
     ]);
 
     const rates = {};
 
-    if (fiatResponse.status === 'fulfilled' && fiatResponse.value.ok) {
-      const data = await fiatResponse.value.json();
+    if (fiatResponse.status === 'fulfilled') {
+      const data = fiatResponse.value;
       const thorchain = data?.thorchain;
       if (thorchain?.eur) rates.EUR = thorchain.eur;
       if (thorchain?.gbp) rates.GBP = thorchain.gbp;
@@ -357,8 +369,8 @@ async function fetchRatesJson() {
       if (thorchain?.xau) rates.XAU = thorchain.xau;
     }
 
-    if (cryptoResponse.status === 'fulfilled' && cryptoResponse.value.ok) {
-      const data = await cryptoResponse.value.json();
+    if (cryptoResponse.status === 'fulfilled') {
+      const data = cryptoResponse.value;
       if (data?.monero?.usd) rates.XMR_USD = data.monero.usd;
       if (data?.zcash?.usd) rates.ZEC_USD = data.zcash.usd;
     }
@@ -435,7 +447,9 @@ function cachedHistoryResponse({
   bondTxEvents = [],
   includeBondTxs = false,
   stale = false,
-  warning = ''
+  warning = '',
+  refreshStatus = '',
+  headers = {}
 }) {
   const filtered = filterCachedHistoryRows(cachedRows, minHeight);
   const payload = {
@@ -456,9 +470,13 @@ function cachedHistoryResponse({
   if (warning) {
     payload.warning = warning;
   }
+  if (refreshStatus) {
+    payload.refresh_status = refreshStatus;
+  }
 
   return json(payload, 200, {
-    'Cache-Control': stale ? 'public, max-age=15' : 'public, max-age=30'
+    'Cache-Control': stale ? 'public, max-age=15' : 'public, max-age=30',
+    ...headers
   });
 }
 
@@ -508,11 +526,14 @@ async function processChurn(bondAddress, nodeAddresses, churnHeight, churnTimest
   });
 }
 
-export async function handleBondHistory(_request, url) {
+export async function handleBondHistory(request, url) {
   const bondAddress = (url.searchParams.get('bond_address') || '').trim().toLowerCase();
   const includeHistorical = url.searchParams.get('include_historical') === 'true';
   const includeBondTxs = url.searchParams.get('include_bond_txs') === 'true';
   const scope = getHistoryScope(includeHistorical);
+  const refreshMode = String(url.searchParams.get('refresh') || '').toLowerCase();
+  const preferHeader = String(request?.headers?.prefer || request?.headers?.get?.('prefer') || '').toLowerCase();
+  const prefersAsync = preferHeader.split(',').some((value) => value.trim() === 'respond-async');
 
   if (!isValidThorAddress(bondAddress)) {
     return error('Invalid bond_address parameter', 400);
@@ -558,6 +579,103 @@ export async function handleBondHistory(_request, url) {
   const legacyCached = (legacyResult.rows || []).filter((row) => !isPoisonedBondHistoryRow(row));
   const historicalCached = (historicalResult.rows || []).filter((row) => !isPoisonedBondHistoryRow(row));
   const currentCached = (currentResult.rows || []).filter((row) => !isPoisonedBondHistoryRow(row));
+  const cached = (cachedResult.rows || []).filter((row) => !isPoisonedBondHistoryRow(row));
+
+  if (refreshMode === 'status') {
+    if (cached.length > 0) {
+      const cachedBondTxEvents = includeBondTxs ? await loadBondTxEvents(bondAddress) : [];
+      return cachedHistoryResponse({
+        bondAddress,
+        cachedRows: cached,
+        hasHistorical: inferHasHistoricalFromCache({
+          discoveredHasHistorical: false,
+          currentRows: currentCached,
+          historicalRows: historicalCached,
+          legacyRows: legacyCached
+        }),
+        minHeight: 0,
+        bondTxEvents: cachedBondTxEvents,
+        includeBondTxs
+      });
+    }
+
+    return json({
+      bond_address: bondAddress,
+      history: [],
+      has_historical: includeHistorical,
+      fetched: 0,
+      total: 0,
+      refresh_status: 'queued'
+    }, 202, { 'Cache-Control': 'no-store', 'Retry-After': '5' });
+  }
+
+  // Normal reads are cache-only and enqueue refresh work. The queue is keyed by
+  // address+scope, so hot dashboard traffic coalesces and never performs Dune,
+  // archive-node, or churn scans in the request path. Explicit refresh=sync is
+  // reserved for the worker and operational repair tooling.
+  if (refreshMode !== 'sync') {
+    try {
+      await enqueueBondHistoryRefresh({
+        bondAddress,
+        scope,
+        includeBondTxs
+      });
+
+      if (cached.length > 0) {
+        const cachedBondTxEvents = includeBondTxs ? await loadBondTxEvents(bondAddress) : [];
+        const hasHistorical = inferHasHistoricalFromCache({
+          discoveredHasHistorical: false,
+          currentRows: currentCached,
+          historicalRows: historicalCached,
+          legacyRows: legacyCached
+        });
+        return cachedHistoryResponse({
+          bondAddress,
+          cachedRows: cached,
+          hasHistorical,
+          minHeight: 0,
+          bondTxEvents: cachedBondTxEvents,
+          includeBondTxs,
+          refreshStatus: 'queued',
+          headers: prefersAsync ? { 'Preference-Applied': 'respond-async' } : {}
+        });
+      }
+
+      return json({
+        bond_address: bondAddress,
+        history: [],
+        has_historical: includeHistorical,
+        fetched: 0,
+        total: 0,
+        refresh_status: 'queued'
+      }, 202, {
+        'Cache-Control': 'no-store',
+        ...(prefersAsync ? { 'Preference-Applied': 'respond-async' } : {}),
+        'Retry-After': '5'
+      });
+    } catch (queueError) {
+      console.warn(`[bond-history] unable to queue refresh for ${bondAddress}: ${queueError.message}`);
+      if (cached.length > 0) {
+        const cachedBondTxEvents = includeBondTxs ? await loadBondTxEvents(bondAddress) : [];
+        return cachedHistoryResponse({
+          bondAddress,
+          cachedRows: cached,
+          hasHistorical: inferHasHistoricalFromCache({
+            discoveredHasHistorical: false,
+            currentRows: currentCached,
+            historicalRows: historicalCached,
+            legacyRows: legacyCached
+          }),
+          minHeight: 0,
+          bondTxEvents: cachedBondTxEvents,
+          includeBondTxs,
+          stale: true,
+          warning: 'Served cached history because the refresh queue is unavailable'
+        });
+      }
+      return error('Unable to queue bond history refresh', 503, { 'Retry-After': '10' });
+    }
+  }
 
   const {
     current: currentNodes,
@@ -594,7 +712,6 @@ export async function handleBondHistory(_request, url) {
     legacyRows: legacyCached
   });
 
-  const cached = (cachedResult.rows || []).filter((row) => !isPoisonedBondHistoryRow(row));
   const cachedHeights = new Set(
     cached
       .filter((row) => row.user_bond != null)
@@ -647,6 +764,7 @@ export async function handleBondHistory(_request, url) {
   uncached.sort((left, right) => right.height - left.height);
   const zeroThreshold = includeHistorical ? 5 : 2;
   const newRows = [];
+  let refreshPartial = false;
   let consecutiveZero = 0;
   const ratesJson = await fetchRatesJson();
 
@@ -656,6 +774,7 @@ export async function handleBondHistory(_request, url) {
       console.warn(
         `[bond-history] stopping historical backfill after transient fetch failure for ${bondAddress} at churn ${churn.height}`
       );
+      refreshPartial = true;
       break;
     }
 
@@ -727,6 +846,12 @@ export async function handleBondHistory(_request, url) {
     fetched: newRows.length,
     total: history.length
   };
+
+  if (refreshPartial) {
+    payload.stale = true;
+    payload.partial = true;
+    payload.warning = 'Historical refresh stopped after a transient upstream failure';
+  }
 
   if (includeBondTxs) {
     payload.bond_tx_map = buildBondTxMap(bondTxEvents, history);

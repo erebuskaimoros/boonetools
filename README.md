@@ -73,15 +73,34 @@ Do not commit real secrets. The committed env files are examples only:
 Frontend production builds use these public runtime values:
 
 ```bash
-VITE_NODEOP_API_BASE=https://boone.tools/functions/v1
-VITE_RAPID_SWAPS_API_BASE=https://boone.tools/functions/v1
-VITE_TC_FEE_DASH_API_BASE=https://boone.tools/functions/v1
-VITE_NODEOP_API_KEY=
-VITE_RAPID_SWAPS_API_KEY=
-VITE_TC_FEE_DASH_API_KEY=
+VITE_BOONETOOLS_API_BASE=https://boone.tools/functions/v1
+VITE_BOONETOOLS_API_KEY=
 ```
 
-Backend runtime values live in `backend/.env` on the server. Start from `backend/.env.example` and set real values there, including `DATABASE_URL`, `PUBLIC_API_KEY`, `DUNE_API_KEY`, and the CMC settings used by TC Fee Dash.
+All frontend features use this single origin/key pair. Existing `VITE_NODEOP_*`,
+`VITE_APP_LAYER_*`, `VITE_NODE_VOTES_*`, `VITE_RAPID_SWAPS_*`, and
+`VITE_TC_FEE_DASH_*` API variables remain supported as migration aliases, but
+new environments should not mix feature-specific origins or credentials.
+
+The shared frontend client unwraps versioned `{ data, meta }` responses so
+existing feature payloads stay compatible. Consumers that need the versioned
+transport metadata can call `getBooneToolsApiMeta(payload)` from
+`src/lib/api/boonetools.js`.
+
+Backend runtime values live in `backend/.env` on the server. Start from `backend/.env.example` and set real values there, including `DATABASE_URL`, `DUNE_API_KEY`, and the CMC settings used by TC Fee Dash. `PUBLIC_API_KEY` is retained only as a legacy optional client token; it is not access control because frontend values are public.
+
+All read-only `/functions/v1` routes are public and protected by backend request
+rate limiting. Successful responses retain their established shape and gain a
+standard `meta` object. Clients can request the versioned `{ data, meta }`
+envelope with `?schema_version=2` or `Accept:
+application/vnd.boonetools.v2+json`.
+
+Bond History serves existing cached rows immediately and coalesces refreshes in
+`bond_history_refresh_queue`. `boonetools-bond-history-refresh.timer` processes
+the queue under per-address advisory locks. All normal reads are cache-only:
+cold misses return `202` and the Bond Tracker polls the cache-only status path
+while the worker materializes the first snapshot. `refresh=sync` is reserved
+for the worker and operational repair tooling.
 
 Current Dune source queries:
 

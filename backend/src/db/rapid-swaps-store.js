@@ -1,9 +1,71 @@
 import { query } from './pool.js';
 import { upsertRows } from './sql.js';
 import {
+  choosePreferredSource,
+  EVENT_SOURCE_PRIORITY,
+  enrichEventRows,
+  recordEventSourceObservations,
+  selectPreferredEventRows,
+  withEventTransaction
+} from '../lib/provenance.js';
+import {
   normalizeRapidSwapHint,
   RAPID_SWAP_CANDIDATE_STATUS
 } from '../shared/rapid-swaps.js';
+
+function rapidSwapSource(row) {
+  return choosePreferredSource('', row?.raw_action?.source || row?.source || 'midgard');
+}
+
+async function upsertCanonicalRapidSwaps(client, rows) {
+  if (rows.length === 0) return;
+  const columns = Object.keys(rows[0]);
+  await upsertRows(client, 'rapid_swaps', rows, {
+    columns,
+    conflictColumns: ['canonical_key'],
+    updateColumns: columns.filter((column) => !['canonical_key', 'tx_id'].includes(column)),
+    updateStrategies: {
+      first_seen_at: 'least',
+      last_seen_at: 'greatest',
+      schema_version: 'greatest'
+    },
+    sourcePreference: {
+      column: 'preferred_source',
+      priorities: EVENT_SOURCE_PRIORITY,
+      observedAtColumn: 'last_seen_at'
+    },
+    jsonColumns: ['raw_action']
+  });
+}
+
+async function persistRapidSwaps(client, rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+
+  const enriched = await enrichEventRows(client, {
+    table: 'rapid_swaps',
+    rows,
+    canonicalKey: (row) => String(row.tx_id || '').trim().toUpperCase(),
+    source: rapidSwapSource,
+    observedAt: (row) => row.observed_at
+  });
+  const canonicalRows = selectPreferredEventRows(enriched);
+
+  await withEventTransaction(client, async () => {
+    await upsertCanonicalRapidSwaps(client, canonicalRows);
+    await recordEventSourceObservations(client, {
+      domain: 'rapid-swaps',
+      rows: enriched,
+      source: rapidSwapSource,
+      sourceEventKey: (row) => row.tx_id,
+      rawReference: (row) => ({
+        tx_id: row.tx_id,
+        action_height: row.action_height || 0
+      })
+    });
+  });
+
+  return enriched.length;
+}
 
 async function readExistingCandidate(client, hintKey) {
   const { rows } = await client.query(
@@ -18,15 +80,11 @@ async function readExistingCandidate(client, hintKey) {
 }
 
 export async function upsertRapidSwap(client, row) {
-  await upsertRows(client, 'rapid_swaps', [row], {
-    conflictColumns: ['tx_id']
-  });
+  await persistRapidSwaps(client, [row]);
 }
 
 export async function upsertRapidSwaps(client, rows) {
-  await upsertRows(client, 'rapid_swaps', rows, {
-    conflictColumns: ['tx_id']
-  });
+  await persistRapidSwaps(client, rows);
 }
 
 export async function upsertRapidSwapCandidate(client, hintInput, patch = {}) {

@@ -2,7 +2,8 @@ import { config } from './config.js';
 
 export const CORS_HEADERS = Object.freeze({
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-nodeop-secret',
+  'Access-Control-Allow-Headers': 'accept, authorization, x-client-info, apikey, content-type, prefer, x-nodeop-secret',
+  'Access-Control-Expose-Headers': 'preference-applied, retry-after, x-boone-schema-version, x-ratelimit-limit, x-ratelimit-remaining',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
 });
 
@@ -59,6 +60,9 @@ export function parseIntegerParam(value, fallback, options = {}) {
 }
 
 export function isAuthorizedPublicRequest(request) {
+  // Compatibility helper for older integrations. Browser VITE_* tokens are
+  // public identifiers, not secrets; all read-only API routes are now openly
+  // served and protected by request rate limiting in server.js.
   if (!config.publicApiKey) {
     return true;
   }

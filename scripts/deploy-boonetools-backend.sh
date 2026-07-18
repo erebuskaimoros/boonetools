@@ -9,6 +9,51 @@ ROOT="$BOONETOOLS_CANONICAL_ROOT"
 SERVER="${SERVER:-root@178.156.211.181}"
 DEST="${DEST:-/opt/boonetools-backend}"
 BACKEND_DEST="$DEST/backend"
+ROLLBACK_DEST="$DEST/.deploy-rollback"
+WRITERS_QUIESCED=false
+
+rollback_failed_deploy() {
+  local exit_status=$?
+  trap - EXIT
+  if [[ "$exit_status" -ne 0 && "$WRITERS_QUIESCED" == "true" ]]; then
+    echo "Deploy failed; restoring the previous backend tree and writer units..." >&2
+    ssh "$SERVER" "DEST='$DEST' BACKEND_DEST='$BACKEND_DEST' ROLLBACK_DEST='$ROLLBACK_DEST' bash -s" <<'REMOTE' || true
+set -u
+if [[ -d "$ROLLBACK_DEST/backend" ]]; then
+  rsync -a --delete --exclude '.env' --exclude 'node_modules' "$ROLLBACK_DEST/backend/" "$BACKEND_DEST/"
+fi
+if [[ -d "$ROLLBACK_DEST/shared" ]]; then
+  rsync -a --delete "$ROLLBACK_DEST/shared/" "$DEST/shared/"
+fi
+
+systemctl start \
+  boonetools-nodeop-scheduler.timer \
+  boonetools-rapid-swaps-scheduler.timer \
+  boonetools-app-layer-live-state.timer \
+  boonetools-rujira-base-fees.timer \
+  boonetools-rujira-reserve-payments.timer \
+  boonetools-node-votes-backfill.timer \
+  boonetools-bond-history-refresh.timer \
+  boonetools-tc-fee-dash-backfill.timer \
+  boonetools-rujira-reserve-listener.service \
+  boonetools-rujira-base-fees-listener.service 2>/dev/null || true
+
+if [[ -f "$BACKEND_DEST/.env" ]]; then
+  while IFS='=' read -r key value || [[ -n "$key" ]]; do
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    export "$key=$value"
+  done < "$BACKEND_DEST/.env"
+fi
+if [[ "${RAPID_SWAPS_WS_INGESTION_ENABLED:-false}" == "true" || "${NODE_VOTES_WS_INGESTION_ENABLED:-true}" == "true" ]]; then
+  systemctl start rapid-swap-listener.service 2>/dev/null || true
+fi
+REMOTE
+  fi
+  exit "$exit_status"
+}
+
+trap rollback_failed_deploy EXIT
 
 if [[ -f "$ROOT/.env" ]]; then
   set -a
@@ -33,7 +78,24 @@ DUNE_API_KEY_VALUE="${DUNE_API_KEY_VALUE:-${DUNE_API_KEY:-}}"
 TC_FEE_DASH_HEAD_LAG_DAYS_DEPLOY_VALUE="${TC_FEE_DASH_HEAD_LAG_DAYS:-1}"
 
 echo "==> Preparing remote directories..."
-ssh "$SERVER" "mkdir -p $BACKEND_DEST $DEST/scripts $DEST/src/lib/rapid-swaps $DEST/src/lib/utils $DEST/ops/caddy $DEST/ops/docker $DEST/ops/systemd"
+ssh "$SERVER" "mkdir -p $BACKEND_DEST $DEST/scripts $DEST/shared $DEST/ops/caddy $DEST/ops/docker $DEST/ops/systemd $ROLLBACK_DEST/backend $ROLLBACK_DEST/shared"
+
+echo "==> Snapshotting the current backend for deploy rollback..."
+ssh "$SERVER" "rsync -a --delete --exclude '.env' --exclude 'node_modules' $BACKEND_DEST/ $ROLLBACK_DEST/backend/ && rsync -a --delete $DEST/shared/ $ROLLBACK_DEST/shared/"
+
+echo "==> Quiescing backend writers before release sync..."
+ssh "$SERVER" "systemctl stop \
+  boonetools-nodeop-scheduler.timer boonetools-nodeop-scheduler.service \
+  boonetools-rapid-swaps-scheduler.timer boonetools-rapid-swaps-scheduler.service \
+  boonetools-app-layer-live-state.timer boonetools-app-layer-live-state.service \
+  boonetools-rujira-base-fees.timer boonetools-rujira-base-fees.service \
+  boonetools-rujira-reserve-payments.timer boonetools-rujira-reserve-payments.service \
+  boonetools-node-votes-backfill.timer boonetools-node-votes-backfill.service \
+  boonetools-bond-history-refresh.timer boonetools-bond-history-refresh.service \
+  boonetools-tc-fee-dash-backfill.timer boonetools-tc-fee-dash-backfill.service \
+  boonetools-rujira-reserve-listener.service boonetools-rujira-base-fees-listener.service \
+  rapid-swap-listener.service 2>/dev/null || true"
+WRITERS_QUIESCED=true
 
 echo "==> Syncing backend, shared modules, and ops assets..."
 rsync -avz --delete --exclude '.env' --exclude 'node_modules' "$ROOT/backend/" "$SERVER:$BACKEND_DEST/"
@@ -43,8 +105,7 @@ rsync -avz "$ROOT/scripts/boonetools-db-restore.sh" "$SERVER:$DEST/scripts/"
 rsync -avz "$ROOT/scripts/catchup-rapid-swaps.mjs" "$SERVER:$DEST/scripts/"
 rsync -avz "$ROOT/scripts/repair-bond-history.mjs" "$SERVER:$DEST/scripts/"
 rsync -avz "$ROOT/scripts/rapid-swap-listener.mjs" "$SERVER:$DEST/scripts/"
-rsync -avz "$ROOT/src/lib/rapid-swaps/" "$SERVER:$DEST/src/lib/rapid-swaps/"
-rsync -avz "$ROOT/src/lib/utils/blockchain.js" "$SERVER:$DEST/src/lib/utils/"
+rsync -avz --delete "$ROOT/shared/" "$SERVER:$DEST/shared/"
 rsync -avz "$ROOT/ops/caddy/" "$SERVER:$DEST/ops/caddy/"
 rsync -avz "$ROOT/ops/docker/" "$SERVER:$DEST/ops/docker/"
 rsync -avz "$ROOT/ops/systemd/" "$SERVER:$DEST/ops/systemd/"
@@ -80,7 +141,7 @@ DB_CONTAINER_VALUE="${BOONETOOLS_DB_CONTAINER:-boonetools-postgres}"
 DB_NAME_VALUE="${BOONETOOLS_DB_NAME:-boonetools}"
 DB_USER_VALUE="${BOONETOOLS_DB_USER:-boonetools}"
 DB_PASSWORD_VALUE="${BOONETOOLS_DB_PASSWORD:-$(openssl rand -hex 24)}"
-API_KEY_VALUE="${PUBLIC_API_KEY_VALUE:-${PUBLIC_API_KEY:-$(openssl rand -hex 24)}}"
+API_KEY_VALUE="${PUBLIC_API_KEY_VALUE:-${PUBLIC_API_KEY:-}}"
 DATABASE_URL_VALUE="${DATABASE_URL:-postgresql://$DB_USER_VALUE:$DB_PASSWORD_VALUE@127.0.0.1:5433/$DB_NAME_VALUE}"
 THORNODE_PRIMARY_URL_VALUE="${THORNODE_PRIMARY_VALUE:-${THORNODE_PRIMARY_URL:-https://gateway.liquify.com/chain/thorchain_api}}"
 THORNODE_ARCHIVE_URL_VALUE="${THORNODE_ARCHIVE_VALUE:-${THORNODE_ARCHIVE_URL:-https://thornode-archive.ninerealms.com}}"
@@ -285,7 +346,7 @@ ssh "$SERVER" "chmod +x $DEST/scripts/boonetools-db-migrate.sh $DEST/scripts/boo
 
 echo "==> Installing systemd units..."
 rsync -avz "$ROOT/ops/systemd/" "$SERVER:/etc/systemd/system/"
-ssh "$SERVER" "systemctl daemon-reload && systemctl enable boonetools-api.service boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-app-layer-live-state.timer boonetools-rujira-base-fees.timer boonetools-rujira-reserve-payments.timer boonetools-node-votes-backfill.timer boonetools-tc-fee-dash-backfill.timer boonetools-db-backup.timer boonetools-rujira-reserve-listener.service boonetools-rujira-base-fees-listener.service"
+ssh "$SERVER" "systemctl daemon-reload && systemctl enable boonetools-api.service boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-app-layer-live-state.timer boonetools-rujira-base-fees.timer boonetools-rujira-reserve-payments.timer boonetools-node-votes-backfill.timer boonetools-bond-history-refresh.timer boonetools-tc-fee-dash-backfill.timer boonetools-db-backup.timer boonetools-rujira-reserve-listener.service boonetools-rujira-base-fees-listener.service"
 
 echo "==> Configuring legacy Rapid Swap listener..."
 ssh "$SERVER" "BACKEND_DEST='$BACKEND_DEST' bash -s" <<'REMOTE'
@@ -318,7 +379,7 @@ if [[ "${RAPID_SWAPS_WS_INGESTION_ENABLED:-false}" == "true" || "${NODE_VOTES_WS
 else
   systemctl stop rapid-swap-listener.service || true
 fi
-systemctl restart boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-app-layer-live-state.timer boonetools-rujira-base-fees.timer boonetools-rujira-reserve-payments.timer boonetools-node-votes-backfill.timer boonetools-tc-fee-dash-backfill.timer boonetools-db-backup.timer
+systemctl restart boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-app-layer-live-state.timer boonetools-rujira-base-fees.timer boonetools-rujira-reserve-payments.timer boonetools-node-votes-backfill.timer boonetools-bond-history-refresh.timer boonetools-tc-fee-dash-backfill.timer boonetools-db-backup.timer
 REMOTE
 
 echo "==> Priming App Layer live-state cache..."
@@ -334,3 +395,6 @@ echo "Done."
 echo "Next steps:"
 echo "  1. Verify the backend endpoints and migration state."
 echo "  2. Install the Caddy config from ops/caddy/Caddyfile.boone.tools and reload Caddy."
+
+WRITERS_QUIESCED=false
+trap - EXIT

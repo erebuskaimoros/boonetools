@@ -33,7 +33,7 @@ export const EXCHANGE_ADDRESSES = {
  * THORChain protocol addresses (RUNEPool, etc.)
  */
 export const PROTOCOL_ADDRESSES = {
-  'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt': 'RUNEPool'
+  'thor1rzqfv62dzu585607s5awqtgnvvwz5rzhdtv772': 'RUNEPool'
 };
 
 /**

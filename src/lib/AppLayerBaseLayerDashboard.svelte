@@ -1,18 +1,44 @@
 <script>
   import { onMount } from 'svelte';
-  import Chart from 'chart.js/auto';
-  import zoomPlugin from 'chartjs-plugin-zoom';
-
-  Chart.register(zoomPlugin);
+  import {
+    fetchAppLayerBaseFees,
+    fetchAppLayerBaseLayerEarnings,
+    fetchAppLayerLiveState,
+    fetchAppLayerReservePayments
+  } from './app-layer/api.js';
+  import { TerminalAlert } from '$lib/components/terminal';
+  import {
+    EMPTY_INVENTORY,
+    amountFromBase,
+    buildPoolPrices,
+    denomLabel,
+    estimateUsd as estimateBalanceUsd,
+    formatAddress,
+    formatAssetAmount,
+    formatDataSource,
+    formatDateTime,
+    formatTxId,
+    formatWeekLabel,
+    getTargetsForConfig as resolveTargetsForConfig,
+    getWeeklyPriceRange,
+    inventoryDisplay,
+    normalizeReserveEvent as normalizeReservePayment,
+    parseCsv,
+    pickAggRows,
+    pickPaidRows,
+    staticArtifactLabel,
+    summarizeCollectorInventory as buildCollectorInventory,
+    summarizeHistory,
+    targetRatePerSecond,
+    targetSummary
+  } from './app-layer/model.js';
+  import {
+    APP_LAYER_SERIES,
+    collectedFlowTooltip,
+    renderAppLayerSeriesChart
+  } from './app-layer/charts.js';
 
   const DATA_BASE = '/data/rujira-base-layer-fees';
-  const APP_LAYER_API_BASE = (
-    import.meta.env.VITE_APP_LAYER_API_BASE ||
-    import.meta.env.VITE_NODEOP_API_BASE ||
-    '/functions/v1'
-  ).replace(/\/$/, '');
-  const APP_LAYER_API_KEY =
-    import.meta.env.VITE_APP_LAYER_API_KEY || import.meta.env.VITE_NODEOP_API_KEY || '';
   const THORCHAIN_NET_BASE = 'https://thorchain.net';
   const BASE_LAYER_COLLECTOR =
     'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
@@ -143,41 +169,6 @@
     }
   ];
 
-  const EMPTY_INVENTORY_BUCKET = Object.freeze({ rows: [], count: 0, pricedUsd: 0, unpricedCount: 0 });
-  const EMPTY_INVENTORY = Object.freeze({
-    available: false,
-    actionsAvailable: false,
-    eligible: EMPTY_INVENTORY_BUCKET,
-    conversion: EMPTY_INVENTORY_BUCKET,
-    blocked: EMPTY_INVENTORY_BUCKET,
-    unresolved: EMPTY_INVENTORY_BUCKET,
-    pricedUsd: 0
-  });
-
-  // Entity colors. Validated marks (dark-surface lightness band + CVD +
-  // contrast) carry the chart geometry; the brighter chrome variants are for
-  // page accents only.
-  const SERIES = {
-    collected: {
-      mark: '#b8860b',
-      fill: 'rgba(184, 134, 11, 0.5)',
-      faint: 'rgba(184, 134, 11, 0.09)',
-      chrome: '#d4a017'
-    },
-    paid: {
-      mark: '#00a755',
-      fill: 'rgba(0, 167, 85, 0.5)',
-      faint: 'rgba(0, 167, 85, 0.09)',
-      chrome: '#00cc66'
-    },
-    generated: {
-      mark: '#2f7fd6',
-      fill: 'rgba(47, 127, 214, 0.5)',
-      faint: 'rgba(47, 127, 214, 0.09)',
-      chrome: '#44a0ff'
-    }
-  };
-
   let weeklyRows = [];
   let reserveEvents = [];
   let staticWeeklyRows = [];
@@ -250,11 +241,6 @@
     if (zoomed[key] !== active) zoomed = { ...zoomed, [key]: active };
   }
 
-  const usd0 = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 0
-  });
   const usd2 = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -272,28 +258,6 @@
     maximumFractionDigits: 4,
     signDisplay: 'always'
   });
-
-  function collectedFlowTooltip(row, grain, limit = 4) {
-    const entries = Object.entries(row.by_denom || {}).sort(
-      (a, b) => Math.abs(b[1].usd || 0) - Math.abs(a[1].usd || 0)
-    );
-    const shown = entries.slice(0, limit);
-    const remaining = entries.slice(limit);
-    const lines = [
-      `${number2.format(row.transfers || 0)} ${grain === 'weekly' ? 'denom-day' : 'denom'} balance changes`,
-      ...shown.map(
-        ([denom, entry]) =>
-          `${denomLabel(denom)}: ${signedNumber4.format(entry.amount)} · ${signedUsd2.format(entry.usd)}`
-      )
-    ];
-
-    if (remaining.length) {
-      const remainingUsd = remaining.reduce((sum, [, entry]) => sum + (entry.usd || 0), 0);
-      lines.push(`${number2.format(remaining.length)} other net: ${signedUsd2.format(remainingUsd)}`);
-    }
-
-    return lines;
-  }
 
   $: latestWeek = weeklyRows.at(-1) || null;
   $: firstEvent = reserveEvents[0] || null;
@@ -413,7 +377,7 @@
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
-      colors: SERIES.collected,
+      colors: APP_LAYER_SERIES.collected,
       valueField: 'inflow_usd',
       cumulativeField: 'cumulative_usd',
       barLabel: 'App-layer earnings allocated to Base Layer',
@@ -428,7 +392,7 @@
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
-      colors: SERIES.paid,
+      colors: APP_LAYER_SERIES.paid,
       valueField: 'payment_usd',
       cumulativeField: 'cumulative_usd',
       barLabel: 'Paid USD at deposit price',
@@ -448,7 +412,7 @@
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
-      colors: SERIES.generated,
+      colors: APP_LAYER_SERIES.generated,
       valueField: 'liquidity_fee_usd',
       cumulativeField: 'cumulative_usd',
       barLabel: 'Generated fees USD',
@@ -669,516 +633,32 @@
     }
   }
 
-  async function fetchAppLayerLiveState() {
-    const headers = APP_LAYER_API_KEY
-      ? { apikey: APP_LAYER_API_KEY, Authorization: `Bearer ${APP_LAYER_API_KEY}` }
-      : {};
-    const response = await fetch(`${APP_LAYER_API_BASE}/app-layer-live-state`, {
-      headers,
-      cache: 'no-store'
-    });
-    const text = await response.text();
-
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 160)}`);
-    }
-
-    return JSON.parse(text);
-  }
-
-  async function fetchAppLayerBaseFees() {
-    const headers = APP_LAYER_API_KEY
-      ? { apikey: APP_LAYER_API_KEY, Authorization: `Bearer ${APP_LAYER_API_KEY}` }
-      : {};
-    const response = await fetch(`${APP_LAYER_API_BASE}/app-layer-base-fees`, {
-      headers,
-      cache: 'no-store'
-    });
-    const text = await response.text();
-
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 160)}`);
-    }
-
-    return JSON.parse(text);
-  }
-
-  async function fetchAppLayerBaseLayerEarnings() {
-    const headers = APP_LAYER_API_KEY
-      ? { apikey: APP_LAYER_API_KEY, Authorization: `Bearer ${APP_LAYER_API_KEY}` }
-      : {};
-    const response = await fetch(`${APP_LAYER_API_BASE}/app-layer-base-layer-earnings`, {
-      headers,
-      cache: 'no-store'
-    });
-    const text = await response.text();
-
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 160)}`);
-    }
-
-    return JSON.parse(text);
-  }
-
-  async function fetchAppLayerReservePayments() {
-    const headers = APP_LAYER_API_KEY
-      ? { apikey: APP_LAYER_API_KEY, Authorization: `Bearer ${APP_LAYER_API_KEY}` }
-      : {};
-    const response = await fetch(`${APP_LAYER_API_BASE}/app-layer-reserve-payments`, {
-      headers,
-      cache: 'no-store'
-    });
-    const text = await response.text();
-
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 160)}`);
-    }
-
-    return JSON.parse(text);
-  }
-
-  function parseCsv(text) {
-    const lines = text.trim().split(/\r?\n/).filter(Boolean);
-    const headers = lines.shift()?.split(',') || [];
-    const numericFields = new Set([
-      'payments',
-      'payment_rune',
-      'rune_price_usd',
-      'payment_usd',
-      'cumulative_rune',
-      'cumulative_usd'
-    ]);
-
-    return lines.map((line) => {
-      const values = line.split(',');
-      return Object.fromEntries(
-        headers.map((header, index) => [
-          header,
-          numericFields.has(header) ? Number(values[index]) : values[index]
-        ])
-      );
-    });
-  }
-
-  function startOfUtcWeek(date) {
-    const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
-    const day = d.getUTCDay();
-    const mondayOffset = day === 0 ? -6 : 1 - day;
-    d.setUTCDate(d.getUTCDate() + mondayOffset);
-    return d;
-  }
-
-  function normalizeBuckets(rows, grain) {
-    const startKey = grain === 'weekly' ? 'week_start' : 'day_start';
-    return rows.map((row) => ({ ...row, bucket_start: row[startKey] }));
-  }
-
-  // Pre-aggregated source (collected inflows / generated fees): use the
-  // requested grain, falling back to whichever grain the artifact carries.
-  function pickAggRows(source, grain) {
-    const daily = source?.daily || [];
-    const weekly = source?.weekly || [];
-    if (grain === 'daily' && daily.length) return { rows: normalizeBuckets(daily, 'daily'), grain: 'daily' };
-    if (grain === 'weekly' && weekly.length) return { rows: normalizeBuckets(weekly, 'weekly'), grain: 'weekly' };
-    if (daily.length) return { rows: normalizeBuckets(daily, 'daily'), grain: 'daily' };
-    return { rows: normalizeBuckets(weekly, 'weekly'), grain: 'weekly' };
-  }
-
-  // Reserve deposits arrive as per-event rows, so bucket them client-side at
-  // the requested grain — daily needs no separate backend series.
-  function bucketReserveEvents(events, grain) {
-    const startOf =
-      grain === 'weekly'
-        ? (d) => startOfUtcWeek(d)
-        : (d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-    const map = new Map();
-    for (const event of events) {
-      const date = new Date(event.date);
-      if (!Number.isFinite(date.getTime())) continue;
-      const key = startOf(date).toISOString().slice(0, 10);
-      const row =
-        map.get(key) ||
-        { bucket_start: key, payments: 0, payment_rune: 0, payment_usd: 0, priceNum: 0, priceDen: 0 };
-      const amountRune = Number(event.amountRune) || 0;
-      row.payments += 1;
-      row.payment_rune += amountRune;
-      row.payment_usd += Number(event.amountUsd) || 0;
-      row.priceNum += (Number(event.runePriceUsd) || 0) * amountRune;
-      row.priceDen += amountRune;
-      map.set(key, row);
-    }
-    let cumUsd = 0;
-    let cumRune = 0;
-    return [...map.values()]
-      .sort((a, b) => a.bucket_start.localeCompare(b.bucket_start))
-      .map((row) => {
-        cumUsd += row.payment_usd;
-        cumRune += row.payment_rune;
-        return {
-          bucket_start: row.bucket_start,
-          payments: row.payments,
-          payment_rune: row.payment_rune,
-          payment_usd: row.payment_usd,
-          rune_price_usd: row.priceDen > 0 ? row.priceNum / row.priceDen : 0,
-          cumulative_usd: cumUsd,
-          cumulative_rune: cumRune
-        };
-      });
-  }
-
-  function pickPaidRows(events, weeklyFallback, grain) {
-    if (events && events.length) {
-      return { rows: bucketReserveEvents(events, grain), grain };
-    }
-    return { rows: normalizeBuckets(weeklyFallback || [], 'weekly'), grain: 'weekly' };
-  }
-
-  // Fill absent buckets with zero-value rows (cumulative carried forward) so
-  // scheduler pauses read as real gaps instead of a compressed axis.
-  function fillBucketGaps(rows, valueField, cumulativeField, stepDays) {
-    if (rows.length < 2) return rows;
-    const stepMs = stepDays * 86400 * 1000;
-    const out = [];
-    let prev = null;
-    let guard = 0;
-    for (const row of rows) {
-      if (prev) {
-        let cursor = new Date(`${prev.bucket_start}T00:00:00Z`);
-        for (;;) {
-          cursor = new Date(cursor.getTime() + stepMs);
-          const key = cursor.toISOString().slice(0, 10);
-          if (key >= row.bucket_start || (guard += 1) > 1000) break;
-          out.push({
-            bucket_start: key,
-            [valueField]: 0,
-            [cumulativeField]: prev[cumulativeField] || 0
-          });
-        }
-      }
-      out.push(row);
-      prev = row;
-    }
-    return out;
-  }
-
-  // Single-axis bar / cumulative-line chart, switched by view.
   function renderSeriesChart(canvas, previousChart, config) {
-    previousChart?.destroy();
-    const { grain, view: chartView, colors, valueField, cumulativeField, barLabel, cumulativeLabel, afterBody, zoomKey } = config;
-    const stepDays = grain === 'weekly' ? 7 : 1;
-    const rows = fillBucketGaps(config.rows, valueField, cumulativeField, stepDays);
-    const cumulative = chartView === 'cumulative';
-    const dataset = cumulative
-      ? {
-          type: 'line',
-          label: cumulativeLabel,
-          data: rows.map((row) => row[cumulativeField] || 0),
-          borderColor: colors.mark,
-          backgroundColor: colors.faint,
-          pointBackgroundColor: colors.mark,
-          pointBorderColor: '#080808',
-          pointRadius: rows.length > 45 ? 0 : 3,
-          borderWidth: 2,
-          tension: 0.2,
-          fill: true
-        }
-      : {
-          type: 'bar',
-          label: barLabel,
-          data: rows.map((row) => row[valueField] || 0),
-          backgroundColor: colors.fill,
-          borderColor: colors.mark,
-          borderWidth: rows.length > 90 ? 0 : 1,
-          borderRadius: 0
-        };
-
-    return new Chart(canvas.getContext('2d'), {
-      type: 'bar',
-      data: {
-        labels: rows.map((row) => formatWeekLabel(row.bucket_start)),
-        datasets: [dataset]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: '#0a0a0a',
-            borderColor: '#1a1a1a',
-            borderWidth: 1,
-            titleColor: colors.chrome,
-            bodyColor: '#c8c8c8',
-            titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
-            bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
-            callbacks: {
-              afterBody(items) {
-                return afterBody ? afterBody(rows[items[0].dataIndex]) : [];
-              },
-              label(context) {
-                return `${context.dataset.label}: ${usd2.format(context.raw)}`;
-              }
-            }
-          },
-          zoom: {
-            limits: { x: { minRange: 1 } },
-            zoom: {
-              // Drag-to-select the time range; wheel is intentionally off so
-              // scrolling past the chart doesn't get trapped zooming it.
-              mode: 'x',
-              wheel: { enabled: false },
-              pinch: { enabled: true },
-              drag: {
-                enabled: true,
-                backgroundColor: colors.faint,
-                borderColor: colors.mark,
-                borderWidth: 1
-              },
-              onZoomComplete: zoomKey ? () => markZoomed(zoomKey, true) : undefined
-            }
-          }
-        },
-        scales: {
-          x: {
-            grid: { color: '#111', drawBorder: false },
-            border: { color: '#1a1a1a' },
-            ticks: { color: '#666', font: { family: "'JetBrains Mono', monospace", size: 10 } }
-          },
-          y: {
-            grid: { color: '#111', drawBorder: false },
-            border: { color: '#1a1a1a' },
-            ticks: {
-              color: colors.chrome,
-              font: { family: "'JetBrains Mono', monospace", size: 10 },
-              callback: (value) => (value >= 1000 ? usd0.format(value) : usd2.format(value))
-            }
-          }
-        }
-      }
+    const { zoomKey, ...chartConfig } = config;
+    return renderAppLayerSeriesChart(canvas, previousChart, {
+      ...chartConfig,
+      onZoomComplete: zoomKey ? () => markZoomed(zoomKey, true) : undefined
     });
   }
 
   function getTargetsForConfig(collectorKey, config) {
-    const targetRows = config?.target_addresses;
-    if (!Array.isArray(targetRows) || !targetRows.length) {
-      return (staticTargets[collectorKey] || []).map((target) => ({ ...target, isFallback: true }));
-    }
-
-    const totalWeight = targetRows.reduce((sum, [, weight]) => sum + Number(weight || 0), 0);
-    return targetRows.map(([address, weight]) => ({
-      address,
-      label: addressLabels[address] || formatAddress(address),
-      percent: totalWeight > 0 ? (Number(weight) / totalWeight) * 100 : 0,
-      isFallback: false
-    }));
+    return resolveTargetsForConfig(collectorKey, config, { staticTargets, addressLabels });
   }
 
-  function amountFromBase(value) {
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric / 1e8 : 0;
+  function normalizeReserveEvent(event, priceRows = weeklyRows) {
+    return normalizeReservePayment(event, priceRows);
   }
 
-  function normalizeReserveEvent(event, priceRows = []) {
-    const amountRune = Number(event.amountRune ?? event.amount_rune ?? amountFromBase(event.amountBase));
-    const runePriceUsdValue = Number(
-      event.runePriceUsd ??
-      event.rune_price_usd ??
-      reservePriceForDate(event.date, priceRows)
-    );
-    const amountUsd = Number(event.amountUsd ?? event.amount_usd ?? amountRune * runePriceUsdValue);
-    return {
-      ...event,
-      amountRune,
-      runePriceUsd: runePriceUsdValue,
-      amountUsd
-    };
-  }
-
-  function reservePriceForDate(value, rows = weeklyRows) {
-    const date = new Date(value);
-    if (!Number.isFinite(date.getTime())) return 0;
-    const match = (rows || []).find((row) => {
-      const start = new Date(`${row.week_start}T00:00:00Z`);
-      const end = new Date(`${row.week_end}T00:00:00Z`);
-      return Number.isFinite(start.getTime()) && Number.isFinite(end.getTime()) && date >= start && date < end;
-    });
-    return Number(match?.rune_price_usd || 0);
-  }
-
-  function getWeeklyPriceRange(rows) {
-    const prices = (rows || []).map((row) => Number(row.rune_price_usd || 0)).filter((price) => price > 0);
-    if (!prices.length) return '';
-    const low = Math.min(...prices);
-    const high = Math.max(...prices);
-    if (Math.abs(low - high) < 0.000001) return `$${number4.format(low)}`;
-    return `$${number4.format(low)}–$${number4.format(high)}`;
-  }
-
-  function buildPoolPrices(pools) {
-    if (!Array.isArray(pools)) return {};
-    return Object.fromEntries(
-      pools
-        .filter((pool) => pool.asset && pool.asset_tor_price)
-        .map((pool) => [pool.asset.toUpperCase(), amountFromBase(pool.asset_tor_price)])
-    );
-  }
-
-  function denomToPoolAsset(denom) {
-    if (!denom) return '';
-    if (denom === 'rune') return 'THOR.RUNE';
-    if (denom.startsWith('x/ghost-vault/')) {
-      return denomToPoolAsset(denom.slice('x/ghost-vault/'.length));
-    }
-    if (denom.startsWith('x/')) return `THOR.${denom.slice(2).toUpperCase()}`;
-    if (denom.startsWith('thor.')) return denom.toUpperCase();
-    if (!denom.includes('-')) return `THOR.${denom.toUpperCase()}`;
-    const splitAt = denom.indexOf('-');
-    return `${denom.slice(0, splitAt).toUpperCase()}.${denom.slice(splitAt + 1).toUpperCase()}`;
-  }
-
-  function denomLabel(denom) {
-    if (!denom) return '';
-    if (denom === 'rune') return 'RUNE';
-    if (denom.startsWith('x/')) return denom.slice(2).toUpperCase();
-    const pool = denomToPoolAsset(denom);
-    const dashAt = pool.indexOf('-');
-    return dashAt === -1 ? pool : pool.slice(0, dashAt);
-  }
-
-  function assetUsdPrice(denom) {
-    if (denom === 'rune') return runePriceUsd;
-    const poolPrice = poolPrices[denomToPoolAsset(denom)];
-    if (poolPrice) return poolPrice;
-    if (isStableDenom(denom)) return 1;
-    return 0;
+  function pricingContext() {
+    return { runePriceUsd, poolPrices };
   }
 
   function estimateUsd(balance) {
-    return amountFromBase(balance.amount) * assetUsdPrice(balance.denom);
-  }
-
-  function normalizeDenom(denom) {
-    return String(denom || '').trim().toLowerCase();
-  }
-
-  function summarizeInventoryBucket(rows) {
-    const pricedUsd = rows.reduce((sum, row) => sum + (Number(row.usdValue) || 0), 0);
-    return {
-      rows,
-      count: rows.length,
-      pricedUsd,
-      unpricedCount: rows.filter((row) => row.amount > 0 && !row.usdValue).length
-    };
+    return estimateBalanceUsd(balance, pricingContext());
   }
 
   function summarizeCollectorInventory(config, balanceRows, actionRows) {
-    if (!Array.isArray(config?.target_denoms) || !Array.isArray(balanceRows)) {
-      return EMPTY_INVENTORY;
-    }
-
-    const targetDenoms = new Set(config.target_denoms.map(([denom]) => normalizeDenom(denom)));
-    const actionsAvailable = Array.isArray(actionRows);
-    const actionDenoms = new Set((actionRows || []).map((action) => normalizeDenom(action?.denom)));
-    const buckets = { eligible: [], conversion: [], blocked: [], unresolved: [] };
-
-    for (const balance of balanceRows || []) {
-      const amount = amountFromBase(balance.amount);
-      if (!(amount > 0)) continue;
-      const row = { ...balance, amount, usdValue: estimateUsd(balance) };
-      const denom = normalizeDenom(balance.denom);
-      if (targetDenoms.has(denom)) {
-        buckets.eligible.push(row);
-      } else if (!actionsAvailable) {
-        buckets.unresolved.push(row);
-      } else if (actionDenoms.has(denom)) {
-        buckets.conversion.push(row);
-      } else {
-        buckets.blocked.push(row);
-      }
-    }
-
-    const eligible = summarizeInventoryBucket(buckets.eligible);
-    const conversion = summarizeInventoryBucket(buckets.conversion);
-    const blocked = summarizeInventoryBucket(buckets.blocked);
-    const unresolved = summarizeInventoryBucket(buckets.unresolved);
-    return {
-      available: true,
-      actionsAvailable,
-      eligible,
-      conversion,
-      blocked,
-      unresolved,
-      pricedUsd: eligible.pricedUsd + conversion.pricedUsd + blocked.pricedUsd + unresolved.pricedUsd
-    };
-  }
-
-  function inventoryDisplay(bucket) {
-    if (!bucket?.count) return '—';
-    if (bucket.pricedUsd > 0) return usd2.format(bucket.pricedUsd);
-    return `${number2.format(bucket.count)} denom${bucket.count === 1 ? '' : 's'}`;
-  }
-
-  function targetRatePerSecond(config, denom) {
-    const target = (config?.target_denoms || [])
-      .find(([targetDenom]) => normalizeDenom(targetDenom) === normalizeDenom(denom));
-    return target ? amountFromBase(target[1]) : 0;
-  }
-
-  function formatDataSource(source) {
-    const value = String(source || '').trim();
-    if (!value) return 'fallback artifact';
-    if (value.includes('mixed')) return 'Dune + RPC/Midgard Postgres';
-    if (value.includes('dune')) return 'Dune-backed Postgres';
-    if (value.includes('postgres')) return 'RPC/Midgard-backed Postgres';
-    if (value.includes('backend-chain-state')) return 'two-minute backend chain snapshots';
-    if (value.includes('static')) return 'static artifact';
-    return value.replaceAll('-', ' ');
-  }
-
-  function staticArtifactLabel(artifactMeta, label = 'static fallback artifact') {
-    const generatedAt = artifactMeta?.generatedAt;
-    return generatedAt ? `${label} generated ${formatDateTime(generatedAt)}` : label;
-  }
-
-  function isStableDenom(denom) {
-    return /(?:usdc|usdt|dai|gusd|usdp)/i.test(denom || '');
-  }
-
-  function formatAssetAmount(balance) {
-    const amount = amountFromBase(balance.amount);
-    if (amount >= 1000) return number2.format(amount);
-    if (amount >= 1) return number4.format(amount);
-    return amount.toLocaleString('en-US', { maximumFractionDigits: 8 });
-  }
-
-  function formatWeekLabel(value) {
-    const date = new Date(`${value}T00:00:00Z`);
-    if (!Number.isFinite(date.getTime())) return value;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-  }
-
-  function formatDateTime(value) {
-    const date = value instanceof Date ? value : new Date(value);
-    if (!Number.isFinite(date.getTime())) return '';
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZoneName: 'short'
-    });
-  }
-
-  function formatAddress(address) {
-    if (!address) return '';
-    return `${address.slice(0, 10)}…${address.slice(-6)}`;
-  }
-
-  function formatTxId(txId) {
-    if (!txId) return '';
-    return `${txId.slice(0, 8)}…${txId.slice(-6)}`;
+    return buildCollectorInventory(config, balanceRows, actionRows, pricingContext());
   }
 
   function addressUrl(address) {
@@ -1189,18 +669,6 @@
     return `${THORCHAIN_NET_BASE}/tx/${txId}`;
   }
 
-  function summarizeHistory(rows) {
-    if (!rows.length) return 'history unavailable';
-    return rows
-      .map((row) => `${row.operation?.includes('INIT') ? 'init' : 'migrate'}:${row.code_id}`)
-      .join(' → ');
-  }
-
-  function targetSummary(targets) {
-    return (targets || [])
-      .map((target) => `${target.percent.toFixed(0)}% → ${target.label}`)
-      .join('  ·  ');
-  }
 </script>
 
 <section class="terminal">
@@ -1238,58 +706,31 @@
   {#if artifactsError || reservePaymentsError || reservePaymentsWarning || generatedFeesError || generatedFeesWarning || inflowsError || inflowsWarning || liveError || liveRouteWarning}
     <div class="alerts">
       {#if artifactsError}
-        <div class="alert err">
-          <span class="alert-tag">ERR</span>
-          <span>artifact data — {artifactsError}</span>
-        </div>
+        <TerminalAlert tone="err">artifact data — {artifactsError}</TerminalAlert>
       {/if}
       {#if inflowsError}
-        <div class="alert warn">
-          <span class="alert-tag">WRN</span>
-          <span>{inflowsError}</span>
-        </div>
+        <TerminalAlert tone="warn">{inflowsError}</TerminalAlert>
       {/if}
       {#if inflowsWarning}
-        <div class="alert warn">
-          <span class="alert-tag">WRN</span>
-          <span>{inflowsWarning}</span>
-        </div>
+        <TerminalAlert tone="warn">{inflowsWarning}</TerminalAlert>
       {/if}
       {#if generatedFeesError}
-        <div class="alert warn">
-          <span class="alert-tag">WRN</span>
-          <span>{generatedFeesError}</span>
-        </div>
+        <TerminalAlert tone="warn">{generatedFeesError}</TerminalAlert>
       {/if}
       {#if reservePaymentsError}
-        <div class="alert warn">
-          <span class="alert-tag">WRN</span>
-          <span>{reservePaymentsError}</span>
-        </div>
+        <TerminalAlert tone="warn">{reservePaymentsError}</TerminalAlert>
       {/if}
       {#if reservePaymentsWarning}
-        <div class="alert warn">
-          <span class="alert-tag">WRN</span>
-          <span>{reservePaymentsWarning}</span>
-        </div>
+        <TerminalAlert tone="warn">{reservePaymentsWarning}</TerminalAlert>
       {/if}
       {#if generatedFeesWarning}
-        <div class="alert warn">
-          <span class="alert-tag">WRN</span>
-          <span>{generatedFeesWarning}</span>
-        </div>
+        <TerminalAlert tone="warn">{generatedFeesWarning}</TerminalAlert>
       {/if}
       {#if liveError}
-        <div class="alert warn">
-          <span class="alert-tag">WRN</span>
-          <span>live state — {liveError}</span>
-        </div>
+        <TerminalAlert tone="warn">live state — {liveError}</TerminalAlert>
       {/if}
       {#if liveRouteWarning}
-        <div class="alert warn">
-          <span class="alert-tag">WRN</span>
-          <span>{liveRouteWarning}</span>
-        </div>
+        <TerminalAlert tone="warn">{liveRouteWarning}</TerminalAlert>
       {/if}
     </div>
   {/if}
@@ -2168,34 +1609,6 @@
     flex-direction: column;
     gap: 6px;
     margin-bottom: 16px;
-  }
-
-  .alert {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    border: 1px solid;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-  }
-
-  .alert.err {
-    border-color: rgba(220, 53, 69, 0.4);
-    background: rgba(220, 53, 69, 0.06);
-    color: #f08089;
-  }
-
-  .alert.warn {
-    border-color: rgba(212, 160, 23, 0.4);
-    background: rgba(212, 160, 23, 0.06);
-    color: #e8c068;
-  }
-
-  .alert-tag {
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    flex-shrink: 0;
   }
 
   /* ========== FLOW MAP ========== */

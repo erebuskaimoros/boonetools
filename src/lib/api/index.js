@@ -20,6 +20,24 @@ export {
   MIDGARD_BASE
 } from './midgard.js';
 
+// BooneTools application backend client
+export {
+  booneToolsApi,
+  booneToolsApiConfig,
+  BOONETOOLS_API_META,
+  BooneToolsApiError,
+  createBooneToolsApiClient,
+  getBooneToolsApiMeta,
+  normalizeBooneToolsApiPayload,
+  resolveBooneToolsApiConfig
+} from './boonetools.js';
+
+export {
+  ProviderRequestError,
+  isProviderChallengeResponse,
+  requestFromProviders
+} from './provider.js';
+
 /**
  * All endpoint constants for reference
  */

@@ -1,3 +1,5 @@
+import { requestFromProviders } from '../lib/provider-client.js';
+
 const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart';
 export const ALLOWED_SYMBOLS = ['SPY', 'VT', 'GC=F'];
 
@@ -13,19 +15,17 @@ export async function fetchYahooQuote(symbol, from, to) {
     params.set('interval', '1d');
   }
 
-  const url = `${YAHOO_BASE}/${encodeURIComponent(symbol)}?${params}`;
-  const response = await fetch(url, {
+  const path = `/${encodeURIComponent(symbol)}?${params}`;
+  const data = await requestFromProviders({
+    bases: [YAHOO_BASE],
+    path,
+    timeoutMs: 10_000,
     headers: {
       'User-Agent': 'Mozilla/5.0',
       Accept: 'application/json'
-    }
+    },
+    errorMessage: ({ status }) => `Yahoo Finance ${symbol}: ${status}`
   });
-
-  if (!response.ok) {
-    throw new Error(`Yahoo Finance ${symbol}: ${response.status}`);
-  }
-
-  const data = await response.json();
   const result = data?.chart?.result?.[0];
   if (!result) {
     throw new Error(`Yahoo Finance ${symbol}: no data`);

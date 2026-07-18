@@ -1,7 +1,7 @@
 import { query } from '../db/pool.js';
 import { json, parseIntegerParam } from '../lib/http.js';
 import { safeNumber, toIsoString } from '../lib/utils.js';
-import { getRapidSwapComparableVolumeUsd } from '../../../src/lib/rapid-swaps/volume.js';
+import { getRapidSwapComparableVolumeUsd } from '../../../shared/rapid-swaps/volume.js';
 
 const RAPID_SWAP_COLUMNS = [
   'tx_id',

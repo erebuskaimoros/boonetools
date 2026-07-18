@@ -7,6 +7,20 @@ function quoteIdentifier(name) {
   return `"${name}"`;
 }
 
+function quoteLiteral(value) {
+  return `'${String(value).replaceAll("'", "''")}'`;
+}
+
+function sourceRankSql(expression, priorities = {}) {
+  const entries = Object.entries(priorities).filter(([source, rank]) => (
+    /^[a-z0-9_-]+$/.test(source) && Number.isFinite(Number(rank))
+  ));
+  const cases = entries.map(([source, rank]) => (
+    `when ${quoteLiteral(source)} then ${Math.trunc(Number(rank))}`
+  ));
+  return `(case lower(coalesce(${expression}, 'unknown')) ${cases.join(' ')} else 10 end)`;
+}
+
 function normalizeValue(value, column, options = {}) {
   if (value === undefined) {
     return null;
@@ -86,14 +100,54 @@ function upsertRowChunk(client, table, rows, options = {}) {
   const conflictSql = conflictColumns.length > 0
     ? ` on conflict (${conflictColumns.map(quoteIdentifier).join(', ')}) `
     : '';
+  const tableSql = quoteIdentifier(table);
+  const strategies = options.updateStrategies || {};
+  const sourcePreference = options.sourcePreference || null;
+  const sourceColumn = sourcePreference?.column;
+  const observedAtColumn = sourcePreference?.observedAtColumn;
+  const existingSource = sourceColumn ? `${tableSql}.${quoteIdentifier(sourceColumn)}` : '';
+  const incomingSource = sourceColumn ? `excluded.${quoteIdentifier(sourceColumn)}` : '';
+  const existingRank = sourceColumn
+    ? sourceRankSql(existingSource, sourcePreference.priorities)
+    : '';
+  const incomingRank = sourceColumn
+    ? sourceRankSql(incomingSource, sourcePreference.priorities)
+    : '';
+  const incomingWins = sourceColumn
+    ? (
+        observedAtColumn
+          ? `(${incomingRank} > ${existingRank} or (${incomingRank} = ${existingRank} and excluded.${quoteIdentifier(observedAtColumn)} >= ${tableSql}.${quoteIdentifier(observedAtColumn)}))`
+          : `${incomingRank} >= ${existingRank}`
+      )
+    : '';
+
+  const updateAssignment = (column) => {
+    const columnSql = quoteIdentifier(column);
+    const existing = `${tableSql}.${columnSql}`;
+    const incoming = `excluded.${columnSql}`;
+    if (strategies[column] === 'greatest') {
+      return `${columnSql} = greatest(${existing}, ${incoming})`;
+    }
+    if (strategies[column] === 'least') {
+      return `${columnSql} = least(${existing}, ${incoming})`;
+    }
+    if (sourceColumn && column === sourceColumn) {
+      return `${columnSql} = case when ${incomingWins} then ${incoming} else ${existing} end`;
+    }
+    if (sourceColumn) {
+      return `${columnSql} = case when ${incomingWins} then ${incoming} else ${existing} end`;
+    }
+    return `${columnSql} = ${incoming}`;
+  };
+
   const updateSql = conflictColumns.length > 0
     ? (
         updateColumns.length > 0
-          ? `do update set ${updateColumns.map((column) => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`).join(', ')}`
+          ? `do update set ${updateColumns.map(updateAssignment).join(', ')}`
           : 'do nothing'
       )
     : '';
 
-  const sql = `insert into ${quoteIdentifier(table)} (${quotedColumns}) values ${tuples.join(', ')}${conflictSql}${updateSql}`;
+  const sql = `insert into ${tableSql} (${quotedColumns}) values ${tuples.join(', ')}${conflictSql}${updateSql}`;
   return client.query(sql, values);
 }

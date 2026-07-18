@@ -315,6 +315,7 @@ export async function fetchDashboard() {
  * @param {number} [options.limit=100] - Max results
  * @param {string} [options.sortBy='ratio'] - Sort field
  * @param {string} [options.sortOrder='asc'] - Sort direction
+ * @param {Array<{sourceAsset: string, targetAsset: string}>} [options.pairVariants] - Equivalent pair identifiers to merge
  * @returns {Promise<Array>}
  */
 export async function fetchPairOrders(sourceAsset, targetAsset, options = {}) {

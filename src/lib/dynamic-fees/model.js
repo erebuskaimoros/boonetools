@@ -14,6 +14,11 @@ export const DYNAMIC_FEE_DEFAULTS = Object.freeze({
 
 const WHITELIST_PREFIX = 'DYNAMICFEE-WHITELIST-';
 
+/**
+ * @param {unknown} value
+ * @param {number} [fallback]
+ * @returns {number}
+ */
 export function parseNumeric(value, fallback = 0) {
   if (value === null || value === undefined || value === '') return fallback;
   const parsed = Number(value);
@@ -80,6 +85,9 @@ export function formatPairDisplayName(pair) {
     .join(' / ');
 }
 
+/**
+ * @param {{ epochBlocks?: number, blockHeight?: number, currentEpoch?: number | null }} [options]
+ */
 export function computeEpochTiming({
   epochBlocks = DYNAMIC_FEE_DEFAULTS.L1DynamicFeeEpochBlocks,
   blockHeight = 0,
@@ -115,6 +123,7 @@ export function liveSealEpoch(reportedEpoch = 0) {
 }
 
 export function extractDynamicConfig({ mimir = {}, currentResponse = {}, lastblock = [] } = {}) {
+  const currentPayload = /** @type {any} */ (currentResponse);
   const epochBlocks = getMimirNumber(
     mimir,
     'L1DynamicFeeEpochBlocks',
@@ -122,7 +131,7 @@ export function extractDynamicConfig({ mimir = {}, currentResponse = {}, lastblo
   );
   const blockHeight = getBlockHeight(lastblock);
   const derivedEpochTiming = computeEpochTiming({ epochBlocks, blockHeight });
-  const reportedCurrentEpoch = parseNumeric(currentResponse?.epoch, derivedEpochTiming.currentEpoch);
+  const reportedCurrentEpoch = parseNumeric(currentPayload?.epoch, derivedEpochTiming.currentEpoch);
   const epochTiming = {
     ...derivedEpochTiming,
     reportedCurrentEpoch,
@@ -486,8 +495,10 @@ export function buildDynamicFeeModel({
   detailsByThorname = {},
   lastblock = []
 } = {}) {
+  const currentPayload = /** @type {any} */ (currentResponse);
+  const recordsPayload = /** @type {any} */ (recordsResponse);
   const config = extractDynamicConfig({ mimir, currentResponse, lastblock });
-  const currentEntriesRaw = Array.isArray(currentResponse?.entries) ? currentResponse.entries : [];
+  const currentEntriesRaw = Array.isArray(currentPayload?.entries) ? currentPayload.entries : [];
   const currentMap = new Map();
 
   for (const entry of currentEntriesRaw) {
@@ -515,7 +526,7 @@ export function buildDynamicFeeModel({
     });
   }
 
-  const recordsRaw = Array.isArray(recordsResponse?.entries) ? recordsResponse.entries : [];
+  const recordsRaw = Array.isArray(recordsPayload?.entries) ? recordsPayload.entries : [];
   const records = recordsRaw.map((entry) => {
     const thorname = String(entry.thorname ?? '').trim();
     const pair = String(entry.pair ?? '').trim();

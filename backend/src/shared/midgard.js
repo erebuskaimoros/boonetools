@@ -1,4 +1,5 @@
 import { config } from '../lib/config.js';
+import { ProviderRequestError, requestFromProviders } from '../lib/provider-client.js';
 
 const MIDGARD_PRIMARY = config.midgardUrl.replace(/\/$/, '');
 const MIDGARD_FALLBACK = config.midgardFallbackUrl.replace(/\/$/, '');
@@ -7,12 +8,6 @@ const MIDGARD_REQUEST_TIMEOUT_MS = 10000;
 const MIDGARD_BASES = Array.from(
   new Set([MIDGARD_PRIMARY, MIDGARD_FALLBACK].filter(Boolean))
 );
-
-function isChallengeResponse(response) {
-  const contentType = (response.headers.get('content-type') || '').toLowerCase();
-  const cfMitigated = response.headers.get('cf-mitigated');
-  return contentType.includes('text/html') || Boolean(cfMitigated);
-}
 
 function getPathSearchParams(path) {
   try {
@@ -32,8 +27,9 @@ function shouldRetryMidgardResponse(path, data) {
   const requestedLimit = Number(params.get('limit'));
   if (
     path.startsWith('/actions') &&
+    params.has('limit') &&
     Number.isFinite(requestedLimit) &&
-    requestedLimit >= 0 &&
+    requestedLimit > 0 &&
     requestedLimit < 50 &&
     Array.isArray(data?.actions) &&
     data.actions.length > requestedLimit
@@ -44,21 +40,8 @@ function shouldRetryMidgardResponse(path, data) {
   return false;
 }
 
-async function parseJsonResponse(response, url) {
-  const text = await response.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Invalid JSON from ${url}`);
-  }
-}
-
 function createMidgardError(message, details = {}) {
-  const error = new Error(message);
-  error.status = details.status || 0;
-  error.url = details.url || '';
-  error.body = details.body || '';
-  return error;
+  return new ProviderRequestError(message, details);
 }
 
 export function isMidgardRateLimitError(error) {
@@ -75,50 +58,21 @@ export async function fetchMidgard(path, options = {}) {
     validateResponse = shouldRetryMidgardResponse
   } = options;
   const baseList = Array.isArray(bases) && bases.length ? bases : MIDGARD_BASES;
-  let lastError = null;
-
-  for (const base of baseList) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), MIDGARD_REQUEST_TIMEOUT_MS);
-    const url = `${base}${path}`;
-
-    try {
-      const response = await fetch(url, {
-        headers: { Accept: 'application/json' },
-        signal: controller.signal
-      });
-
-      if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        throw createMidgardError(`Midgard error: ${response.status} ${response.statusText} for ${path}`, {
-          status: response.status,
-          url,
-          body: body.slice(0, 240)
-        });
-      }
-
-      if (isChallengeResponse(response)) {
-        throw new Error(`Midgard challenge response for ${path}`);
-      }
-
-      const payload = await parseJsonResponse(response, url);
-      const shouldRetry = typeof validateResponse === 'function' && validateResponse(path, payload);
-      if (shouldRetry) {
-        throw new Error(`Midgard returned an unusable response for ${path}`);
-      }
-
-      return payload;
-    } catch (error) {
-      lastError = error;
-      if (isMidgardRateLimitError(error)) {
-        throw error;
-      }
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  throw lastError || new Error(`Unable to fetch Midgard path ${path}`);
+  return requestFromProviders({
+    bases: baseList,
+    path,
+    timeoutMs: options.timeoutMs || MIDGARD_REQUEST_TIMEOUT_MS,
+    headers: { Accept: 'application/json' },
+    validateResponse: (payload) => (
+      typeof validateResponse === 'function' && validateResponse(path, payload)
+        ? createMidgardError(`Midgard returned an unusable response for ${path}`)
+        : null
+    ),
+    shouldStop: isMidgardRateLimitError,
+    errorMessage: ({ status, statusText }) => (
+      `Midgard error: ${status} ${statusText} for ${path}`
+    )
+  });
 }
 
 export async function fetchMidgardBond(bondAddress) {

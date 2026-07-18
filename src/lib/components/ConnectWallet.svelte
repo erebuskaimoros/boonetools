@@ -16,6 +16,7 @@
     setTradeOwnerAccount
   } from '../limit-orders/store.js';
   import { getChainFromAsset } from '../utils/blockchain.js';
+  import { hideBrokenImage } from '../utils/dom.js';
 
   export let open = false;
 
@@ -718,7 +719,7 @@
               <div class="cw-chains-grid">
                 {#each ((walletMod?.supportedChains || {})[selectedWallet.option] || []) as chain}
                   <button class="cw-chain-item" type="button" class:selected={selectedWalletChains.includes(chain)} on:click={() => toggleChain(chain)}>
-                    <img src="assets/chains/{chain}.svg" alt={chain} class="cw-chain-icon" on:error={(e) => e.target.style.display='none'} />
+                    <img src="assets/chains/{chain}.svg" alt={chain} class="cw-chain-icon" on:error={hideBrokenImage} />
                     <span class="cw-chain-name">{chain}</span>
                   </button>
                 {/each}

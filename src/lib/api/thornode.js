@@ -7,6 +7,7 @@
  */
 
 import { fromBaseUnit } from '../utils/blockchain.js';
+import { requestFromProviders } from './provider.js';
 
 /**
  * API Provider configurations
@@ -48,6 +49,7 @@ class ThorNodeClient {
     };
     this.maxFailures = 3;
     this.cache = new Map();
+    this.inflight = new Map();
     this.cacheTTL = 5000;
   }
 
@@ -72,6 +74,8 @@ class ThorNodeClient {
       blockHeight,
       parseJson = true,
       realtime = true,
+      timeoutMs = 10000,
+      fetchImpl = globalThis.fetch,
       ...fetchOptions
     } = options;
 
@@ -88,54 +92,37 @@ class ThorNodeClient {
       this.cache.delete(cacheKey);
     }
 
-    // Determine providers to try (in order)
-    const providers = [PROVIDERS.thorchain, PROVIDERS.fallback];
-
-    let lastError = null;
-
-    for (const provider of providers) {
-      try {
-        let url = `${provider.base}${path}`;
-
-        // Add block height for providers that support height-aware queries.
-        if (blockHeight && provider.supportsBlockHeight) {
-          const separator = url.includes('?') ? '&' : '?';
-          url += `${separator}height=${blockHeight}`;
-        }
-
-        const response = await fetch(url, {
-          headers: { ...(provider.headers || {}), ...fetchOptions.headers },
-          ...fetchOptions
-        });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = parseJson ? await response.json() : await response.text();
-
-        // Cache successful response
-        if (cache) {
-          this.cache.set(cacheKey, { data, timestamp: Date.now() });
-        }
-
-        if (provider.name in this.failureCount) {
-          this.failureCount[provider.name] = 0;
-        }
-
-        return data;
-      } catch (error) {
-        lastError = error;
-        console.warn(`THORNode fetch failed for ${provider.name}${path}:`, error.message);
-
-        if (provider.name in this.failureCount) {
-          this.failureCount[provider.name]++;
-        }
-      }
+    if (cache && this.inflight.has(cacheKey)) {
+      return this.inflight.get(cacheKey);
     }
 
-    // All providers failed
-    throw new Error(`All THORNode providers failed for ${path}: ${lastError?.message}`);
+    let requestPath = path;
+    if (blockHeight) {
+      const separator = requestPath.includes('?') ? '&' : '?';
+      requestPath += `${separator}height=${encodeURIComponent(blockHeight)}`;
+    }
+
+    const pending = requestFromProviders({
+      bases: [PROVIDERS.thorchain.base, PROVIDERS.fallback.base],
+      path: requestPath,
+      responseType: parseJson ? 'json' : 'text',
+      timeoutMs,
+      fetchImpl,
+      request: fetchOptions,
+      shouldStop: (error) => Number(error?.status) === 429
+    }).then((data) => {
+      if (cache) {
+        this.cache.set(cacheKey, { data, timestamp: Date.now() });
+      }
+      return data;
+    }).catch((error) => {
+      throw new Error(`All THORNode providers failed for ${path}: ${error.message}`, { cause: error });
+    }).finally(() => {
+      this.inflight.delete(cacheKey);
+    });
+
+    if (cache) this.inflight.set(cacheKey, pending);
+    return pending;
   }
 
   // ============================================

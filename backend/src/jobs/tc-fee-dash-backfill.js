@@ -1,58 +1,17 @@
-import { withAdvisoryLock } from '../db/lock.js';
 import { config } from '../lib/config.js';
+import { createRecordedJobRunner } from '../lib/recorded-job.js';
 import { sleep } from '../lib/utils.js';
 import { runTcFeeDashDailyBackfill } from '../shared/tc-fee-dash-ingestion.js';
 
 const LOCK_KEY = 'boonetools:tc-fee-dash';
 const JOB_NAME = 'tc-fee-dash-backfill';
 
-async function insertJobRun(client) {
-  const { rows } = await client.query(
-    `insert into tc_fee_dash_job_runs (job_name, started_at, status, stats_json)
-     values ($1, now(), 'running', '{}'::jsonb)
-     returning id`,
-    [JOB_NAME]
-  );
-  return String(rows[0].id);
-}
-
-async function completeJobRun(client, jobId, status, stats, error = '') {
-  await client.query(
-    `update tc_fee_dash_job_runs
-     set finished_at = now(),
-         status = $2,
-         error = $3,
-         stats_json = $4
-     where id = $1`,
-    [
-      jobId,
-      status,
-      error || null,
-      stats || {}
-    ]
-  );
-}
-
-async function runSingleTcFeeDashBackfill() {
-  return withAdvisoryLock(LOCK_KEY, async (client) => {
-    const jobId = await insertJobRun(client);
-    try {
-      const stats = await runTcFeeDashDailyBackfill(client);
-      await completeJobRun(client, jobId, 'success', stats);
-      return {
-        ok: true,
-        job_id: jobId,
-        ...stats
-      };
-    } catch (error) {
-      const stats = {
-        error: error.message || String(error)
-      };
-      await completeJobRun(client, jobId, 'error', stats, stats.error);
-      throw error;
-    }
-  });
-}
+const runSingleTcFeeDashBackfill = createRecordedJobRunner({
+  lockKey: LOCK_KEY,
+  tableName: 'tc_fee_dash_job_runs',
+  jobName: JOB_NAME,
+  run: runTcFeeDashDailyBackfill
+});
 
 function isTerminalResult(result) {
   return result?.complete === true

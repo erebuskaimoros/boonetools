@@ -9,6 +9,8 @@
  * - https://midgard.thorchain.network/v2
  */
 
+import { requestFromProviders } from './provider.js';
+
 /**
  * Midgard API base URL
  */
@@ -39,8 +41,9 @@ function shouldRetryMidgardResponse(path, data) {
   const requestedLimit = Number(params.get('limit'));
   if (
     path.startsWith('/actions') &&
+    params.has('limit') &&
     Number.isFinite(requestedLimit) &&
-    requestedLimit >= 0 &&
+    requestedLimit > 0 &&
     requestedLimit < 50 &&
     Array.isArray(data?.actions) &&
     data.actions.length > requestedLimit
@@ -49,12 +52,6 @@ function shouldRetryMidgardResponse(path, data) {
   }
 
   return false;
-}
-
-function createMidgardError(message, details = {}) {
-  const error = new Error(message);
-  error.status = details.status || 0;
-  return error;
 }
 
 export function isMidgardRateLimitError(error) {
@@ -71,6 +68,7 @@ class MidgardClient {
   constructor({ bases = MIDGARD_BASES } = {}) {
     this.bases = bases;
     this.cache = new Map();
+    this.inflight = new Map();
     this.cacheTTL = 30000; // 30 seconds (Midgard updates less frequently)
   }
 
@@ -92,6 +90,8 @@ class MidgardClient {
       cache = true,
       bases = this.bases,
       validateResponse = shouldRetryMidgardResponse,
+      timeoutMs = 10000,
+      fetchImpl = globalThis.fetch,
       ...fetchOptions
     } = options;
 
@@ -108,42 +108,32 @@ class MidgardClient {
       this.cache.delete(cacheKey);
     }
 
-    let lastError = null;
-
-    for (const base of baseList) {
-      try {
-        const response = await fetch(`${base}${path}`, {
-          ...fetchOptions
-        });
-
-        if (!response.ok) {
-          throw createMidgardError(`Midgard error: ${response.status} ${response.statusText}`, {
-            status: response.status
-          });
-        }
-
-        const data = await response.json();
-        const shouldRetry = typeof validateResponse === 'function' && validateResponse(path, data);
-        if (shouldRetry) {
-          throw new Error(`Midgard returned an unusable response for ${path}`);
-        }
-
-        // Cache successful response
-        if (cache) {
-          this.cache.set(cacheKey, { data, timestamp: Date.now() });
-        }
-
-        return data;
-      } catch (error) {
-        lastError = error;
-        if (isMidgardRateLimitError(error)) {
-          throw error;
-        }
-      }
+    if (cache && this.inflight.has(cacheKey)) {
+      return this.inflight.get(cacheKey);
     }
 
-    console.error(`Midgard fetch failed for ${path}:`, lastError);
-    throw lastError;
+    const pending = requestFromProviders({
+      bases: baseList,
+      path,
+      timeoutMs,
+      fetchImpl,
+      request: fetchOptions,
+      validateResponse: (data) => (
+        typeof validateResponse === 'function' && validateResponse(path, data)
+          ? `Midgard returned an unusable response for ${path}`
+          : null
+      ),
+      shouldStop: (error) => isMidgardRateLimitError(error),
+      errorMessage: ({ status, statusText }) => `Midgard error: ${status} ${statusText}`.trim()
+    }).then((data) => {
+      if (cache) this.cache.set(cacheKey, { data, timestamp: Date.now() });
+      return data;
+    }).finally(() => {
+      this.inflight.delete(cacheKey);
+    });
+
+    if (cache) this.inflight.set(cacheKey, pending);
+    return pending;
   }
 
   // ============================================

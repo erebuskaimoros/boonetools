@@ -3,6 +3,7 @@
   import { CHART_RANGE_OPTIONS, thorchainChartDataProvider } from './chart-data.js';
   import { normalizeAsset, getChainFromAsset } from '$lib/utils/blockchain.js';
 
+  /** @type {{ sourceAsset: string, targetAsset: string } | null} */
   export let pair = null;
   export let marketPrice = null;
   export let refreshKey = 0;
@@ -374,7 +375,7 @@
       return;
     }
 
-    chart.setStyles(buildChartStyles());
+    chart.setStyles(/** @type {any} */ (buildChartStyles()));
     chart.setOffsetRightDistance(16);
     chart.setLeftMinVisibleBarCount(8);
     chart.setRightMinVisibleBarCount(6);

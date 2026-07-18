@@ -573,6 +573,11 @@
     return getSettlementChain(asset);
   }
 
+  /**
+   * @param {bigint | null} amountAtomic
+   * @param {bigint | null} priceAtomic
+   * @param {string} side
+   */
   function calculateLimitTargetAmount(amountAtomic, priceAtomic, side) {
     if (!amountAtomic || !priceAtomic || priceAtomic <= 0n) return null;
     return side === 'buy'
@@ -713,7 +718,7 @@
         amount: sellAmountAtomic.toString(),
         destination,
         target_out: targetAmountAtomic.toString(),
-        custom_ttl: String(selectedTTL),
+        custom_ttl: selectedTTL,
         ...getAffiliateParams()
       };
 
@@ -766,6 +771,7 @@
     marketQuoteLoading = true;
     marketQuoteError = '';
     try {
+      /** @type {Record<string, string>} */
       const params = {
         from_asset: trade.sellAsset,
         to_asset: trade.buyAsset,
@@ -805,6 +811,7 @@
       const sourceAddress = sourceAssignment?.address || '';
       if (!sourceAddress || !sourceAssignment?.provider) throw new Error(getSourceError(trade, 'market'));
 
+      /** @type {Record<string, string>} */
       const params = {
         from_asset: trade.sellAsset,
         to_asset: trade.buyAsset,
@@ -928,7 +935,7 @@
         amount: sellAmountAtomic.toString(),
         destination,
         target_out: targetAmountAtomic.toString(),
-        custom_ttl: String(selectedTTL),
+        custom_ttl: selectedTTL,
         ...getAffiliateParams()
       };
       const quote = await fetchLimitQuote(params);

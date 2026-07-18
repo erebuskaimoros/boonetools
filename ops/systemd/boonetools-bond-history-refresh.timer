@@ -1,0 +1,11 @@
+[Unit]
+Description=Process queued BooneTools bond history refreshes every minute
+
+[Timer]
+OnBootSec=45
+OnUnitActiveSec=1min
+Persistent=true
+Unit=boonetools-bond-history-refresh.service
+
+[Install]
+WantedBy=timers.target

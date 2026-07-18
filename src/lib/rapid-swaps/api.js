@@ -1,34 +1,14 @@
 import { thornode } from '../api/thornode.js';
+import { booneToolsApi } from '../api/boonetools.js';
 import {
   buildAssetUsdIndex,
   estimateCoinUsd
 } from './model.js';
 
-const RAPID_SWAPS_API = {
-  base: (import.meta.env.VITE_RAPID_SWAPS_API_BASE || import.meta.env.VITE_NODEOP_API_BASE || '').replace(/\/$/, ''),
-  key: import.meta.env.VITE_RAPID_SWAPS_API_KEY || import.meta.env.VITE_NODEOP_API_KEY || ''
-};
-
 function getConfigError() {
-  if (!RAPID_SWAPS_API.base && !RAPID_SWAPS_API.key) {
-    return 'Rapid swap recorder backend is not configured. Set VITE_RAPID_SWAPS_API_BASE/VITE_RAPID_SWAPS_API_KEY or reuse the Node Operator backend env vars.';
-  }
-
-  if (!RAPID_SWAPS_API.base) {
-    return 'Rapid swap recorder backend is not configured. Missing VITE_RAPID_SWAPS_API_BASE.';
-  }
-
-  if (!RAPID_SWAPS_API.key) {
-    return 'Rapid swap recorder backend is not configured. Missing VITE_RAPID_SWAPS_API_KEY.';
-  }
-
+  // The canonical client defaults to the same-origin public `/functions/v1`
+  // route. An explicit base and browser-visible client token are both optional.
   return '';
-}
-
-function isChallengeResponse(response) {
-  const contentType = (response.headers.get('content-type') || '').toLowerCase();
-  const cfMitigated = response.headers.get('cf-mitigated');
-  return contentType.includes('text/html') || Boolean(cfMitigated);
 }
 
 function roundUsd(value) {
@@ -49,45 +29,12 @@ export async function fetchRapidSwapsDashboard(options = {}) {
     throw new Error(configError);
   }
 
-  const params = new URLSearchParams();
-  if (options.forceRefresh) {
-    params.set('ts', String(Date.now()));
-  }
-  for (const [key, value] of Object.entries(options.params || {})) {
-    if (value !== undefined && value !== null && value !== '') {
-      params.set(key, String(value));
-    }
-  }
-
-  const url = `${RAPID_SWAPS_API.base}/rapid-swaps${params.toString() ? `?${params.toString()}` : ''}`;
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/json',
-      apikey: RAPID_SWAPS_API.key,
-      Authorization: `Bearer ${RAPID_SWAPS_API.key}`
-    }
+  return booneToolsApi.get('/rapid-swaps', {
+    forceRefresh: options.forceRefresh,
+    query: options.params,
+    errorMessage: ({ response }) => `Rapid swaps backend request failed (${response.status})`,
+    challengeMessage: 'Rapid swaps backend returned challenge response'
   });
-
-  if (!response.ok) {
-    let message = `Rapid swaps backend request failed (${response.status})`;
-
-    try {
-      const payload = await response.json();
-      if (payload?.error) {
-        message = payload.error;
-      }
-    } catch (_) {
-      // Ignore JSON parse issues for error payloads.
-    }
-
-    throw new Error(message);
-  }
-
-  if (isChallengeResponse(response)) {
-    throw new Error('Rapid swaps backend returned challenge response');
-  }
-
-  return response.json();
 }
 
 export async function fetchRapidSwapsSwapHistory(params = {}) {
@@ -96,42 +43,11 @@ export async function fetchRapidSwapsSwapHistory(params = {}) {
     throw new Error(configError);
   }
 
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(params || {})) {
-    if (value !== undefined && value !== null && value !== '') {
-      query.set(key, String(value));
-    }
-  }
-
-  const url = `${RAPID_SWAPS_API.base}/rapid-swaps-swap-history${query.toString() ? `?${query.toString()}` : ''}`;
-  const response = await fetch(url, {
-    headers: {
-      Accept: 'application/json',
-      apikey: RAPID_SWAPS_API.key,
-      Authorization: `Bearer ${RAPID_SWAPS_API.key}`
-    }
+  return booneToolsApi.get('/rapid-swaps-swap-history', {
+    query: params,
+    errorMessage: ({ response }) => `Rapid swaps history request failed (${response.status})`,
+    challengeMessage: 'Rapid swaps history backend returned challenge response'
   });
-
-  if (!response.ok) {
-    let message = `Rapid swaps history request failed (${response.status})`;
-
-    try {
-      const payload = await response.json();
-      if (payload?.error) {
-        message = payload.error;
-      }
-    } catch (_) {
-      // Ignore JSON parse issues for error payloads.
-    }
-
-    throw new Error(message);
-  }
-
-  if (isChallengeResponse(response)) {
-    throw new Error('Rapid swaps history backend returned challenge response');
-  }
-
-  return response.json();
 }
 
 export async function fetchLiveRapidSwaps() {

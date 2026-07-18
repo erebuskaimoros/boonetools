@@ -1,5 +1,6 @@
 import { closePool } from './db/pool.js';
 import { runAppLayerLiveStateScheduler } from './jobs/app-layer-live-state-scheduler.js';
+import { runBondHistoryRefreshQueue } from './jobs/bond-history-refresh.js';
 import { runNodeopScheduler } from './jobs/nodeop-scheduler.js';
 import { runNodeVotesBackfill } from './jobs/node-votes-backfill.js';
 import { runRapidSwapsScheduler } from './jobs/rapid-swaps-scheduler.js';
@@ -11,6 +12,7 @@ const jobName = process.argv[2] || '';
 
 const runners = {
   'app-layer-live-state-scheduler': runAppLayerLiveStateScheduler,
+  'bond-history-refresh': runBondHistoryRefreshQueue,
   'nodeop-scheduler': runNodeopScheduler,
   'node-votes-backfill': runNodeVotesBackfill,
   'rapid-swaps-scheduler': runRapidSwapsScheduler,

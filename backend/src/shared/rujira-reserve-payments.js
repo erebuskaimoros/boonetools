@@ -2,6 +2,15 @@ import { createHash } from 'node:crypto';
 import { query } from '../db/pool.js';
 import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
+import {
+  canonicalReservePaymentKey,
+  choosePreferredSource,
+  EVENT_SOURCE_PRIORITY,
+  enrichEventRows,
+  recordEventSourceObservations,
+  selectPreferredEventRows,
+  withEventTransaction
+} from '../lib/provenance.js';
 import { safeNumber, sleep, toIsoString } from '../lib/utils.js';
 import { executeDuneQueryRows, formatDuneDateTime, summarizeDuneError } from './dune.js';
 import { fetchMidgard, fetchMidgardActions, isMidgardRateLimitError } from './midgard.js';
@@ -32,6 +41,61 @@ export const BASE_LAYER_REVENUE_COLLECTOR =
   'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
 export const TC_RESERVE_MODULE =
   'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
+
+function reservePaymentSource(row) {
+  return choosePreferredSource('', row?.source || 'unknown');
+}
+
+async function upsertCanonicalReservePaymentEvents(client, rows) {
+  if (rows.length === 0) return;
+  const columns = Object.keys(rows[0]);
+  await upsertRows(client, 'rujira_reserve_payment_events', rows, {
+    columns,
+    conflictColumns: ['canonical_key'],
+    updateColumns: columns.filter((column) => column !== 'canonical_key'),
+    updateStrategies: {
+      first_seen_at: 'least',
+      last_seen_at: 'greatest',
+      schema_version: 'greatest'
+    },
+    sourcePreference: {
+      column: 'preferred_source',
+      priorities: EVENT_SOURCE_PRIORITY,
+      observedAtColumn: 'last_seen_at'
+    },
+    jsonColumns: ['raw_event']
+  });
+}
+
+async function persistRujiraReservePaymentEvents(client, events) {
+  if (!Array.isArray(events) || events.length === 0) return [];
+
+  const enriched = await enrichEventRows(client, {
+    table: 'rujira_reserve_payment_events',
+    rows: events,
+    canonicalKey: canonicalReservePaymentKey,
+    source: reservePaymentSource,
+    observedAt: (row) => row.updated_at
+  });
+  const canonicalRows = selectPreferredEventRows(enriched);
+
+  await withEventTransaction(client, async () => {
+    await upsertCanonicalReservePaymentEvents(client, canonicalRows);
+    await recordEventSourceObservations(client, {
+      domain: 'rujira-reserve-payments',
+      rows: enriched,
+      source: reservePaymentSource,
+      sourceEventKey: (row) => row.event_key,
+      rawReference: (row) => ({
+        event_key: row.event_key,
+        tx_id: row.tx_id,
+        height: row.height
+      })
+    });
+  });
+
+  return enriched;
+}
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -354,13 +418,10 @@ export async function saveRujiraReservePaymentEvents(client, events) {
     return 0;
   }
 
-  await upsertRows(client, 'rujira_reserve_payment_events', events, {
-    conflictColumns: ['event_key'],
-    jsonColumns: ['raw_event']
-  });
+  const enriched = await persistRujiraReservePaymentEvents(client, events);
   await pruneDuplicateRujiraReservePaymentEvents(client);
 
-  return events.length;
+  return enriched.length;
 }
 
 export async function pruneDuplicateRujiraReservePaymentEvents(client) {
@@ -1122,10 +1183,7 @@ async function runRujiraReservePaymentsDuneIngestion(client) {
   });
   const rows = buildRujiraReservePaymentRowsFromDune(result.rows);
 
-  await upsertRows(client, 'rujira_reserve_payment_events', rows, {
-    conflictColumns: ['event_key'],
-    jsonColumns: ['raw_event']
-  });
+  await persistRujiraReservePaymentEvents(client, rows);
   const duplicateRowsDeleted = await pruneDuplicateRujiraReservePaymentEvents(client);
 
   const heights = rows.map((row) => row.height).filter((height) => height > 0);

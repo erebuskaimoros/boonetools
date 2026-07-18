@@ -11,6 +11,7 @@ Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--dns-result-order=ipv4first
 EnvironmentFile=/opt/boonetools-backend/backend/.env
 ExecStart=/usr/bin/node src/run-job.js app-layer-live-state-scheduler
+TimeoutStartSec=10min
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=boonetools-app-layer-live-state

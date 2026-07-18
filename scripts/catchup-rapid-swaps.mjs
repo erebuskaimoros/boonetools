@@ -14,11 +14,11 @@ import {
   fetchRapidSwapPriceIndex,
   getRapidSwapRateLimitCooldownMs,
   isRapidSwapRateLimitError
-} from '../src/lib/rapid-swaps/backend.js';
+} from '../shared/rapid-swaps/backend.js';
 import {
   midgardTimestampToMillis,
   normalizeRapidSwapAction
-} from '../src/lib/rapid-swaps/model.js';
+} from '../shared/rapid-swaps/model.js';
 
 function readFlag(name) {
   return process.argv.includes(name);

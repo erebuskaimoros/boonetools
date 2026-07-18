@@ -13,6 +13,8 @@
  * const data = await response.json();
  */
 
+import { requestFromProviders } from '../api/provider.js';
+
 // ============================================
 // API Endpoint Configuration
 // ============================================
@@ -24,12 +26,13 @@ const DEV_THORNODE_ENDPOINTS = {
   primary: '/__thornode_primary',
   fallback: '/__thornode_fallback'
 };
+const IS_DEV = Boolean(import.meta.env?.DEV);
 
 export const THORNODE_ENDPOINTS = {
-  primary: import.meta.env.DEV
+  primary: IS_DEV
     ? DEV_THORNODE_ENDPOINTS.primary
     : 'https://gateway.liquify.com/chain/thorchain_api',
-  fallback: import.meta.env.DEV
+  fallback: IS_DEV
     ? DEV_THORNODE_ENDPOINTS.fallback
     : 'https://thornode.thorchain.network'
 };
@@ -71,45 +74,21 @@ export const MIDGARD_ENDPOINTS = {
  * });
  */
 export async function fetchWithFallback(endpoint, options = {}, endpoints = THORNODE_ENDPOINTS) {
-  const { stopOnRateLimit = false, ...fetchOptions } = options;
-  const primaryUrl = `${endpoints.primary}${endpoint}`;
-  const fallbackUrl = `${endpoints.fallback}${endpoint}`;
-
-  try {
-    // Try primary endpoint first
-    const response = await fetch(primaryUrl, fetchOptions);
-    if (response.ok) {
-      return response;
-    }
-    if (stopOnRateLimit && response.status === 429) {
-      throw new Error(`Primary endpoint rate limited: ${response.status}`);
-    }
-    throw new Error(`Primary endpoint failed: ${response.status}`);
-  } catch (error) {
-    if (stopOnRateLimit && /rate limited|429/i.test(String(error?.message || ''))) {
-      throw error;
-    }
-
-    if (fallbackUrl === primaryUrl) {
-      console.error(`Primary endpoint failed for ${endpoint}:`, error);
-      throw error;
-    }
-
-    console.warn(`Primary endpoint failed, trying fallback: ${error.message}`);
-
-    try {
-      // Try fallback endpoint
-      const fallbackResponse = await fetch(fallbackUrl, fetchOptions);
-      if (fallbackResponse.ok) {
-        console.log(`Using fallback endpoint for: ${endpoint}`);
-        return fallbackResponse;
-      }
-      throw new Error(`Fallback endpoint failed: ${fallbackResponse.status}`);
-    } catch (fallbackError) {
-      console.error(`Both endpoints failed for ${endpoint}:`, fallbackError);
-      throw fallbackError;
-    }
-  }
+  const {
+    stopOnRateLimit = false,
+    timeoutMs = 10000,
+    fetchImpl = globalThis.fetch,
+    ...fetchOptions
+  } = options;
+  return requestFromProviders({
+    bases: [endpoints.primary, endpoints.fallback],
+    path: endpoint,
+    responseType: 'response',
+    timeoutMs,
+    fetchImpl,
+    request: fetchOptions,
+    shouldStop: (error) => stopOnRateLimit && Number(error?.status) === 429
+  });
 }
 
 /**
@@ -178,7 +157,11 @@ export async function fetchMidgard(endpoint, options = {}) {
  * const pools = await fetchMidgardJSON('/v2/pools');
  */
 export async function fetchMidgardJSON(endpoint, options = {}) {
-  return fetchJSONWithFallback(endpoint, options, MIDGARD_ENDPOINTS);
+  return fetchJSONWithFallback(
+    endpoint,
+    { ...options, stopOnRateLimit: true },
+    MIDGARD_ENDPOINTS
+  );
 }
 
 // ============================================

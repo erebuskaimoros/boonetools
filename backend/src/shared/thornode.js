@@ -1,91 +1,43 @@
 import { config } from '../lib/config.js';
+import { requestFromProviders } from '../lib/provider-client.js';
 import { fetchMidgardChurns } from './midgard.js';
 
 const THORNODE_PRIMARY = config.thornodePrimaryUrl;
 const THORNODE_ARCHIVE = config.thornodeArchiveUrl;
 const THORNODE_FALLBACK = config.thornodeFallbackUrl;
 
-let activeThornodeIndex = 0;
 const THORNODE_REQUEST_TIMEOUT_MS = 4000;
-
-function isChallengeResponse(response) {
-  const contentType = (response.headers.get('content-type') || '').toLowerCase();
-  const cfMitigated = response.headers.get('cf-mitigated');
-  return contentType.includes('text/html') || Boolean(cfMitigated);
-}
-
-async function parseResponse(response, responseType) {
-  if (responseType === 'text') {
-    return response.text();
-  }
-  return response.json();
-}
-
-async function fetchFromBase(baseUrl, endpoint, responseType, headers = {}) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), THORNODE_REQUEST_TIMEOUT_MS);
-  let response;
-
-  try {
-    response = await fetch(`${baseUrl}${endpoint}`, {
-      headers: {
-        Accept: responseType === 'text' ? 'text/plain' : 'application/json',
-        ...headers
-      },
-      signal: controller.signal
-    });
-  } finally {
-    clearTimeout(timeoutId);
-  }
-
-  if (!response.ok) {
-    throw new Error(`Request failed (${response.status}) for ${endpoint}`);
-  }
-
-  if (isChallengeResponse(response)) {
-    throw new Error(`Challenge response for ${endpoint}`);
-  }
-
-  return parseResponse(response, responseType);
-}
 
 export async function fetchThorchain(endpoint, options = {}) {
   const responseType = options.responseType || 'json';
-  const bases = options.historical
+  const configuredBases = options.historical
     ? [THORNODE_PRIMARY, THORNODE_ARCHIVE, THORNODE_FALLBACK]
-    : (
-        activeThornodeIndex === 1
-          ? [THORNODE_FALLBACK, THORNODE_PRIMARY]
-          : [THORNODE_PRIMARY, THORNODE_FALLBACK]
-      );
-  let lastError = null;
-
-  for (let index = 0; index < bases.length; index += 1) {
-    const base = bases[index];
-    if (!base) {
-      continue;
-    }
-
-    try {
-      const payload = await fetchFromBase(base, endpoint, responseType, options.headers);
-      if (!options.historical) {
-        activeThornodeIndex = base === THORNODE_FALLBACK ? 1 : 0;
-      }
-      return payload;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError || new Error(`Unable to fetch ${endpoint}`);
+    : [THORNODE_PRIMARY, THORNODE_FALLBACK];
+  const bases = [...new Set(configuredBases.filter(Boolean))];
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) && Number(options.timeoutMs) > 0
+    ? Number(options.timeoutMs)
+    : THORNODE_REQUEST_TIMEOUT_MS;
+  return requestFromProviders({
+    bases,
+    path: endpoint,
+    responseType,
+    timeoutMs,
+    headers: {
+      Accept: responseType === 'text' ? 'text/plain' : 'application/json',
+      ...(options.headers || {})
+    },
+    validateResponse: options.validateResponse,
+    shouldStop: options.shouldStop,
+    errorMessage: ({ status }) => `Request failed (${status}) for ${endpoint}`
+  });
 }
 
 export async function fetchNodes() {
-  const payload = await fetchThorchain('/thorchain/nodes');
-  if (!Array.isArray(payload)) {
-    throw new Error('Invalid /thorchain/nodes response');
-  }
-  return payload;
+  return fetchThorchain('/thorchain/nodes', {
+    validateResponse: (payload) => Array.isArray(payload)
+      ? null
+      : 'Invalid /thorchain/nodes response'
+  });
 }
 
 export async function fetchHistoricalNodesAtHeight(height) {
@@ -94,22 +46,20 @@ export async function fetchHistoricalNodesAtHeight(height) {
   }
 
   const payload = await fetchThorchain(`/thorchain/nodes?height=${Math.trunc(height)}`, {
-    historical: true
+    historical: true,
+    validateResponse: (response) => Array.isArray(response)
+      ? null
+      : `Invalid historical node response for height ${height}`
   });
-
-  if (!Array.isArray(payload)) {
-    throw new Error(`Invalid historical node response for height ${height}`);
-  }
-
   return payload;
 }
 
 export async function fetchLastblock() {
-  const payload = await fetchThorchain('/thorchain/lastblock');
-  if (!Array.isArray(payload)) {
-    throw new Error('Invalid /thorchain/lastblock response');
-  }
-  return payload;
+  return fetchThorchain('/thorchain/lastblock', {
+    validateResponse: (payload) => Array.isArray(payload)
+      ? null
+      : 'Invalid /thorchain/lastblock response'
+  });
 }
 
 export async function fetchChurns() {

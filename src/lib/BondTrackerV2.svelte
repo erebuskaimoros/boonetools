@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from "svelte";
   import Chart from 'chart.js/auto';
-  import { thornode } from '$lib/api';
+  import { booneToolsApi, thornode } from '$lib/api';
   import { formatNumber, simplifyNumber, formatCountdown, getAddressSuffix } from '$lib/utils/formatting';
   import { fromBaseUnit } from '$lib/utils/blockchain';
   import { getChurnState, getNodes, getLeaveStatus, LEAVE_STATUS } from '$lib/utils/nodes';
@@ -412,35 +412,45 @@
 
   // Map churn height → array of bond/unbond tx hashes from the backend cache.
   let bondTxMap = {};
-
-  const BOND_HISTORY_API = {
-    base: (import.meta.env.VITE_NODEOP_API_BASE || '').replace(/\/$/, ''),
-    key: import.meta.env.VITE_NODEOP_API_KEY || ''
-  };
+  let historyRequestGeneration = 0;
 
   const fetchBondHistory = async () => {
+    const requestGeneration = ++historyRequestGeneration;
+    const requestedBondAddress = my_bond_address;
+    const requestedHistorical = includeHistorical;
     try {
       historyLoading = true;
       historyError = null;
       historyProgressCurrent = 0;
       historyProgressTotal = 1; // indeterminate
 
-      // Call the edge function — it handles caching, archive queries, everything
-      const histParam = includeHistorical ? '&include_historical=true' : '';
-      const url = `${BOND_HISTORY_API.base}/bond-history?bond_address=${encodeURIComponent(my_bond_address)}${histParam}&include_bond_txs=true`;
-      const res = await fetch(url, {
-        headers: {
-          'apikey': BOND_HISTORY_API.key,
-          'Authorization': `Bearer ${BOND_HISTORY_API.key}`
-        }
-      });
+      // Cold addresses are queued instead of making the browser wait on Dune
+      // and archive-node scans. Poll the cache-only status path while the
+      // systemd worker materializes the first snapshot.
+      let data = null;
+      for (let attempt = 0; attempt < 19; attempt += 1) {
+        data = await booneToolsApi.get('/bond-history', {
+          headers: attempt === 0 ? { Prefer: 'respond-async' } : {},
+          query: {
+            bond_address: requestedBondAddress,
+            include_historical: requestedHistorical ? true : '',
+            include_bond_txs: true,
+            refresh: attempt === 0 ? '' : 'status'
+          }
+        });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || `API error ${res.status}`);
+        if (requestGeneration !== historyRequestGeneration) return;
+
+        if (data.refresh_status !== 'queued' || (data.history || []).length > 0) {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        if (requestGeneration !== historyRequestGeneration) return;
       }
 
-      const data = await res.json();
+      if (data?.refresh_status === 'queued' && (data.history || []).length === 0) {
+        throw new Error('Bond history refresh is still queued. Please try again shortly.');
+      }
       const history = data.history || [];
       hasHistoricalNodes = data.has_historical || false;
       bondTxMap = data.bond_tx_map || {};
@@ -488,8 +498,11 @@
       if (curr !== 'USD') loadHistoricalRates(curr);
 
       // Render chart on next tick
-      setTimeout(() => initHistoryChart(), 0);
+      setTimeout(() => {
+        if (requestGeneration === historyRequestGeneration) initHistoryChart();
+      }, 0);
     } catch (error) {
+      if (requestGeneration !== historyRequestGeneration) return;
       console.error('Error fetching bond history:', error);
       historyError = error.message;
       historyLoading = false;
@@ -691,7 +704,7 @@
             ticks: {
               color: '#00cc66',
               font: { family: "'JetBrains Mono', monospace", size: 10 },
-              callback: (v) => simplifyNumber(v) + ' ᚱ'
+              callback: (v) => simplifyNumber(Number(v)) + ' ᚱ'
             }
           },
           y1: {
@@ -702,7 +715,7 @@
             ticks: {
               color: '#d4a017',
               font: { family: "'JetBrains Mono', monospace", size: 10 },
-              callback: (v) => formatCurrencyCompact(v, curr)
+              callback: (v) => formatCurrencyCompact(Number(v), curr)
             }
           }
         },
@@ -710,7 +723,7 @@
           legend: {
             labels: {
               color: '#555',
-              font: { family: "'JetBrains Mono', monospace", size: 10, weight: '600' },
+              font: { family: "'JetBrains Mono', monospace", size: 10, weight: 600 },
               boxWidth: 12,
               boxHeight: 2,
               padding: 16
@@ -729,9 +742,9 @@
               label: (context) => {
                 const val = context.raw;
                 if (context.dataset.yAxisID === 'y') {
-                  return ' ᚱ ' + formatNumber(val, { maximumFractionDigits: 1 });
+                  return ' ᚱ ' + formatNumber(Number(val), { maximumFractionDigits: 1 });
                 }
-                return ' ' + sym + formatNumber(val, { maximumFractionDigits: config.decimals });
+                return ' ' + sym + formatNumber(Number(val), { maximumFractionDigits: config.decimals });
               },
               afterBody: (tooltipItems) => {
                 if (!tooltipItems.length) return '';
@@ -771,7 +784,7 @@
     historyLoaded = false;
     churnPage = 1;
     if (historyChartInstance) { historyChartInstance.destroy(); historyChartInstance = null; }
-    const url = new URL(window.location);
+    const url = new URL(window.location.href);
     url.searchParams.delete('bond_address');
     window.history.pushState({}, '', url);
   };
@@ -814,7 +827,7 @@
   }
 
   const updateURLBondOnly = () => {
-    const url = new URL(window.location);
+    const url = new URL(window.location.href);
     url.searchParams.set("bond_address", my_bond_address);
     url.searchParams.delete("node_address");
     const curr = get(currentCurrency);
@@ -840,7 +853,7 @@
 
   // Update other functions to use showToastMessage
   const copyLink = () => {
-    const url = new URL(window.location);
+    const url = new URL(window.location.href);
     url.searchParams.set("bond_address", my_bond_address);
     if (!isMultiNode && node_address) {
       url.searchParams.set("node_address", node_address);
@@ -888,7 +901,7 @@
 
       // Update suffix and URL
       bondAddressSuffix = getAddressSuffix(my_bond_address, 4);
-      const url = new URL(window.location);
+      const url = new URL(window.location.href);
       url.searchParams.set('bond_address', my_bond_address);
       url.searchParams.delete('node_address'); // Let fetchBondData determine the node
       window.history.pushState({}, '', url);
@@ -908,6 +921,7 @@
   });
 
   onDestroy(() => {
+    historyRequestGeneration += 1;
     if (historyChartInstance) {
       historyChartInstance.destroy();
     }

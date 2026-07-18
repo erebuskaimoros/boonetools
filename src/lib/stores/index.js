@@ -5,9 +5,6 @@
  *   import { runePrice, pools, subscribeToRunePrice } from '$lib/stores';
  */
 
-// Audio store (existing)
-export { audioPlaying } from './audioStore.js';
-
 // RUNE price store
 export {
   runePrice,

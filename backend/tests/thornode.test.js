@@ -82,3 +82,70 @@ test('fetchThorchain forwards historical height headers', async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test('fetchThorchain re-probes the primary after serving a fallback response', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  let primaryAttempts = 0;
+
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+
+    if (url === `${THORNODE_PRIMARY}/thorchain/network`) {
+      primaryAttempts += 1;
+      return primaryAttempts === 1
+        ? createJsonResponse({ error: 'unavailable' }, 503, 'Service Unavailable')
+        : createJsonResponse({ rune_price_in_tor: '2' });
+    }
+
+    if (url === `${THORNODE_FALLBACK}/thorchain/network`) {
+      return createJsonResponse({ rune_price_in_tor: '1' });
+    }
+
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  try {
+    const fallbackPayload = await fetchThorchain('/thorchain/network');
+    const recoveredPayload = await fetchThorchain('/thorchain/network');
+
+    assert.equal(fallbackPayload.rune_price_in_tor, '1');
+    assert.equal(recoveredPayload.rune_price_in_tor, '2');
+    assert.deepEqual(calls, [
+      `${THORNODE_PRIMARY}/thorchain/network`,
+      `${THORNODE_FALLBACK}/thorchain/network`,
+      `${THORNODE_PRIMARY}/thorchain/network`
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchThorchain falls back when a primary returns malformed HTTP-200 data', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+    if (url === `${THORNODE_PRIMARY}/thorchain/nodes`) {
+      return createJsonResponse({ nodes: [] });
+    }
+    if (url === `${THORNODE_FALLBACK}/thorchain/nodes`) {
+      return createJsonResponse([]);
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  try {
+    const payload = await fetchThorchain('/thorchain/nodes', {
+      validateResponse: (value) => Array.isArray(value) ? null : 'Invalid nodes payload'
+    });
+    assert.deepEqual(payload, []);
+    assert.deepEqual(calls, [
+      `${THORNODE_PRIMARY}/thorchain/nodes`,
+      `${THORNODE_FALLBACK}/thorchain/nodes`
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

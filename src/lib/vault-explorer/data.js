@@ -203,6 +203,7 @@ export async function fetchVaultExplorerData() {
   const pools = [...allPoolAssets].map(poolAsset => {
     let poolTotalUSD = 0;
     let maxCellValue = 0;
+    /** @type {any[]} */
     const assetTypes = [];
 
     // Native (pooled) — per-vault distribution

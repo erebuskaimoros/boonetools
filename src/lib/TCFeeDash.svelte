@@ -1,19 +1,5 @@
 <script>
   import { onDestroy, onMount, tick } from 'svelte';
-  import Chart from 'chart.js/auto';
-
-  const tooltipPlugin = Chart?.registry?.plugins?.get?.('tooltip') || Chart?.Tooltip;
-  if (tooltipPlugin?.positioners) {
-    tooltipPlugin.positioners.cursor = function (elements, eventPosition) {
-      if (eventPosition && Number.isFinite(eventPosition.x) && Number.isFinite(eventPosition.y)) {
-        return { x: eventPosition.x, y: eventPosition.y };
-      }
-      if (elements && elements.length) {
-        return { x: elements[0].element.x, y: elements[0].element.y };
-      }
-      return false;
-    };
-  }
   import { fetchTcFeeDash } from './tc-fee-dash/api.js';
   import {
     aggregateTcFeeRows,
@@ -24,6 +10,18 @@
     summarizeTcFeeRows
   } from './tc-fee-dash/model.js';
   import { formatNumber, formatUSD } from '$lib/utils/formatting';
+  import { TerminalAlert } from '$lib/components/terminal';
+  import {
+    createTcFeeChart,
+    createTcFeeIncomeVolumeChart,
+    drawTcFeeNavigator,
+    tcFeeNavigatorIndexFromPixel
+  } from './tc-fee-dash/charts.js';
+  import {
+    formatTcFeeBps as formatBps,
+    formatTcFeeDate as formatDate,
+    formatTcFeeUsdCompact as formatUsdCompact
+  } from './tc-fee-dash/presentation.js';
 
   const GRANULARITIES = [
     { value: 'day', label: 'day' },
@@ -35,115 +33,6 @@
     { days: 90, label: '90d', color: '#5588cc', dash: [8, 5] },
     { days: 180, label: '180d', color: '#c8c8c8', dash: [2, 5] }
   ];
-  const activePointPlugin = {
-    id: 'tcFeeActivePoint',
-    afterDraw(chart) {
-      const activeElements = chart.tooltip?.getActiveElements?.() || [];
-      if (!activeElements.length) return;
-
-      const { ctx, chartArea } = chart;
-      ctx.save();
-      for (const active of activeElements) {
-        if (!chart.isDatasetVisible(active.datasetIndex)) continue;
-
-        const meta = chart.getDatasetMeta(active.datasetIndex);
-        const element = meta?.data?.[active.index];
-        if (!element || element.skip) continue;
-
-        const point = typeof element.getProps === 'function' ? element.getProps(['x', 'y'], true) : element;
-        if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
-        if (
-          point.x < chartArea.left ||
-          point.x > chartArea.right ||
-          point.y < chartArea.top ||
-          point.y > chartArea.bottom
-        ) {
-          continue;
-        }
-
-        const dataset = chart.data.datasets[active.datasetIndex] || {};
-        const pointBackground = dataset.pointBackgroundColor;
-        const accentColor = Array.isArray(pointBackground)
-          ? pointBackground[active.index] || dataset.borderColor || '#00cc66'
-          : pointBackground || dataset.borderColor || '#00cc66';
-        const radius = active.datasetIndex === 0 ? 7 : 5.5;
-
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(8, 8, 8, 0.96)';
-        ctx.fill();
-        ctx.lineWidth = 2;
-        ctx.strokeStyle = accentColor;
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, Math.max(2.5, radius - 4), 0, Math.PI * 2);
-        ctx.fillStyle = accentColor;
-        ctx.fill();
-      }
-      ctx.restore();
-    }
-  };
-  const haltBandPlugin = {
-    id: 'tcFeeHaltBand',
-    beforeDatasetsDraw(chart, _args, options) {
-      const bands = Array.isArray(options?.bands) ? options.bands : [];
-      if (!bands.length) return;
-
-      const { ctx, chartArea, scales } = chart;
-      const xScale = scales.x;
-      const labels = chart.data.labels || [];
-      if (!xScale || !labels.length) return;
-
-      ctx.save();
-      ctx.font = '10px JetBrains Mono, monospace';
-      ctx.textBaseline = 'top';
-
-      for (const band of bands) {
-        const startIndex = Math.max(0, Math.min(Number(band.startIndex) || 0, labels.length - 1));
-        const endIndex = Math.max(startIndex, Math.min(Number(band.endIndex) || startIndex, labels.length - 1));
-        const startCenter = xScale.getPixelForValue(startIndex);
-        const endCenter = xScale.getPixelForValue(endIndex);
-        const prevCenter = startIndex > 0
-          ? xScale.getPixelForValue(startIndex - 1)
-          : startCenter - Math.max(12, xScale.width / Math.max(1, labels.length));
-        const nextCenter = endIndex < labels.length - 1
-          ? xScale.getPixelForValue(endIndex + 1)
-          : endCenter + Math.max(12, xScale.width / Math.max(1, labels.length));
-        const left = Math.max(chartArea.left, startIndex === 0 ? chartArea.left : (prevCenter + startCenter) / 2);
-        const right = Math.min(chartArea.right, endIndex === labels.length - 1 ? chartArea.right : (endCenter + nextCenter) / 2);
-        const width = Math.max(0, right - left);
-        if (width <= 0) continue;
-
-        ctx.fillStyle = 'rgba(212, 160, 23, 0.09)';
-        ctx.fillRect(left, chartArea.top, width, chartArea.bottom - chartArea.top);
-        ctx.strokeStyle = 'rgba(212, 160, 23, 0.28)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(left, chartArea.top);
-        ctx.lineTo(left, chartArea.bottom);
-        ctx.moveTo(right, chartArea.top);
-        ctx.lineTo(right, chartArea.bottom);
-        ctx.stroke();
-
-        ctx.strokeStyle = 'rgba(212, 160, 23, 0.14)';
-        for (let x = left - (chartArea.bottom - chartArea.top); x < right; x += 10) {
-          ctx.beginPath();
-          ctx.moveTo(x, chartArea.bottom);
-          ctx.lineTo(x + chartArea.bottom - chartArea.top, chartArea.top);
-          ctx.stroke();
-        }
-
-        if (width >= 58) {
-          ctx.fillStyle = '#d4a017';
-          ctx.fillText(String(band.label || 'CHAIN HALT').toUpperCase(), left + 6, chartArea.top + 6);
-        }
-      }
-
-      ctx.restore();
-    }
-  };
-
   let dashboard = null;
   let loading = true;
   let refreshing = false;
@@ -302,110 +191,11 @@
   }
 
   function drawNavigator() {
-    if (!navCanvas) return;
-    const ratio = window.devicePixelRatio || 1;
-    const cssWidth = navCanvas.clientWidth;
-    const cssHeight = navCanvas.clientHeight;
-    if (!cssWidth || !cssHeight) return;
-    if (navCanvas.width !== cssWidth * ratio || navCanvas.height !== cssHeight * ratio) {
-      navCanvas.width = cssWidth * ratio;
-      navCanvas.height = cssHeight * ratio;
-    }
-    const ctx = navCanvas.getContext('2d');
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.clearRect(0, 0, cssWidth, cssHeight);
-
-    const n = rows.length;
-    if (!n) return;
-    const padY = 4;
-    const innerH = cssHeight - padY * 2;
-    const values = rows.map((r) => Number(r.feesPerBillionUsd) || 0);
-    const maxV = Math.max(1, ...values);
-    const xAt = (i) => (n === 1 ? cssWidth / 2 : (i / (n - 1)) * cssWidth);
-    const yAt = (v) => padY + innerH - (v / maxV) * innerH;
-
-    // dim baseline sparkline (full series)
-    ctx.beginPath();
-    ctx.moveTo(0, cssHeight);
-    for (let i = 0; i < n; i++) ctx.lineTo(xAt(i), yAt(values[i]));
-    ctx.lineTo(cssWidth, cssHeight);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(0, 204, 102, 0.04)';
-    ctx.fill();
-
-    ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-      const x = xAt(i);
-      const y = yAt(values[i]);
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
-    ctx.strokeStyle = '#1f4f37';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-
-    const startX = xAt(normalizedStartIndex);
-    const endX = xAt(normalizedEndIndex);
-
-    // dim mask outside window
-    ctx.fillStyle = 'rgba(8, 8, 8, 0.55)';
-    ctx.fillRect(0, 0, startX, cssHeight);
-    ctx.fillRect(endX, 0, cssWidth - endX, cssHeight);
-
-    // bright window area
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(startX, 0, Math.max(0, endX - startX), cssHeight);
-    ctx.clip();
-
-    ctx.beginPath();
-    ctx.moveTo(0, cssHeight);
-    for (let i = 0; i < n; i++) ctx.lineTo(xAt(i), yAt(values[i]));
-    ctx.lineTo(cssWidth, cssHeight);
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(0, 204, 102, 0.18)';
-    ctx.fill();
-
-    ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-      const x = xAt(i);
-      const y = yAt(values[i]);
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
-    ctx.strokeStyle = '#00cc66';
-    ctx.lineWidth = 1.4;
-    ctx.stroke();
-    ctx.restore();
-
-    drawNavHandle(ctx, startX, cssHeight, 1);
-    drawNavHandle(ctx, endX, cssHeight, -1);
-  }
-
-  function drawNavHandle(ctx, x, h, dir) {
-    ctx.strokeStyle = '#00cc66';
-    ctx.fillStyle = '#00cc66';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
-    ctx.stroke();
-    const tick = 5;
-    ctx.beginPath();
-    ctx.moveTo(x, 0.5);
-    ctx.lineTo(x + tick * dir, 0.5);
-    ctx.moveTo(x, h - 0.5);
-    ctx.lineTo(x + tick * dir, h - 0.5);
-    ctx.stroke();
-    const gripY = h / 2;
-    for (let i = -3; i <= 3; i += 3) {
-      ctx.fillRect(x - 1, gripY + i, 2, 1);
-    }
+    drawTcFeeNavigator(navCanvas, rows, normalizedStartIndex, normalizedEndIndex);
   }
 
   function navIndexFromPx(px, width) {
-    const n = rows.length;
-    if (n <= 1) return 0;
-    const ratio = Math.max(0, Math.min(1, px / width));
-    return Math.round(ratio * (n - 1));
+    return tcFeeNavigatorIndexFromPixel(px, width, rows.length);
   }
 
   function navMouseDown(event) {
@@ -564,16 +354,6 @@
     resetWindow();
   }
 
-  function feePointColor(rowOrValue) {
-    if (rowOrValue?.hasHaltDays || rowOrValue?.rollingAverageExcluded) return '#d4a017';
-    const value = typeof rowOrValue === 'object' ? rowOrValue.feeBps : rowOrValue;
-    if (value >= 20) return '#d4a017';
-    if (value >= 15) return '#00cc66';
-    if (value >= 10) return '#5588cc';
-    if (value >= 5) return '#888888';
-    return '#dc3545';
-  }
-
   function renderCharts() {
     renderChart();
     renderIncomeVolumeChart();
@@ -584,142 +364,8 @@
       destroyChart();
       return;
     }
-
-    const isNarrowChart = chartCanvas.clientWidth < 520;
-    const isDenseChart = series.rows.length > 90;
-
     destroyChart();
-    chartInstance = new Chart(chartCanvas.getContext('2d'), {
-      type: 'line',
-      plugins: [haltBandPlugin, activePointPlugin],
-      data: {
-        labels: series.labels,
-        datasets: [
-          {
-            label: 'TC fees per $1B volume',
-            data: series.feesPerBillionUsd,
-            borderColor: '#00cc66',
-            backgroundColor: 'rgba(0, 204, 102, 0.08)',
-            pointBackgroundColor: series.rows.map(feePointColor),
-            pointBorderColor: '#080808',
-            pointBorderWidth: isDenseChart ? 0 : 2,
-            pointRadius: series.rows.map((row) => (
-              row.hasHaltDays ? (isDenseChart ? 0 : 3.5) : row.feeBps < 5 ? 0 : isDenseChart ? 0 : 5
-            )),
-            pointHoverRadius: series.rows.map((row) => (
-              row.hasHaltDays ? 6 : row.feeBps < 5 ? 0 : isDenseChart ? 5 : 7
-            )),
-            pointStyle: series.rows.map((row) => (row.hasHaltDays ? 'rectRot' : 'circle')),
-            borderWidth: isDenseChart ? 1.5 : 2,
-            tension: isDenseChart ? 0.08 : 0.25,
-            fill: true
-          },
-          ...rollingSeries.map((option) => ({
-            label: `${option.label} rolling avg`,
-            data: option.data,
-            borderColor: option.color,
-            backgroundColor: 'transparent',
-            borderDash: option.dash,
-            borderWidth: isDenseChart ? 1.6 : 1.9,
-            fill: false,
-            pointRadius: 0,
-            pointHoverRadius: 4,
-            tension: isDenseChart ? 0.08 : 0.18,
-            rollingDays: option.days
-          }))
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: {
-          intersect: false,
-          mode: 'index'
-        },
-        plugins: {
-          legend: {
-            display: false
-          },
-          tooltip: {
-            backgroundColor: '#080808',
-            borderColor: '#1a1a1a',
-            borderWidth: 1,
-            titleColor: '#ffffff',
-            bodyColor: '#c8c8c8',
-            displayColors: false,
-            position: 'cursor',
-            caretSize: 0,
-            caretPadding: 14,
-            xAlign: 'left',
-            yAlign: 'bottom',
-            callbacks: {
-              title(items) {
-                return items[0]?.label || '';
-              },
-              label(context) {
-                if (context.dataset.rollingDays) {
-                  if (context.parsed.y == null) return '';
-                  return `${context.dataset.rollingDays}d rolling avg: ${formatUSD(context.parsed.y)} · halt days excluded`;
-                }
-
-                const row = series.rows[context.dataIndex];
-                if (!row) return '';
-                const lines = [
-                  `fees / $1B: ${formatUSD(row.feesPerBillionUsd)}`,
-                  `TC fees: ${formatUSD(row.tcFeesUsd)}`,
-                  `CMC + Dune volume: ${formatUsdCompact(row.globalExchangeVolumeUsd)}`
-                ];
-                if (row.feeBps > 0) {
-                  lines.splice(1, 0, `fee setting: ${formatNumber(row.feeBps, { maximumFractionDigits: 0 })} bps`);
-                }
-                if (row.cmcVolume24hUsd > 0) {
-                  lines.push(`CMC volume: ${formatUsdCompact(row.cmcVolume24hUsd)}`);
-                }
-                if (row.defillamaDexVolumeUsd > 0) {
-                  lines.push(`Dune DEX volume: ${formatUsdCompact(row.defillamaDexVolumeUsd)}`);
-                }
-                if (row.hasHaltDays) {
-                  lines.push(`${row.haltLabel || 'chain halt'}: excluded from rolling averages`);
-                }
-                return lines;
-              }
-            }
-          },
-          tcFeeHaltBand: {
-            bands: series.haltBands || []
-          }
-        },
-        scales: {
-          x: {
-            grid: { color: '#111111' },
-            ticks: {
-              color: '#666666',
-              maxTicksLimit: isNarrowChart ? 5 : 7,
-              maxRotation: 0,
-              autoSkip: !isNarrowChart,
-              font: { family: 'JetBrains Mono', size: 10 },
-              callback(value, index) {
-                const label = series.labels[index] || this.getLabelForValue(value);
-                if (!isNarrowChart) return label;
-                if (index % 4 !== 0) return '';
-                return label.split('-')[0]?.trim() || label;
-              }
-            }
-          },
-          y: {
-            beginAtZero: false,
-            grid: { color: '#111111' },
-            ticks: {
-              color: '#666666',
-              font: { family: 'JetBrains Mono', size: 10 },
-              callback(value) {
-                return `$${formatNumber(value, { maximumFractionDigits: 0 })}`;
-              }
-            }
-          }
-        }
-      }
-    });
+    chartInstance = createTcFeeChart(chartCanvas, { series, rollingSeries });
   }
 
   function renderIncomeVolumeChart() {
@@ -727,153 +373,13 @@
       destroyIncomeVolumeChart();
       return;
     }
-
-    const isNarrowChart = incomeVolumeCanvas.clientWidth < 520;
-    const isDenseChart = series.rows.length > 90;
-
     destroyIncomeVolumeChart();
-    incomeVolumeChartInstance = new Chart(incomeVolumeCanvas.getContext('2d'), {
-      type: 'line',
-      plugins: [haltBandPlugin, activePointPlugin],
-      data: {
-        labels: series.labels,
-        datasets: [
-          {
-            label: 'Liquidity fee income / THORChain volume',
-            data: series.incomeVolumeBps,
-            borderColor: '#d4a017',
-            backgroundColor: 'rgba(212, 160, 23, 0.08)',
-            pointBackgroundColor: series.rows.map((row) => row.hasHaltDays ? '#d4a017' : '#00cc66'),
-            pointBorderColor: '#080808',
-            pointBorderWidth: isDenseChart ? 0 : 2,
-            pointRadius: isDenseChart ? 0 : 4,
-            pointHoverRadius: isDenseChart ? 5 : 7,
-            borderWidth: isDenseChart ? 1.5 : 2,
-            tension: isDenseChart ? 0.08 : 0.25,
-            spanGaps: false,
-            fill: true
-          },
-          ...incomeVolumeRollingSeries.map((option) => ({
-            label: `${option.label} rolling avg`,
-            data: option.data,
-            borderColor: option.color,
-            backgroundColor: 'transparent',
-            borderDash: option.dash,
-            borderWidth: isDenseChart ? 1.6 : 1.9,
-            fill: false,
-            pointRadius: 0,
-            pointHoverRadius: 4,
-            tension: isDenseChart ? 0.08 : 0.18,
-            rollingDays: option.days
-          }))
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: {
-          intersect: false,
-          mode: 'index'
-        },
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: '#080808',
-            borderColor: '#1a1a1a',
-            borderWidth: 1,
-            titleColor: '#ffffff',
-            bodyColor: '#c8c8c8',
-            displayColors: false,
-            position: 'cursor',
-            caretSize: 0,
-            caretPadding: 14,
-            xAlign: 'left',
-            yAlign: 'bottom',
-            callbacks: {
-              title(items) {
-                return items[0]?.label || '';
-              },
-              label(context) {
-                if (context.dataset.rollingDays) {
-                  if (context.parsed.y == null) return '';
-                  return `${context.dataset.rollingDays}d rolling avg: ${formatBps(context.parsed.y)} · halt days excluded`;
-                }
-
-                const row = series.rows[context.dataIndex];
-                if (!row || row.incomeVolumeBps == null) return 'income / volume: unavailable';
-                return [
-                  `income / volume: ${formatBps(row.incomeVolumeBps)}`,
-                  `liquidity fee income: ${formatUSD(row.tcFeesUsd)}`,
-                  `THORChain swap volume: ${formatUsdCompact(row.thorchainVolumeUsd)}`
-                ];
-              }
-            }
-          },
-          tcFeeHaltBand: {
-            bands: series.haltBands || []
-          }
-        },
-        scales: {
-          x: {
-            grid: { color: '#111111' },
-            ticks: {
-              color: '#666666',
-              maxTicksLimit: isNarrowChart ? 5 : 7,
-              maxRotation: 0,
-              autoSkip: !isNarrowChart,
-              font: { family: 'JetBrains Mono', size: 10 },
-              callback(value, index) {
-                const label = series.labels[index] || this.getLabelForValue(value);
-                if (!isNarrowChart) return label;
-                if (index % 4 !== 0) return '';
-                return label.split('-')[0]?.trim() || label;
-              }
-            }
-          },
-          y: {
-            beginAtZero: true,
-            grid: { color: '#111111' },
-            ticks: {
-              color: '#666666',
-              font: { family: 'JetBrains Mono', size: 10 },
-              callback(value) {
-                return formatBps(value);
-              }
-            }
-          }
-        }
-      }
+    incomeVolumeChartInstance = createTcFeeIncomeVolumeChart(incomeVolumeCanvas, {
+      series,
+      rollingSeries: incomeVolumeRollingSeries
     });
   }
 
-  function formatUsdCompact(value) {
-    const numeric = Number(value) || 0;
-    if (Math.abs(numeric) >= 1_000_000_000_000) {
-      return `$${formatNumber(numeric / 1_000_000_000_000, { maximumFractionDigits: 2 })}T`;
-    }
-    if (Math.abs(numeric) >= 1_000_000_000) {
-      return `$${formatNumber(numeric / 1_000_000_000, { maximumFractionDigits: 2 })}B`;
-    }
-    return formatUSD(numeric);
-  }
-
-  function formatBps(value) {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric)) return '—';
-    return `${formatNumber(numeric, { maximumFractionDigits: 2 })} bps`;
-  }
-
-  function formatDate(value) {
-    if (!value) return '--';
-    const date = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
-    if (!Number.isFinite(date.getTime())) return String(value);
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      timeZone: 'UTC'
-    }).format(date);
-  }
 </script>
 
 <div class="tc-fee-dashboard">
@@ -907,10 +413,7 @@
 
   {#if error}
     <div class="alerts">
-      <div class="alert err">
-        <span class="alert-tag">ERR</span>
-        <span>tc fee series — {error}</span>
-      </div>
+      <TerminalAlert tone="err">tc fee series — {error}</TerminalAlert>
     </div>
   {/if}
 
@@ -1281,28 +784,6 @@
     margin-bottom: 16px;
   }
 
-  .alert {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
-    border: 1px solid;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-  }
-
-  .alert.err {
-    border-color: rgba(220, 53, 69, 0.4);
-    background: rgba(220, 53, 69, 0.06);
-    color: #f08089;
-  }
-
-  .alert-tag {
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    flex-shrink: 0;
-  }
-
   /* ========== METRIC GRID ========== */
 
   .metric-grid {
@@ -1388,8 +869,7 @@
 
   .block-title,
   .meta-strip,
-  .state,
-  .chart-foot {
+  .state {
     font-family: 'JetBrains Mono', monospace;
   }
 
@@ -1750,36 +1230,6 @@
     height: 220px;
     justify-content: center;
     letter-spacing: 0.08em;
-  }
-
-  .chart-foot {
-    align-items: center;
-    border-top: 1px solid #111111;
-    color: #666666;
-    display: flex;
-    flex-wrap: wrap;
-    font-size: 10px;
-    gap: 14px;
-    padding: 12px 16px 14px;
-  }
-
-  .foot-label {
-    color: #666666;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-  }
-
-  .legend-item {
-    align-items: center;
-    color: #888888;
-    display: inline-flex;
-    gap: 6px;
-  }
-
-  .swatch {
-    display: inline-block;
-    height: 8px;
-    width: 8px;
   }
 
   .state {

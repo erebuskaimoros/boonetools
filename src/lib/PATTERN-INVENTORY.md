@@ -365,7 +365,7 @@ When migrating a component, check for these patterns:
 │   └── assets.js         # ASSET_LOGOS, CHAIN_LOGOS, COINGECKO_IDS
 ├── stores/
 │   ├── index.js          # Re-exports all stores
-│   ├── audioStore.js     # Existing audio state
+│   ├── currency.js       # Shared display-currency and price state
 │   ├── runePrice.js      # Shared RUNE price (6s refresh)
 │   └── pools.js          # Shared pool data (60s refresh)
 ├── utils/

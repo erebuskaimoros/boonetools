@@ -51,7 +51,8 @@ function getSelectedProvider() {
     return activeProviderOverrides[activeProviderOverrides.length - 1];
   }
 
-  let selected;
+  /** @type {any} */
+  let selected = null;
   selectedAccount.subscribe(v => selected = v)();
   return selected?.provider;
 }
@@ -254,7 +255,7 @@ export async function getProviderChainBalance(provider, chain, refresh = true) {
     throw new Error(`No connected ${chain} wallet on ${provider}`);
   }
 
-  const defaultBalance = [AssetValue.from({ chain })];
+  const defaultBalance = [(/** @type {any} */ (AssetValue)).from({ chain })];
   wallet.balance = defaultBalance;
 
   if (!refresh || !('getBalance' in wallet)) {
@@ -274,7 +275,7 @@ export async function getProviderChainBalance(provider, chain, refresh = true) {
  * Broadcast a limit order swap via connected wallet
  * @param {Object} routeOrQuote - Adapted route input or raw THORNode quote context
  * @param {Object} options
- * @param {string} options.provider - Wallet provider used for signing
+ * @param {string} [options.provider] - Wallet provider used for signing
  * @returns {Promise<string>} Transaction hash
  */
 export async function broadcastSwap(routeOrQuote, { provider } = {}) {
@@ -303,7 +304,7 @@ export async function broadcastSwap(routeOrQuote, { provider } = {}) {
  * @param {string} params.memo - THORChain memo
  * @param {string} [params.recipient] - Override deposit recipient
  * @param {Object} options
- * @param {string} options.provider - Wallet provider used for signing
+ * @param {string} [options.provider] - Wallet provider used for signing
  * @returns {Promise<string>} Transaction hash
  */
 export async function broadcastDeposit({ asset, amount = '0', memo, recipient = '' }, { provider } = {}) {
@@ -338,7 +339,7 @@ export async function broadcastDeposit({ asset, amount = '0', memo, recipient = 
  * @param {string|number} params.amount - Human-readable amount
  * @param {string} params.owner - THOR address that owns the trade account
  * @param {Object} options
- * @param {string} options.provider - Wallet provider used for signing
+ * @param {string} [options.provider] - Wallet provider used for signing
  * @returns {Promise<string>} Transaction hash
  */
 export async function broadcastTradeAccountDeposit({ asset, amount, owner }, { provider } = {}) {
@@ -374,7 +375,7 @@ export async function broadcastTradeAccountDeposit({ asset, amount, owner }, { p
  * @param {string|number} params.amount - Human-readable amount
  * @param {string} params.destinationAddress - L1 destination address
  * @param {Object} options
- * @param {string} options.provider - Wallet provider used for signing
+ * @param {string} [options.provider] - Wallet provider used for signing
  * @returns {Promise<string>} Transaction hash
  */
 export async function broadcastTradeAccountWithdrawal({ asset, amount, destinationAddress }, { provider } = {}) {

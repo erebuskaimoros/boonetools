@@ -1,8 +1,18 @@
 import { query } from '../db/pool.js';
 import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
+import {
+  canonicalNodeVoteKey,
+  choosePreferredSource,
+  EVENT_SOURCE_PRIORITY,
+  enrichEventRows,
+  recordEventSourceObservations,
+  selectPreferredEventRows,
+  withEventTransaction
+} from '../lib/provenance.js';
 import { sleep } from '../lib/utils.js';
 import { executeDuneQueryRows, formatDuneDateTime } from './dune.js';
+import { fetchThorchain } from './thornode.js';
 
 const RPC_TIMEOUT_MS = 15000;
 const THORNODE_TIMEOUT_MS = 8000;
@@ -24,8 +34,40 @@ const NODE_VOTE_COLUMNS = [
   'source',
   'raw_event',
   'observed_at',
-  'updated_at'
+  'updated_at',
+  'canonical_key',
+  'preferred_source',
+  'first_seen_at',
+  'last_seen_at',
+  'schema_version'
 ];
+
+function nodeVoteSource(row) {
+  return choosePreferredSource('', row?.source || 'unknown');
+}
+
+async function upsertCanonicalNodeVotes(client, rows) {
+  if (rows.length === 0) return;
+  await upsertRows(client, 'node_votes', rows, {
+    columns: NODE_VOTE_COLUMNS,
+    conflictColumns: ['canonical_key'],
+    updateColumns: NODE_VOTE_COLUMNS.filter(
+      (column) => column !== 'canonical_key'
+    ),
+    updateStrategies: {
+      first_seen_at: 'least',
+      last_seen_at: 'greatest',
+      schema_version: 'greatest'
+    },
+    sourcePreference: {
+      column: 'preferred_source',
+      priorities: EVENT_SOURCE_PRIORITY,
+      observedAtColumn: 'last_seen_at'
+    },
+    jsonColumns: ['raw_event'],
+    chunkSize: 250
+  });
+}
 
 function trimBaseUrl(baseUrl) {
   return String(baseUrl || '').replace(/\/$/, '');
@@ -102,12 +144,15 @@ export async function fetchNodeVotesRpc(path, params = {}, options = {}) {
 }
 
 async function fetchThornodeApi(path, options = {}) {
-  const historical = Boolean(options.historical);
-  const bases = historical
-    ? [config.thornodeFallbackUrl, config.thornodePrimaryUrl]
-    : [config.thornodePrimaryUrl, config.thornodeFallbackUrl];
+  const url = new URL(normalizePath(path), 'http://thornode.local');
+  for (const [key, value] of Object.entries(options.params || {})) {
+    if (value !== undefined && value !== null && value !== '') {
+      url.searchParams.set(key, String(value));
+    }
+  }
 
-  return fetchFromBases(bases, path, options.params || {}, {
+  return fetchThorchain(`${url.pathname}${url.search}`, {
+    historical: Boolean(options.historical),
     timeoutMs: options.timeoutMs || THORNODE_TIMEOUT_MS
   });
 }
@@ -299,14 +344,31 @@ export async function upsertNodeVotes(client, rows) {
     return 0;
   }
 
-  await upsertRows(client, 'node_votes', rows, {
-    columns: NODE_VOTE_COLUMNS,
-    conflictColumns: ['event_key'],
-    jsonColumns: ['raw_event'],
-    chunkSize: 250
+  const enriched = await enrichEventRows(client, {
+    table: 'node_votes',
+    rows,
+    canonicalKey: canonicalNodeVoteKey,
+    source: nodeVoteSource,
+    observedAt: (row) => row.observed_at
+  });
+  const canonicalRows = selectPreferredEventRows(enriched);
+
+  await withEventTransaction(client, async () => {
+    await upsertCanonicalNodeVotes(client, canonicalRows);
+    await recordEventSourceObservations(client, {
+      domain: 'node-votes',
+      rows: enriched,
+      source: nodeVoteSource,
+      sourceEventKey: (row) => row.event_key,
+      rawReference: (row) => ({
+        event_key: row.event_key,
+        tx_id: row.tx_id,
+        height: row.height
+      })
+    });
   });
 
-  return rows.length;
+  return enriched.length;
 }
 
 function normalizeNodeMetadata(node) {

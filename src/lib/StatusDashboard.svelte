@@ -4,7 +4,7 @@
   import { thornode } from './api/thornode.js';
   import { midgard } from './api/midgard.js';
   import { fetchNodeVotesDashboard } from './node-votes/api.js';
-  import { fetchStuckTransactions } from './status/api.js';
+  import { fetchNetworkSnapshot, fetchStuckTransactions } from './status/api.js';
   import {
     buildChainStatuses,
     buildChurnStatus,
@@ -52,6 +52,35 @@
 
   onDestroy(() => clearInterval(refreshTimer));
 
+  async function fetchDirectNetworkSnapshot() {
+    const fields = [
+      { key: 'inbound_addresses', request: () => thornode.getInboundAddresses({ cache: false }), fallback: [] },
+      { key: 'nodes', request: () => thornode.getNodes({ cache: false }), fallback: [] },
+      { key: 'mimir', request: () => thornode.getAllMimir({ cache: false }), fallback: {} },
+      { key: 'lastblock', request: () => thornode.fetch('/thorchain/lastblock', { cache: false }), fallback: [] },
+      { key: 'churns', request: () => midgard.getChurns({ cache: false }), fallback: [] }
+    ];
+    const results = await Promise.allSettled(fields.map((field) => field.request()));
+    const payload = { errors: {}, partial: false };
+
+    results.forEach((result, index) => {
+      const { key, fallback } = fields[index];
+      if (result.status === 'fulfilled') {
+        payload[key] = result.value;
+      } else {
+        payload[key] = fallback;
+        payload.errors[key] = result.reason?.message || `${key} is unavailable`;
+      }
+    });
+
+    if (Object.keys(payload.errors).length === fields.length) {
+      throw new Error(`Live network status is unavailable: ${Object.values(payload.errors).join('; ')}`);
+    }
+
+    payload.partial = Object.keys(payload.errors).length > 0;
+    return payload;
+  }
+
   async function loadStatus(options = {}) {
     if (!options.silent) {
       loading = chainStatuses.length === 0;
@@ -65,21 +94,26 @@
     churnError = '';
     stuckError = '';
 
-    const [coreResult, votesResult, churnResult, stuckResult] = await Promise.allSettled([
-      Promise.all([
-        thornode.getInboundAddresses({ cache: false }),
-        thornode.getNodes({ cache: false }),
-        thornode.getAllMimir({ cache: false }),
-        thornode.fetch('/thorchain/lastblock', { cache: false })
-      ]),
+    const [coreResult, votesResult, stuckResult] = await Promise.allSettled([
+      fetchNetworkSnapshot({ forceRefresh: !options.silent }).catch(fetchDirectNetworkSnapshot),
       fetchNodeVotesDashboard({ days: 45, forceRefresh: !options.silent }),
-      midgard.getChurns({ cache: false }),
       fetchStuckTransactions({ forceRefresh: !options.silent })
     ]);
 
     if (coreResult.status === 'fulfilled') {
-      [inboundAddresses, nodes, mimir, lastBlocks] = coreResult.value;
-      lastUpdated = new Date();
+      inboundAddresses = coreResult.value.inbound_addresses || [];
+      nodes = coreResult.value.nodes || [];
+      mimir = coreResult.value.mimir || {};
+      lastBlocks = coreResult.value.lastblock || [];
+      churns = coreResult.value.churns || [];
+      const snapshotErrors = coreResult.value.errors || {};
+      const coreMessages = ['inbound_addresses', 'nodes', 'mimir', 'lastblock']
+        .map((key) => snapshotErrors[key])
+        .filter(Boolean);
+      coreError = coreMessages.join('; ') || (coreResult.value.stale ? coreResult.value.warning : '');
+      churnError = snapshotErrors.churns || '';
+      const snapshotTime = Date.parse(coreResult.value.as_of || '');
+      lastUpdated = Number.isFinite(snapshotTime) ? new Date(snapshotTime) : new Date();
     } else {
       coreError = coreResult.reason?.message || 'Live THORNode status is unavailable.';
     }
@@ -88,12 +122,6 @@
       voteDashboard = votesResult.value;
     } else {
       votesError = votesResult.reason?.message || 'Vote and Mimir history is unavailable.';
-    }
-
-    if (churnResult.status === 'fulfilled') {
-      churns = churnResult.value;
-    } else {
-      churnError = churnResult.reason?.message || 'Churn history is unavailable.';
     }
 
     if (stuckResult.status === 'fulfilled') {

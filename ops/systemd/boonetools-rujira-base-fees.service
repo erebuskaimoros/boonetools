@@ -11,6 +11,7 @@ Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--dns-result-order=ipv4first
 EnvironmentFile=/opt/boonetools-backend/backend/.env
 ExecStart=/usr/bin/node src/run-job.js rujira-base-fees-scheduler
+TimeoutStartSec=30min
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=boonetools-rujira-base-fees

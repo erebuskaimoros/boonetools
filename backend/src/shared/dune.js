@@ -1,9 +1,8 @@
 import { config } from '../lib/config.js';
+import { requestFromProviders } from '../lib/provider-client.js';
 import { sleep } from '../lib/utils.js';
 
-function duneApiPath(path) {
-  return `${config.duneApiBaseUrl.replace(/\/$/, '')}${path}`;
-}
+const DUNE_HTTP_TIMEOUT_MS = 60_000;
 
 function readExecutionState(payload) {
   return String(
@@ -77,30 +76,22 @@ async function fetchDuneJson(path, options = {}) {
     throw new Error('Missing required config: duneApiKey');
   }
 
-  const response = await fetch(duneApiPath(path), {
-    method: options.method || 'GET',
+  return requestFromProviders({
+    bases: [config.duneApiBaseUrl],
+    path,
+    timeoutMs: Math.max(1, Number(options.timeoutMs) || DUNE_HTTP_TIMEOUT_MS),
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
       'X-Dune-API-Key': config.duneApiKey,
       ...(options.headers || {})
     },
-    body: options.body ? JSON.stringify(options.body) : undefined
+    request: {
+      method: options.method || 'GET',
+      body: options.body ? JSON.stringify(options.body) : undefined
+    },
+    errorMessage: ({ status }) => `Dune API HTTP ${status} for ${path}`
   });
-  const body = await response.text();
-
-  if (!response.ok) {
-    const error = new Error(`Dune API HTTP ${response.status} for ${path}`);
-    error.status = response.status;
-    error.body = body.slice(0, 1000);
-    throw error;
-  }
-
-  try {
-    return body ? JSON.parse(body) : {};
-  } catch (error) {
-    throw new Error(`Invalid JSON from Dune API ${path}: ${error.message}`);
-  }
 }
 
 async function waitForDuneExecution(executionId) {

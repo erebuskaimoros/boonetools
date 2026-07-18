@@ -4,11 +4,10 @@ The BooneTools `/status` dashboard is a concise public current-state surface. It
 
 ## Current-State Sources
 
-- `/thorchain/inbound_addresses`: per-chain trading and LP-action availability.
-- `/thorchain/lastblock`: THORChain height and each external chain's last observed height.
-- `/thorchain/nodes`: active-node count and majority active version.
-- `/thorchain/mimir`: asset-specific `PauseLPDeposit-*` state not represented by the chain-level LP flag.
-- Midgard `/v2/churns`: latest successful churn height and timestamp.
+- `/functions/v1/network-snapshot`: one 15-second backend snapshot of THORNode
+  inbound addresses, lastblock, nodes, and Mimir plus Midgard churns. Each
+  field fails independently and the last usable snapshot is retained on total
+  provider outage.
 - `/functions/v1/stuck-transactions`: cached BooneTools composition of current swap, streaming, scheduled-outbound, and signing queues with per-inbound transaction status.
 
 The chain table presents one `LP Actions` state. `chain_lp_actions_paused` blocks both adds and withdrawals. Full `Halt<chain>Chain`, solvency, global-chain, and node-pause state also blocks both actions, matching the Thornode handlers. If those flags are clear but any `PauseLPDeposit-<chain>-*` Mimir is positive, the combined chain state is `PARTIAL`.
@@ -30,4 +29,8 @@ The full explorer remains the detail surface:
 
 ## Failure Behavior
 
-THORNode current state, the BooneTools stuck-transaction scan, and BooneTools vote history load independently. A stuck-scan or vote-history failure leaves current chain availability visible with a scoped warning. The page refreshes every 60 seconds and supports manual refresh.
+The network snapshot, BooneTools stuck-transaction scan, and BooneTools vote
+history load independently. A churn-only failure keeps healthy THORNode state;
+a stuck-scan or vote-history failure leaves current chain availability visible
+with a scoped warning. Manual refresh bypasses the fresh snapshot cache while
+retaining stale-on-error fallback. The page refreshes every 60 seconds.

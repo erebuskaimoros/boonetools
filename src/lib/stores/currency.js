@@ -19,6 +19,7 @@
  */
 
 import { writable } from 'svelte/store';
+import { booneToolsApi } from '../api/boonetools.js';
 
 // ---- Configuration ----
 
@@ -49,9 +50,6 @@ export const exchangeRates = writable({});
 
 // ---- Rate Fetching ----
 
-const STOCK_PRICES_BASE = (import.meta.env.VITE_NODEOP_API_BASE || '').replace(/\/$/, '');
-const STOCK_PRICES_KEY = import.meta.env.VITE_NODEOP_API_KEY || '';
-
 export async function fetchExchangeRates() {
   const results = await Promise.allSettled([
     // 1. RUNE price in fiat + BTC + XAU
@@ -61,11 +59,9 @@ export async function fetchExchangeRates() {
     fetch('https://api.coingecko.com/api/v3/simple/price?ids=monero,zcash&vs_currencies=usd')
       .then(r => r.ok ? r.json() : null),
     // 3. SPY, VT, gold from stock-prices proxy
-    STOCK_PRICES_BASE
-      ? fetch(`${STOCK_PRICES_BASE}/stock-prices?symbols=SPY,VT,GC=F`, {
-          headers: { apikey: STOCK_PRICES_KEY, Authorization: `Bearer ${STOCK_PRICES_KEY}` }
-        }).then(r => r.ok ? r.json() : null)
-      : Promise.resolve(null)
+    booneToolsApi.get('/stock-prices', {
+      query: { symbols: 'SPY,VT,GC=F' }
+    }).catch(() => null)
   ]);
 
   const rates = {};
@@ -161,18 +157,16 @@ export async function fetchHistoricalRates(currency, fromTimestamp, toTimestamp)
       }
     } else if (YAHOO_SYMBOLS[currency]) {
       // Stocks/Gold: use our stock-prices proxy
-      if (STOCK_PRICES_BASE) {
-        const res = await fetch(
-          `${STOCK_PRICES_BASE}/stock-prices?symbols=${YAHOO_SYMBOLS[currency]}&from=${fromTimestamp}&to=${toTimestamp}`,
-          { headers: { apikey: STOCK_PRICES_KEY, Authorization: `Bearer ${STOCK_PRICES_KEY}` } }
-        );
-        if (res.ok) {
-          const data = await res.json();
-          const symbolData = data[YAHOO_SYMBOLS[currency]];
-          if (Array.isArray(symbolData)) {
-            points = symbolData; // Already [[timestamp, price], ...]
-          }
+      const data = await booneToolsApi.get('/stock-prices', {
+        query: {
+          symbols: YAHOO_SYMBOLS[currency],
+          from: fromTimestamp,
+          to: toTimestamp
         }
+      });
+      const symbolData = data[YAHOO_SYMBOLS[currency]];
+      if (Array.isArray(symbolData)) {
+        points = symbolData; // Already [[timestamp, price], ...]
       }
     }
   } catch (err) {
@@ -230,7 +224,7 @@ export function switchCurrency() {
 
 function updateCurrencyURL(currency) {
   if (typeof window === 'undefined') return;
-  const url = new URL(window.location);
+  const url = new URL(window.location.href);
   if (currency !== 'USD') {
     url.searchParams.set('currency', currency);
   } else {

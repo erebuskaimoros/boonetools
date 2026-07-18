@@ -1,0 +1,12 @@
+{
+  "extends": "./jsconfig.json",
+  "include": [
+    "src/main.js",
+    "src/App.svelte",
+    "src/vite-env.d.ts"
+  ],
+  "exclude": [
+    "src/routes/**",
+    "src/components/**"
+  ]
+}

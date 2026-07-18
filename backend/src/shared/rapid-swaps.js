@@ -13,19 +13,19 @@ export {
   isRapidSwapRateLimitError,
   resolveRapidSwapHint,
   enrichRapidSwapHint
-} from '../../../src/lib/rapid-swaps/backend.js';
+} from '../../../shared/rapid-swaps/backend.js';
 
 export {
   buildRapidSwapCanonicalScanPlan,
   mergeRapidSwapRowsByTxId,
   shouldSkipRapidSwapCanonicalScanForHealthyListener,
   summarizeRapidSwapCanonicalScan
-} from '../../../src/lib/rapid-swaps/ingestion.js';
+} from '../../../shared/rapid-swaps/ingestion.js';
 
 export {
   normalizeRapidSwapHint,
   RAPID_SWAP_CANDIDATE_STATUS
-} from '../../../src/lib/rapid-swaps/reconciliation.js';
+} from '../../../shared/rapid-swaps/reconciliation.js';
 
 function toIsoOrNull(value) {
   if (!value) {

@@ -15,6 +15,7 @@ BooneTools now has a dedicated Hetzner-hosted backend stack for all current DB-b
 ## Layout
 
 - API service: `backend/src/server.js`
+- Runtime-neutral domain core: `shared/rapid-swaps/` and `shared/blockchain.js`
 - DB schema: `backend/migrations/`
 - Dedicated Postgres container: `ops/docker/boonetools-postgres.compose.yml`
 - systemd units/timers: `ops/systemd/`
@@ -30,16 +31,33 @@ BooneTools now has a dedicated Hetzner-hosted backend stack for all current DB-b
 Frontend/runtime env should point to:
 
 ```bash
-VITE_NODEOP_API_BASE=https://boone.tools/functions/v1
-VITE_RAPID_SWAPS_API_BASE=https://boone.tools/functions/v1
+VITE_BOONETOOLS_API_BASE=https://boone.tools/functions/v1
+VITE_BOONETOOLS_API_KEY=
 ```
 
-Public GETs continue to accept:
+The frontend uses one BooneTools API origin and optional public client token for every feature.
+Legacy feature-specific `VITE_*_API_BASE` and `VITE_*_API_KEY` variables are
+accepted only as migration aliases.
+
+Every read-only route is public and protected by the backend request limiter.
+The optional browser-visible token is retained for compatibility and client
+identification only; it is not authentication. Existing clients may continue
+to send:
 
 - `apikey: <PUBLIC_API_KEY>`
 - `Authorization: Bearer <PUBLIC_API_KEY>`
 
+Successful legacy responses gain additive contract metadata. Request the v2
+`{ data, meta }` envelope using `?schema_version=2` or the media type
+`application/vnd.boonetools.v2+json`.
+
 The public `/functions/v1/stuck-transactions` endpoint powers the `/status` dashboard's high-confidence stuck-payment list. It composes current THORNode queue and transaction-stage state behind a 30-second in-process cache; it requires no database migration or additional environment variable.
+
+The public `/functions/v1/network-snapshot` endpoint coalesces Status dashboard
+reads behind one short-lived cache. THORNode fields and Midgard churns fail
+independently, so a churn outage does not erase healthy node/Mimir state. A
+forced refresh retains the previous snapshot as stale fallback if every
+provider is unavailable.
 
 The public `/functions/v1/node-votes` payload includes one deduplicated
 `active_nodes` roster from the same THORNode state used for current vote
@@ -62,7 +80,7 @@ Start from `backend/.env.example` and set at least:
 ```bash
 PORT=8787
 DATABASE_URL=postgresql://boonetools:...@127.0.0.1:5433/boonetools
-PUBLIC_API_KEY=...
+PUBLIC_API_KEY= # optional legacy client token, not a secret
 THORNODE_PRIMARY_URL=https://gateway.liquify.com/chain/thorchain_api
 THORNODE_FALLBACK_URL=https://thornode.thorchain.network
 MIDGARD_URL=https://gateway.liquify.com/chain/thorchain_midgard/v2
@@ -107,11 +125,26 @@ npm run boonetools:deploy:backend
 
 That script:
 
-1. Syncs backend code, shared rapid-swap modules, scripts, and ops assets to `/opt/boonetools-backend`
-2. Installs backend dependencies
-3. Starts the dedicated Postgres container
-4. Applies canonical DB migrations
-5. Installs/restarts the backend API, schedulers, and backup timer; the App Layer live-state prime also writes the current lane 01 accrual row
+1. Snapshots the current backend/shared tree and quiesces writer timers and listeners
+2. Syncs backend code, the neutral `shared/` domain package, scripts, and ops assets to `/opt/boonetools-backend`; production does not copy or import frontend `src/` modules
+3. Installs backend dependencies and starts the dedicated Postgres container
+4. Applies each canonical DB migration and its applied marker in one transaction
+5. Installs/restarts the backend API, schedulers, Bond History refresh worker, and backup timer; the App Layer live-state prime also writes the current lane 01 accrual row
+
+If deployment exits after writers are quiesced, the EXIT trap restores the
+snapshotted backend/shared tree and starts the previous writer set.
+
+Cached Bond History requests enqueue one refresh per address and scope in
+`bond_history_refresh_queue`. `boonetools-bond-history-refresh.timer` drains
+that queue every minute. Normal request handlers never perform historical
+provider scans, including on cold misses: they return `202` until the worker
+has materialized a cache row. The frontend polls `refresh=status`, which reads
+the cache without re-enqueueing work or disturbing retry backoff.
+
+Migration `026_event_provenance.sql` gives Rapid Swaps, node votes, and Rujira
+Reserve payments a unique canonical identity plus per-provider observation
+history. Canonical upserts enforce source precedence and monotonic first/last
+seen timestamps atomically in Postgres.
 
 When `RAPID_SWAPS_DUNE_QUERY_ID` is configured, deploy disables the legacy
 `rapid-swap-listener.service`; the scheduler live tail is the fresh-data path.

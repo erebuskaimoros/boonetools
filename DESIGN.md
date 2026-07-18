@@ -352,6 +352,12 @@ inline using the contract above, or extract reusable terminal components into
 similar are still acceptable inside legacy components but should not be added
 to new terminal screens — write the small bit of mono markup directly.
 
+Reusable terminal primitives live under `src/lib/components/terminal/`.
+`TerminalAlert.svelte` is the canonical `ERR` / `WRN` / `INF` row and preserves
+the alert treatment described above. Shared Chart.js palette/font primitives
+live in `src/lib/charts/terminal.js`; feature-specific datasets, plugins, and
+interaction controllers stay beside each feature's model.
+
 ## Do's and Don'ts
 
 Do:

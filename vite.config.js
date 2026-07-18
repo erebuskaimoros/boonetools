@@ -6,6 +6,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
 const THORNODE_PRIMARY = 'https://gateway.liquify.com/chain/thorchain_api'
+export const THORNODE_ARCHIVE = 'https://thornode-archive.ninerealms.com'
 const THORNODE_FALLBACK = 'https://thornode.thorchain.network'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RUJIRA_BASE_LAYER_DATA_DIR = path.resolve(__dirname, '../docs/rujira-base-layer-fees')
@@ -225,7 +226,7 @@ function createTreasuryLpProxy() {
         }
 
         if (req.method === 'GET' && req.url?.startsWith('/__thornode_archive')) {
-          await proxyThorNodeRequest(req, res, [THORNODE_FALLBACK], '/__thornode_archive')
+          await proxyThorNodeRequest(req, res, [THORNODE_ARCHIVE], '/__thornode_archive')
           return
         }
 
@@ -343,7 +344,7 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/__thornode_fallback/, '')
       },
       '/__thornode_archive': {
-        target: THORNODE_FALLBACK,
+        target: THORNODE_ARCHIVE,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/__thornode_archive/, '')
       }

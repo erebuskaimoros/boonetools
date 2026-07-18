@@ -43,6 +43,26 @@
     return value < 100 ? formatUSDWithDecimals(value, 2) : formatUSD(value);
   }
 
+  /**
+   * @param {Event} event
+   * @param {string} fallbackSrc
+   */
+  function useImageFallback(event, fallbackSrc) {
+    const image = /** @type {HTMLImageElement} */ (event.currentTarget);
+    image.onerror = null;
+    image.src = fallbackSrc;
+  }
+
+  /** @param {Event} event */
+  function useCoinFallback(event) {
+    useImageFallback(event, '/assets/coins/fallback-logo.svg');
+  }
+
+  /** @param {Event} event */
+  function useChainFallback(event) {
+    useImageFallback(event, '/assets/chains/fallback-logo.svg');
+  }
+
   function hasKnownUsdValue(value) {
     return value != null && Number.isFinite(value);
   }
@@ -726,8 +746,8 @@
                   <div class="asset-row">
                     <div class="asset-left">
                       <div class="logo-wrap">
-                        <img src={getAssetLogo(balance.asset) || '/assets/coins/fallback-logo.svg'} alt={getAssetDisplayName(balance.asset)} class="asset-icon" on:error={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/coins/fallback-logo.svg'; }} />
-                        <div class="chain-badge"><img src={getChainLogo(balance.chain) || '/assets/chains/fallback-logo.svg'} alt={balance.chain} class="chain-icon" on:error={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/chains/fallback-logo.svg'; }} /></div>
+                        <img src={getAssetLogo(balance.asset) || '/assets/coins/fallback-logo.svg'} alt={getAssetDisplayName(balance.asset)} class="asset-icon" on:error={useCoinFallback} />
+                        <div class="chain-badge"><img src={getChainLogo(balance.chain) || '/assets/chains/fallback-logo.svg'} alt={balance.chain} class="chain-icon" on:error={useChainFallback} /></div>
                       </div>
                       <span class="asset-name">{getAssetDisplayName(balance.asset)}</span>
                     </div>
@@ -750,8 +770,8 @@
                     <div class="lp-top">
                       <div class="asset-left">
                         <div class="logo-wrap">
-                          <img src={getAssetLogo(position.fullPool) || '/assets/coins/fallback-logo.svg'} alt={position.pool} class="asset-icon" on:error={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/coins/fallback-logo.svg'; }} />
-                          <div class="chain-badge"><img src={getChainLogo(position.fullPool.split('.')[0]) || '/assets/chains/fallback-logo.svg'} alt={position.fullPool.split('.')[0]} class="chain-icon" on:error={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/chains/fallback-logo.svg'; }} /></div>
+                          <img src={getAssetLogo(position.fullPool) || '/assets/coins/fallback-logo.svg'} alt={position.pool} class="asset-icon" on:error={useCoinFallback} />
+                          <div class="chain-badge"><img src={getChainLogo(position.fullPool.split('.')[0]) || '/assets/chains/fallback-logo.svg'} alt={position.fullPool.split('.')[0]} class="chain-icon" on:error={useChainFallback} /></div>
                         </div>
                         <span class="asset-name">{position.pool}</span>
                       </div>
@@ -819,8 +839,8 @@
                     <div class="entry-head">
                       <div class="entry-id">
                         <div class="logo-wrap">
-                          <img src={getAssetLogo(entry.primaryAsset) || '/assets/coins/fallback-logo.svg'} alt={entry.label} class="asset-icon" on:error={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/coins/fallback-logo.svg'; }} />
-                          <div class="chain-badge"><img src={getChainLogo(entry.chain) || '/assets/chains/fallback-logo.svg'} alt={entry.chain} class="chain-icon" on:error={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/chains/fallback-logo.svg'; }} /></div>
+                          <img src={getAssetLogo(entry.primaryAsset) || '/assets/coins/fallback-logo.svg'} alt={entry.label} class="asset-icon" on:error={useCoinFallback} />
+                          <div class="chain-badge"><img src={getChainLogo(entry.chain) || '/assets/chains/fallback-logo.svg'} alt={entry.chain} class="chain-icon" on:error={useChainFallback} /></div>
                         </div>
                         <span class="entry-name">{entry.label}</span>
                         <span class="chain-tag">{entry.chain}</span>
@@ -854,8 +874,8 @@
                               <div class="asset-row">
                                 <div class="asset-left">
                                   <div class="logo-wrap sm">
-                                    <img src={getAssetLogo(balance.asset) || '/assets/coins/fallback-logo.svg'} alt={getAssetDisplayName(balance.asset)} class="asset-icon" on:error={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/coins/fallback-logo.svg'; }} />
-                                    <div class="chain-badge"><img src={getChainLogo(balance.chain) || '/assets/chains/fallback-logo.svg'} alt={balance.chain} class="chain-icon" on:error={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/chains/fallback-logo.svg'; }} /></div>
+                                    <img src={getAssetLogo(balance.asset) || '/assets/coins/fallback-logo.svg'} alt={getAssetDisplayName(balance.asset)} class="asset-icon" on:error={useCoinFallback} />
+                                    <div class="chain-badge"><img src={getChainLogo(balance.chain) || '/assets/chains/fallback-logo.svg'} alt={balance.chain} class="chain-icon" on:error={useChainFallback} /></div>
                                   </div>
                                   <span class="asset-name">{balance.displayName || getAssetDisplayName(balance.asset)}</span>
                                 </div>
@@ -877,8 +897,8 @@
                                   <div class="lp-top">
                                     <div class="asset-left">
                                       <div class="logo-wrap sm">
-                                        <img src={getAssetLogo(position.fullPool) || '/assets/coins/fallback-logo.svg'} alt={position.pool} class="asset-icon" on:error={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/coins/fallback-logo.svg'; }} />
-                                        <div class="chain-badge"><img src={getChainLogo(position.fullPool.split('.')[0]) || '/assets/chains/fallback-logo.svg'} alt={position.fullPool.split('.')[0]} class="chain-icon" on:error={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = '/assets/chains/fallback-logo.svg'; }} /></div>
+                                        <img src={getAssetLogo(position.fullPool) || '/assets/coins/fallback-logo.svg'} alt={position.pool} class="asset-icon" on:error={useCoinFallback} />
+                                        <div class="chain-badge"><img src={getChainLogo(position.fullPool.split('.')[0]) || '/assets/chains/fallback-logo.svg'} alt={position.fullPool.split('.')[0]} class="chain-icon" on:error={useChainFallback} /></div>
                                       </div>
                                       <span class="asset-name">{position.pool}</span>
                                     </div>
