@@ -5,7 +5,7 @@ import {
   TREASURY_LP_DISCOVERY_TTL_MS,
   buildTreasurySnapshot
 } from '../src/treasury/builder.js';
-import { fetchTreasuryCore } from '../src/treasury/providers.js';
+import { fetchTcyStaker, fetchTreasuryCore } from '../src/treasury/providers.js';
 
 const NOW = new Date('2026-07-18T12:00:00.000Z');
 
@@ -17,7 +17,8 @@ function corePayload(overrides = {}) {
       value: [
         { asset: 'BTC.BTC', status: 'Available', asset_tor_price: '6000000000000' },
         { asset: 'ETH.ETH', status: 'Available', asset_tor_price: '300000000000' },
-        { asset: 'BSC.BNB', status: 'Available', asset_tor_price: '60000000000' }
+        { asset: 'BSC.BNB', status: 'Available', asset_tor_price: '60000000000' },
+        { asset: 'THOR.TCY', status: 'Available', asset_tor_price: '10000000' }
       ]
     },
     nodes: {
@@ -61,6 +62,7 @@ function providers(overrides = {}) {
       amount: 1
     }],
     fetchMemberPoolAssets: async (address) => address.includes('10qh') ? ['BTC.BTC'] : [],
+    fetchTcyStaker: async (address) => ({ address, amount: '500000000' }),
     fetchLiquidityProvider: async (asset) => ({
       asset,
       units: '10',
@@ -91,6 +93,19 @@ test('fetchTreasuryCore fetches shared network, pools, nodes, and module data ex
   assert.equal(Object.values(result).every((segment) => segment.ok), true);
 });
 
+test('fetchTcyStaker reads the address-specific THORNode staking record', async () => {
+  const calls = [];
+  const result = await fetchTcyStaker('thor1treasury', {
+    fetchThorchain: async (path) => {
+      calls.push(path);
+      return { address: 'thor1treasury', amount: '2330000000000000' };
+    }
+  });
+
+  assert.deepEqual(calls, ['/thorchain/tcy_staker/thor1treasury']);
+  assert.equal(result.amount, '2330000000000000');
+});
+
 test('Treasury snapshot builds the complete UI contract without request-time provider work', async () => {
   const snapshot = await buildTreasurySnapshot({ providers: providers(), now: () => NOW });
 
@@ -102,6 +117,12 @@ test('Treasury snapshot builds the complete UI contract without request-time pro
   assert.equal(snapshot.consolidatedSection.summary.addressCount, 8);
   assert.equal(snapshot.sections[1].entries.find((entry) => entry.label === 'Treasury Vultisig').bonds.length, 1);
   assert.equal(snapshot.sections[1].entries.find((entry) => entry.label === 'Treasury Vultisig').lpPositions.length, 1);
+  const vultisig2 = snapshot.sections[1].entries.find((entry) => entry.label === 'Treasury Vultisig 2');
+  assert.equal(vultisig2.stakedPositions.length, 1);
+  assert.equal(vultisig2.stakedPositions[0].asset, 'THOR.TCY');
+  assert.equal(vultisig2.stakedPositions[0].amount, 5);
+  assert.equal(vultisig2.summary.stakeValue, 0.5);
+  assert.equal(snapshot.consolidatedSection.stakedPositions[0].amount, 5);
   assert.ok(snapshot.totalSummary.totalValue > 0);
   assert.equal(snapshot.control.lpDiscovery['active:Treasury Vultisig'].assets[0], 'BTC.BTC');
 });
@@ -117,6 +138,7 @@ test('Treasury refresh reuses failed segments and skips LP rediscovery until its
       module: { ok: false, error: 'module down' }
     }),
     fetchThorBalance: async () => { throw new Error('bank down'); },
+    fetchTcyStaker: async () => { throw new Error('staking down'); },
     fetchExternalHoldings: async () => { throw new Error('chain down'); },
     fetchMemberPoolAssets: async () => {
       discoveryCalls += 1;
@@ -145,6 +167,10 @@ test('Treasury refresh reuses failed segments and skips LP rediscovery until its
     second.sections[1].entries.find((entry) => entry.label === 'Treasury Vultisig').lpPositions.length,
     1
   );
+  assert.equal(
+    second.sections[1].entries.find((entry) => entry.label === 'Treasury Vultisig 2').stakedPositions[0].amount,
+    5
+  );
 });
 
 test('first-run broad LP fallback collapses to active pools and failed rediscovery backs off', async () => {
@@ -171,7 +197,7 @@ test('first-run broad LP fallback collapses to active pools and failed rediscove
 
   const first = await buildTreasurySnapshot({ providers: fallbackProviders, now: () => NOW });
   assert.equal(memberCalls, 4);
-  assert.equal(lpCalls, 12);
+  assert.equal(lpCalls, 16);
   assert.deepEqual(first.control.lpDiscovery['active:Treasury Vultisig'].assets, ['BTC.BTC']);
   assert.deepEqual(first.control.lpDiscovery['active:Treasury Test'].assets, []);
   assert.equal(
@@ -185,7 +211,7 @@ test('first-run broad LP fallback collapses to active pools and failed rediscove
     now: () => new Date(NOW.getTime() + 5 * 60 * 1000)
   });
   assert.equal(memberCalls, 4);
-  assert.equal(lpCalls, 13);
+  assert.equal(lpCalls, 17);
 
   const due = await buildTreasurySnapshot({
     previousSnapshot: second,
@@ -193,7 +219,7 @@ test('first-run broad LP fallback collapses to active pools and failed rediscove
     now: () => new Date(NOW.getTime() + TREASURY_LP_DISCOVERY_TTL_MS + 1)
   });
   assert.equal(memberCalls, 8);
-  assert.equal(lpCalls, 14);
+  assert.equal(lpCalls, 18);
   assert.ok(due.control.lpDiscovery['active:Treasury Vultisig'].nextAttemptAt);
 
   await buildTreasurySnapshot({
@@ -202,5 +228,5 @@ test('first-run broad LP fallback collapses to active pools and failed rediscove
     now: () => new Date(NOW.getTime() + TREASURY_LP_DISCOVERY_TTL_MS + 5 * 60 * 1000)
   });
   assert.equal(memberCalls, 8);
-  assert.equal(lpCalls, 15);
+  assert.equal(lpCalls, 19);
 });

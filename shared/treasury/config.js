@@ -49,7 +49,8 @@ export const TREASURY_SECTIONS = Object.freeze([
       Object.freeze({
         address: 'thor1lhufh0mwasa0lk9udppdegmvnkgqt08f0m9p5g',
         label: 'Treasury Vultisig 2',
-        chain: 'THOR'
+        chain: 'THOR',
+        includeTcyStake: true
       }),
       Object.freeze({
         address: 'TJ8LE5jBifN2CQmgE5TLiLZGFGVNny1dHT',

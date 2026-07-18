@@ -50,8 +50,18 @@ test('rapid swap chart buckets retain cumulative seeds without raw rows', () => 
 });
 
 test('rapid swap read model includes compact aggregates for every non-table view', async () => {
-  const swapRow = {
-    tx_id: 'ABC',
+  const topSwapRow = {
+    tx_id: 'TOP',
+    action_date: '2026-04-25T00:00:00Z',
+    observed_at: '2026-04-25T00:01:00Z',
+    source_asset: 'BTC.BTC',
+    target_asset: 'THOR.RUNE',
+    comparable_volume_usd: 1000,
+    streaming_count: 10,
+    blocks_used: 2
+  };
+  const latestSwapRow = {
+    tx_id: 'LATEST',
     action_date: '2026-07-18T00:00:00Z',
     observed_at: '2026-07-18T00:01:00Z',
     source_asset: 'BTC.BTC',
@@ -63,8 +73,9 @@ test('rapid swap read model includes compact aggregates for every non-table view
   const client = {
     async query(sql, params = []) {
       if (sql.includes('min(observed_at)')) return { rows: [{ total_tracked: 1, cumulative_volume_usd: 100, total_subs: 10, total_blocks_used: 2, saved_blocks: 8, recent_24h_count: 1, recent_24h_volume_usd: 100 }] };
-      if (sql.includes('order by comparable_volume_usd')) return { rows: [swapRow] };
-      if (sql.includes('where action_date >=') && sql.includes('limit $2')) return { rows: [swapRow] };
+      if (sql.includes('order by comparable_volume_usd')) return { rows: [topSwapRow] };
+      if (sql.includes('order by action_date desc, tx_id asc')) return { rows: [latestSwapRow] };
+      if (sql.includes('where action_date >=') && sql.includes('limit $2')) return { rows: [latestSwapRow] };
       if (sql.includes("date_trunc('day'")) return { rows: [{ bucket_start: '2026-07-18', swap_count: 1, comparable_volume_usd: 100, total_subs: 10, total_blocks_used: 2, saved_blocks: 8 }] };
       if (sql.includes('cross join lateral')) return { rows: [
         { dimension: 'sub_swaps', label: '6-10', sort_order: 3, swap_count: 1, volume_usd: 100 },
@@ -83,6 +94,8 @@ test('rapid swap read model includes compact aggregates for every non-table view
     now: new Date('2026-07-18T00:02:00Z')
   });
   assert.equal(payload.chart_buckets.length, 1);
+  assert.equal(payload.top_20[0].tx_id, 'TOP');
+  assert.equal(payload.latest_20[0].tx_id, 'LATEST');
   assert.equal(payload.preaggregates.distributions.sub_swaps[0].bucket, '6-10');
   assert.equal(payload.preaggregates.affiliates[0].affiliate, 'be');
   assert.equal(payload.preaggregates.paths[0].avg_time_saved_seconds, 48);

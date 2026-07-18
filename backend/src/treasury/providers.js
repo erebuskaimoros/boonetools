@@ -130,6 +130,24 @@ export async function fetchThorBalance(address, options = {}) {
   return Array.isArray(payload?.balances) ? payload.balances : [];
 }
 
+export async function fetchTcyStaker(address, options = {}) {
+  const fetchThor = options.fetchThorchain || fetchThorchain;
+  try {
+    const payload = await fetchThor(`/thorchain/tcy_staker/${address}`, {
+      timeoutMs: options.timeoutMs || REQUEST_TIMEOUT_MS
+    });
+    return {
+      address: payload?.address || address,
+      amount: String(payload?.amount || '0')
+    };
+  } catch (error) {
+    if (Number(error?.status) === 404 || /404|not found/i.test(message(error))) {
+      return { address, amount: '0' };
+    }
+    throw error;
+  }
+}
+
 export async function fetchMemberPoolAssets(address, options = {}) {
   const fetchMember = options.fetchMidgard || fetchMidgard;
   const payload = await fetchMember(`/member/${address}`, {

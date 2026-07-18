@@ -98,6 +98,7 @@ export async function buildRapidSwapsSummaryPayload(client = { query }, options 
   const [
     summaryResult,
     topRowsResult,
+    latestRowsResult,
     recentRowsResult,
     dailyBucketsResult,
     distributionsResult,
@@ -124,6 +125,12 @@ export async function buildRapidSwapsSummaryPayload(client = { query }, options 
       `select ${RAPID_SWAP_COLUMNS}
        from rapid_swaps
        order by comparable_volume_usd desc, action_date desc
+       limit 20`
+    ),
+    client.query(
+      `select ${RAPID_SWAP_COLUMNS}
+       from rapid_swaps
+       order by action_date desc, tx_id asc
        limit 20`
     ),
     client.query(
@@ -305,6 +312,7 @@ export async function buildRapidSwapsSummaryPayload(client = { query }, options 
     chain_status: sourceStatus,
     source_status: sourceStatus,
     top_20: topRowsResult.rows.map(normalizeRapidSwapDashboardRow),
+    latest_20: latestRowsResult.rows.map(normalizeRapidSwapDashboardRow),
     recent_24h: recentRowsResult.rows.map(normalizeRapidSwapDashboardRow),
     chart_buckets: normalizeDailyBuckets(dailyBucketsResult.rows),
     preaggregates: {

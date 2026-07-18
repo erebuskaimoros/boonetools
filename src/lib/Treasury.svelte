@@ -12,7 +12,7 @@
   import { fetchTreasurySnapshot } from '$lib/treasury/api';
 
   const NOTE_TEXT =
-    'The Original section shows the live treasury module address, including module balances, LP positions, and any node bonds. Active THOR addresses include THOR balances, LP positions, and node bonds. External-chain addresses show native balances, and the New ETH Treasury also lists Ethereum ERC-20 holdings plus supported BSC, Avalanche, and Base balances for the same EVM address.';
+    'The Original section shows the live treasury module address, including module balances, LP positions, and any node bonds. Active THOR addresses include THOR balances, TCY staking positions, LP positions, and node bonds. External-chain addresses show native balances, and the New ETH Treasury also lists Ethereum ERC-20 holdings plus supported BSC, Avalanche, and Base balances for the same EVM address.';
 
   let loading = true;
   let error = null;
@@ -77,6 +77,7 @@
     return entries.reduce(
       (summary, entry) => {
         summary.walletValue += entry.summary.walletValue;
+        summary.stakeValue += entry.summary.stakeValue || 0;
         summary.lpValue += entry.summary.lpValue;
         summary.bondValue += entry.summary.bondValue;
         summary.totalValue += entry.summary.totalValue;
@@ -85,6 +86,7 @@
       {
         addressCount: entries.length,
         walletValue: 0,
+        stakeValue: 0,
         lpValue: 0,
         bondValue: 0,
         totalValue: 0
@@ -96,12 +98,20 @@
     return entry.balances.length > 0;
   }
 
+  function hasVisibleStakes(entry) {
+    return (entry.stakedPositions || []).length > 0;
+  }
+
   function hasVisibleBonds(entry) {
     return entry.bonds.length > 0;
   }
 
   function shouldShowEntryEmptyState(entry) {
-    return !hasVisibleBalances(entry) && entry.lpPositions.length === 0 && !entry.showLpSection && !hasVisibleBonds(entry);
+    return !hasVisibleBalances(entry)
+      && !hasVisibleStakes(entry)
+      && entry.lpPositions.length === 0
+      && !entry.showLpSection
+      && !hasVisibleBonds(entry);
   }
 
   function usesCompactBondLayout(entry) {
@@ -173,6 +183,29 @@
     );
   }
 
+  function buildConsolidatedStakedPositions(entries) {
+    const positionsByAsset = new Map();
+
+    for (const entry of entries) {
+      for (const position of entry.stakedPositions || []) {
+        const existing = positionsByAsset.get(position.asset) || {
+          asset: position.asset,
+          chain: position.chain,
+          amount: 0,
+          usdValue: 0,
+          hasMissingPrice: false
+        };
+
+        existing.amount += Number(position.amount || 0);
+        existing.usdValue += Number(position.usdValue || 0);
+        existing.hasMissingPrice ||= position.hasMissingPrice || !hasKnownUsdValue(position.usdValue);
+        positionsByAsset.set(position.asset, existing);
+      }
+    }
+
+    return sortHoldingsByValue(Array.from(positionsByAsset.values()));
+  }
+
   function buildConsolidatedBonds(entries) {
     const bondsByNode = new Map();
 
@@ -202,8 +235,9 @@
     return {
       key: 'consolidated',
       title: 'Consolidated Positions',
-      description: `Aggregated balances, LP positions, and node bonds across ${entries.length} tracked treasury addresses.`,
+      description: `Aggregated balances, staked positions, LP positions, and node bonds across ${entries.length} tracked treasury addresses.`,
       balances: buildConsolidatedBalances(entries),
+      stakedPositions: buildConsolidatedStakedPositions(entries),
       lpPositions: buildConsolidatedLpPositions(entries),
       bonds: buildConsolidatedBonds(entries),
       summary: summarizeSection(entries)
@@ -213,7 +247,7 @@
   function countUnpricedBalances(sourceSections = []) {
     return sourceSections
       .flatMap((section) => section.entries)
-      .flatMap((entry) => entry.balances)
+      .flatMap((entry) => [...entry.balances, ...(entry.stakedPositions || [])])
       .filter((balance) => balance.hasMissingPrice)
       .length;
   }
@@ -232,6 +266,7 @@
     }
 
     const balanceWeight = hasVisibleBalances(entry) ? 36 + entry.balances.length * 38 : 0;
+    const stakeWeight = hasVisibleStakes(entry) ? 36 + entry.stakedPositions.length * 38 : 0;
     const lpWeight =
       entry.lpPositions.length > 0 || entry.showLpSection
         ? 32 + Math.max(entry.lpPositions.length, 1) * 52
@@ -244,6 +279,10 @@
 
     if (hasVisibleBalances(entry)) {
       weight += balanceWeight;
+    }
+
+    if (hasVisibleStakes(entry)) {
+      weight += stakeWeight;
     }
 
     if (entry.lpPositions.length > 0 || entry.showLpSection) {
@@ -376,6 +415,8 @@
             <div class="head-stats">
               <span>Wallets <strong>{formatUSD(consolidatedSection.summary.walletValue)}</strong></span>
               <span class="sep">|</span>
+              <span>Staked <strong>{formatUSD(consolidatedSection.summary.stakeValue || 0)}</strong></span>
+              <span class="sep">|</span>
               <span>LP <strong>{formatUSD(consolidatedSection.summary.lpValue)}</strong></span>
               <span class="sep">|</span>
               <span>Bonds <strong>{formatUSD(consolidatedSection.summary.bondValue)}</strong></span>
@@ -403,6 +444,29 @@
                 {/each}
               {:else}
                 <div class="empty">No balances.</div>
+              {/if}
+            </div>
+
+            <div class="consol-col">
+              <div class="col-head">STAKED POSITIONS</div>
+              {#if (consolidatedSection.stakedPositions || []).length > 0}
+                {#each consolidatedSection.stakedPositions as position}
+                  <div class="asset-row">
+                    <div class="asset-left">
+                      <div class="logo-wrap">
+                        <img src={getAssetLogo(position.asset) || '/assets/coins/fallback-logo.svg'} alt={getAssetDisplayName(position.asset)} class="asset-icon" on:error={useCoinFallback} />
+                        <div class="chain-badge"><img src={getChainLogo(position.chain) || '/assets/chains/fallback-logo.svg'} alt={position.chain} class="chain-icon" on:error={useChainFallback} /></div>
+                      </div>
+                      <span class="asset-name">{getAssetDisplayName(position.asset)}</span>
+                    </div>
+                    <div class="asset-right">
+                      <span class="mono">{formatAmount(position.amount)}</span>
+                      <span class="dim">{formatHoldingUsdValue(position)}</span>
+                    </div>
+                  </div>
+                {/each}
+              {:else}
+                <div class="empty">No staked positions.</div>
               {/if}
             </div>
 
@@ -463,6 +527,8 @@
             <div class="head-stats">
               <span>W <strong>{formatUSD(section.summary.walletValue)}</strong></span>
               <span class="sep">|</span>
+              <span>S <strong>{formatUSD(section.summary.stakeValue || 0)}</strong></span>
+              <span class="sep">|</span>
               <span>LP <strong>{formatUSD(section.summary.lpValue)}</strong></span>
               <span class="sep">|</span>
               <span>B <strong>{formatUSD(section.summary.bondValue)}</strong></span>
@@ -497,6 +563,8 @@
                       <div class="entry-summary">
                         <span>W {formatUsdValue(entry.summary.walletValue)}</span>
                         <span class="sep">|</span>
+                        <span>S {formatUsdValue(entry.summary.stakeValue || 0)}</span>
+                        <span class="sep">|</span>
                         <span>LP {formatUsdValue(entry.summary.lpValue)}</span>
                         <span class="sep">|</span>
                         <span>B {formatUsdValue(entry.summary.bondValue)}</span>
@@ -526,6 +594,27 @@
                                 <div class="asset-right">
                                   <span class="mono">{formatAmount(balance.amount)}</span>
                                   <span class="dim">{formatHoldingUsdValue(balance)}</span>
+                                </div>
+                              </div>
+                            {/each}
+                          </div>
+                        {/if}
+
+                        {#if hasVisibleStakes(entry)}
+                          <div class="detail-block detail-block--stakes">
+                            <div class="detail-label">STAKED POSITIONS</div>
+                            {#each entry.stakedPositions as position}
+                              <div class="asset-row">
+                                <div class="asset-left">
+                                  <div class="logo-wrap sm">
+                                    <img src={getAssetLogo(position.asset) || '/assets/coins/fallback-logo.svg'} alt={getAssetDisplayName(position.asset)} class="asset-icon" on:error={useCoinFallback} />
+                                    <div class="chain-badge"><img src={getChainLogo(position.chain) || '/assets/chains/fallback-logo.svg'} alt={position.chain} class="chain-icon" on:error={useChainFallback} /></div>
+                                  </div>
+                                  <span class="asset-name">{getAssetDisplayName(position.asset)}</span>
+                                </div>
+                                <div class="asset-right">
+                                  <span class="mono">{formatAmount(position.amount)}</span>
+                                  <span class="dim">{formatHoldingUsdValue(position)}</span>
                                 </div>
                               </div>
                             {/each}
@@ -707,7 +796,7 @@
 
   .consol-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 1px;
     background: #1a1a1a;
   }

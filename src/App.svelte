@@ -22,6 +22,11 @@
   let selectedApp = null;
   let loadedComponent = null;
   let isLoadingApp = false;
+  let appLoadError = '';
+  let componentLoadSequence = 0;
+
+  const COMPONENT_RELOAD_KEY = 'boonetools-component-reload';
+  const STALE_COMPONENT_ERROR = /(?:failed to fetch dynamically imported module|error loading dynamically imported module|importing a module script failed|chunkloaderror)/i;
 
   const rapidSwapsApp = {
     name: "Rapid Swaps",
@@ -144,15 +149,66 @@
   }
 
   async function loadComponent(app) {
+    const loadSequence = ++componentLoadSequence;
     loadedComponent = null;
     isLoadingApp = true;
+    appLoadError = '';
     try {
       const module = await app.component();
+      if (loadSequence !== componentLoadSequence) return;
       loadedComponent = module.default;
+      clearComponentReload(app);
     } catch (error) {
       console.error('Error loading component:', error);
+      if (loadSequence !== componentLoadSequence) return;
+
+      if (isStaleComponentError(error) && reloadWithFreshAssets(app)) {
+        return;
+      }
+
+      appLoadError = 'This dashboard could not be loaded. The site may have been updated while this tab was open.';
+    } finally {
+      if (loadSequence === componentLoadSequence) {
+        isLoadingApp = false;
+      }
     }
-    isLoadingApp = false;
+  }
+
+  function componentReloadValue(app) {
+    return `${window.location.pathname}:${app.path}`;
+  }
+
+  function isStaleComponentError(error) {
+    return STALE_COMPONENT_ERROR.test(String(error?.message || error || ''));
+  }
+
+  function clearComponentReload(app) {
+    try {
+      if (sessionStorage.getItem(COMPONENT_RELOAD_KEY) === componentReloadValue(app)) {
+        sessionStorage.removeItem(COMPONENT_RELOAD_KEY);
+      }
+    } catch {
+      // Storage can be unavailable in privacy-restricted browser contexts.
+    }
+  }
+
+  function reloadWithFreshAssets(app) {
+    try {
+      const reloadValue = componentReloadValue(app);
+      if (sessionStorage.getItem(COMPONENT_RELOAD_KEY) === reloadValue) return false;
+      sessionStorage.setItem(COMPONENT_RELOAD_KEY, reloadValue);
+    } catch {
+      return false;
+    }
+
+    window.location.reload();
+    return true;
+  }
+
+  function retryComponentLoad() {
+    if (!selectedApp) return;
+    clearComponentReload(selectedApp);
+    loadComponent(selectedApp);
   }
 
   function trackAppView(app) {
@@ -381,6 +437,11 @@
     {:else if isLoadingApp && selectedApp}
       <div class="app-loading">
         <span class="brand-prompt">$</span> loading {selectedApp.path}<span class="cursor">_</span>
+      </div>
+    {:else if appLoadError && selectedApp}
+      <div class="app-load-error" role="alert">
+        <div><span class="app-load-error-tag">ERR</span> {appLoadError}</div>
+        <button class="bracket-btn" on:click={retryComponentLoad}><span class="bk">[</span>retry<span class="bk">]</span></button>
       </div>
     {/if}
   </div>
@@ -828,6 +889,27 @@
     font-size: 12px;
     font-weight: 600;
     color: #666;
+  }
+
+  .app-load-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    max-width: 720px;
+    margin: 48px auto 0;
+    padding: 16px;
+    border: 1px solid #1a1a1a;
+    background: #0a0a0a;
+    color: #888;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+
+  .app-load-error-tag {
+    margin-right: 8px;
+    color: #dc3545;
+    font-weight: 700;
   }
 
   /* ---- DESKTOP-APP IFRAME MODE: no sidebar, compact top bar ---- */

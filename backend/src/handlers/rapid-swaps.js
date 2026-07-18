@@ -173,7 +173,7 @@ export async function handleRapidSwapsSummary(_request, url) {
   }
 
   const summary = model?.payload || await buildRapidSwapsSummaryPayload();
-  const canUseReadModelTopRows = Boolean(
+  const canUseReadModelLatestRows = Boolean(
     model &&
     !pagination.includeAll &&
     !tableWhere.filtered &&
@@ -181,7 +181,7 @@ export async function handleRapidSwapsSummary(_request, url) {
     pagination.limit <= 20 &&
     sort.sort === 'date' &&
     sort.order === 'desc' &&
-    Array.isArray(summary.top_20)
+    Array.isArray(summary.latest_20)
   );
   const countPromise = pagination.includeAll
     ? null
@@ -193,8 +193,8 @@ export async function handleRapidSwapsSummary(_request, url) {
       : null;
   const rowsPromise = pagination.includeAll
     ? fetchLegacyAllRows()
-    : canUseReadModelTopRows
-      ? Promise.resolve(summary.top_20.slice(0, pagination.limit))
+    : canUseReadModelLatestRows
+      ? Promise.resolve(summary.latest_20.slice(0, pagination.limit))
     : fetchRowsPage({
         whereSql: tableWhere.whereSql,
         whereParams: tableWhere.params,

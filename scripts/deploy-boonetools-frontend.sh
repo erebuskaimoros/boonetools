@@ -9,26 +9,25 @@ ROOT="$BOONETOOLS_CANONICAL_ROOT"
 SERVER="${SERVER:-root@boone.tools}"
 DEST="${DEST:-/var/www/boone-tools}"
 VERIFY_URL="${VERIFY_URL:-https://boone.tools/}"
+ASSET_RETENTION_DAYS="${ASSET_RETENTION_DAYS:-30}"
+
+if [[ ! "$ASSET_RETENTION_DAYS" =~ ^[0-9]+$ ]] || [[ "$ASSET_RETENTION_DAYS" -lt 1 ]]; then
+  echo "ASSET_RETENTION_DAYS must be a positive integer" >&2
+  exit 1
+fi
 
 echo "==> Building BooneTools frontend..."
 (cd "$ROOT" && npm run build)
 
-echo "==> Preserving App Layer dashboard compatibility assets..."
-DASHBOARD_CSS="$(find "$ROOT/dist/assets" -maxdepth 1 -name 'AppLayerBaseLayerDashboard-*.css' | sort | tail -n 1)"
-DASHBOARD_JS="$(find "$ROOT/dist/assets" -maxdepth 1 -name 'AppLayerBaseLayerDashboard-*.js' | sort | tail -n 1)"
+echo "==> Syncing application shell to $SERVER:$DEST/ ..."
+# Replace non-asset files exactly, but protect the asset directory from the
+# delete pass. Browsers with an older app shell can still request its hashed
+# lazy chunks after a deploy instead of receiving a 404.
+rsync -avz --delete --exclude '/assets/' "$ROOT/dist/" "$SERVER:$DEST/"
 
-if [[ -z "$DASHBOARD_CSS" || -z "$DASHBOARD_JS" ]]; then
-  echo "Missing App Layer dashboard chunks after build" >&2
-  exit 1
-fi
-
-# Keep the last deployed dashboard chunk names available so a browser with a
-# stale cached index/module graph does not receive index.html for CSS or JS.
-cp "$DASHBOARD_CSS" "$ROOT/dist/assets/AppLayerBaseLayerDashboard-3pz7TDqh.css"
-cp "$DASHBOARD_JS" "$ROOT/dist/assets/AppLayerBaseLayerDashboard-DolkGllj.js"
-
-echo "==> Syncing dist/ to $SERVER:$DEST/ ..."
-rsync -avz --delete "$ROOT/dist/" "$SERVER:$DEST/"
+echo "==> Syncing current assets and retaining prior chunks for ${ASSET_RETENTION_DAYS} days..."
+rsync -avz "$ROOT/dist/assets/" "$SERVER:$DEST/assets/"
+ssh "$SERVER" "find '$DEST/assets' -type f -mtime +$ASSET_RETENTION_DAYS -delete && find '$DEST/assets' -mindepth 1 -type d -empty -delete"
 
 if [[ -n "$VERIFY_URL" ]]; then
   echo "==> Verifying $VERIFY_URL ..."

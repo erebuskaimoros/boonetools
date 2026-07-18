@@ -160,18 +160,23 @@ export function toTreasuryLpPosition(data, assetPrices = {}, runePrice = 0) {
 
 export function finalizeTreasuryEntry(entry, pieces = {}) {
   const balances = Array.isArray(pieces.balances) ? pieces.balances : [];
+  const stakedPositions = Array.isArray(pieces.stakedPositions) ? pieces.stakedPositions : [];
   const lpPositions = (Array.isArray(pieces.lpPositions) ? pieces.lpPositions : [])
     .filter((position) => safeNumber(position?.totalUsdValue) >= 1)
     .sort((left, right) => safeNumber(right.totalUsdValue) - safeNumber(left.totalUsdValue));
   const bonds = (Array.isArray(pieces.bonds) ? pieces.bonds : [])
     .filter((bond) => safeNumber(bond?.amount) > 0);
-  const summary = summarizeEntry({ balances, lpPositions, bonds }, pieces.runePrice);
+  const summary = summarizeEntry({ balances, stakedPositions, lpPositions, bonds }, pieces.runePrice);
 
   return {
     ...entry,
     moduleBalances: undefined,
-    primaryAsset: entry.primaryAsset || balances[0]?.asset || NATIVE_ASSET_BY_CHAIN[entry.chain],
+    primaryAsset: entry.primaryAsset
+      || balances[0]?.asset
+      || stakedPositions[0]?.asset
+      || NATIVE_ASSET_BY_CHAIN[entry.chain],
     balances,
+    stakedPositions,
     lpPositions,
     bonds,
     entryError: pieces.entryError || null,
@@ -184,6 +189,10 @@ export function summarizeEntry(entry, runePrice = 0) {
     (total, holding) => total + safeNumber(holding?.usdValue),
     0
   );
+  const stakeValue = (entry?.stakedPositions || []).reduce(
+    (total, position) => total + safeNumber(position?.usdValue),
+    0
+  );
   const lpValue = (entry?.lpPositions || []).reduce(
     (total, position) => total + safeNumber(position?.totalUsdValue),
     0
@@ -193,12 +202,19 @@ export function summarizeEntry(entry, runePrice = 0) {
     0
   );
 
-  return { walletValue, lpValue, bondValue, totalValue: walletValue + lpValue + bondValue };
+  return {
+    walletValue,
+    stakeValue,
+    lpValue,
+    bondValue,
+    totalValue: walletValue + stakeValue + lpValue + bondValue
+  };
 }
 
 export function summarizeSection(entries = []) {
   return entries.reduce((summary, entry) => {
     summary.walletValue += safeNumber(entry?.summary?.walletValue);
+    summary.stakeValue += safeNumber(entry?.summary?.stakeValue);
     summary.lpValue += safeNumber(entry?.summary?.lpValue);
     summary.bondValue += safeNumber(entry?.summary?.bondValue);
     summary.totalValue += safeNumber(entry?.summary?.totalValue);
@@ -206,6 +222,7 @@ export function summarizeSection(entries = []) {
   }, {
     addressCount: entries.length,
     walletValue: 0,
+    stakeValue: 0,
     lpValue: 0,
     bondValue: 0,
     totalValue: 0
@@ -215,6 +232,7 @@ export function summarizeSection(entries = []) {
 export function buildConsolidatedSection(sourceSections = []) {
   const entries = sourceSections.flatMap((section) => section.entries || []);
   const balancesByAsset = new Map();
+  const stakedByAsset = new Map();
   const positionsByPool = new Map();
   const bondsByNode = new Map();
 
@@ -231,6 +249,20 @@ export function buildConsolidatedSection(sourceSections = []) {
       existing.usdValue += safeNumber(balance.usdValue);
       existing.hasMissingPrice ||= Boolean(balance.hasMissingPrice) || !hasKnownUsdValue(balance.usdValue);
       balancesByAsset.set(balance.asset, existing);
+    }
+
+    for (const position of entry.stakedPositions || []) {
+      const existing = stakedByAsset.get(position.asset) || {
+        asset: position.asset,
+        chain: position.chain,
+        amount: 0,
+        usdValue: 0,
+        hasMissingPrice: false
+      };
+      existing.amount += safeNumber(position.amount);
+      existing.usdValue += safeNumber(position.usdValue);
+      existing.hasMissingPrice ||= Boolean(position.hasMissingPrice) || !hasKnownUsdValue(position.usdValue);
+      stakedByAsset.set(position.asset, existing);
     }
 
     for (const position of entry.lpPositions || []) {
@@ -265,8 +297,9 @@ export function buildConsolidatedSection(sourceSections = []) {
   return {
     key: 'consolidated',
     title: 'Consolidated Positions',
-    description: `Aggregated balances, LP positions, and node bonds across ${entries.length} tracked treasury addresses.`,
+    description: `Aggregated balances, staked positions, LP positions, and node bonds across ${entries.length} tracked treasury addresses.`,
     balances: [...balancesByAsset.values()].sort(compareHoldings),
+    stakedPositions: [...stakedByAsset.values()].sort(compareHoldings),
     lpPositions: [...positionsByPool.values()]
       .sort((left, right) => right.totalUsdValue - left.totalUsdValue),
     bonds: [...bondsByNode.values()].sort((left, right) => right.amount - left.amount),
@@ -277,7 +310,7 @@ export function buildConsolidatedSection(sourceSections = []) {
 export function countUnpricedBalances(sourceSections = []) {
   return sourceSections
     .flatMap((section) => section.entries || [])
-    .flatMap((entry) => entry.balances || [])
+    .flatMap((entry) => [...(entry.balances || []), ...(entry.stakedPositions || [])])
     .filter((balance) => balance.hasMissingPrice)
     .length;
 }

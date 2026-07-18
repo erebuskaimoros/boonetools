@@ -21,13 +21,14 @@ import {
   fetchExternalHoldings,
   fetchLiquidityProvider,
   fetchMemberPoolAssets,
+  fetchTcyStaker,
   fetchThorBalance,
   fetchTokenPrices,
   fetchTreasuryCore,
   mapWithConcurrency
 } from './providers.js';
 
-export const TREASURY_SNAPSHOT_SCHEMA_VERSION = 1;
+export const TREASURY_SNAPSHOT_SCHEMA_VERSION = 2;
 // The publisher runs every five minutes. Keep one missed-cycle of headroom so
 // normal timer jitter/build duration does not mark a healthy snapshot stale.
 export const TREASURY_SNAPSHOT_TTL_MS = 10 * 60 * 1000;
@@ -253,6 +254,7 @@ function annotateSegmentWatermarks(states, previous, previousControl, nowMs) {
       && (
         ['network', 'pools', 'module', 'nodes'].includes(key)
         || key.startsWith('balances:')
+        || key.startsWith('stakes:')
         || key.startsWith('lp:')
       )
   ));
@@ -278,6 +280,7 @@ export async function buildTreasurySnapshot(options = {}) {
     fetchExternalHoldings,
     fetchLiquidityProvider,
     fetchMemberPoolAssets,
+    fetchTcyStaker,
     fetchThorBalance,
     fetchTokenPrices,
     fetchTreasuryCore,
@@ -338,6 +341,7 @@ export async function buildTreasurySnapshot(options = {}) {
     key: entryKey(section, entry)
   })));
   const rawBalances = new Map();
+  const rawStakedPositions = new Map();
 
   await providers.mapWithConcurrency(entries, BALANCE_CONCURRENCY, async ({ section, entry, key }) => {
     const oldEntry = previousEntries.get(key);
@@ -370,6 +374,34 @@ export async function buildTreasurySnapshot(options = {}) {
         rawBalances.set(key, []);
         warnings.push(`Balances ${entry.label}: ${detail}`);
         segmentStates[`balances:${key}`] = { status: 'error', warning: detail };
+      }
+    }
+  });
+
+  const stakeEntries = entries.filter(({ entry }) => entry.includeTcyStake);
+  await providers.mapWithConcurrency(stakeEntries, BALANCE_CONCURRENCY, async ({ entry, key }) => {
+    const oldEntry = previousEntries.get(key);
+    try {
+      const staker = await providers.fetchTcyStaker(entry.address, providerOptions);
+      rawStakedPositions.set(key, normalizeHoldings([{
+        asset: 'THOR.TCY',
+        chain: 'THOR',
+        amount: fromBaseUnit(staker?.amount)
+      }], poolState.assetPrices));
+      segmentStates[`stakes:${key}`] = { status: 'fresh' };
+    } catch (error) {
+      const detail = errorMessage(error);
+      if (oldEntry?.stakedPositions) {
+        rawStakedPositions.set(key, normalizeHoldings(
+          repricePreviousHoldings(oldEntry.stakedPositions),
+          poolState.assetPrices
+        ));
+        warnings.push(`TCY stake ${entry.label}: ${detail}; reused last successful position`);
+        segmentStates[`stakes:${key}`] = { status: 'reused', warning: detail };
+      } else {
+        rawStakedPositions.set(key, []);
+        warnings.push(`TCY stake ${entry.label}: ${detail}`);
+        segmentStates[`stakes:${key}`] = { status: 'error', warning: detail };
       }
     }
   });
@@ -424,6 +456,7 @@ export async function buildTreasurySnapshot(options = {}) {
       const balanceState = segmentStates[`balances:${key}`];
       return finalizeTreasuryEntry(entry, {
         balances: holdings,
+        stakedPositions: rawStakedPositions.get(key) || [],
         lpPositions: lpResult.positionsByEntry.get(key) || [],
         bonds: bondsByAddress[String(entry.address).toLowerCase()] || [],
         runePrice,
@@ -443,7 +476,12 @@ export async function buildTreasurySnapshot(options = {}) {
   const totalSummary = summarizeSection(sectionPayloads.flatMap((section) => section.entries));
   const uniqueWarnings = [...new Set(warnings)];
   const usableEntries = sectionPayloads.flatMap((section) => section.entries)
-    .filter((entry) => entry.balances.length || entry.lpPositions.length || entry.bonds.length);
+    .filter((entry) => (
+      entry.balances.length
+      || entry.stakedPositions.length
+      || entry.lpPositions.length
+      || entry.bonds.length
+    ));
   if (usableEntries.length === 0 && !previous) {
     throw new Error('Treasury snapshot produced no usable entries');
   }
