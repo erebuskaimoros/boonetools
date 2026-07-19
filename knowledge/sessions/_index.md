@@ -12,8 +12,8 @@
 
 | Date | Focus | Summary | Link |
 |------|-------|---------|------|
+| 2026-07-18 #3 | BooneTools Briefings Launch | Added and deployed the Briefings archive and first TRON performance report at a durable nested URL | `sessions/2026-07-18/session-3.md` |
 | 2026-07-18 #2 | Production Dashboard Reliability and Treasury Tracking | Fixed Rapid ordering, lazy-route deploy continuity, and Treasury Vultisig 2 staked TCY; responsive fit remains open | `sessions/2026-07-18/session-2.md` |
 | 2026-07-18 #1 | BooneTools Performance Correction | Moved dashboard provider work into durable publishers and deployed compact, performance-gated read paths | `sessions/2026-07-18/session-1.md` |
 | 2026-07-17 #1 | BooneTools Architecture Consolidation | Implemented and deployed the nine audit recommendations across shared data, backend jobs, provenance, UI structure, and CI | `sessions/2026-07-17/session-1.md` |
 | 2026-07-16 #4 | TC Fee Chart Synchronized Zoom | Made either TC Fee Dash chart control the shared visible date window | `sessions/2026-07-16/session-4.md` |
-| 2026-07-16 #3 | TC Fee Native Yield Chart | Added and deployed a volume-weighted liquidity-fee income / THORChain swap volume chart | `sessions/2026-07-16/session-3.md` |

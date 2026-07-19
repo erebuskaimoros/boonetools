@@ -108,6 +108,14 @@
     description: "Track ADR26 dynamic L1 fee floors by thorname, pair, epoch, and controller signal"
   };
 
+  const briefingsApp = {
+    name: "Briefings",
+    component: () => import("./lib/Briefings.svelte"),
+    icon: "▤",
+    path: "briefings",
+    description: "Read BooneTools reports, research, and analysis"
+  };
+
   const apps = [
     statusApp,
     rapidSwapsApp,
@@ -118,7 +126,8 @@
     dynamicFeeApp,
     ...(SHOW_LIMIT_ORDERS ? [limitOrdersApp] : []),
     ...(SHOW_VOTE_TRACKER ? [voteTrackerApp] : []),
-    appLayerBaseLayerApp
+    appLayerBaseLayerApp,
+    briefingsApp
   ];
   const hiddenApps = [];
 
@@ -277,10 +286,17 @@
   onMount(() => {
     checkDesktopAppMode();
 
-    // Route based on URL path; `/` and unknown paths default to status
+    // Route based on URL path; `/` and unknown paths default to status.
+    // Load known routes in place so nested paths such as `/briefings/*` survive.
     const path = stripBase(window.location.pathname).slice(1).split('/')[0];
     const app = getAvailableApp(path);
-    selectApp(app || defaultApp, { replace: true });
+    if (app) {
+      selectedApp = app;
+      loadComponent(app);
+      trackAppView(app);
+    } else {
+      selectApp(defaultApp, { replace: true });
+    }
 
     window.addEventListener('popstate', handlePopState);
     return () => {

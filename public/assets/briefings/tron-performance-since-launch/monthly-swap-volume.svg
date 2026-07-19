@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="440" viewBox="0 0 1000 440" role="img" aria-labelledby="title desc">
+  <title id="title">Monthly TRX and USDT swap volume</title>
+  <desc id="desc">Grouped bars show monthly swap volume from October 2025 through July 18, 2026. TRX totaled 39.7 million dollars and USDT totaled 157.2 million dollars. May and June were affected by the THORChain halt.</desc>
+  <style>
+    :root { --bg: #080808; --fg: #e8e8e8; --muted: #888888; --grid: #1a1a1a; --trx: #00cc66; --usdt: #d4a017; --halt: #111111; }
+    text { font-family: "JetBrains Mono", ui-monospace, monospace; fill: var(--fg); }
+    .muted { fill: var(--muted); font-size: 13px; }
+    .label { font-size: 14px; font-weight: 500; }
+    .title { font-size: 22px; font-weight: 500; }
+    .grid { stroke: var(--grid); stroke-width: 1; }
+    .trx { fill: var(--trx); }
+    .usdt { fill: var(--usdt); }
+  </style>
+  <rect width="1000" height="440" fill="var(--bg)"/>
+  <text class="title" x="90" y="34">Monthly swap volume (USD)</text>
+  <rect class="trx" x="90" y="48" width="12" height="12" rx="2"/><text class="muted" x="110" y="59">TRX · $39.7M total</text>
+  <rect class="usdt" x="260" y="48" width="12" height="12" rx="2"/><text class="muted" x="280" y="59">USDT · $157.2M total</text>
+
+  <rect x="706" y="70" width="176" height="280" fill="var(--halt)" opacity="0.58"/>
+  <text class="muted" x="794" y="87" text-anchor="middle">halt affected</text>
+
+  <line class="grid" x1="90" y1="70" x2="970" y2="70"/><text class="muted" x="80" y="75" text-anchor="end">$50.0M</text>
+  <line class="grid" x1="90" y1="140" x2="970" y2="140"/><text class="muted" x="80" y="145" text-anchor="end">$37.5M</text>
+  <line class="grid" x1="90" y1="210" x2="970" y2="210"/><text class="muted" x="80" y="215" text-anchor="end">$25.0M</text>
+  <line class="grid" x1="90" y1="280" x2="970" y2="280"/><text class="muted" x="80" y="285" text-anchor="end">$12.5M</text>
+  <line class="grid" x1="90" y1="350" x2="970" y2="350"/><text class="muted" x="80" y="355" text-anchor="end">$0</text>
+
+  <rect class="trx" x="108" y="345.3" width="24" height="4.7" rx="2"/><rect class="usdt" x="136" y="330.6" width="24" height="19.4" rx="2"/>
+  <rect class="trx" x="196" y="346.3" width="24" height="3.7" rx="2"/><rect class="usdt" x="224" y="313.3" width="24" height="36.7" rx="2"/>
+  <rect class="trx" x="284" y="344.4" width="24" height="5.6" rx="2"/><rect class="usdt" x="312" y="297.2" width="24" height="52.8" rx="2"/>
+  <rect class="trx" x="372" y="343.0" width="24" height="7.0" rx="2"/><rect class="usdt" x="400" y="273.7" width="24" height="76.3" rx="2"/>
+  <rect class="trx" x="460" y="280.9" width="24" height="69.1" rx="2"/><rect class="usdt" x="488" y="269.5" width="24" height="80.5" rx="2"/>
+  <rect class="trx" x="548" y="322.1" width="24" height="27.9" rx="2"/><rect class="usdt" x="576" y="255.8" width="24" height="94.2" rx="2"/>
+  <rect class="trx" x="636" y="288.5" width="24" height="61.5" rx="2"/><rect class="usdt" x="664" y="136.9" width="24" height="213.1" rx="2"/>
+  <rect class="trx" x="724" y="336.9" width="24" height="13.1" rx="2"/><rect class="usdt" x="752" y="254.0" width="24" height="96.0" rx="2"/>
+  <rect class="trx" x="812" y="348.7" width="24" height="1.3" rx="1"/><rect class="usdt" x="840" y="337.1" width="24" height="12.9" rx="2"/>
+  <rect class="trx" x="900" y="321.5" width="24" height="28.5" rx="2"/><rect class="usdt" x="928" y="151.7" width="24" height="198.3" rx="2"/>
+
+  <text class="label" x="676" y="128" text-anchor="middle">$38.0M</text>
+  <text class="label" x="472" y="271" text-anchor="middle">$12.3M</text>
+
+  <text class="muted" x="134" y="377" text-anchor="middle">Oct</text><text class="muted" x="222" y="377" text-anchor="middle">Nov</text>
+  <text class="muted" x="310" y="377" text-anchor="middle">Dec</text><text class="muted" x="398" y="377" text-anchor="middle">Jan</text>
+  <text class="muted" x="486" y="377" text-anchor="middle">Feb</text><text class="muted" x="574" y="377" text-anchor="middle">Mar</text>
+  <text class="muted" x="662" y="377" text-anchor="middle">Apr</text><text class="muted" x="750" y="377" text-anchor="middle">May</text>
+  <text class="muted" x="838" y="377" text-anchor="middle">Jun</text><text class="muted" x="926" y="377" text-anchor="middle">Jul*</text>
+  <text class="muted" x="90" y="416">UTC months · July through Jul 18</text>
+</svg>
