@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="570" viewBox="0 0 1000 570" role="img" aria-labelledby="title desc">
+  <title id="title">Top ten THORChain pools by liquidity fees</title>
+  <desc id="desc">Horizontal bars rank THORChain pools by liquidity fees from October 1, 2025 through July 18, 2026. Bitcoin ranks first at 3.52 million dollars. TRON USDT is highlighted at rank nine with 214.4 thousand dollars.</desc>
+  <style>
+    :root { --bg: #080808; --fg: #e8e8e8; --muted: #cfcfcf; --bar: #555555; --highlight: #00cc66; }
+    text { font-family: "JetBrains Mono", ui-monospace, monospace; fill: var(--fg); }
+    .title { font-size: 24px; font-weight: 600; }
+    .label { fill: var(--muted); font-size: 16px; }
+    .value { fill: var(--muted); font-size: 15px; }
+    .highlight-label { fill: var(--fg); font-size: 16px; font-weight: 600; }
+    .highlight-value { fill: var(--fg); font-size: 15px; font-weight: 600; }
+    .bar { fill: var(--bar); opacity: 0.72; }
+    .highlight { fill: var(--highlight); }
+  </style>
+  <rect width="1000" height="570" fill="var(--bg)"/>
+  <text class="title" x="220" y="38">Top pools by liquidity fees since Oct 1, 2025</text>
+  <text class="label" x="220" y="61">Through Jul 18, 2026 · TRON USDT highlighted</text>
+
+  <text class="label" x="202" y="100" text-anchor="end">1 · BTC</text><rect class="bar" x="220" y="82" width="650" height="24" rx="3"/><text class="value" x="882" y="100">$3.52M</text>
+  <text class="label" x="202" y="144" text-anchor="end">2 · ETH</text><rect class="bar" x="220" y="126" width="558" height="24" rx="3"/><text class="value" x="790" y="144">$3.02M</text>
+  <text class="label" x="202" y="188" text-anchor="end">3 · Ethereum USDT</text><rect class="bar" x="220" y="170" width="160" height="24" rx="3"/><text class="value" x="392" y="188">$866.8K</text>
+  <text class="label" x="202" y="232" text-anchor="end">4 · Ethereum USDC</text><rect class="bar" x="220" y="214" width="147" height="24" rx="3"/><text class="value" x="379" y="232">$793.3K</text>
+  <text class="label" x="202" y="276" text-anchor="end">5 · BCH</text><rect class="bar" x="220" y="258" width="107" height="24" rx="3"/><text class="value" x="339" y="276">$577.6K</text>
+  <text class="label" x="202" y="320" text-anchor="end">6 · LTC</text><rect class="bar" x="220" y="302" width="67" height="24" rx="3"/><text class="value" x="299" y="320">$363.6K</text>
+  <text class="label" x="202" y="364" text-anchor="end">7 · Ethereum WBTC</text><rect class="bar" x="220" y="346" width="53" height="24" rx="3"/><text class="value" x="285" y="364">$286.6K</text>
+  <text class="label" x="202" y="408" text-anchor="end">8 · AVAX</text><rect class="bar" x="220" y="390" width="47" height="24" rx="3"/><text class="value" x="279" y="408">$256.9K</text>
+  <text class="highlight-label" x="202" y="452" text-anchor="end">9 · TRON USDT</text><rect class="highlight" x="220" y="434" width="40" height="24" rx="3"/><text class="highlight-value" x="272" y="452">$214.4K</text>
+  <text class="label" x="202" y="496" text-anchor="end">10 · XRP</text><rect class="bar" x="220" y="478" width="29" height="24" rx="3"/><text class="value" x="261" y="496">$158.8K</text>
+
+  <text class="label" x="220" y="542">Liquidity fees converted to USD using each daily interval's RUNE/USD price</text>
+</svg>

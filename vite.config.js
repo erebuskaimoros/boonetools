@@ -329,7 +329,9 @@ export default defineConfig({
     createTreasuryLpProxy(),
     createRujiraBaseLayerDataProxy()
   ],
-  base: '',
+  // The production SPA is served from the domain root. Root-relative entry
+  // assets keep direct nested routes (for example `/briefings/*`) loadable.
+  base: '/',
   server: {
     host: true,
     proxy: {

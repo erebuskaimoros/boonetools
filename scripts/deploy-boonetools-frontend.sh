@@ -19,6 +19,11 @@ fi
 echo "==> Building BooneTools frontend..."
 (cd "$ROOT" && npm run build)
 
+if grep -Eq '(src|href)="\./assets/' "$ROOT/dist/index.html"; then
+  echo "Deploy aborted: dist/index.html contains route-relative asset URLs that break direct nested SPA routes." >&2
+  exit 1
+fi
+
 echo "==> Syncing application shell to $SERVER:$DEST/ ..."
 # Replace non-asset files exactly, but protect the asset directory from the
 # delete pass. Browsers with an older app shell can still request its hashed
