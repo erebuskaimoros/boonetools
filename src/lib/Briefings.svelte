@@ -742,6 +742,118 @@
     font-weight: 700;
   }
 
+  /* Reports prioritize long-form readability over the shell's dim data density. */
+  .report-page,
+  .report-page .command-line,
+  .report-page .arg,
+  .report-page .breadcrumbs,
+  .report-page .breadcrumbs a,
+  .report-page .status,
+  .report-page .report-meta,
+  .report-page .report-meta span,
+  .report-page .block-title h2,
+  .report-page .block-meta,
+  .report-page .metric strong,
+  .report-page .metric > span:last-child,
+  .report-page .block-lede,
+  .report-page table,
+  .report-page th,
+  .report-page tbody tr.total td,
+  .report-page tbody tr.highlight td,
+  .report-page figcaption,
+  .report-page .findings p,
+  .report-page .methodology ul,
+  .report-page .back-link,
+  .report-page .lede,
+  .report-page .lede strong,
+  .report-page .findings strong {
+    color: #fff;
+  }
+
+  .report-page h1 {
+    color: #fff;
+    font-size: clamp(28px, 4vw, 36px);
+    line-height: 1.2;
+  }
+
+  .report-page .command-line {
+    font-size: 13px;
+  }
+
+  .report-page .breadcrumbs {
+    font-size: 12px;
+  }
+
+  .report-page .status,
+  .report-page .report-meta,
+  .report-page .block-meta {
+    font-size: 11px;
+  }
+
+  .report-page .report-meta {
+    line-height: 1.7;
+  }
+
+  .report-page .lede {
+    max-width: 920px;
+    font-size: 17px;
+    line-height: 1.75;
+  }
+
+  .report-page .block-title h2 {
+    font-size: 15px;
+  }
+
+  .report-page .metric-index,
+  .report-page .metric > span:last-child {
+    font-size: 11px;
+  }
+
+  .report-page .metric strong {
+    font-size: clamp(21px, 2.2vw, 27px);
+  }
+
+  .report-page .block-lede,
+  .report-page .methodology ul {
+    font-size: 15px;
+    line-height: 1.75;
+  }
+
+  .report-page table {
+    font-size: 14px;
+  }
+
+  .report-page th {
+    font-size: 11px;
+  }
+
+  .report-page th,
+  .report-page td {
+    padding-top: 14px;
+    padding-bottom: 14px;
+  }
+
+  .report-page figcaption {
+    font-size: 12px;
+  }
+
+  .report-page figure {
+    overflow-x: auto;
+  }
+
+  .report-page figure img {
+    min-width: 760px;
+  }
+
+  .report-page .findings p {
+    font-size: 16px;
+    line-height: 1.75;
+  }
+
+  .report-page .back-link {
+    font-size: 13px;
+  }
+
   @media (max-width: 760px) {
     .briefings-page {
       width: min(100% - 28px, 1080px);
@@ -808,6 +920,14 @@
 
     .metric strong {
       font-size: 17px;
+    }
+
+    .report-page .lede {
+      font-size: 16px;
+    }
+
+    .report-page .metric strong {
+      font-size: 20px;
     }
   }
 </style>

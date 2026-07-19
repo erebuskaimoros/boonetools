@@ -2,11 +2,11 @@
   <title id="title">Monthly TRX and USDT liquidity fees</title>
   <desc id="desc">Grouped bars show monthly liquidity fees from October 2025 through July 18, 2026. TRX totaled 63.2 thousand dollars and USDT totaled 214.4 thousand dollars. May and June were affected by the THORChain halt.</desc>
   <style>
-    :root { --bg: #080808; --fg: #e8e8e8; --muted: #888888; --grid: #1a1a1a; --trx: #00cc66; --usdt: #d4a017; --halt: #111111; }
+    :root { --bg: #080808; --fg: #ffffff; --muted: #ffffff; --grid: #2a2a2a; --trx: #00cc66; --usdt: #d4a017; --halt: #111111; }
     text { font-family: "JetBrains Mono", ui-monospace, monospace; fill: var(--fg); }
-    .muted { fill: var(--muted); font-size: 13px; }
-    .label { font-size: 14px; font-weight: 500; }
-    .title { font-size: 22px; font-weight: 500; }
+    .muted { fill: var(--muted); font-size: 15px; }
+    .label { font-size: 16px; font-weight: 600; }
+    .title { font-size: 24px; font-weight: 600; }
     .grid { stroke: var(--grid); stroke-width: 1; }
     .trx { fill: var(--trx); }
     .usdt { fill: var(--usdt); }
