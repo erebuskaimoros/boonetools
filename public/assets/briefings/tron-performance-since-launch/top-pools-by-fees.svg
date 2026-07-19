@@ -2,7 +2,7 @@
   <title id="title">Top ten THORChain pools by liquidity fees</title>
   <desc id="desc">Horizontal bars rank THORChain pools by liquidity fees from October 1, 2025 through July 18, 2026. Bitcoin ranks first at 3.52 million dollars. TRON USDT is highlighted at rank nine with 214.4 thousand dollars.</desc>
   <style>
-    :root { --bg: #080808; --fg: #ffffff; --muted: #ffffff; --bar: #555555; --highlight: #00cc66; }
+    :root { --bg: #080808; --fg: #e8e8e8; --muted: #cfcfcf; --bar: #555555; --highlight: #00cc66; }
     text { font-family: "JetBrains Mono", ui-monospace, monospace; fill: var(--fg); }
     .title { font-size: 24px; font-weight: 600; }
     .label { fill: var(--muted); font-size: 16px; }

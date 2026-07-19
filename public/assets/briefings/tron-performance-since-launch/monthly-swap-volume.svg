@@ -2,7 +2,7 @@
   <title id="title">Monthly TRX and USDT swap volume</title>
   <desc id="desc">Grouped bars show monthly swap volume from October 2025 through July 18, 2026. TRX totaled 39.7 million dollars and USDT totaled 157.2 million dollars. May and June were affected by the THORChain halt.</desc>
   <style>
-    :root { --bg: #080808; --fg: #ffffff; --muted: #ffffff; --grid: #2a2a2a; --trx: #00cc66; --usdt: #d4a017; --halt: #111111; }
+    :root { --bg: #080808; --fg: #e8e8e8; --muted: #cfcfcf; --grid: #2a2a2a; --trx: #00cc66; --usdt: #d4a017; --halt: #111111; }
     text { font-family: "JetBrains Mono", ui-monospace, monospace; fill: var(--fg); }
     .muted { fill: var(--muted); font-size: 15px; }
     .label { font-size: 16px; font-weight: 600; }

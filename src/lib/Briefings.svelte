@@ -767,13 +767,34 @@
   .report-page .lede,
   .report-page .lede strong,
   .report-page .findings strong {
-    color: #fff;
+    color: #e3e3e3;
   }
 
   .report-page h1 {
-    color: #fff;
+    color: #f3f3f3;
     font-size: clamp(28px, 4vw, 36px);
     line-height: 1.2;
+  }
+
+  .report-page .block-title h2,
+  .report-page .metric strong,
+  .report-page .lede strong,
+  .report-page .findings strong,
+  .report-page tbody tr.total td,
+  .report-page tbody tr.highlight td {
+    color: #f0f0f0;
+  }
+
+  .report-page .breadcrumbs,
+  .report-page .breadcrumbs a,
+  .report-page .status,
+  .report-page .report-meta,
+  .report-page .report-meta span,
+  .report-page .block-meta,
+  .report-page .metric > span:last-child,
+  .report-page th,
+  .report-page figcaption {
+    color: #d2d2d2;
   }
 
   .report-page .command-line {
