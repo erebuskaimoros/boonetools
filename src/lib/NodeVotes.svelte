@@ -638,7 +638,23 @@
                         {#if missingVoters.length}
                           <div class="missing-voter-list" aria-label="Node operators without a current vote for {row.mimir_key}">
                             {#each missingVoters as voter}
-                              <span title="Operator {voter.operator_address} · Node {voter.node_address}">{shortAddress(voter.operator_address || voter.node_address)}</span>
+                              <span class="missing-voter" title="Operator {voter.operator_address} · Node {voter.node_address}">
+                                <span>OP</span>
+                                <a
+                                  href="https://thorchain.net/address/{voter.operator_address}"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="View operator {voter.operator_address} on thorchain.net"
+                                >{shortAddress(voter.operator_address)}</a>
+                                <i>·</i>
+                                <span>NODE</span>
+                                <a
+                                  href="https://thorchain.net/node/{voter.node_address}"
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title="View node {voter.node_address} on thorchain.net"
+                                >{shortAddress(voter.node_address)}</a>
+                              </span>
                             {/each}
                           </div>
                         {:else}
@@ -679,8 +695,32 @@
                                 <tbody>
                                   {#each row.vote_history as vote}
                                     <tr class:removed={vote.vote_removed}>
-                                      <td title={vote.node_address}>{shortAddress(vote.node_address)}</td>
-                                      <td title={vote.operator_address}>{shortAddress(vote.operator_address)}</td>
+                                      <td title={vote.node_address}>
+                                        {#if vote.node_address}
+                                          <a
+                                            class="explorer-link"
+                                            href="https://thorchain.net/node/{vote.node_address}"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            title="View node {vote.node_address} on thorchain.net"
+                                          >{shortAddress(vote.node_address)}</a>
+                                        {:else}
+                                          -
+                                        {/if}
+                                      </td>
+                                      <td title={vote.operator_address}>
+                                        {#if vote.operator_address}
+                                          <a
+                                            class="explorer-link"
+                                            href="https://thorchain.net/address/{vote.operator_address}"
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            title="View operator {vote.operator_address} on thorchain.net"
+                                          >{shortAddress(vote.operator_address)}</a>
+                                        {:else}
+                                          -
+                                        {/if}
+                                      </td>
                                       <td><strong>{displayNodeVote(vote)}</strong></td>
                                       <td>{vote.node_status || '-'}</td>
                                       <td>
@@ -1446,14 +1486,31 @@
     gap: 6px;
   }
 
-  .missing-voter-list span {
-    min-width: 52px;
+  .missing-voter {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     padding: 5px 7px;
     border: 1px solid var(--border);
     background: #050505;
-    color: var(--body);
     font: 800 10px/1 'JetBrains Mono', monospace;
-    text-align: center;
+  }
+
+  .missing-voter > span,
+  .missing-voter > i {
+    color: var(--dim);
+    font-style: normal;
+  }
+
+  .missing-voter a {
+    color: var(--body);
+    text-decoration: none;
+  }
+
+  .missing-voter a:hover,
+  .missing-voter a:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
   }
 
   .detail-grid {
@@ -1576,6 +1633,18 @@
   }
 
   .tx-link:hover {
+    text-decoration: underline;
+  }
+
+  .explorer-link {
+    color: var(--text);
+    font-weight: 800;
+    text-decoration: none;
+  }
+
+  .explorer-link:hover,
+  .explorer-link:focus-visible {
+    color: var(--accent);
     text-decoration: underline;
   }
 
