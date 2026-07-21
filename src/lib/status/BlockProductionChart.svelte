@@ -13,6 +13,11 @@
   const TOP = 16;
   const BOTTOM = 184;
   const TARGET_SECONDS = 6;
+  const TOOLTIP_WIDTH = 260;
+  const TOOLTIP_HEIGHT = 64;
+
+  /** @type {number | null} */
+  let activePointIndex = null;
 
   $: historyPoints = history?.points || [];
   $: points = historyPoints
@@ -40,6 +45,18 @@
   $: areaPath = points.length > 1
     ? `${linePath} L ${chartX(points.at(-1), points.length - 1).toFixed(2)} ${BOTTOM} L ${chartX(points[0], 0).toFixed(2)} ${BOTTOM} Z`
     : '';
+  $: activePoint = activePointIndex === null ? null : points[activePointIndex] || null;
+  $: activePointX = activePoint && activePointIndex !== null
+    ? chartX(activePoint, activePointIndex)
+    : 0;
+  $: activePointY = activePoint ? chartY(activePoint.seconds) : 0;
+  $: tooltipX = Math.max(
+    LEFT,
+    Math.min(WIDTH - RIGHT - TOOLTIP_WIDTH, activePointX - (TOOLTIP_WIDTH / 2))
+  );
+  $: tooltipY = activePointY - TOOLTIP_HEIGHT - 12 < TOP
+    ? activePointY + 12
+    : activePointY - TOOLTIP_HEIGHT - 12;
 
   function chartX(point, index) {
     const plotWidth = WIDTH - LEFT - RIGHT;
@@ -65,6 +82,32 @@
   function formatTooltip(point) {
     const date = new Date(point.timestamp);
     return `${date.toLocaleString('en-US')} · ${formatSeconds(point.seconds)} per block · ${point.blocks} blocks · height ${Number(point.height || 0).toLocaleString('en-US')}`;
+  }
+
+  function formatTooltipTime(point) {
+    return new Date(point.timestamp).toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    });
+  }
+
+  function showTooltip(index) {
+    activePointIndex = index;
+  }
+
+  function hideTooltip(index) {
+    if (activePointIndex === index) activePointIndex = null;
+  }
+
+  function handleTooltipKeydown(event, index) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      showTooltip(index);
+    } else if (event.key === 'Escape') {
+      hideTooltip(index);
+    }
   }
 </script>
 
@@ -96,10 +139,39 @@
         <path class="series-line" d={linePath}></path>
 
         {#each points as point, index}
-          <circle class="series-point" cx={chartX(point, index)} cy={chartY(point.seconds)} r="2.4">
-            <title>{formatTooltip(point)}</title>
-          </circle>
+          <g
+            class="point-target"
+            class:active={activePointIndex === index}
+            role="button"
+            tabindex="0"
+            aria-label={formatTooltip(point)}
+            on:mouseenter={() => showTooltip(index)}
+            on:mouseleave={() => hideTooltip(index)}
+            on:focus={() => showTooltip(index)}
+            on:blur={() => hideTooltip(index)}
+            on:click={() => showTooltip(index)}
+            on:keydown={(event) => handleTooltipKeydown(event, index)}
+          >
+            <circle class="point-hit" cx={chartX(point, index)} cy={chartY(point.seconds)} r="11"></circle>
+            <circle class="series-point" cx={chartX(point, index)} cy={chartY(point.seconds)} r="2.4"></circle>
+          </g>
         {/each}
+
+        {#if activePoint}
+          <line class="tooltip-guide" x1={activePointX} x2={activePointX} y1={TOP} y2={BOTTOM}></line>
+          <circle class="tooltip-anchor" cx={activePointX} cy={activePointY} r="4"></circle>
+          <g class="chart-tooltip" transform={`translate(${tooltipX} ${tooltipY})`} aria-hidden="true">
+            <rect width={TOOLTIP_WIDTH} height={TOOLTIP_HEIGHT}></rect>
+            <text class="tooltip-time" x="10" y="16">{formatTooltipTime(activePoint)}</text>
+            <line x1="10" x2={TOOLTIP_WIDTH - 10} y1="24" y2="24"></line>
+            <text class="tooltip-key" x="10" y="38">BLOCK TIME</text>
+            <text class="tooltip-value accent" x="10" y="54">{formatSeconds(activePoint.seconds)}</text>
+            <text class="tooltip-key" x="100" y="38">OBSERVED</text>
+            <text class="tooltip-value" x="100" y="54">{activePoint.blocks.toLocaleString('en-US')} blocks</text>
+            <text class="tooltip-key" x="180" y="38">HEIGHT</text>
+            <text class="tooltip-value" x="180" y="54">{Number(activePoint.height || 0).toLocaleString('en-US')}</text>
+          </g>
+        {/if}
 
         <text class="axis-label x-label" x={LEFT} y={HEIGHT - 11}>{formatChartTime(startTime)}</text>
         <text class="axis-label x-label middle" x={WIDTH / 2} y={HEIGHT - 11}>{formatChartTime(startTime + ((endTime - startTime) / 2))}</text>
@@ -187,6 +259,20 @@
   .series-area { fill: rgba(0, 204, 102, .045); }
   .series-line { fill: none; stroke: #00cc66; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .series-point { fill: #080808; stroke: #00cc66; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+  .point-target { cursor: crosshair; outline: none; }
+  .point-hit { fill: transparent; stroke: none; }
+  .point-target:hover .series-point,
+  .point-target:focus .series-point,
+  .point-target.active .series-point { fill: #00cc66; stroke: #e8e8e8; stroke-width: 1.5; }
+  .tooltip-guide { stroke: #333; stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .tooltip-anchor { fill: #00cc66; stroke: #e8e8e8; stroke-width: 1.25; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .chart-tooltip { pointer-events: none; }
+  .chart-tooltip rect { fill: #060606; stroke: #2a2a2a; stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .chart-tooltip line { stroke: #1a1a1a; stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .tooltip-time { fill: #888; font: 600 8px 'JetBrains Mono', monospace; }
+  .tooltip-key { fill: #555; font: 700 7px 'JetBrains Mono', monospace; letter-spacing: .08em; }
+  .tooltip-value { fill: #e8e8e8; font: 700 9px 'JetBrains Mono', monospace; }
+  .tooltip-value.accent { fill: #00cc66; }
   .axis-label { fill: #444; font: 8px 'JetBrains Mono', monospace; }
   .y-label { text-anchor: end; }
   .x-label.middle { text-anchor: middle; }
