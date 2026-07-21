@@ -176,6 +176,8 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(deployScript, /\[\[ -f "\$unit_path" \]\] \|\| continue/);
   assert.match(deployScript, /systemctl restart boonetools-api\.service/);
   assert.match(deployScript, /Writer unit remained active after stop/);
+  assert.match(deployScript, /start_remote_unit_with_retry boonetools-app-layer-live-state\.service/);
+  assert.match(deployScript, /start_remote_unit_with_retry boonetools-status-dashboard\.service/);
   const statusPrime = deployScript.indexOf('Priming compact Status read model');
   const publicSmoke = deployScript.indexOf('Verifying public latency, payload, and compression budgets');
   const timerStart = deployScript.indexOf('Starting scheduler and maintenance timers after successful priming and smoke checks');

@@ -1,5 +1,6 @@
 const STATUS_UPDATE_KEY = /^(HALT|PAUSELP|SOLVENCYHALT|NODEPAUSE)/i;
 export const MAX_STATUS_STUCK_TRANSACTIONS = 20;
+export const MAX_BLOCK_PRODUCTION_POINTS = 150;
 
 function numberValue(value) {
   const numeric = Number(value);
@@ -254,6 +255,32 @@ function compactStuckTransaction(row) {
   };
 }
 
+function compactBlockProduction(input = {}) {
+  const normalized = (Array.isArray(input.points) ? input.points : [])
+    .map((row) => ({
+      time: timestamp(row?.time),
+      height: Math.trunc(numberValue(row?.height)),
+      seconds_per_block: Math.round(numberValue(row?.seconds_per_block) * 1000) / 1000,
+      block_count: Math.trunc(numberValue(row?.block_count))
+    }))
+    .filter((row) => (
+      row.time && row.height > 0 && row.seconds_per_block > 0 && row.block_count > 0
+    ))
+    .sort((left, right) => Date.parse(left.time) - Date.parse(right.time));
+  const stride = Math.max(1, Math.ceil(normalized.length / MAX_BLOCK_PRODUCTION_POINTS));
+  const points = normalized.filter((_, index) => (
+    index % stride === 0 || index === normalized.length - 1
+  )).slice(-MAX_BLOCK_PRODUCTION_POINTS);
+  return {
+    window_hours: 24,
+    live_interval_minutes: Math.max(1, Math.trunc(numberValue(input.live_interval_minutes) || 5)),
+    points,
+    as_of: timestamp(input.as_of) || points.at(-1)?.time || null,
+    source: String(input.source || 'thorchain-rpc-block-headers'),
+    warning: String(input.warning || '')
+  };
+}
+
 export function buildStatusDashboardReadModel(input = {}) {
   const networkSnapshot = input.networkSnapshot;
   if (!networkSnapshot || !Array.isArray(networkSnapshot.inbound_addresses)) {
@@ -261,6 +288,7 @@ export function buildStatusDashboardReadModel(input = {}) {
   }
   const voteDashboard = input.voteDashboard || {};
   const stuckDashboard = input.stuckDashboard || {};
+  const blockProduction = compactBlockProduction(input.blockProduction || {});
   const generatedAt = timestamp(input.generatedAt) || new Date().toISOString();
   const nowMs = Date.parse(generatedAt);
   const nodes = Array.isArray(networkSnapshot.nodes) ? networkSnapshot.nodes : [];
@@ -299,7 +327,7 @@ export function buildStatusDashboardReadModel(input = {}) {
   };
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     as_of: generatedAt,
     network: {
       height: thorchainHeight,
@@ -308,6 +336,7 @@ export function buildStatusDashboardReadModel(input = {}) {
       summary: summarizeNetwork(chains)
     },
     chains,
+    block_production: blockProduction,
     churn: buildChurnStatus(
       mimir,
       thorchainHeight,
@@ -341,7 +370,11 @@ export function buildStatusDashboardReadModel(input = {}) {
         stale: Boolean(voteDashboard?.read_model?.stale),
         fresh_until: timestamp(voteDashboard?.read_model?.fresh_until)
       },
-      stuck: { provider: 'boonetools-stuck-scan', as_of: sourceTimestamps.stuck }
+      stuck: { provider: 'boonetools-stuck-scan', as_of: sourceTimestamps.stuck },
+      block_production: {
+        provider: blockProduction.source,
+        as_of: blockProduction.as_of
+      }
     },
     partial: Boolean(
       networkSnapshot.partial ||

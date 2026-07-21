@@ -22,6 +22,15 @@ The backend composes and caches the fan-out for 30 seconds, bounds per-transacti
 
 `/functions/v1/node-votes` supplies timestamped effective operational Mimir changes and current economic vote progress. The status page translates effective halt, resume, signing, and LP changes into plain language, while retaining the raw Mimir key/value and linking the transaction to `thorchain.net`.
 
+Block-production history is part of the materialized status read model rather
+than a browser-side provider call. The status scheduler samples canonical
+THORChain RPC block-header timestamps, bootstraps the last 24 hours with hourly
+20-block windows, and then appends five-minute live averages. Samples are
+retained for 48 hours in `block_production_samples`; the public contract
+downsamples to at most 150 points while preserving the full 24-hour span. A
+block-header failure leaves the rest of the status dashboard usable and gives
+the chart its own warning/collection state.
+
 The full explorer remains the detail surface:
 
 - `https://thorchain.net/network`

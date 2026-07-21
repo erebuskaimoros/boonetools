@@ -78,6 +78,19 @@ function sources() {
       }],
       partial: false,
       failed_lookups: 0
+    },
+    blockProduction: {
+      window_hours: 24,
+      live_interval_minutes: 5,
+      as_of: '2026-07-18T12:00:00Z',
+      source: 'thorchain-rpc-block-headers',
+      points: [{
+        time: '2026-07-18T12:00:00Z',
+        height: 1000,
+        seconds_per_block: 6.1254,
+        block_count: 49,
+        source: 'status-live'
+      }]
     }
   };
 }
@@ -92,10 +105,35 @@ test('status dashboard read model compacts network, governance, updates, and stu
   assert.equal(payload.network.majority_version, '3.8.0');
   assert.equal(payload.network.summary.label, 'Degraded');
   assert.equal(payload.chains.length, 2);
+  assert.equal(payload.block_production.points.length, 1);
+  assert.equal(payload.block_production.points[0].seconds_per_block, 6.125);
   assert.equal(payload.votes.governance.length, 1);
   assert.equal(payload.votes.status_updates[0].description, 'BTC trading resumed');
   assert.equal(payload.stuck_transactions.count, 1);
   assert.equal(payload.stuck_transactions.transactions[0].raw_provider_field_that_must_not_leak, undefined);
+  assert.ok(Buffer.byteLength(JSON.stringify(payload)) < 25_000);
+});
+
+test('status dashboard preserves the full 24-hour chart window within its payload budget', () => {
+  const fixture = sources();
+  const startMs = Date.parse('2026-07-17T12:00:00Z');
+  fixture.blockProduction.points = Array.from({ length: 289 }, (_, index) => ({
+    time: new Date(startMs + (index * 5 * 60_000)).toISOString(),
+    height: 1_000 + (index * 50),
+    seconds_per_block: 5.8 + ((index % 12) / 10),
+    block_count: 50,
+    source: 'status-live'
+  }));
+  fixture.blockProduction.as_of = fixture.blockProduction.points.at(-1).time;
+
+  const payload = buildStatusDashboardReadModel({
+    ...fixture,
+    generatedAt: '2026-07-18T12:00:03Z'
+  });
+
+  assert.ok(payload.block_production.points.length <= 150);
+  assert.equal(payload.block_production.points[0].time, '2026-07-17T12:00:00.000Z');
+  assert.equal(payload.block_production.points.at(-1).time, '2026-07-18T12:00:00.000Z');
   assert.ok(Buffer.byteLength(JSON.stringify(payload)) < 25_000);
 });
 
@@ -105,7 +143,8 @@ test('status dashboard snapshot loads all source lanes concurrently into one pay
     generatedAt: '2026-07-18T12:00:03Z',
     loadNetworkSnapshot: async () => fixture.networkSnapshot,
     loadVoteDashboard: async () => fixture.voteDashboard,
-    loadStuckDashboard: async () => fixture.stuckDashboard
+    loadStuckDashboard: async () => fixture.stuckDashboard,
+    loadBlockProductionHistory: async () => fixture.blockProduction
   });
   assert.equal(snapshot.payload.votes.governance.length, 1);
   assert.equal(snapshot.payload.stuck_transactions.transactions.length, 1);
@@ -116,6 +155,7 @@ test('status dashboard snapshot loads all source lanes concurrently into one pay
     governance_votes: 1,
     status_updates: 1,
     stuck_transactions: 1,
+    block_production_points: 1,
     partial: false
   });
 });
@@ -130,7 +170,8 @@ test('status snapshot does not republish stale node votes as a fresh lane', asyn
     generatedAt: '2026-07-18T12:00:03Z',
     loadNetworkSnapshot: async () => fixture.networkSnapshot,
     loadVoteDashboard: async () => fixture.voteDashboard,
-    loadStuckDashboard: async () => fixture.stuckDashboard
+    loadStuckDashboard: async () => fixture.stuckDashboard,
+    loadBlockProductionHistory: async () => fixture.blockProduction
   });
 
   assert.equal(snapshot.payload.partial, true);
@@ -146,7 +187,7 @@ test('status public handler is DB-only, exposes stale state, and honors If-None-
   });
   const model = {
     key: 'status-dashboard:v1',
-    schemaVersion: 1,
+    schemaVersion: 2,
     payload,
     etag: '"stored"',
     generatedAt: '2026-07-18T12:00:03.000Z',

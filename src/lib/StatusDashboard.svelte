@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
 
   import { fetchStatusDashboard } from './status/api.js';
+  import BlockProductionChart from './status/BlockProductionChart.svelte';
 
   const REFRESH_INTERVAL_MS = 60_000;
   const number = new Intl.NumberFormat('en-US');
@@ -298,6 +299,8 @@
       </div>
     </section>
 
+    <BlockProductionChart history={dashboard?.block_production} />
+
     <section class="block stuck-block" class:has-stuck={hasStuckTransactions} aria-labelledby="stuck-transactions-title">
       <div class="block-title">
         <h2 id="stuck-transactions-title"><span>▌</span> Stuck Transactions</h2>
@@ -435,7 +438,7 @@
 
     <div class="source-line">
       <span><i></i> LIVE</span>
-      THORNode current state · Midgard churn history · BooneTools stuck-tx scan and node-vote history · auto-refresh 60s
+      THORNode current state and block headers · Midgard churn history · BooneTools stuck-tx scan and node-vote history · auto-refresh 60s
       {#if lastUpdated}<em>updated {formatDateTime(lastUpdated)}</em>{/if}
     </div>
   {/if}
@@ -447,7 +450,7 @@
   }
 
   .status-dashboard {
-    width: min(1080px, calc(100vw - 32px));
+    width: min(1080px, calc(100% - 32px));
     margin: 0 auto;
     padding: 24px 0 56px;
     color: #c8c8c8;

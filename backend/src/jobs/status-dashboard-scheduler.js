@@ -10,6 +10,7 @@ import {
 } from '../shared/status-dashboard.js';
 import { getNetworkSnapshot } from '../shared/network-snapshot.js';
 import { buildStuckTransactionSnapshot } from '../shared/stuck-transactions.js';
+import { refreshBlockProductionHistory } from '../shared/block-production.js';
 
 const LOCK_KEY = 'boonetools:status-dashboard';
 
@@ -38,10 +39,21 @@ export async function buildStatusDashboardSnapshot(options = {}) {
   const loadNetwork = options.loadNetworkSnapshot || (() => getNetworkSnapshot({ forceRefresh: true }));
   const loadVotes = options.loadVoteDashboard || loadVoteDashboard;
   const loadStuck = options.loadStuckDashboard || buildStuckTransactionSnapshot;
-  const [networkSnapshot, voteDashboard, stuckDashboard] = await Promise.all([
+  const loadBlockProduction = options.loadBlockProductionHistory || (() => (
+    options.client
+      ? refreshBlockProductionHistory(options.client, options.blockProductionOptions)
+      : Promise.resolve({ points: [], as_of: null, source: 'unavailable-in-test' })
+  ));
+  const [networkSnapshot, voteDashboard, stuckDashboard, blockProduction] = await Promise.all([
     loadNetwork(),
     loadVotes(),
-    loadStuck()
+    loadStuck(),
+    loadBlockProduction().catch((error) => ({
+      points: [],
+      as_of: null,
+      source: 'thorchain-rpc-block-headers',
+      warning: error?.message || 'Block-production history is unavailable'
+    }))
   ]);
   if (networkSnapshot?.stale) {
     throw new Error('Network providers did not produce a fresh status snapshot');
@@ -54,6 +66,7 @@ export async function buildStatusDashboardSnapshot(options = {}) {
     networkSnapshot,
     voteDashboard,
     stuckDashboard,
+    blockProduction,
     generatedAt
   });
   return {
@@ -62,7 +75,8 @@ export async function buildStatusDashboardSnapshot(options = {}) {
     sourceUpdatedAt: latestSourceTimestamp([
       networkSnapshot.as_of,
       voteDashboard.as_of,
-      stuckDashboard.scanned_at
+      stuckDashboard.scanned_at,
+      blockProduction.as_of
     ]),
     metadata: {
       partial: payload.partial,
@@ -75,6 +89,7 @@ export async function buildStatusDashboardSnapshot(options = {}) {
       governance_votes: payload.votes.governance.length,
       status_updates: payload.votes.status_updates.length,
       stuck_transactions: payload.stuck_transactions.transactions.length,
+      block_production_points: payload.block_production.points.length,
       partial: payload.partial
     }
   };
@@ -88,6 +103,6 @@ export async function runStatusDashboardScheduler(options = {}) {
     ttlMs: options.ttlMs || STATUS_DASHBOARD_TTL_MS,
     client,
     now: options.now,
-    build: () => buildStatusDashboardSnapshot(options)
+    build: () => buildStatusDashboardSnapshot({ ...options, client })
   }));
 }

@@ -12,6 +12,21 @@ BACKEND_DEST="$DEST/backend"
 ROLLBACK_DEST="$DEST/.deploy-rollback"
 WRITERS_QUIESCED=false
 
+start_remote_unit_with_retry() {
+  local unit="$1"
+  local attempt
+  for attempt in 1 2 3; do
+    if ssh "$SERVER" "systemctl start $unit"; then
+      return 0
+    fi
+    if [[ "$attempt" -lt 3 ]]; then
+      echo "Prime attempt $attempt for $unit failed; retrying in 5 seconds..." >&2
+      sleep 5
+    fi
+  done
+  return 1
+}
+
 rollback_failed_deploy() {
   local exit_status=$?
   trap - EXIT
@@ -467,7 +482,7 @@ fi
 REMOTE
 
 echo "==> Priming App Layer live-state cache..."
-ssh "$SERVER" "systemctl start boonetools-app-layer-live-state.service"
+start_remote_unit_with_retry boonetools-app-layer-live-state.service
 
 echo "==> Starting first Rujira base-fee ingestion pass..."
 ssh "$SERVER" "systemctl start boonetools-rujira-base-fees.service"
@@ -488,7 +503,7 @@ echo "==> Priming Treasury read model..."
 ssh "$SERVER" "systemctl start boonetools-treasury-snapshot.service"
 
 echo "==> Priming compact Status read model..."
-ssh "$SERVER" "systemctl start boonetools-status-dashboard.service"
+start_remote_unit_with_retry boonetools-status-dashboard.service
 
 echo "==> Validating and reloading Caddy with response compression..."
 ssh "$SERVER" "caddy validate --config $DEST/ops/caddy/Caddyfile.boone.tools && install -m 0644 $DEST/ops/caddy/Caddyfile.boone.tools /etc/caddy/Caddyfile && systemctl reload caddy"
