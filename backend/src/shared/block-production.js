@@ -10,6 +10,7 @@ const BOOTSTRAP_HOURS = 24;
 const BOOTSTRAP_BLOCKS_PER_HOUR = 600;
 const BOOTSTRAP_RANGE_SIZE = 20;
 const BOOTSTRAP_CONCURRENCY = 4;
+const RPC_BLOCKCHAIN_PAGE_SIZE = 20;
 
 function finiteNumber(value) {
   const numeric = Number(value);
@@ -32,13 +33,7 @@ export function parseBlockProductionHead(payload) {
 }
 
 export function summarizeBlockRange(payload, source = 'rpc-hourly-bootstrap') {
-  const rows = (Array.isArray(payload?.result?.block_metas) ? payload.result.block_metas : [])
-    .map((row) => ({
-      height: Math.trunc(finiteNumber(row?.header?.height)),
-      blockTime: isoTimestamp(row?.header?.time)
-    }))
-    .filter((row) => row.height > 0 && row.blockTime)
-    .sort((left, right) => left.height - right.height);
+  const rows = parseBlockRangeHeaders(payload);
   const first = rows[0];
   const last = rows.at(-1);
   const blockCount = (last?.height || 0) - (first?.height || 0);
@@ -56,6 +51,54 @@ export function summarizeBlockRange(payload, source = 'rpc-hourly-bootstrap') {
     secondsPerBlock: elapsedMs / blockCount / 1000,
     source
   };
+}
+
+export function parseBlockRangeHeaders(payload) {
+  return (Array.isArray(payload?.result?.block_metas) ? payload.result.block_metas : [])
+    .map((row) => ({
+      height: Math.trunc(finiteNumber(row?.header?.height)),
+      blockTime: isoTimestamp(row?.header?.time)
+    }))
+    .filter((row) => row.height > 0 && row.blockTime)
+    .sort((left, right) => left.height - right.height);
+}
+
+export function buildBlockProductionBuckets(headers, options = {}) {
+  const bucketMs = Math.max(60_000, Math.trunc(finiteNumber(options.bucketMs) || BLOCK_PRODUCTION_SAMPLE_MS));
+  const source = String(options.source || 'rpc-5m-backfill');
+  const buckets = new Map();
+
+  for (const header of headers || []) {
+    const timestamp = Date.parse(header?.blockTime || '');
+    const height = Math.trunc(finiteNumber(header?.height));
+    if (!Number.isFinite(timestamp) || height <= 0) continue;
+    const bucketStart = Math.floor(timestamp / bucketMs) * bucketMs;
+    const rows = buckets.get(bucketStart) || [];
+    rows.push({ height, blockTime: new Date(timestamp).toISOString() });
+    buckets.set(bucketStart, rows);
+  }
+
+  return [...buckets.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, rows]) => {
+      rows.sort((left, right) => left.height - right.height);
+      const first = rows[0];
+      const last = rows.at(-1);
+      const blockCount = last.height - first.height;
+      const elapsedMs = Date.parse(last.blockTime) - Date.parse(first.blockTime);
+      if (blockCount <= 0 || !Number.isFinite(elapsedMs) || elapsedMs <= 0) return null;
+      return {
+        sampleTime: last.blockTime,
+        startHeight: first.height,
+        endHeight: last.height,
+        startBlockTime: first.blockTime,
+        endBlockTime: last.blockTime,
+        blockCount,
+        secondsPerBlock: elapsedMs / blockCount / 1000,
+        source
+      };
+    })
+    .filter(Boolean);
 }
 
 async function fetchBlockProductionHead(options = {}) {
@@ -81,6 +124,31 @@ async function runInChunks(values, size, operation) {
     }
   }
   return results;
+}
+
+async function fetchBlockHeadersByHeightRange(startHeight, endHeight, options = {}) {
+  const fetchRpc = options.fetchRpc || fetchThorchainRpc;
+  const pages = [];
+  for (let minHeight = startHeight; minHeight <= endHeight; minHeight += RPC_BLOCKCHAIN_PAGE_SIZE) {
+    pages.push({
+      minHeight,
+      maxHeight: Math.min(endHeight, minHeight + RPC_BLOCKCHAIN_PAGE_SIZE - 1)
+    });
+  }
+  const pageHeaders = await runInChunks(
+    pages,
+    options.concurrency || BOOTSTRAP_CONCURRENCY,
+    async ({ minHeight, maxHeight }) => parseBlockRangeHeaders(await fetchRpc(
+      '/blockchain',
+      { minHeight, maxHeight },
+      options.rpcOptions
+    ))
+  );
+  const byHeight = new Map();
+  for (const headers of pageHeaders) {
+    for (const header of headers) byHeight.set(header.height, header);
+  }
+  return [...byHeight.values()].sort((left, right) => left.height - right.height);
 }
 
 async function insertSamples(client, samples) {
@@ -111,6 +179,43 @@ async function insertSamples(client, samples) {
       ]
     );
   }
+}
+
+export async function backfillBlockProductionRange(client, options = {}) {
+  const startHeight = Math.trunc(finiteNumber(options.startHeight));
+  const endHeight = Math.trunc(finiteNumber(options.endHeight));
+  if (startHeight <= 0 || endHeight <= startHeight) {
+    throw new Error('Block-production backfill requires a positive start height below the end height');
+  }
+
+  const headers = await fetchBlockHeadersByHeightRange(startHeight, endHeight, options);
+  if (headers.length < 2) throw new Error('Block-production backfill did not receive enough RPC headers');
+  const expectedHeaders = endHeight - startHeight + 1;
+  if (headers.length !== expectedHeaders) {
+    throw new Error(`Block-production backfill received ${headers.length} of ${expectedHeaders} expected headers`);
+  }
+
+  const samples = buildBlockProductionBuckets(headers, options);
+  if (!samples.length) throw new Error('Block-production backfill did not produce any complete buckets');
+  const coverageStart = samples[0].startBlockTime;
+  const coverageEnd = samples.at(-1).endBlockTime;
+  const removed = await client.query(
+    `delete from block_production_samples
+     where source = 'rpc-hourly-bootstrap'
+       and sample_time >= $1
+       and sample_time <= $2`,
+    [coverageStart, coverageEnd]
+  );
+  await insertSamples(client, samples);
+  return {
+    startHeight,
+    endHeight,
+    headers: headers.length,
+    samples: samples.length,
+    removedHourlySamples: removed.rowCount || 0,
+    coverageStart,
+    coverageEnd
+  };
 }
 
 async function bootstrapHistory(client, head, options = {}) {

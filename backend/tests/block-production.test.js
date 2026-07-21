@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  backfillBlockProductionRange,
+  buildBlockProductionBuckets,
   parseBlockProductionHead,
+  parseBlockRangeHeaders,
   summarizeBlockRange
 } from '../src/shared/block-production.js';
 
@@ -45,4 +48,76 @@ test('summarizeBlockRange rejects incomplete or non-progressing ranges', () => {
       block_metas: [{ header: { height: '100', time: '2026-07-21T12:00:00Z' } }]
     }
   }), null);
+});
+
+test('parseBlockRangeHeaders normalizes and sorts canonical headers', () => {
+  assert.deepEqual(parseBlockRangeHeaders({
+    result: {
+      block_metas: [
+        { header: { height: '102', time: '2026-07-21T12:00:12.600Z' } },
+        { header: { height: '100', time: '2026-07-21T12:00:00.000Z' } },
+        { header: { height: 'bad', time: '2026-07-21T12:00:06.100Z' } }
+      ]
+    }
+  }), [
+    { height: 100, blockTime: '2026-07-21T12:00:00.000Z' },
+    { height: 102, blockTime: '2026-07-21T12:00:12.600Z' }
+  ]);
+});
+
+test('buildBlockProductionBuckets calculates aligned five-minute samples', () => {
+  const samples = buildBlockProductionBuckets([
+    { height: 100, blockTime: '2026-07-21T12:00:01.000Z' },
+    { height: 101, blockTime: '2026-07-21T12:00:07.000Z' },
+    { height: 102, blockTime: '2026-07-21T12:04:55.000Z' },
+    { height: 103, blockTime: '2026-07-21T12:05:02.000Z' },
+    { height: 104, blockTime: '2026-07-21T12:09:58.000Z' }
+  ]);
+
+  assert.equal(samples.length, 2);
+  assert.deepEqual(samples.map((sample) => ({
+    startHeight: sample.startHeight,
+    endHeight: sample.endHeight,
+    blockCount: sample.blockCount,
+    secondsPerBlock: sample.secondsPerBlock,
+    source: sample.source
+  })), [
+    { startHeight: 100, endHeight: 102, blockCount: 2, secondsPerBlock: 147, source: 'rpc-5m-backfill' },
+    { startHeight: 103, endHeight: 104, blockCount: 1, secondsPerBlock: 296, source: 'rpc-5m-backfill' }
+  ]);
+});
+
+test('backfillBlockProductionRange pages every header and replaces overlapping hourly samples', async () => {
+  const queries = [];
+  const fetchRpc = async (path, { minHeight, maxHeight }) => ({
+    result: {
+      block_metas: Array.from({ length: maxHeight - minHeight + 1 }, (_, index) => {
+        const height = minHeight + index;
+        return {
+          header: {
+            height: String(height),
+            time: new Date(Date.parse('2026-07-21T12:00:00.000Z') + ((height - 100) * 6_000)).toISOString()
+          }
+        };
+      })
+    }
+  });
+  const client = {
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return { rowCount: sql.trim().startsWith('delete') ? 2 : 1 };
+    }
+  };
+
+  const result = await backfillBlockProductionRange(client, {
+    startHeight: 100,
+    endHeight: 124,
+    fetchRpc
+  });
+
+  assert.equal(result.headers, 25);
+  assert.equal(result.samples, 1);
+  assert.equal(result.removedHourlySamples, 2);
+  assert.equal(queries.filter(({ sql }) => sql.trim().startsWith('delete')).length, 1);
+  assert.equal(queries.filter(({ sql }) => sql.trim().startsWith('insert')).length, 1);
 });

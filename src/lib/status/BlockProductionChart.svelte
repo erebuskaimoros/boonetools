@@ -18,9 +18,18 @@
 
   /** @type {number | null} */
   let activePointIndex = null;
+  /** @type {number | null} */
+  let zoomStart = null;
+  /** @type {number | null} */
+  let zoomEnd = null;
+  /** @type {number | null} */
+  let selectionStartX = null;
+  /** @type {number | null} */
+  let selectionEndX = null;
+  let selecting = false;
 
   $: historyPoints = history?.points || [];
-  $: points = historyPoints
+  $: allPoints = historyPoints
     .map((point) => ({
       ...point,
       timestamp: Date.parse(point?.time || ''),
@@ -29,6 +38,9 @@
     }))
     .filter((point) => Number.isFinite(point.timestamp) && Number.isFinite(point.seconds) && point.seconds > 0)
     .sort((left, right) => left.timestamp - right.timestamp);
+  $: points = zoomStart === null || zoomEnd === null
+    ? allPoints
+    : allPoints.filter((point) => point.timestamp >= zoomStart && point.timestamp <= zoomEnd);
   $: startTime = points[0]?.timestamp || 0;
   $: endTime = points.at(-1)?.timestamp || startTime;
   $: totalBlocks = points.reduce((sum, point) => sum + point.blocks, 0);
@@ -57,6 +69,12 @@
   $: tooltipY = activePointY - TOOLTIP_HEIGHT - 12 < TOP
     ? activePointY + 12
     : activePointY - TOOLTIP_HEIGHT - 12;
+  $: selectionLeft = selectionStartX === null || selectionEndX === null
+    ? 0
+    : Math.min(selectionStartX, selectionEndX);
+  $: selectionWidth = selectionStartX === null || selectionEndX === null
+    ? 0
+    : Math.abs(selectionEndX - selectionStartX);
 
   function chartX(point, index) {
     const plotWidth = WIDTH - LEFT - RIGHT;
@@ -109,12 +127,100 @@
       hideTooltip(index);
     }
   }
+
+  function pointerChartX(event) {
+    const svg = event.currentTarget.ownerSVGElement;
+    const bounds = svg.getBoundingClientRect();
+    const x = ((event.clientX - bounds.left) / bounds.width) * WIDTH;
+    return Math.max(LEFT, Math.min(WIDTH - RIGHT, x));
+  }
+
+  function timestampAtX(x) {
+    const plotWidth = WIDTH - LEFT - RIGHT;
+    return startTime + (((x - LEFT) / plotWidth) * (endTime - startTime));
+  }
+
+  function startZoomSelection(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    activePointIndex = null;
+    selecting = true;
+    selectionStartX = pointerChartX(event);
+    selectionEndX = selectionStartX;
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Selection still works when pointer capture is unavailable (for example, synthetic input).
+    }
+  }
+
+  function updateZoomSelection(event) {
+    if (!selecting) return;
+    selectionEndX = pointerChartX(event);
+  }
+
+  function finishZoomSelection(event) {
+    if (!selecting) return;
+    selectionEndX = pointerChartX(event);
+    selecting = false;
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // The pointer may already have been released by the browser.
+    }
+
+    const left = Math.min(selectionStartX ?? 0, selectionEndX ?? 0);
+    const right = Math.max(selectionStartX ?? 0, selectionEndX ?? 0);
+    const selectedPoints = right - left >= 18
+      ? points.filter((point) => point.timestamp >= timestampAtX(left) && point.timestamp <= timestampAtX(right))
+      : [];
+
+    selectionStartX = null;
+    selectionEndX = null;
+    if (selectedPoints.length < 2) return;
+
+    zoomStart = selectedPoints[0].timestamp;
+    zoomEnd = selectedPoints.at(-1).timestamp;
+    activePointIndex = null;
+  }
+
+  function cancelZoomSelection(event) {
+    selecting = false;
+    selectionStartX = null;
+    selectionEndX = null;
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // The pointer may already have been released by the browser.
+    }
+  }
+
+  function resetZoom() {
+    zoomStart = null;
+    zoomEnd = null;
+    activePointIndex = null;
+    selectionStartX = null;
+    selectionEndX = null;
+  }
+
+  function formatWindowDuration() {
+    const durationMinutes = Math.max(1, Math.round((endTime - startTime) / 60000));
+    if (durationMinutes < 60) return `${durationMinutes}M`;
+    const hours = Math.floor(durationMinutes / 60);
+    const minutes = durationMinutes % 60;
+    return minutes ? `${hours}H ${minutes}M` : `${hours}H`;
+  }
 </script>
 
 <section class="block block-production" aria-labelledby="block-production-title">
   <div class="block-title">
     <h2 id="block-production-title"><span>▌</span> Block Production Time</h2>
-    <span class="window-label">[LAST 24H]</span>
+    <div class="window-actions">
+      <span class="window-label">{zoomStart === null ? '[LAST 24H]' : `[ZOOMED ${formatWindowDuration()}]`}</span>
+      {#if zoomStart !== null}
+        <button class="reset-zoom" type="button" on:click={resetZoom}><span>[R]</span> reset zoom</button>
+      {/if}
+    </div>
   </div>
 
   <div class="chart-summary" aria-label="Block production summary">
@@ -126,7 +232,7 @@
 
   {#if points.length > 1}
     <div class="chart-scroll">
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label="Average seconds per THORChain block over the last 24 hours">
+      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label="Average seconds per THORChain block. Drag across the plot to highlight and zoom into a time range.">
         {#each yTicks as tick}
           <line class="grid-line" x1={LEFT} x2={WIDTH - RIGHT} y1={chartY(tick)} y2={chartY(tick)} />
           <text class="axis-label y-label" x={LEFT - 9} y={chartY(tick) + 3}>{formatSeconds(tick)}</text>
@@ -137,6 +243,20 @@
 
         <path class="series-area" d={areaPath}></path>
         <path class="series-line" d={linePath}></path>
+
+        <rect
+          class="zoom-capture"
+          x={LEFT}
+          y={TOP}
+          width={WIDTH - LEFT - RIGHT}
+          height={BOTTOM - TOP}
+          role="application"
+          aria-label="Drag across this plot area to highlight and zoom into a time range"
+          on:pointerdown={startZoomSelection}
+          on:pointermove={updateZoomSelection}
+          on:pointerup={finishZoomSelection}
+          on:pointercancel={cancelZoomSelection}
+        ></rect>
 
         {#each points as point, index}
           <g
@@ -156,6 +276,17 @@
             <circle class="series-point" cx={chartX(point, index)} cy={chartY(point.seconds)} r="2.4"></circle>
           </g>
         {/each}
+
+        {#if selecting && selectionWidth > 0}
+          <g class="zoom-selection" aria-hidden="true">
+            <rect x={selectionLeft} y={TOP} width={selectionWidth} height={BOTTOM - TOP}></rect>
+            <line x1={selectionLeft} x2={selectionLeft} y1={TOP} y2={BOTTOM}></line>
+            <line x1={selectionLeft + selectionWidth} x2={selectionLeft + selectionWidth} y1={TOP} y2={BOTTOM}></line>
+            {#if selectionWidth > 90}
+              <text x={selectionLeft + (selectionWidth / 2)} y={TOP + 13}>RELEASE TO ZOOM</text>
+            {/if}
+          </g>
+        {/if}
 
         {#if activePoint}
           <line class="tooltip-guide" x1={activePointX} x2={activePointX} y1={TOP} y2={BOTTOM}></line>
@@ -184,7 +315,7 @@
 
   <div class="chart-source">
     <span>THORChain RPC block headers</span>
-    <em>{history?.live_interval_minutes || 5}m live averages · hourly bootstrap samples</em>
+    <em>drag to highlight + zoom · {history?.live_interval_minutes || 5}m live averages</em>
   </div>
 
   {#if history?.warning}
@@ -224,6 +355,21 @@
     letter-spacing: .08em;
   }
 
+  .window-actions { display: flex; align-items: center; gap: 10px; }
+
+  .reset-zoom {
+    padding: 4px 7px;
+    border: 1px solid #1a1a1a;
+    background: transparent;
+    color: #666;
+    font: 600 8px/1.2 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+
+  .reset-zoom span { color: #00cc66; }
+  .reset-zoom:hover, .reset-zoom:focus-visible { border-color: #00cc66; color: #00cc66; outline: none; }
+
   .chart-summary {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -258,6 +404,12 @@
   .target-label { fill: #8a6d16; font: 700 8px 'JetBrains Mono', monospace; text-anchor: end; }
   .series-area { fill: rgba(0, 204, 102, .045); }
   .series-line { fill: none; stroke: #00cc66; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+  .series-area, .series-line, .grid-line, .target-line, .target-label { pointer-events: none; }
+  .zoom-capture { fill: transparent; cursor: zoom-in; touch-action: pan-y; }
+  .zoom-selection { pointer-events: none; }
+  .zoom-selection rect { fill: rgba(0, 204, 102, .1); stroke: rgba(0, 204, 102, .45); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .zoom-selection line { stroke: #00cc66; stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .zoom-selection text { fill: #00cc66; font: 700 7px 'JetBrains Mono', monospace; letter-spacing: .08em; text-anchor: middle; }
   .series-point { fill: #080808; stroke: #00cc66; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
   .point-target { cursor: crosshair; outline: none; }
   .point-hit { fill: transparent; stroke: none; }

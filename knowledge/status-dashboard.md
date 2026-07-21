@@ -31,6 +31,12 @@ downsamples to at most 150 points while preserving the full 24-hour span. A
 block-header failure leaves the rest of the status dashboard usable and gives
 the chart its own warning/collection state.
 
+Short historical gaps can be replaced with canonical five-minute buckets by
+running `node src/backfill-block-production.js <start-height> <end-height>` in
+the backend runtime. The backfill fetches every header in bounded 20-block RPC
+pages, rejects incomplete ranges, and removes overlapping hourly bootstrap
+samples before inserting the non-overlapping five-minute series.
+
 The full explorer remains the detail surface:
 
 - `https://thorchain.net/network`
