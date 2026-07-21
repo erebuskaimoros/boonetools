@@ -13,6 +13,7 @@
   const TOP = 16;
   const BOTTOM = 184;
   const TARGET_SECONDS = 6;
+  const Y_TICK_INTERVALS = 4;
   const TOOLTIP_WIDTH = 260;
   const TOOLTIP_HEIGHT = 64;
 
@@ -50,7 +51,11 @@
   $: latestSeconds = points.at(-1)?.seconds || 0;
   $: maxSeconds = points.length ? Math.max(...points.map((point) => point.seconds)) : 0;
   $: yMax = Math.max(10, Math.ceil((maxSeconds * 1.12) / 2) * 2);
-  $: yTicks = [yMax, yMax / 2, 0];
+  $: yTicks = Array.from(
+    { length: Y_TICK_INTERVALS + 1 },
+    (_, index) => yMax * (1 - (index / Y_TICK_INTERVALS))
+  );
+  $: xTicks = buildHourlyTicks(startTime, endTime);
   $: linePath = points.map((point, index) => (
     `${index === 0 ? 'M' : 'L'} ${chartX(point, index).toFixed(2)} ${chartY(point.seconds).toFixed(2)}`
   )).join(' ');
@@ -91,10 +96,32 @@
     return `${Number(value).toFixed(Number(value) < 10 ? 2 : 1)}s`;
   }
 
-  function formatChartTime(value) {
+  function buildHourlyTicks(start, end) {
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return [];
+    const firstHour = new Date(start);
+    firstHour.setMinutes(0, 0, 0);
+    if (firstHour.getTime() < start) firstHour.setHours(firstHour.getHours() + 1);
+
+    const ticks = [];
+    for (let time = firstHour.getTime(); time <= end && ticks.length < 72; time += 60 * 60 * 1000) {
+      ticks.push({
+        time,
+        x: LEFT + (((time - start) / (end - start)) * (WIDTH - LEFT - RIGHT))
+      });
+    }
+    return ticks;
+  }
+
+  function formatChartHour(value) {
     const date = new Date(value || 0);
     if (!Number.isFinite(date.getTime())) return '-';
-    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return date.toLocaleTimeString('en-US', { hour: 'numeric' }).replace(' ', '');
+  }
+
+  function formatAxisSeconds(value) {
+    if (!Number.isFinite(Number(value))) return '-';
+    if (Number(value) === 0) return '0s';
+    return `${Number(value).toFixed(1)}s`;
   }
 
   function formatTooltip(point) {
@@ -235,7 +262,13 @@
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label="Average seconds per THORChain block. Drag across the plot to highlight and zoom into a time range.">
         {#each yTicks as tick}
           <line class="grid-line" x1={LEFT} x2={WIDTH - RIGHT} y1={chartY(tick)} y2={chartY(tick)} />
-          <text class="axis-label y-label" x={LEFT - 9} y={chartY(tick) + 3}>{formatSeconds(tick)}</text>
+          <text class="axis-label y-label" x={LEFT - 9} y={chartY(tick) + 3}>{formatAxisSeconds(tick)}</text>
+        {/each}
+
+        {#each xTicks as tick}
+          <line class="grid-line vertical" x1={tick.x} x2={tick.x} y1={TOP} y2={BOTTOM} />
+          <line class="hour-tick" x1={tick.x} x2={tick.x} y1={BOTTOM} y2={BOTTOM + 4} />
+          <text class="axis-label x-label" x={tick.x} y={HEIGHT - 11}>{formatChartHour(tick.time)}</text>
         {/each}
 
         <line class="target-line" x1={LEFT} x2={WIDTH - RIGHT} y1={chartY(TARGET_SECONDS)} y2={chartY(TARGET_SECONDS)} />
@@ -304,9 +337,6 @@
           </g>
         {/if}
 
-        <text class="axis-label x-label" x={LEFT} y={HEIGHT - 11}>{formatChartTime(startTime)}</text>
-        <text class="axis-label x-label middle" x={WIDTH / 2} y={HEIGHT - 11}>{formatChartTime(startTime + ((endTime - startTime) / 2))}</text>
-        <text class="axis-label x-label end" x={WIDTH - RIGHT} y={HEIGHT - 11}>{formatChartTime(endTime)}</text>
       </svg>
     </div>
   {:else}
@@ -400,6 +430,8 @@
   }
 
   .grid-line { stroke: #181818; stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .grid-line.vertical { stroke: #121212; }
+  .hour-tick { stroke: #333; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
   .target-line { stroke: rgba(212, 160, 23, .6); stroke-width: 1; stroke-dasharray: 5 5; vector-effect: non-scaling-stroke; }
   .target-label { fill: #8a6d16; font: 700 8px 'JetBrains Mono', monospace; text-anchor: end; }
   .series-area { fill: rgba(0, 204, 102, .045); }
@@ -427,8 +459,7 @@
   .tooltip-value.accent { fill: #00cc66; }
   .axis-label { fill: #444; font: 8px 'JetBrains Mono', monospace; }
   .y-label { text-anchor: end; }
-  .x-label.middle { text-anchor: middle; }
-  .x-label.end { text-anchor: end; }
+  .x-label { font-size: 7px; text-anchor: middle; }
 
   .empty-chart {
     padding: 34px 16px;

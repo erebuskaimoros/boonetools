@@ -12,8 +12,8 @@
 
 | Date | Focus | Summary | Link |
 |------|-------|---------|------|
+| 2026-07-21 #5 | Granular Block Chart Axes | Added and deployed five-value y-axis labels and top-of-hour x-axis guides across zoomed ranges | `sessions/2026-07-21/session-5.md` |
 | 2026-07-21 #4 | Block Chart Zoom and Five-Minute Backfill | Added and deployed range zooming plus a canonical five-minute reconstruction of today's block-time slowdown | `sessions/2026-07-21/session-4.md` |
 | 2026-07-21 #3 | Block Chart Tooltips | Added and deployed accessible terminal tooltips for every status block-production point | `sessions/2026-07-21/session-3.md` |
 | 2026-07-21 #2 | Status Block Production Chart | Added and deployed a provider-free 24-hour block-time chart with durable sampling and retry-hardened release primes | `sessions/2026-07-21/session-2.md` |
 | 2026-07-21 #1 | Vote Tracker Explorer Links | Added and deployed linked operator/node suffixes for missing voters and vote-key histories | `sessions/2026-07-21/session-1.md` |
-| 2026-07-18 #3 | BooneTools Briefings Launch | Added and deployed the Briefings archive and first TRON performance report at a durable nested URL | `sessions/2026-07-18/session-3.md` |
