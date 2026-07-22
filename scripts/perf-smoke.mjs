@@ -14,6 +14,7 @@ const RAPID_RANGE_FROM = Math.floor(Date.UTC(
 const RAPID_RANGE_TO = Math.floor(Date.now() / 1000);
 const ENDPOINTS = [
   { name: 'status', path: '/status-dashboard', maxMs: 750, maxBytes: 25_000 },
+  { name: 'status-live', path: '/status-live', maxMs: 500, maxBytes: 5_000 },
   { name: 'treasury', path: '/treasury-snapshot', maxMs: 1_500, maxBytes: 200_000 },
   { name: 'app-live', path: '/app-layer-live-state', maxMs: 1_000, maxBytes: 200_000 },
   { name: 'app-earnings', path: '/app-layer-base-layer-earnings', maxMs: 1_000, maxBytes: 150_000 },

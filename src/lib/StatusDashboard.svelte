@@ -1,24 +1,32 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
 
-  import { fetchStatusDashboard } from './status/api.js';
+  import { fetchStatusDashboard, fetchStatusLive } from './status/api.js';
   import BlockProductionChart from './status/BlockProductionChart.svelte';
 
-  const REFRESH_INTERVAL_MS = 60_000;
+  const DASHBOARD_REFRESH_INTERVAL_MS = 60_000;
+  const LIVE_REFRESH_INTERVAL_MS = 15_000;
   const number = new Intl.NumberFormat('en-US');
 
   let dashboard = null;
+  let liveStatus = null;
   let lastUpdated = null;
   let loading = true;
   let refreshing = false;
   let coreError = '';
+  let liveError = '';
   let votesError = '';
   let churnError = '';
   let stuckError = '';
   let refreshTimer;
+  let liveRefreshTimer;
+  let statusRequestInFlight = false;
+  let liveRequestInFlight = false;
+  let visibilityHandler;
 
-  $: chainStatuses = dashboard?.chains || [];
-  $: networkSummary = dashboard?.network?.summary || {
+  $: currentDashboard = mergeLiveStatus(dashboard, liveStatus);
+  $: chainStatuses = currentDashboard?.chains || [];
+  $: networkSummary = currentDashboard?.network?.summary || {
     total: 0,
     tradingEnabled: 0,
     depositsEnabled: 0,
@@ -30,10 +38,10 @@
     tone: 'err',
     label: 'Unavailable'
   };
-  $: activeNodeCount = Number(dashboard?.network?.active_node_count || 0);
-  $: networkVersion = dashboard?.network?.majority_version || '-';
-  $: thorchainHeight = Number(dashboard?.network?.height || 0);
-  $: churnStatus = dashboard?.churn || {
+  $: activeNodeCount = Number(currentDashboard?.network?.active_node_count || 0);
+  $: networkVersion = currentDashboard?.network?.majority_version || '-';
+  $: thorchainHeight = Number(currentDashboard?.network?.height || 0);
+  $: churnStatus = currentDashboard?.churn || {
     isPaused: false,
     mimirValue: 0,
     lastChurnHeight: 0,
@@ -41,24 +49,94 @@
     blocksSince: 0,
     estimated: true
   };
-  $: governanceVotes = dashboard?.votes?.governance || [];
-  $: statusUpdates = dashboard?.votes?.status_updates || [];
-  $: stuckDashboard = dashboard?.stuck_transactions || null;
+  $: governanceVotes = currentDashboard?.votes?.governance || [];
+  $: statusUpdates = currentDashboard?.votes?.status_updates || [];
+  $: stuckDashboard = currentDashboard?.stuck_transactions || null;
   $: stuckTransactions = stuckDashboard?.transactions || [];
   $: hasStuckTransactions = stuckTransactions.length > 0 || Number(stuckDashboard?.count || 0) > 0;
   $: haltedChains = chainStatuses.filter((chain) => chain.trading === 'paused').map((chain) => chain.chain);
+  $: statusError = [coreError, liveError].filter(Boolean).join('; ');
+  $: lastUpdated = newestDate(
+    currentDashboard?.sources?.network?.as_of,
+    currentDashboard?.as_of
+  );
 
   onMount(() => {
     loadStatus();
-    refreshTimer = setInterval(() => loadStatus({ silent: true }), REFRESH_INTERVAL_MS);
+    loadLiveStatus({ revalidate: true });
+    refreshTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') loadStatus({ silent: true });
+    }, DASHBOARD_REFRESH_INTERVAL_MS);
+    liveRefreshTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') loadLiveStatus({ revalidate: true });
+    }, LIVE_REFRESH_INTERVAL_MS);
+    visibilityHandler = () => {
+      if (document.visibilityState !== 'visible') return;
+      loadLiveStatus({ revalidate: true });
+      const dashboardAgeMs = Date.now() - Date.parse(dashboard?.as_of || '');
+      if (!Number.isFinite(dashboardAgeMs) || dashboardAgeMs >= DASHBOARD_REFRESH_INTERVAL_MS) {
+        loadStatus({ silent: true });
+      }
+    };
+    document.addEventListener('visibilitychange', visibilityHandler);
+    window.addEventListener('focus', visibilityHandler);
   });
 
-  onDestroy(() => clearInterval(refreshTimer));
+  onDestroy(() => {
+    clearInterval(refreshTimer);
+    clearInterval(liveRefreshTimer);
+    document.removeEventListener('visibilitychange', visibilityHandler);
+    window.removeEventListener('focus', visibilityHandler);
+  });
+
+  function newestDate(...values) {
+    const timestamps = values
+      .map((value) => Date.parse(String(value || '')))
+      .filter(Number.isFinite);
+    return timestamps.length ? new Date(Math.max(...timestamps)) : null;
+  }
+
+  function mergeLiveStatus(snapshot, live) {
+    if (!snapshot) {
+      if (!live) return null;
+      return {
+        schema_version: 1,
+        as_of: live.as_of,
+        network: live.network,
+        chains: live.chains,
+        churn: live.churn,
+        sources: { network: live.source },
+        partial: true,
+        stale: Boolean(live.stale),
+        warnings: live.warnings || []
+      };
+    }
+    if (!live) return snapshot;
+    const snapshotTime = Date.parse(snapshot?.sources?.network?.as_of || '');
+    const liveTime = Date.parse(live?.source?.as_of || live?.as_of || '');
+    if (Number.isFinite(snapshotTime) && (!Number.isFinite(liveTime) || liveTime < snapshotTime)) {
+      return snapshot;
+    }
+    return {
+      ...snapshot,
+      network: live.network || snapshot.network,
+      chains: live.chains || snapshot.chains,
+      churn: live.churn || snapshot.churn,
+      sources: {
+        ...snapshot.sources,
+        network: live.source || snapshot?.sources?.network
+      },
+      partial: Boolean(snapshot.partial || live.partial),
+      stale: Boolean(snapshot.stale || live.stale),
+      warnings: [...new Set([...(snapshot.warnings || []), ...(live.warnings || [])])]
+    };
+  }
 
   async function loadStatus(options = {}) {
+    if (statusRequestInFlight) return;
+    statusRequestInFlight = true;
     if (!options.silent) {
       loading = chainStatuses.length === 0;
-      refreshing = chainStatuses.length > 0;
     }
 
     coreError = '';
@@ -67,7 +145,7 @@
     stuckError = '';
 
     try {
-      const nextDashboard = await fetchStatusDashboard({ forceRefresh: !options.silent });
+      const nextDashboard = await fetchStatusDashboard({ forceRefresh: Boolean(options.revalidate) });
       dashboard = nextDashboard;
       const warnings = Array.isArray(nextDashboard?.warnings) ? nextDashboard.warnings : [];
       coreError = nextDashboard?.partial || nextDashboard?.stale ? warnings.join('; ') : '';
@@ -76,14 +154,42 @@
       stuckError = nextDashboard?.stuck_transactions?.partial
         ? `${nextDashboard.stuck_transactions.failed_lookups || 0} transaction lookups failed; this scan may be incomplete.`
         : '';
-      const snapshotTime = Date.parse(nextDashboard?.as_of || '');
-      lastUpdated = Number.isFinite(snapshotTime) ? new Date(snapshotTime) : new Date();
     } catch (loadError) {
       coreError = loadError?.message || 'Cached network status is unavailable.';
+      votesError = 'Vote and Mimir history is unavailable.';
+      stuckError = 'Stuck transaction history is unavailable.';
+    } finally {
+      statusRequestInFlight = false;
+      loading = false;
     }
+  }
 
-    loading = false;
-    refreshing = false;
+  async function loadLiveStatus(options = {}) {
+    if (liveRequestInFlight) return;
+    liveRequestInFlight = true;
+    try {
+      const nextLiveStatus = await fetchStatusLive({ revalidate: Boolean(options.revalidate) });
+      liveStatus = nextLiveStatus;
+      const warnings = Array.isArray(nextLiveStatus?.warnings) ? nextLiveStatus.warnings : [];
+      liveError = nextLiveStatus?.partial || nextLiveStatus?.stale ? warnings.join('; ') : '';
+    } catch (loadError) {
+      liveError = loadError?.message || 'Live network status is unavailable.';
+    } finally {
+      liveRequestInFlight = false;
+    }
+  }
+
+  async function refreshStatus() {
+    if (refreshing) return;
+    refreshing = true;
+    try {
+      await Promise.all([
+        loadStatus({ revalidate: true }),
+        loadLiveStatus({ revalidate: true })
+      ]);
+    } finally {
+      refreshing = false;
+    }
   }
 
   function formatDateTime(value) {
@@ -94,7 +200,8 @@
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
+      second: '2-digit'
     });
   }
 
@@ -183,14 +290,14 @@
         <h1>THORCHAIN STATUS<span class="cursor">_</span></h1>
         <p>One live view of chain availability, network changes, and governance activity.</p>
       </div>
-      <button class="bracket-button" on:click={() => loadStatus()} disabled={refreshing}>
+      <button class="bracket-button" on:click={refreshStatus} disabled={refreshing}>
         <span>[</span>R<span>]</span> {refreshing ? 'refreshing' : 'refresh'}
       </button>
     </div>
   </section>
 
-  {#if coreError}
-    <div class="alert err"><span>ERR</span>{coreError}</div>
+  {#if statusError}
+    <div class="alert err"><span>ERR</span>{statusError}</div>
   {/if}
 
   {#if loading}
@@ -299,7 +406,7 @@
       </div>
     </section>
 
-    <BlockProductionChart history={dashboard?.block_production} />
+    <BlockProductionChart history={currentDashboard?.block_production} />
 
     <section class="block stuck-block" class:has-stuck={hasStuckTransactions} aria-labelledby="stuck-transactions-title">
       <div class="block-title">
@@ -438,7 +545,7 @@
 
     <div class="source-line">
       <span><i></i> LIVE</span>
-      THORNode current state and block headers · Midgard churn history · BooneTools stuck-tx scan and node-vote history · auto-refresh 60s
+      THORNode live state 15s · block headers, stuck-tx scan, and node-vote history 60s
       {#if lastUpdated}<em>updated {formatDateTime(lastUpdated)}</em>{/if}
     </div>
   {/if}

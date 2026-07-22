@@ -8,11 +8,25 @@ import {
   STATUS_DASHBOARD_TTL_MS,
   buildStatusDashboardReadModel
 } from '../shared/status-dashboard.js';
-import { getNetworkSnapshot } from '../shared/network-snapshot.js';
+import { getStatusLiveReadModel } from '../shared/status-live.js';
 import { buildStuckTransactionSnapshot } from '../shared/stuck-transactions.js';
 import { refreshBlockProductionHistory } from '../shared/block-production.js';
 
 const LOCK_KEY = 'boonetools:status-dashboard';
+
+async function loadLiveNetwork(client) {
+  const model = await getStatusLiveReadModel({ client });
+  if (!model) throw new Error('Live status read model is not available');
+  return {
+    ...model.payload,
+    read_model: {
+      stale: model.stale,
+      generated_at: model.generatedAt,
+      source_updated_at: model.sourceUpdatedAt,
+      fresh_until: model.freshUntil
+    }
+  };
+}
 
 async function loadVoteDashboard() {
   const model = await getReadModel(ANALYTICS_READ_MODEL_KEYS.nodeVotes);
@@ -36,7 +50,7 @@ function latestSourceTimestamp(values) {
 }
 
 export async function buildStatusDashboardSnapshot(options = {}) {
-  const loadNetwork = options.loadNetworkSnapshot || (() => getNetworkSnapshot({ forceRefresh: true }));
+  const loadNetwork = options.loadLiveNetwork || (() => loadLiveNetwork(options.client));
   const loadVotes = options.loadVoteDashboard || loadVoteDashboard;
   const loadStuck = options.loadStuckDashboard || buildStuckTransactionSnapshot;
   const loadBlockProduction = options.loadBlockProductionHistory || (() => (
@@ -44,7 +58,7 @@ export async function buildStatusDashboardSnapshot(options = {}) {
       ? refreshBlockProductionHistory(options.client, options.blockProductionOptions)
       : Promise.resolve({ points: [], as_of: null, source: 'unavailable-in-test' })
   ));
-  const [networkSnapshot, voteDashboard, stuckDashboard, blockProduction] = await Promise.all([
+  const [liveNetwork, voteDashboard, stuckDashboard, blockProduction] = await Promise.all([
     loadNetwork(),
     loadVotes(),
     loadStuck(),
@@ -55,15 +69,15 @@ export async function buildStatusDashboardSnapshot(options = {}) {
       warning: error?.message || 'Block-production history is unavailable'
     }))
   ]);
-  if (networkSnapshot?.stale) {
-    throw new Error('Network providers did not produce a fresh status snapshot');
+  if (liveNetwork?.stale || liveNetwork?.read_model?.stale) {
+    throw new Error('Live status publisher did not produce a fresh network snapshot');
   }
   if (stuckDashboard?.stale) {
     throw new Error('Stuck-transaction providers did not produce a fresh status snapshot');
   }
   const generatedAt = options.generatedAt || new Date().toISOString();
   const payload = buildStatusDashboardReadModel({
-    networkSnapshot,
+    liveNetwork,
     voteDashboard,
     stuckDashboard,
     blockProduction,
@@ -73,7 +87,7 @@ export async function buildStatusDashboardSnapshot(options = {}) {
     payload,
     generatedAt,
     sourceUpdatedAt: latestSourceTimestamp([
-      networkSnapshot.as_of,
+      liveNetwork.source?.as_of || liveNetwork.as_of,
       voteDashboard.as_of,
       stuckDashboard.scanned_at,
       blockProduction.as_of

@@ -147,18 +147,21 @@ test('market-history provider failure rejects without both prior segments', asyn
 });
 
 test('job registry, systemd timers, and deploy keep provider lanes isolated and recoverable', async () => {
-  const [registry, nodeService, nodeTimer, marketService, marketTimer, statusService, deployScript, perfSmoke] = await Promise.all([
+  const [registry, nodeService, nodeTimer, marketService, marketTimer, statusService, liveStatusService, liveStatusTimer, deployScript, perfSmoke] = await Promise.all([
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-node-votes-summary.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-node-votes-summary.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-rapid-swaps-market-history.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-rapid-swaps-market-history.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-status-dashboard.service', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-status-live.service', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-status-live.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../scripts/deploy-boonetools-backend.sh', import.meta.url), 'utf8'),
     readFile(new URL('../../scripts/perf-smoke.mjs', import.meta.url), 'utf8')
   ]);
   assert.match(registry, /'node-votes-summary': runNodeVotesSummary/);
   assert.match(registry, /'rapid-swaps-market-history': runRapidSwapsMarketHistory/);
+  assert.match(registry, /'status-live-scheduler': runStatusLiveScheduler/);
   assert.match(nodeService, /ExecStart=.* node-votes-summary/);
   assert.match(nodeService, /TimeoutStartSec=45s/);
   assert.match(nodeTimer, /OnUnitActiveSec=1min/);
@@ -167,6 +170,10 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(marketTimer, /OnUnitActiveSec=30min/);
   assert.match(statusService, /After=.*boonetools-node-votes-summary\.service/);
   assert.match(statusService, /Wants=.*boonetools-node-votes-summary\.service/);
+  assert.match(statusService, /Wants=.*boonetools-status-live\.service/);
+  assert.match(liveStatusService, /ExecStart=.* status-live-scheduler/);
+  assert.match(liveStatusService, /TimeoutStartSec=20s/);
+  assert.match(liveStatusTimer, /OnUnitActiveSec=15s/);
   for (const unit of ['boonetools-node-votes-summary', 'boonetools-rapid-swaps-market-history']) {
     assert.match(deployScript, new RegExp(`${unit}\\.timer`));
     assert.match(deployScript, new RegExp(`systemctl start ${unit}\\.service`));
@@ -178,9 +185,12 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(deployScript, /Writer unit remained active after stop/);
   assert.match(deployScript, /start_remote_unit_with_retry boonetools-app-layer-live-state\.service/);
   assert.match(deployScript, /start_remote_unit_with_retry boonetools-status-dashboard\.service/);
+  assert.match(deployScript, /start_remote_unit_with_retry boonetools-status-live\.service/);
   const statusPrime = deployScript.indexOf('Priming compact Status read model');
+  const liveStatusPrime = deployScript.indexOf('Priming compact live Status read model');
   const publicSmoke = deployScript.indexOf('Verifying public latency, payload, and compression budgets');
   const timerStart = deployScript.indexOf('Starting scheduler and maintenance timers after successful priming and smoke checks');
+  assert.ok(liveStatusPrime >= 0 && liveStatusPrime < statusPrime);
   assert.ok(statusPrime >= 0 && statusPrime < publicSmoke);
   assert.ok(publicSmoke < timerStart);
   assert.match(perfSmoke, /allowStale: false/);

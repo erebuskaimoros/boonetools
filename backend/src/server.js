@@ -32,6 +32,7 @@ import { handleRapidSwapsSwapHistory } from './handlers/rapid-swaps-swap-history
 import { handleStockPrices } from './handlers/stock-prices.js';
 import { handleStuckTransactions } from './handlers/stuck-transactions.js';
 import { handleStatusDashboard } from './handlers/status-dashboard.js';
+import { handleStatusLive } from './handlers/status-live.js';
 import { handleTcFeeDash } from './handlers/tc-fee-dash.js';
 import { handleTreasurySnapshot } from './handlers/treasury-snapshot.js';
 
@@ -50,6 +51,7 @@ const routes = new Map([
   ['/node-votes/vote', route(handleNodeVoteDetails, 2, 6)],
   ['/node-votes/node', route(handleNodeVoteNodeDetails, 2, 6)],
   ['/status-dashboard', route(handleStatusDashboard, 1, 64)],
+  ['/status-live', route(handleStatusLive, 1, 64)],
   ['/network-snapshot', route(handleNetworkSnapshot, 5, 2)],
   ['/tc-fee-dash', route(handleTcFeeDash, 1, 64)],
   ['/rapid-swaps', route(handleRapidSwaps, 5, 3)],

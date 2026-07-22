@@ -9,7 +9,7 @@ import {
 } from '../src/lib/api/boonetools.js';
 import { fetchAppLayerLiveState } from '../src/lib/app-layer/api.js';
 import { fetchNodeVotesDashboard } from '../src/lib/node-votes/api.js';
-import { fetchStuckTransactions } from '../src/lib/status/api.js';
+import { fetchStatusLive, fetchStuckTransactions } from '../src/lib/status/api.js';
 import { fetchTcFeeDash } from '../src/lib/tc-fee-dash/api.js';
 
 function createResponse(payload, options = {}) {
@@ -198,16 +198,19 @@ test('active feature adapters retain their public functions and endpoint shapes'
   };
 
   await fetchStuckTransactions();
+  await fetchStatusLive({ revalidate: true });
   await fetchNodeVotesDashboard({ days: 45 });
   await fetchTcFeeDash();
   await fetchAppLayerLiveState();
 
   assert.deepEqual(requests.map((request) => request.url), [
     '/functions/v1/stuck-transactions',
+    '/functions/v1/status-live',
     '/functions/v1/node-votes-summary?days=45',
     '/functions/v1/tc-fee-dash',
     '/functions/v1/app-layer-live-state'
   ]);
-  assert.notEqual(requests[3].options.cache, 'no-store');
+  assert.equal(requests[1].options.cache, 'no-cache');
+  assert.notEqual(requests[4].options.cache, 'no-store');
   assert.equal(requests.every((request) => request.options.headers.Accept === 'application/json'), true);
 });

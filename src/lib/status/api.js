@@ -17,6 +17,14 @@ export async function fetchStatusDashboard(options = {}) {
   });
 }
 
+export async function fetchStatusLive(options = {}) {
+  return booneToolsApi.get('/status-live', {
+    cache: options.revalidate ? 'no-cache' : undefined,
+    errorMessage: ({ response }) => `Live status failed (${response.status})`,
+    challengeMessage: 'Live status backend returned a challenge response'
+  });
+}
+
 export async function fetchStuckTransactions(options = {}) {
   return booneToolsApi.get('/stuck-transactions', {
     forceRefresh: options.forceRefresh,

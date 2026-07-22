@@ -154,6 +154,7 @@ candidates=(
   boonetools-node-votes-summary.timer boonetools-node-votes-summary.service
   boonetools-rapid-swaps-market-history.timer boonetools-rapid-swaps-market-history.service
   boonetools-status-dashboard.timer boonetools-status-dashboard.service
+  boonetools-status-live.timer boonetools-status-live.service
   boonetools-treasury-snapshot.timer boonetools-treasury-snapshot.service
   boonetools-nodeop-scheduler.timer boonetools-nodeop-scheduler.service
   boonetools-rapid-swaps-scheduler.timer boonetools-rapid-swaps-scheduler.service
@@ -446,7 +447,7 @@ ssh "$SERVER" "chmod +x $DEST/scripts/boonetools-db-migrate.sh $DEST/scripts/boo
 
 echo "==> Installing systemd units..."
 rsync -avz "$ROOT/ops/systemd/" "$SERVER:/etc/systemd/system/"
-ssh "$SERVER" "systemctl daemon-reload && systemctl enable boonetools-api.service boonetools-analytics-read-models.timer boonetools-node-votes-summary.timer boonetools-rapid-swaps-market-history.timer boonetools-status-dashboard.timer boonetools-treasury-snapshot.timer boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-app-layer-live-state.timer boonetools-rujira-base-fees.timer boonetools-rujira-reserve-payments.timer boonetools-node-votes-backfill.timer boonetools-bond-history-refresh.timer boonetools-tc-fee-dash-backfill.timer boonetools-db-backup.timer boonetools-rujira-reserve-listener.service boonetools-rujira-base-fees-listener.service"
+ssh "$SERVER" "systemctl daemon-reload && systemctl enable boonetools-api.service boonetools-analytics-read-models.timer boonetools-node-votes-summary.timer boonetools-rapid-swaps-market-history.timer boonetools-status-dashboard.timer boonetools-status-live.timer boonetools-treasury-snapshot.timer boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-app-layer-live-state.timer boonetools-rujira-base-fees.timer boonetools-rujira-reserve-payments.timer boonetools-node-votes-backfill.timer boonetools-bond-history-refresh.timer boonetools-tc-fee-dash-backfill.timer boonetools-db-backup.timer boonetools-rujira-reserve-listener.service boonetools-rujira-base-fees-listener.service"
 
 echo "==> Configuring legacy Rapid Swap listener..."
 ssh "$SERVER" "BACKEND_DEST='$BACKEND_DEST' bash -s" <<'REMOTE'
@@ -502,6 +503,9 @@ ssh "$SERVER" "systemctl start boonetools-rapid-swaps-market-history.service"
 echo "==> Priming Treasury read model..."
 ssh "$SERVER" "systemctl start boonetools-treasury-snapshot.service"
 
+echo "==> Priming compact live Status read model..."
+start_remote_unit_with_retry boonetools-status-live.service
+
 echo "==> Priming compact Status read model..."
 start_remote_unit_with_retry boonetools-status-dashboard.service
 
@@ -513,7 +517,7 @@ ssh "$SERVER" "node $DEST/scripts/perf-smoke.mjs --base https://boone.tools/func
 ssh "$SERVER" "node $DEST/scripts/perf-smoke.mjs --base https://boone.tools/functions/v1 --endpoint status --requests 50 --concurrency 50 --require-compression"
 
 echo "==> Starting scheduler and maintenance timers after successful priming and smoke checks..."
-ssh "$SERVER" "systemctl restart boonetools-analytics-read-models.timer boonetools-node-votes-summary.timer boonetools-rapid-swaps-market-history.timer boonetools-status-dashboard.timer boonetools-treasury-snapshot.timer boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-app-layer-live-state.timer boonetools-rujira-base-fees.timer boonetools-rujira-reserve-payments.timer boonetools-node-votes-backfill.timer boonetools-bond-history-refresh.timer boonetools-tc-fee-dash-backfill.timer boonetools-db-backup.timer"
+ssh "$SERVER" "systemctl restart boonetools-analytics-read-models.timer boonetools-node-votes-summary.timer boonetools-rapid-swaps-market-history.timer boonetools-status-dashboard.timer boonetools-status-live.timer boonetools-treasury-snapshot.timer boonetools-nodeop-scheduler.timer boonetools-rapid-swaps-scheduler.timer boonetools-app-layer-live-state.timer boonetools-rujira-base-fees.timer boonetools-rujira-reserve-payments.timer boonetools-node-votes-backfill.timer boonetools-bond-history-refresh.timer boonetools-tc-fee-dash-backfill.timer boonetools-db-backup.timer"
 
 echo "Done."
 echo "Next steps:"

@@ -158,9 +158,16 @@ Migration `027_api_read_models.sql` adds the shared `api_read_models` snapshot
 store and bounded publisher-run history. Migration
 `028_analytics_read_paths.sql` adds the ordered/cursor indexes used by compact
 summary and drill-down routes. The additive public routes are
-`/status-dashboard`, `/treasury-snapshot`, `/node-votes-summary`, and
+`/status-live`, `/status-dashboard`, `/treasury-snapshot`, `/node-votes-summary`, and
 `/rapid-swaps-summary`; the established Node/Rapid routes remain compatibility
 surfaces during frontend rollout but never contact providers on a GET.
+
+`boonetools-status-live.timer` publishes a compact network-only read model every
+15 seconds. The Status frontend conditionally polls that small endpoint while
+visible and merges it with the one-minute dashboard snapshot, so current block,
+chain, node, and churn values update without repeating history or stuck-tx work.
+The one-minute publisher reads the same live model from Postgres rather than
+repeating the current-network provider requests.
 
 Rapid-Swap websocket ingestion is disabled by default in the shared
 `rapid-swap-listener.service`, while Node-Vote websocket ingestion remains

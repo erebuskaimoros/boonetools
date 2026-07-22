@@ -10,6 +10,7 @@ import { runRapidSwapsScheduler } from './jobs/rapid-swaps-scheduler.js';
 import { runRujiraBaseFeesScheduler } from './jobs/rujira-base-fees-scheduler.js';
 import { runRujiraReservePaymentsScheduler } from './jobs/rujira-reserve-payments-scheduler.js';
 import { runStatusDashboardScheduler } from './jobs/status-dashboard-scheduler.js';
+import { runStatusLiveScheduler } from './jobs/status-live-scheduler.js';
 import { runTcFeeDashBackfill } from './jobs/tc-fee-dash-backfill.js';
 import { runTreasurySnapshot } from './jobs/treasury-snapshot.js';
 
@@ -27,6 +28,7 @@ const runners = {
   'rujira-base-fees-scheduler': runRujiraBaseFeesScheduler,
   'rujira-reserve-payments-scheduler': runRujiraReservePaymentsScheduler,
   'status-dashboard-scheduler': runStatusDashboardScheduler,
+  'status-live-scheduler': runStatusLiveScheduler,
   'tc-fee-dash-backfill': runTcFeeDashBackfill,
   'treasury-snapshot': runTreasurySnapshot
 };

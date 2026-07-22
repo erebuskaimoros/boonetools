@@ -4,11 +4,47 @@ import test from 'node:test';
 import {
   buildChainStatuses,
   buildChurnStatus,
+  buildStatusNetworkReadModel,
   getGovernanceVotes,
   getRecentStatusUpdates,
   isHeightMimirActive,
   summarizeNetwork
 } from '../shared/status/model.js';
+
+test('live status model contains only compact current network state', () => {
+  const payload = buildStatusNetworkReadModel({
+    generatedAt: '2026-07-21T12:00:01Z',
+    networkSnapshot: {
+      inbound_addresses: [{ chain: 'BTC' }, { chain: 'ETH', chain_trading_paused: true }],
+      nodes: [
+        { status: 'Active', version: '3.19.0', status_since: 900 },
+        { status: 'Active', version: '3.19.0', status_since: 901 }
+      ],
+      mimir: { HALTCHURNING: 1 },
+      lastblock: [
+        { chain: 'BTC', thorchain: 1000, last_observed_in: 50, last_signed_out: 49 },
+        { chain: 'ETH', thorchain: 1000, last_observed_in: 60, last_signed_out: 58 }
+      ],
+      churns: [{ height: 900, date: 1_721_304_000_000_000_000 }],
+      as_of: '2026-07-21T12:00:00Z',
+      source: { live: 'thornode', churns: 'midgard' },
+      partial: false,
+      stale: false
+    }
+  });
+
+  assert.equal(payload.network.height, 1000);
+  assert.equal(payload.network.active_node_count, 2);
+  assert.equal(payload.network.majority_version, '3.19.0');
+  assert.equal(payload.network.summary.label, 'Degraded');
+  assert.equal(payload.chains.length, 2);
+  assert.equal(payload.churn.isPaused, true);
+  assert.equal(payload.source.as_of, '2026-07-21T12:00:00.000Z');
+  assert.equal(payload.block_production, undefined);
+  assert.equal(payload.votes, undefined);
+  assert.equal(payload.stuck_transactions, undefined);
+  assert.ok(Buffer.byteLength(JSON.stringify(payload)) < 5_000);
+});
 
 test('height Mimirs activate only after a positive activation height', () => {
   assert.equal(isHeightMimirActive(1, 100), true);

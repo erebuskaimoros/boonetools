@@ -1,7 +1,7 @@
 [Unit]
 Description=BooneTools Compact Status Dashboard Read Model Scheduler
-After=network-online.target docker.service boonetools-api.service boonetools-node-votes-summary.service
-Wants=network-online.target docker.service boonetools-node-votes-summary.service
+After=network-online.target docker.service boonetools-api.service boonetools-node-votes-summary.service boonetools-status-live.service
+Wants=network-online.target docker.service boonetools-node-votes-summary.service boonetools-status-live.service
 
 [Service]
 Type=oneshot

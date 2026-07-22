@@ -239,6 +239,54 @@ function majorityVersion(nodes) {
   return [...counts.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] || '';
 }
 
+export function buildStatusNetworkReadModel(input = {}) {
+  const networkSnapshot = input.networkSnapshot;
+  if (!networkSnapshot || !Array.isArray(networkSnapshot.inbound_addresses)) {
+    throw new Error('A usable network snapshot is required');
+  }
+  const generatedAt = timestamp(input.generatedAt) || new Date().toISOString();
+  const nowMs = Date.parse(generatedAt);
+  const nodes = Array.isArray(networkSnapshot.nodes) ? networkSnapshot.nodes : [];
+  const activeNodes = nodes.filter((node) => node?.status === 'Active');
+  const lastBlocks = Array.isArray(networkSnapshot.lastblock) ? networkSnapshot.lastblock : [];
+  const mimir = networkSnapshot.mimir && typeof networkSnapshot.mimir === 'object'
+    ? networkSnapshot.mimir
+    : {};
+  const chains = buildChainStatuses(networkSnapshot.inbound_addresses, mimir, lastBlocks);
+  const thorchainHeight = Math.max(0, ...lastBlocks.map((row) => numberValue(row?.thorchain)));
+  const warnings = warningValues(
+    networkSnapshot.warnings,
+    Object.values(networkSnapshot.errors || {}),
+    networkSnapshot.warning
+  );
+
+  return {
+    schema_version: 1,
+    as_of: generatedAt,
+    network: {
+      height: thorchainHeight,
+      active_node_count: activeNodes.length,
+      majority_version: majorityVersion(nodes),
+      summary: summarizeNetwork(chains)
+    },
+    chains,
+    churn: buildChurnStatus(
+      mimir,
+      thorchainHeight,
+      networkSnapshot.churns,
+      activeNodes,
+      Number.isFinite(nowMs) ? nowMs : Date.now()
+    ),
+    source: {
+      provider: networkSnapshot.source || {},
+      as_of: timestamp(networkSnapshot.as_of)
+    },
+    partial: Boolean(networkSnapshot.partial || warnings.length > 0),
+    stale: Boolean(networkSnapshot.stale),
+    warnings
+  };
+}
+
 function compactStuckTransaction(row) {
   return {
     tx_id: String(row?.tx_id || ''),
@@ -283,29 +331,13 @@ function compactBlockProduction(input = {}) {
 
 export function buildStatusDashboardReadModel(input = {}) {
   const networkSnapshot = input.networkSnapshot;
-  if (!networkSnapshot || !Array.isArray(networkSnapshot.inbound_addresses)) {
-    throw new Error('A usable network snapshot is required');
-  }
   const voteDashboard = input.voteDashboard || {};
   const stuckDashboard = input.stuckDashboard || {};
   const blockProduction = compactBlockProduction(input.blockProduction || {});
   const generatedAt = timestamp(input.generatedAt) || new Date().toISOString();
-  const nowMs = Date.parse(generatedAt);
-  const nodes = Array.isArray(networkSnapshot.nodes) ? networkSnapshot.nodes : [];
-  const activeNodes = nodes.filter((node) => node?.status === 'Active');
-  const lastBlocks = Array.isArray(networkSnapshot.lastblock) ? networkSnapshot.lastblock : [];
-  const mimir = networkSnapshot.mimir && typeof networkSnapshot.mimir === 'object'
-    ? networkSnapshot.mimir
-    : {};
-  const chains = buildChainStatuses(networkSnapshot.inbound_addresses, mimir, lastBlocks);
-  const thorchainHeight = Math.max(0, ...lastBlocks.map((row) => numberValue(row?.thorchain)));
-  const networkWarnings = warningValues(
-    networkSnapshot.warnings,
-    Object.values(networkSnapshot.errors || {}),
-    networkSnapshot.warning
-  );
+  const liveNetwork = input.liveNetwork || buildStatusNetworkReadModel({ networkSnapshot, generatedAt });
   const sourceWarnings = warningValues(
-    networkWarnings,
+    liveNetwork.warnings,
     stuckDashboard.warning,
     voteDashboard?.read_model?.stale
       ? 'Node-vote read model is stale'
@@ -321,7 +353,6 @@ export function buildStatusDashboardReadModel(input = {}) {
     .slice(0, MAX_STATUS_STUCK_TRANSACTIONS)
     .map(compactStuckTransaction);
   const sourceTimestamps = {
-    network: timestamp(networkSnapshot.as_of),
     votes: timestamp(voteDashboard.as_of),
     stuck: timestamp(stuckDashboard.scanned_at)
   };
@@ -329,21 +360,10 @@ export function buildStatusDashboardReadModel(input = {}) {
   return {
     schema_version: 2,
     as_of: generatedAt,
-    network: {
-      height: thorchainHeight,
-      active_node_count: activeNodes.length,
-      majority_version: majorityVersion(nodes),
-      summary: summarizeNetwork(chains)
-    },
-    chains,
+    network: liveNetwork.network,
+    chains: liveNetwork.chains,
     block_production: blockProduction,
-    churn: buildChurnStatus(
-      mimir,
-      thorchainHeight,
-      networkSnapshot.churns,
-      activeNodes,
-      Number.isFinite(nowMs) ? nowMs : Date.now()
-    ),
+    churn: liveNetwork.churn,
     votes: {
       governance: getGovernanceVotes(voteDashboard.by_vote || []),
       status_updates: getRecentStatusUpdates(voteDashboard.by_vote || []),
@@ -363,7 +383,7 @@ export function buildStatusDashboardReadModel(input = {}) {
       scanned_height: numberValue(stuckDashboard.height)
     },
     sources: {
-      network: { provider: networkSnapshot.source || {}, as_of: sourceTimestamps.network },
+      network: liveNetwork.source,
       votes: {
         provider: 'boonetools-node-votes',
         as_of: sourceTimestamps.votes,
@@ -377,13 +397,13 @@ export function buildStatusDashboardReadModel(input = {}) {
       }
     },
     partial: Boolean(
-      networkSnapshot.partial ||
+      liveNetwork.partial ||
       stuckDashboard.partial ||
       voteDashboard?.read_model?.stale ||
       sourceWarnings.length > 0
     ),
     stale: Boolean(
-      networkSnapshot.stale ||
+      liveNetwork.stale ||
       stuckDashboard.stale ||
       voteDashboard?.read_model?.stale
     ),

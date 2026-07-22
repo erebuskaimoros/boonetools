@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { handleStatusDashboard } from '../src/handlers/status-dashboard.js';
+import { handleStatusLive } from '../src/handlers/status-live.js';
 import { buildStatusDashboardSnapshot } from '../src/jobs/status-dashboard-scheduler.js';
-import { buildStatusDashboardReadModel } from '../../shared/status/model.js';
+import { buildStatusLiveSnapshot, runStatusLiveScheduler } from '../src/jobs/status-live-scheduler.js';
+import { buildStatusDashboardReadModel, buildStatusNetworkReadModel } from '../../shared/status/model.js';
 
 function sources() {
   return {
@@ -141,7 +143,10 @@ test('status dashboard snapshot loads all source lanes concurrently into one pay
   const fixture = sources();
   const snapshot = await buildStatusDashboardSnapshot({
     generatedAt: '2026-07-18T12:00:03Z',
-    loadNetworkSnapshot: async () => fixture.networkSnapshot,
+    loadLiveNetwork: async () => buildStatusNetworkReadModel({
+      networkSnapshot: fixture.networkSnapshot,
+      generatedAt: '2026-07-18T12:00:03Z'
+    }),
     loadVoteDashboard: async () => fixture.voteDashboard,
     loadStuckDashboard: async () => fixture.stuckDashboard,
     loadBlockProductionHistory: async () => fixture.blockProduction
@@ -168,7 +173,10 @@ test('status snapshot does not republish stale node votes as a fresh lane', asyn
   };
   const snapshot = await buildStatusDashboardSnapshot({
     generatedAt: '2026-07-18T12:00:03Z',
-    loadNetworkSnapshot: async () => fixture.networkSnapshot,
+    loadLiveNetwork: async () => buildStatusNetworkReadModel({
+      networkSnapshot: fixture.networkSnapshot,
+      generatedAt: '2026-07-18T12:00:03Z'
+    }),
     loadVoteDashboard: async () => fixture.voteDashboard,
     loadStuckDashboard: async () => fixture.stuckDashboard,
     loadBlockProductionHistory: async () => fixture.blockProduction
@@ -219,4 +227,92 @@ test('status handler returns 503 without priming instead of contacting providers
   });
   assert.equal(response.status, 503);
   assert.equal(response.headers['Retry-After'], '30');
+});
+
+test('live status snapshot excludes heavy dashboard lanes', async () => {
+  const snapshot = await buildStatusLiveSnapshot({
+    generatedAt: '2026-07-18T12:00:03Z',
+    loadNetworkSnapshot: async () => sources().networkSnapshot
+  });
+
+  assert.equal(snapshot.payload.network.height, 1000);
+  assert.equal(snapshot.payload.chains.length, 2);
+  assert.equal(snapshot.payload.block_production, undefined);
+  assert.equal(snapshot.payload.votes, undefined);
+  assert.equal(snapshot.payload.stuck_transactions, undefined);
+  assert.deepEqual(snapshot.stats, {
+    chains: 2,
+    active_nodes: 2,
+    height: 1000,
+    partial: false
+  });
+});
+
+test('live status handler is DB-only and supports conditional polling', async () => {
+  const snapshot = await buildStatusLiveSnapshot({
+    generatedAt: '2026-07-18T12:00:03Z',
+    loadNetworkSnapshot: async () => sources().networkSnapshot
+  });
+  const model = {
+    key: 'status-live:v1',
+    schemaVersion: 1,
+    payload: snapshot.payload,
+    etag: '"stored-live"',
+    generatedAt: '2026-07-18T12:00:03.000Z',
+    sourceUpdatedAt: '2026-07-18T12:00:00.000Z',
+    freshUntil: '2026-07-18T12:00:48.000Z',
+    publishedAt: '2026-07-18T12:00:04.000Z',
+    stale: false,
+    ageSeconds: 1
+  };
+
+  const first = await handleStatusLive({ headers: {} }, null, {
+    getReadModel: async () => model
+  });
+  assert.equal(first.status, 200);
+  assert.equal(first.body.network.height, 1000);
+  assert.match(first.headers['Cache-Control'], /max-age=5/);
+  const conditional = await handleStatusLive({
+    headers: { 'if-none-match': first.headers.ETag }
+  }, null, {
+    getReadModel: async () => model
+  });
+  assert.equal(conditional.status, 304);
+  assert.equal(conditional.body, null);
+});
+
+test('live status scheduler publishes with a short TTL and logs a compact result', async () => {
+  let publishOptions;
+  const result = await runStatusLiveScheduler({
+    lockRunner: async (key, callback) => {
+      assert.equal(key, 'boonetools:status-live');
+      return callback({ name: 'locked-client' });
+    },
+    loadNetworkSnapshot: async () => sources().networkSnapshot,
+    publish: async (options) => {
+      publishOptions = options;
+      const built = await options.build();
+      assert.equal(built.payload.network.height, 1000);
+      return {
+        ok: true,
+        runId: '77',
+        model: {
+          key: options.modelKey,
+          schemaVersion: options.schemaVersion,
+          payload: built.payload,
+          generatedAt: built.generatedAt,
+          sourceUpdatedAt: built.sourceUpdatedAt,
+          freshUntil: '2026-07-18T12:00:48.000Z',
+          publishedAt: '2026-07-18T12:00:04.000Z',
+          stale: false,
+          ageSeconds: 0
+        }
+      };
+    }
+  });
+
+  assert.equal(publishOptions.modelKey, 'status-live:v1');
+  assert.equal(publishOptions.ttlMs, 45_000);
+  assert.equal(result.model.key, 'status-live:v1');
+  assert.equal(result.model.payload, undefined);
 });

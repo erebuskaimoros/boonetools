@@ -22,6 +22,7 @@ every response.
 
 | Public endpoint | Model key | Publisher | Cadence / TTL |
 | --- | --- | --- | --- |
+| `/status-live` | `status-live:v1` | `boonetools-status-live` | 15s / 45s |
 | `/status-dashboard` | `status-dashboard:v1` | `boonetools-status-dashboard` | 1m / 150s |
 | `/treasury-snapshot` | `treasury-snapshot:v1` | `boonetools-treasury-snapshot` | 5m / 10m |
 | `/rapid-swaps-summary` | `rapid-swaps-summary:v1` | `boonetools-analytics-read-models` | 1m / 150s |
@@ -32,6 +33,13 @@ every response.
 | `/app-layer-base-fees` | `app-layer-base-fees:v1` | `boonetools-analytics-read-models` | 1m / 330s |
 | `/app-layer-reserve-payments` | `app-layer-reserve-payments:v1` | `boonetools-analytics-read-models` | 1m / 330s |
 | `/tc-fee-dash` | `tc-fee-dash:v1` | `boonetools-analytics-read-models` | 1m / 15m |
+
+The Status page merges `/status-live` into the heavier minute-scale dashboard
+snapshot. The live lane contains only current network, chain, and churn values;
+it never repeats block-history, stuck-transaction, or vote work. Browser polling
+pauses in hidden tabs and performs an immediate conditional read on return. The
+minute publisher consumes this same live read model instead of repeating the
+THORNode/Midgard network fan-out.
 
 Provider-backed Node Votes and Rapid market history have independent locks,
 processes, and deadlines. A slow Dune refresh therefore cannot hold the
@@ -62,6 +70,7 @@ cold request ceilings:
 
 | Surface | Latency | Compressed bytes |
 | --- | ---: | ---: |
+| Status live | 500ms | 5KB |
 | Status | 750ms | 25KB |
 | Treasury | 1.5s | 200KB |
 | App Layer live | 1s | 200KB |
