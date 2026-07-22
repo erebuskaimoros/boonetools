@@ -55,6 +55,8 @@
     { length: Y_TICK_INTERVALS + 1 },
     (_, index) => yMax * (1 - (index / Y_TICK_INTERVALS))
   );
+  // Keep yMax explicit so Svelte invalidates the target SVG coordinates after a zoom rescale.
+  $: targetY = TOP + ((1 - Math.min(yMax, TARGET_SECONDS) / yMax) * (BOTTOM - TOP));
   $: xTicks = buildHourlyTicks(startTime, endTime);
   $: linePath = points.map((point, index) => (
     `${index === 0 ? 'M' : 'L'} ${chartX(point, index).toFixed(2)} ${chartY(point.seconds).toFixed(2)}`
@@ -271,8 +273,8 @@
           <text class="axis-label x-label" x={tick.x} y={HEIGHT - 11}>{formatChartHour(tick.time)}</text>
         {/each}
 
-        <line class="target-line" x1={LEFT} x2={WIDTH - RIGHT} y1={chartY(TARGET_SECONDS)} y2={chartY(TARGET_SECONDS)} />
-        <text class="target-label" x={WIDTH - RIGHT - 4} y={chartY(TARGET_SECONDS) - 6}>6S TARGET</text>
+        <line class="target-line" x1={LEFT} x2={WIDTH - RIGHT} y1={targetY} y2={targetY} />
+        <text class="target-label" x={WIDTH - RIGHT - 4} y={targetY - 6}>6S TARGET</text>
 
         <path class="series-area" d={areaPath}></path>
         <path class="series-line" d={linePath}></path>
