@@ -3,6 +3,7 @@
   import Footer from './lib/Footer.svelte';
   import Snow from './lib/Snow.svelte';
   import Banner from './lib/Banner.svelte';
+  import { trackFirstPartyPageView } from './lib/page-view-analytics.js';
 
   const BASE_PATH = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
   function stripBase(pathname) {
@@ -221,6 +222,11 @@
   }
 
   function trackAppView(app) {
+    trackFirstPartyPageView(app.path, {
+      basePath: BASE_PATH,
+      isDesktopApp
+    });
+
     if (typeof gtag === 'undefined') return;
     gtag('event', 'page_view', {
       page_title: app.name,

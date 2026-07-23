@@ -9,6 +9,17 @@ https://github.com/erebuskaimoros/boonetools
 
 This repo is a Svelte/Vite frontend with a small Node/Postgres backend for cached THORChain analytics. Dune is the source of truth for historical analytics; public THORChain endpoints are retained for live chain state, quotes, wallet balances, and other action-oriented reads that Dune cannot safely serve.
 
+## Page-view analytics
+
+The SPA sends a credential-free same-origin `POST` to
+`/_analytics/page-view/<page-slug>` when a visitor selects a tool page. The
+event follows client-side navigation, carries no body, cookie, persistent
+visitor ID, search parameters, or wallet data, respects browser Do Not Track,
+and excludes desktop-app embeds. Caddy records the request in its
+privacy-filtered Boone Tools access log; the separate private Web Traffic
+Analytics service aggregates the fixed page slugs into the protected
+`boonetools-pages.html` report.
+
 ## What Is In Here
 
 - `src/` - Svelte app code for the public tools.

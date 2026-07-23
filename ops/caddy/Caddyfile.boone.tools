@@ -22,6 +22,19 @@ boone.tools {
     encode zstd gzip
 
     route {
+        @page_view {
+            method POST
+            path /_analytics/page-view/*
+        }
+        handle @page_view {
+            header Cache-Control "no-store"
+            header X-Robots-Tag "noindex, nofollow, noarchive"
+            respond 204
+        }
+
+        @page_view_other path /_analytics/page-view/*
+        respond @page_view_other 405
+
         handle_path /functions/v1/* {
             reverse_proxy 127.0.0.1:8787
         }
