@@ -5,6 +5,7 @@ import {
   buildAffiliateChartSeries,
   buildAffiliateMidgardSeries,
   buildAffiliateRollups,
+  buildAffiliateTrendView,
   buildEpochChartSeries,
   buildDynamicFeeModel,
   computeEpochTiming,
@@ -68,6 +69,7 @@ test('buildEpochChartSeries keeps sealed and live rows separate when epoch label
   );
 
   assert.deepEqual(series.labels, ['E1862 sealed', 'E1863 sealed', 'E1863 live']);
+  assert.deepEqual(series.volume, [0, 0, 1000]);
   assert.deepEqual(series.fees, [1.25, 2.5, 40]);
   assert.deepEqual(series.bps, [1, 1, 2]);
 });
@@ -87,6 +89,7 @@ test('buildEpochChartSeries labels adjusted live seal epoch separately', () => {
   );
 
   assert.deepEqual(series.labels, ['E1862 sealed', 'E1863 sealed', 'E1864 live']);
+  assert.deepEqual(series.volume, [0, 0, 1000]);
   assert.deepEqual(series.fees, [1.25, 2.5, 40]);
 });
 
@@ -171,6 +174,76 @@ test('buildAffiliateMidgardSeries merges historical affiliate volume and fees be
   assert.equal(series.totalVolumeUsd, 1218);
   assert.equal(series.totalFeesUsd, 2.5);
   assert.equal(series.totalCount, 1);
+});
+
+test('buildAffiliateTrendView uses cached warm-up rows for rolling volume averages', () => {
+  const points = Array.from({ length: 220 }, (_, index) => {
+    const volumeUsd = index + 1;
+    const feesUsd = volumeUsd / 1000;
+    return {
+      label: `day-${index + 1}`,
+      volumeUsd,
+      feesUsd,
+      count: 1,
+      rateBps: 10
+    };
+  });
+
+  const view = buildAffiliateTrendView({ points }, 30, [30, 90, 180]);
+
+  assert.equal(view.points.length, 30);
+  assert.equal(view.labels[0], 'day-191');
+  assert.equal(view.labels.at(-1), 'day-220');
+  assert.equal(view.rollingVolumeUsd[30][0], 176.5);
+  assert.equal(view.rollingVolumeUsd[30].at(-1), 205.5);
+  assert.equal(view.rollingVolumeUsd[90][0], 146.5);
+  assert.equal(view.rollingVolumeUsd[90].at(-1), 175.5);
+  assert.equal(view.rollingVolumeUsd[180][0], 101.5);
+  assert.equal(view.rollingVolumeUsd[180].at(-1), 130.5);
+  assert.equal(view.totalVolumeUsd, 6165);
+  assert.equal(Number(view.totalFeesUsd.toFixed(3)), 6.165);
+  assert.equal(Number(view.totalRateBps.toFixed(6)), 10);
+  assert.equal(view.sourcePointCount, 220);
+});
+
+test('buildAffiliateTrendView excludes 2026 halt days from calendar-window averages', () => {
+  const point = (date, volumeUsd) => ({
+    startTime: String(Date.parse(`${date}T00:00:00.000Z`) / 1000),
+    label: date,
+    volumeUsd,
+    feesUsd: 0,
+    count: 0,
+    rateBps: null
+  });
+  const values = new Map([
+    ['2026-05-13', 10],
+    ['2026-05-14', 20],
+    ['2026-05-15', 30],
+    ['2026-06-22', 60],
+    ['2026-06-23', 90],
+    ['2026-06-24', 120]
+  ]);
+  const points = [];
+  for (
+    let timestamp = Date.parse('2026-05-13T00:00:00.000Z');
+    timestamp <= Date.parse('2026-06-24T00:00:00.000Z');
+    timestamp += 24 * 60 * 60 * 1000
+  ) {
+    const date = new Date(timestamp).toISOString().slice(0, 10);
+    points.push(point(date, values.get(date) || 0));
+  }
+
+  const view = buildAffiliateTrendView({ points }, points.length, [3]);
+  const averageByDate = new Map(
+    points.map((entry, index) => [entry.label, view.rollingVolumeUsd[3][index]])
+  );
+
+  assert.equal(averageByDate.get('2026-05-15'), 20);
+  assert.equal(averageByDate.get('2026-05-16'), null);
+  assert.equal(averageByDate.get('2026-06-21'), null);
+  assert.equal(averageByDate.get('2026-06-22'), 60);
+  assert.equal(averageByDate.get('2026-06-23'), 75);
+  assert.equal(averageByDate.get('2026-06-24'), 90);
 });
 
 test('buildAffiliateRollups includes whitelisted affiliates without merging sealed and live rows', () => {

@@ -1,3 +1,5 @@
+import { isThorchain2026HackHalt } from '../constants/chain-events.js';
+
 export const MAX_DYNAMIC_FEE_HISTORY = 30;
 
 export const DYNAMIC_FEE_DEFAULTS = Object.freeze({
@@ -234,17 +236,20 @@ export function buildEpochChartSeries(record = {}, currentEpoch = 0) {
   const hasLive = (Number(record.currentFeesUsd) || 0) > 0 || (Number(record.currentVolumeUsd) || 0) > 0;
 
   const labels = history.map((row) => `E${row.epoch} sealed`);
+  const volume = history.map((row) => Number(row.volumeUsd) || 0);
   const fees = history.map((row) => row.feesUsd);
   const bps = history.map((row) => row.bpsAtClose);
 
   if (hasLive) {
     labels.push(liveEpoch ? `E${liveEpoch} live` : 'live');
+    volume.push(Number(record.currentVolumeUsd) || 0);
     fees.push(Number(record.currentFeesUsd) || 0);
     bps.push(Number(record.dynamicBps) || 0);
   }
 
   return {
     labels,
+    volume,
     fees,
     bps
   };
@@ -348,6 +353,7 @@ export function buildAffiliateMidgardSeries(statsRows = [], earningsRows = [], t
         startTime,
         endTime,
         label: formatUnixDayLabel(startTime),
+        rollingAverageExcluded: isThorchain2026HackHalt(startTime),
         volumeUsd: 0,
         feesUsd: 0,
         count: 0
@@ -396,6 +402,65 @@ export function buildAffiliateMidgardSeries(statsRows = [], earningsRows = [], t
     totalFeesUsd,
     totalRateBps: totalVolumeUsd > 0 ? (totalFeesUsd / totalVolumeUsd) * 10000 : null,
     totalCount
+  };
+}
+
+export function buildAffiliateTrendView(series = {}, count = 90, rollingWindows = [30, 90, 180]) {
+  const sourcePoints = Array.isArray(series?.points) ? series.points : [];
+  const visibleCount = Math.max(1, Math.floor(parseNumeric(count, sourcePoints.length || 1)));
+  const startIndex = Math.max(0, sourcePoints.length - visibleCount);
+  const points = sourcePoints.slice(startIndex);
+  const rollingVolumeUsd = {};
+
+  for (const rawWindow of new Set(Array.isArray(rollingWindows) ? rollingWindows : [])) {
+    const windowDays = Math.max(1, Math.floor(parseNumeric(rawWindow, 1)));
+    const averages = new Array(sourcePoints.length).fill(null);
+    let rollingTotal = 0;
+    let eligibleDayCount = 0;
+
+    for (let index = 0; index < sourcePoints.length; index += 1) {
+      const point = sourcePoints[index];
+      const rollingAverageExcluded = Boolean(point?.rollingAverageExcluded) ||
+        isThorchain2026HackHalt(point?.startTime);
+      if (!rollingAverageExcluded) {
+        rollingTotal += Number(point?.volumeUsd) || 0;
+        eligibleDayCount += 1;
+      }
+
+      if (index >= windowDays) {
+        const expiredPoint = sourcePoints[index - windowDays];
+        const expiredPointExcluded = Boolean(expiredPoint?.rollingAverageExcluded) ||
+          isThorchain2026HackHalt(expiredPoint?.startTime);
+        if (!expiredPointExcluded) {
+          rollingTotal -= Number(expiredPoint?.volumeUsd) || 0;
+          eligibleDayCount -= 1;
+        }
+      }
+
+      if (!rollingAverageExcluded && index >= windowDays - 1 && eligibleDayCount > 0) {
+        averages[index] = rollingTotal / eligibleDayCount;
+      }
+    }
+
+    rollingVolumeUsd[windowDays] = averages.slice(startIndex);
+  }
+
+  const totalVolumeUsd = points.reduce((sum, point) => sum + (Number(point?.volumeUsd) || 0), 0);
+  const totalFeesUsd = points.reduce((sum, point) => sum + (Number(point?.feesUsd) || 0), 0);
+  const totalCount = points.reduce((sum, point) => sum + (Number(point?.count) || 0), 0);
+
+  return {
+    labels: points.map((point) => point.label),
+    volume: points.map((point) => point.volumeUsd),
+    fees: points.map((point) => point.feesUsd),
+    rateBps: points.map((point) => point.rateBps),
+    rollingVolumeUsd,
+    points,
+    totalVolumeUsd,
+    totalFeesUsd,
+    totalRateBps: totalVolumeUsd > 0 ? (totalFeesUsd / totalVolumeUsd) * 10000 : null,
+    totalCount,
+    sourcePointCount: sourcePoints.length
   };
 }
 

@@ -4,6 +4,7 @@
   import { fetchJSONWithFallback, MIDGARD_ENDPOINTS } from '$lib/utils/api';
   import {
     buildAffiliateMidgardSeries,
+    buildAffiliateTrendView,
     buildDynamicFeeModel,
     buildEpochChartSeries,
     computeEpochTiming,
@@ -16,6 +17,10 @@
     amber: '#d4a017',
     amberSoft: 'rgba(212, 160, 23, 0.18)',
     blue: '#5588cc',
+    blueSoft: 'rgba(85, 136, 204, 0.18)',
+    rolling30: '#4fb3bf',
+    rolling90: '#b08adf',
+    rolling180: '#e06c75',
     grid: '#1a1a1a',
     text: '#777'
   };
@@ -33,6 +38,13 @@
     { id: '180d', label: '6M', count: 180 },
     { id: '365d', label: '1Y', count: 365 }
   ];
+  // Midgard caps daily history at 400 rows; keep the extra rows as rolling-average warm-up.
+  const AFFILIATE_HISTORY_COUNT = 400;
+  const AFFILIATE_ROLLING_AVERAGES = [
+    { days: 30, label: '30D', color: CHART.rolling30, borderDash: [] },
+    { days: 90, label: '90D', color: CHART.rolling90, borderDash: [7, 4] },
+    { days: 180, label: '180D', color: CHART.rolling180, borderDash: [2, 4] }
+  ];
 
   let model = null;
   let error = null;
@@ -45,6 +57,7 @@
   let activeDashboardTab = 'pair';
   let selectedAffiliateId = '';
   let affiliateTimeframe = '90d';
+  let affiliateRollingAverages = [];
   let sortField = 'currentFeesUsd';
   let sortDir = 'desc';
   let chartCanvas;
@@ -83,9 +96,19 @@
     affiliates[0] ||
     null;
   $: affiliateHistoryKey = selectedAffiliate
-    ? `${selectedAffiliate.id}:${affiliateTimeframeOption.id}`
+    ? selectedAffiliate.id
     : '';
-  $: affiliateHistory = affiliateHistoryKey ? affiliateHistoryCache[affiliateHistoryKey] || null : null;
+  $: affiliateHistorySource = affiliateHistoryKey ? affiliateHistoryCache[affiliateHistoryKey] || null : null;
+  $: affiliateHistory = affiliateHistorySource
+    ? buildAffiliateTrendView(
+        affiliateHistorySource,
+        affiliateTimeframeOption.count,
+        AFFILIATE_ROLLING_AVERAGES.map((option) => option.days)
+      )
+    : null;
+  $: affiliateRollingLabel = affiliateRollingAverages.length
+    ? affiliateRollingAverages.map((days) => `${days}D`).join(' + ')
+    : 'RAW';
   $: filteredRecords = sortRecords(filterRecords(records, search, stateFilter), sortField, sortDir);
   $: selectedRecord =
     records.find((record) => record.id === selectedId) ||
@@ -112,7 +135,7 @@
     ? `${selectedRecord.id}:${selectedRecord.history.length}:${selectedRecord.dynamicBps}:${selectedRecord.currentFeesUsd}`
     : 'empty';
   $: affiliateChartKey = affiliateHistory
-    ? `${affiliateHistoryKey}:${affiliateHistory.points.length}:${affiliateHistory.totalVolumeUsd}:${affiliateHistory.totalFeesUsd}`
+    ? `${affiliateHistoryKey}:${affiliateTimeframeOption.id}:${affiliateHistory.points.length}:${affiliateHistory.totalVolumeUsd}:${affiliateHistory.totalFeesUsd}:${affiliateRollingAverages.join(',')}`
     : `${affiliateHistoryKey}:empty:${affiliateHistoryLoading}`;
   $: if (chartCanvas && chartKey !== renderedChartKey) {
     renderedChartKey = chartKey;
@@ -126,7 +149,7 @@
   ) {
     requestedAffiliateHistoryKey = affiliateHistoryKey;
     if (!affiliateHistoryCache[affiliateHistoryKey]) {
-      loadAffiliateHistory(selectedAffiliate, affiliateTimeframeOption, affiliateHistoryKey);
+      loadAffiliateHistory(selectedAffiliate, affiliateHistoryKey);
     }
   }
   $: if (affiliateChartCanvas && affiliateChartKey !== renderedAffiliateChartKey) {
@@ -221,8 +244,8 @@
     return detail;
   }
 
-  async function loadAffiliateHistory(affiliate, timeframe, requestKey) {
-    if (!affiliate?.thorname || !timeframe?.count) return;
+  async function loadAffiliateHistory(affiliate, requestKey) {
+    if (!affiliate?.thorname) return;
 
     affiliateHistoryLoading = true;
     affiliateHistoryError = null;
@@ -231,7 +254,7 @@
     const params = new URLSearchParams({
       thorname: affiliate.thorname,
       interval: 'day',
-      count: String(timeframe.count)
+      count: String(AFFILIATE_HISTORY_COUNT)
     });
 
     try {
@@ -423,7 +446,10 @@
 
     if (!chartCanvas || !selectedRecord || selectedRecord.history.length === 0) return;
 
-    const { labels, fees, bps } = buildEpochChartSeries(selectedRecord, model.config.currentEpoch);
+    const { labels, volume, fees, bps } = buildEpochChartSeries(
+      selectedRecord,
+      model.config.currentEpoch
+    );
 
     chartInstance = new Chart(chartCanvas, {
       type: 'bar',
@@ -432,12 +458,21 @@
         datasets: [
           {
             type: 'bar',
+            label: 'volume',
+            data: volume,
+            backgroundColor: CHART.blueSoft,
+            borderColor: CHART.blue,
+            borderWidth: 1,
+            yAxisID: 'yVolume'
+          },
+          {
+            type: 'bar',
             label: 'fees',
             data: fees,
             backgroundColor: CHART.greenSoft,
             borderColor: CHART.green,
             borderWidth: 1,
-            yAxisID: 'y'
+            yAxisID: 'yFees'
           },
           {
             type: 'line',
@@ -449,7 +484,7 @@
             pointRadius: 3,
             borderWidth: 2,
             tension: 0.2,
-            yAxisID: 'y1'
+            yAxisID: 'yBps'
           }
         ]
       },
@@ -457,6 +492,10 @@
         responsive: true,
         maintainAspectRatio: false,
         animation: { duration: 220 },
+        interaction: {
+          mode: 'index',
+          intersect: false
+        },
         plugins: {
           legend: {
             display: true,
@@ -477,6 +516,7 @@
             callbacks: {
               label: (ctx) => {
                 if (ctx.dataset.label === 'bps') return `bps: ${formatBps(ctx.parsed.y)}`;
+                if (ctx.dataset.label === 'volume') return `volume: ${formatUsd(ctx.parsed.y)}`;
                 return `fees: ${formatUsd(ctx.parsed.y)}`;
               }
             }
@@ -487,22 +527,33 @@
             grid: { color: CHART.grid },
             ticks: { color: CHART.text, font: { family: 'JetBrains Mono', size: 10 } }
           },
-          y: {
+          yVolume: {
             beginAtZero: true,
             position: 'left',
             grid: { color: CHART.grid },
             ticks: {
-              color: CHART.text,
+              color: CHART.blue,
               font: { family: 'JetBrains Mono', size: 10 },
               callback: (value) => formatUsdCompact(value)
             }
           },
-          y1: {
+          yFees: {
             beginAtZero: true,
             position: 'right',
             grid: { drawOnChartArea: false, color: CHART.grid },
             ticks: {
-              color: CHART.text,
+              color: CHART.green,
+              font: { family: 'JetBrains Mono', size: 10 },
+              callback: (value) => formatUsdCompact(value)
+            }
+          },
+          yBps: {
+            beginAtZero: true,
+            position: 'right',
+            offset: true,
+            grid: { drawOnChartArea: false, color: CHART.grid },
+            ticks: {
+              color: CHART.amber,
               font: { family: 'JetBrains Mono', size: 10 },
               callback: (value) => `${value} bps`
             }
@@ -517,6 +568,23 @@
     affiliateChartInstance = null;
 
     if (!affiliateChartCanvas || !affiliateHistory?.points?.length) return;
+
+    const rollingDatasets = AFFILIATE_ROLLING_AVERAGES
+      .filter((option) => affiliateRollingAverages.includes(option.days))
+      .map((option) => ({
+        type: /** @type {'line'} */ ('line'),
+        label: `${option.label.toLowerCase()} volume avg`,
+        data: affiliateHistory.rollingVolumeUsd?.[option.days] || [],
+        borderColor: option.color,
+        backgroundColor: option.color,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        borderWidth: 2,
+        borderDash: option.borderDash,
+        tension: 0.2,
+        spanGaps: false,
+        yAxisID: 'yVolume'
+      }));
 
     affiliateChartInstance = new Chart(affiliateChartCanvas, {
       type: 'bar',
@@ -556,7 +624,8 @@
             tension: 0.25,
             spanGaps: true,
             yAxisID: 'yRate'
-          }
+          },
+          ...rollingDatasets
         ]
       },
       options: {
@@ -586,7 +655,10 @@
                 if (ctx.dataset.label === 'fees / volume') {
                   return `fees / volume: ${formatRateBps(ctx.parsed.y)}`;
                 }
-                return `${ctx.dataset.label}: ${formatUsd(ctx.parsed.y)}`;
+                const suffix = String(ctx.dataset.label || '').endsWith('volume avg')
+                  ? ' · halt days excluded'
+                  : '';
+                return `${ctx.dataset.label}: ${formatUsd(ctx.parsed.y)}${suffix}`;
               }
             }
           }
@@ -634,6 +706,12 @@
         }
       }
     });
+  }
+
+  function toggleAffiliateRollingAverage(days) {
+    affiliateRollingAverages = affiliateRollingAverages.includes(days)
+      ? affiliateRollingAverages.filter((entry) => entry !== days)
+      : [...affiliateRollingAverages, days].sort((a, b) => a - b);
   }
 
   function statusMessage() {
@@ -1057,22 +1135,43 @@
     <section class="block">
       <div class="block-head">
         <div class="block-title"><span class="title-marker">|</span><h2>Affiliate Trend</h2></div>
-        <div class="block-meta">[{selectedAffiliate?.thorname || '--'} / {affiliateTimeframeOption.label}]</div>
+        <div class="block-meta">[{selectedAffiliate?.thorname || '--'} / {affiliateTimeframeOption.label} / {affiliateRollingLabel}]</div>
       </div>
 
       <div class="affiliate-chart-toolbar">
-        <div class="timeframe-tabs" role="tablist" aria-label="Affiliate chart timeframe">
-          {#each AFFILIATE_TIMEFRAMES as option}
-            <button
-              type="button"
-              role="tab"
-              aria-selected={affiliateTimeframe === option.id}
-              class:active={affiliateTimeframe === option.id}
-              on:click={() => (affiliateTimeframe = option.id)}
-            >
-              {option.label}
-            </button>
-          {/each}
+        <div class="affiliate-chart-control">
+          <span class="chart-control-label">volume rolling avg</span>
+          <div class="timeframe-tabs rolling-average-tabs" role="group" aria-label="Volume rolling averages">
+            {#each AFFILIATE_ROLLING_AVERAGES as option}
+              <button
+                type="button"
+                aria-label={`Toggle ${option.days}-day volume rolling average`}
+                aria-pressed={affiliateRollingAverages.includes(option.days)}
+                class:active={affiliateRollingAverages.includes(option.days)}
+                style:color={affiliateRollingAverages.includes(option.days) ? option.color : null}
+                on:click={() => toggleAffiliateRollingAverage(option.days)}
+              >
+                <span class="rolling-swatch" style:background={option.color}></span>
+                {option.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+        <div class="affiliate-chart-control timeframe-control">
+          <span class="chart-control-label">range</span>
+          <div class="timeframe-tabs" role="tablist" aria-label="Affiliate chart timeframe">
+            {#each AFFILIATE_TIMEFRAMES as option}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={affiliateTimeframe === option.id}
+                class:active={affiliateTimeframe === option.id}
+                on:click={() => (affiliateTimeframe = option.id)}
+              >
+                {option.label}
+              </button>
+            {/each}
+          </div>
         </div>
       </div>
 
@@ -1168,7 +1267,7 @@
 
 <style>
   .terminal {
-    width: min(1380px, calc(100vw - 24px));
+    width: min(1380px, calc(100% - 24px));
     margin: 0 auto;
     padding: 24px 0 56px;
     color: #c8c8c8;
@@ -1623,10 +1722,32 @@
   }
 
   .affiliate-chart-toolbar {
+    align-items: flex-end;
     display: flex;
-    justify-content: flex-end;
-    gap: 10px;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
     margin-bottom: 12px;
+  }
+
+  .affiliate-chart-control {
+    align-items: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .timeframe-control {
+    align-items: flex-end;
+    margin-left: auto;
+  }
+
+  .chart-control-label {
+    color: #555;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
   }
 
   .timeframe-tabs {
@@ -1656,6 +1777,23 @@
   .timeframe-tabs button.active {
     color: #00cc66;
     background: #0b0b0b;
+  }
+
+  .rolling-average-tabs button {
+    align-items: center;
+    display: inline-flex;
+    gap: 6px;
+  }
+
+  .rolling-swatch {
+    display: inline-block;
+    height: 2px;
+    opacity: 0.55;
+    width: 12px;
+  }
+
+  .rolling-average-tabs button.active .rolling-swatch {
+    opacity: 1;
   }
 
   .affiliate-chart-frame {
@@ -1974,7 +2112,7 @@
 
   @media (max-width: 640px) {
     .terminal {
-      width: calc(100vw - 16px);
+      width: calc(100% - 16px);
       padding: 16px 0 40px;
     }
 
@@ -1985,6 +2123,22 @@
 
     .affiliate-metrics {
       grid-template-columns: 1fr;
+    }
+
+    .affiliate-chart-toolbar {
+      align-items: stretch;
+      flex-direction: column;
+    }
+
+    .affiliate-chart-control,
+    .timeframe-control {
+      align-items: flex-start;
+      margin-left: 0;
+    }
+
+    .timeframe-tabs {
+      max-width: 100%;
+      overflow-x: auto;
     }
 
     .affiliate-metric,

@@ -1,10 +1,13 @@
+import {
+  THORCHAIN_2026_HACK_HALT_LABEL,
+  isThorchain2026HackHalt
+} from '../constants/chain-events.js';
+
 const BILLION = 1_000_000_000;
 const BASIS_POINTS = 10_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const HACK_HALT_ZERO_FEE_START = '2026-05-01';
-const HACK_HALT_ZERO_FEE_END = '2026-07-01';
-const HACK_HALT_LABEL = 'Chain halt';
+const HACK_HALT_LABEL = THORCHAIN_2026_HACK_HALT_LABEL;
 
 function toFiniteNumber(value, fallback = 0) {
   const numeric = Number(value);
@@ -133,11 +136,8 @@ export function computeIncomeVolumeBps(incomeUsd, thorchainVolumeUsd) {
 }
 
 function isHackHaltZeroFeeDay(row) {
-  const startMs = dateMs(row.windowStart);
   return row.period === 'day' &&
-    Number.isFinite(startMs) &&
-    startMs >= dateMs(HACK_HALT_ZERO_FEE_START) &&
-    startMs < dateMs(HACK_HALT_ZERO_FEE_END) &&
+    isThorchain2026HackHalt(row.windowStart) &&
     !(toFiniteNumber(row.tcFeesUsd) > 0) &&
     toFiniteNumber(row.globalExchangeVolumeUsd) > 0;
 }
