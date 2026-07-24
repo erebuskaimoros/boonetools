@@ -120,9 +120,11 @@ bootstrap_legacy_release() {
   local installed_units=(
     /etc/systemd/system/boonetools-*.service
     /etc/systemd/system/boonetools-*.timer
-    /etc/systemd/system/rapid-swap-listener.service
-    /etc/systemd/system/rapid-swap-listener.timer
   )
+  [[ -e /etc/systemd/system/rapid-swap-listener.service ]] \
+    && installed_units+=(/etc/systemd/system/rapid-swap-listener.service)
+  [[ -e /etc/systemd/system/rapid-swap-listener.timer ]] \
+    && installed_units+=(/etc/systemd/system/rapid-swap-listener.timer)
   if [[ "${#installed_units[@]}" -gt 0 ]]; then
     cp -a -- "${installed_units[@]}" "$legacy_dir/ops/systemd/"
   fi
@@ -224,8 +226,9 @@ stop_writers() {
   local timer_paths=(/etc/systemd/system/boonetools-*.timer)
   local service_paths=(
     /etc/systemd/system/boonetools-*.service
-    /etc/systemd/system/rapid-swap-listener.service
   )
+  [[ -e /etc/systemd/system/rapid-swap-listener.service ]] \
+    && service_paths+=(/etc/systemd/system/rapid-swap-listener.service)
   local units=()
   local path unit
 
@@ -256,9 +259,11 @@ install_units_from_release() {
   local current_paths=(
     /etc/systemd/system/boonetools-*.service
     /etc/systemd/system/boonetools-*.timer
-    /etc/systemd/system/rapid-swap-listener.service
-    /etc/systemd/system/rapid-swap-listener.timer
   )
+  [[ -e /etc/systemd/system/rapid-swap-listener.service ]] \
+    && current_paths+=(/etc/systemd/system/rapid-swap-listener.service)
+  [[ -e /etc/systemd/system/rapid-swap-listener.timer ]] \
+    && current_paths+=(/etc/systemd/system/rapid-swap-listener.timer)
   local desired_names=" "
   local path name
 
