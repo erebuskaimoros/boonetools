@@ -344,7 +344,7 @@ start_and_verify_timers() {
   shopt -s nullglob
   local timer_paths=("$CURRENT_LINK"/ops/systemd/*.timer)
   local timers=()
-  local path timer timer_row
+  local path timer timer_row attempt
   for path in "${timer_paths[@]}"; do
     timers+=("$(basename "$path")")
   done
@@ -357,10 +357,18 @@ start_and_verify_timers() {
   for timer in "${timers[@]}"; do
     systemctl is-enabled --quiet "$timer" || die "$timer is not enabled"
     systemctl is-active --quiet "$timer" || die "$timer is not active"
-    timer_row="$(systemctl list-timers --all --no-legend "$timer")"
+    timer_row=
+    for attempt in $(seq 1 10); do
+      timer_row="$(systemctl list-timers --all --no-legend "$timer")"
+      if [[ -n "$timer_row" ]] \
+        && ! grep -Eq '^[[:space:]]*n/a[[:space:]]' <<<"$timer_row"; then
+        break
+      fi
+      sleep 1
+    done
     [[ -n "$timer_row" ]] || die "$timer has no timer state"
     if grep -Eq '^[[:space:]]*n/a[[:space:]]' <<<"$timer_row"; then
-      die "$timer has no future trigger"
+      die "$timer has no future trigger after waiting 10 seconds"
     fi
   done
 }
