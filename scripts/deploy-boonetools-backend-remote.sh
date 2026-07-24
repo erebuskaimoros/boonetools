@@ -478,7 +478,7 @@ start_postgres_and_wait
 stop_writers
 
 log "Applying backward-compatible database migrations"
-BOONETOOLS_ENV_FILE="$ENV_FILE" bash "$RELEASE_DIR/scripts/boonetools-db-migrate.sh"
+BOONETOOLS_ENV_FILE="$ENV_FILE" bash "$RELEASE_DIR/scripts/boonetools-db-migrate.sh" </dev/null
 
 log "Installing the release unit manifest"
 install_units_from_release "$RELEASE_DIR"
