@@ -2,7 +2,7 @@
 Description=Refresh BooneTools Rapid Swaps market history every thirty minutes
 
 [Timer]
-OnBootSec=45s
+OnActiveSec=45s
 OnUnitActiveSec=30min
 AccuracySec=1min
 Persistent=true

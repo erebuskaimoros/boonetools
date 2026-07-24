@@ -1,4 +1,4 @@
-import { getRapidSwapComparableVolumeUsd } from '../../../shared/rapid-swaps/volume.js';
+import { getRapidSwapLegVolumeUsd } from '../../../shared/rapid-swaps/volume.js';
 
 export function toChartDateKey(value) {
   const date = typeof value === 'string' ? new Date(value) : value;
@@ -160,14 +160,14 @@ export function computeDailyData(swaps, midgardHistory, allSwaps = swaps, option
       if (!Number.isFinite(date.getTime())) continue;
       const key = toChartDateKey(date);
       if (!key || key >= firstVisibleKey) continue;
-      cumulativeVolume += getRapidSwapComparableVolumeUsd(row);
+      cumulativeVolume += getRapidSwapLegVolumeUsd(row);
       cumulativeCount += 1;
     }
   }
 
   for (const key of sortedKeys) {
     const rows = byDay[key];
-    const dayVolume = rows.reduce((sum, row) => sum + getRapidSwapComparableVolumeUsd(row), 0);
+    const dayVolume = rows.reduce((sum, row) => sum + getRapidSwapLegVolumeUsd(row), 0);
     cumulativeVolume += dayVolume;
     volume.push(dayVolume);
     cumVolume.push(cumulativeVolume);
@@ -186,7 +186,7 @@ export function computeDailyData(swaps, midgardHistory, allSwaps = swaps, option
     efficiency.push(totalBlocks > 0 ? +(totalSubs / totalBlocks).toFixed(2) : 1);
     pctFaster.push(totalSubs > 0 ? +((1 - totalBlocks / totalSubs) * 100).toFixed(1) : 0);
 
-    const comparableVolume = rows.reduce((sum, row) => sum + getRapidSwapComparableVolumeUsd(row), 0);
+    const comparableVolume = rows.reduce((sum, row) => sum + getRapidSwapLegVolumeUsd(row), 0);
     const midgard = mgByDay[key];
     volumePct.push(midgard && midgard.volume > 0 ? +((comparableVolume / midgard.volume) * 100).toFixed(2) : null);
     countPct.push(midgard && midgard.count > 0 ? +((rows.length / midgard.count) * 100).toFixed(2) : null);
@@ -229,7 +229,7 @@ export function computeDailyBucketData(buckets, midgardHistory, options = {}) {
   };
 
   for (const bucket of rows) {
-    const volume = Number(bucket.comparable_volume_usd) || 0;
+    const volume = Number(bucket.leg_volume_usd ?? bucket.comparable_volume_usd) || 0;
     const count = Number(bucket.swap_count) || 0;
     const totalSubs = Number(bucket.total_subs) || 0;
     const totalBlocks = Number(bucket.total_blocks_used) || 0;

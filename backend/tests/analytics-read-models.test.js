@@ -103,6 +103,7 @@ test('rapid swap read model includes compact aggregates for every non-table view
     source_asset: 'BTC.BTC',
     target_asset: 'THOR.RUNE',
     swap_count: 1,
+    leg_volume_usd: 100,
     volume_usd: 100
   });
 });

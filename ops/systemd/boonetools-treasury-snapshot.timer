@@ -2,7 +2,7 @@
 Description=Refresh BooneTools Treasury read model every five minutes
 
 [Timer]
-OnBootSec=10s
+OnActiveSec=10s
 OnUnitActiveSec=5min
 AccuracySec=10s
 Persistent=true

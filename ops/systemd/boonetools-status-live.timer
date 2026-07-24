@@ -2,7 +2,7 @@
 Description=Refresh the BooneTools compact live status every fifteen seconds
 
 [Timer]
-OnBootSec=10s
+OnActiveSec=10s
 OnUnitActiveSec=15s
 AccuracySec=1s
 Persistent=true

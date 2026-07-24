@@ -2,14 +2,21 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import Chart from 'chart.js/auto';
   import { fetchJSONWithFallback, MIDGARD_ENDPOINTS } from '$lib/utils/api';
+  import { booneToolsApi } from '$lib/api/boonetools.js';
   import {
     buildAffiliateMidgardSeries,
+    buildAffiliateTransactionView,
     buildAffiliateTrendView,
     buildDynamicFeeModel,
     buildEpochChartSeries,
     computeEpochTiming,
+    formatAssetDisplayName,
     liveSealEpoch
   } from '$lib/dynamic-fees/model.js';
+  import {
+    getEpochBlockRange,
+    getPairFilterAsset
+  } from '$lib/dynamic-fees/transactions.js';
 
   const CHART = {
     green: '#00cc66',
@@ -38,12 +45,18 @@
     { id: '180d', label: '6M', count: 180 },
     { id: '365d', label: '1Y', count: 365 }
   ];
-  // Midgard caps daily history at 400 rows; keep the extra rows as rolling-average warm-up.
+  // Midgard caps daily earnings history at 400 rows; keep the extra rows as
+  // rolling-average warm-up. Volume comes from BooneTools' per-leg backend.
   const AFFILIATE_HISTORY_COUNT = 400;
   const AFFILIATE_ROLLING_AVERAGES = [
     { days: 30, label: '30D', color: CHART.rolling30, borderDash: [] },
     { days: 90, label: '90D', color: CHART.rolling90, borderDash: [7, 4] },
     { days: 180, label: '180D', color: CHART.rolling180, borderDash: [2, 4] }
+  ];
+  const AFFILIATE_BUCKETS = [
+    { id: 'day', label: 'DAY' },
+    { id: 'week', label: 'WEEK' },
+    { id: 'month', label: 'MONTH' }
   ];
 
   let model = null;
@@ -57,6 +70,7 @@
   let activeDashboardTab = 'pair';
   let selectedAffiliateId = '';
   let affiliateTimeframe = '90d';
+  let affiliateBucket = 'day';
   let affiliateRollingAverages = [];
   let sortField = 'currentFeesUsd';
   let sortDir = 'desc';
@@ -71,6 +85,13 @@
   let affiliateHistoryError = null;
   let requestedAffiliateHistoryKey = '';
   let activeAffiliateHistoryKey = '';
+  let selectedAffiliateBucket = null;
+  let affiliateTransactions = [];
+  let affiliateTransactionsCache = {};
+  let affiliateTransactionsLoading = false;
+  let affiliateTransactionsError = null;
+  let activeAffiliateTransactionRequestKey = '';
+  let runePriceHistoryPromise = null;
   let detailCache = {};
   let rpcWs = null;
   let rpcConnected = false;
@@ -81,6 +102,12 @@
   let rpcReconnectTimer = null;
   let epochRefreshTimer = null;
   let shuttingDownRpc = false;
+  let selectedEpoch = null;
+  let epochTransactions = [];
+  let epochTransactionsCache = {};
+  let epochTransactionsLoading = false;
+  let epochTransactionsError = null;
+  let activeEpochRequestKey = '';
 
   $: records = model?.records || [];
   $: currentEntries = model?.currentEntries || [];
@@ -103,7 +130,8 @@
     ? buildAffiliateTrendView(
         affiliateHistorySource,
         affiliateTimeframeOption.count,
-        AFFILIATE_ROLLING_AVERAGES.map((option) => option.days)
+        AFFILIATE_ROLLING_AVERAGES.map((option) => option.days),
+        affiliateBucket
       )
     : null;
   $: affiliateRollingLabel = affiliateRollingAverages.length
@@ -135,7 +163,7 @@
     ? `${selectedRecord.id}:${selectedRecord.history.length}:${selectedRecord.dynamicBps}:${selectedRecord.currentFeesUsd}`
     : 'empty';
   $: affiliateChartKey = affiliateHistory
-    ? `${affiliateHistoryKey}:${affiliateTimeframeOption.id}:${affiliateHistory.points.length}:${affiliateHistory.totalVolumeUsd}:${affiliateHistory.totalFeesUsd}:${affiliateRollingAverages.join(',')}`
+    ? `${affiliateHistoryKey}:${affiliateTimeframeOption.id}:${affiliateBucket}:${affiliateHistory.points.length}:${affiliateHistory.totalVolumeUsd}:${affiliateHistory.totalFeesUsd}:${affiliateHistory.totalRateBps}:${affiliateRollingAverages.join(',')}:${selectedAffiliateBucket?.key || ''}`
     : `${affiliateHistoryKey}:empty:${affiliateHistoryLoading}`;
   $: if (chartCanvas && chartKey !== renderedChartKey) {
     renderedChartKey = chartKey;
@@ -244,6 +272,26 @@
     return detail;
   }
 
+  function getRunePriceHistory() {
+    if (runePriceHistoryPromise) return runePriceHistoryPromise;
+
+    const params = new URLSearchParams({
+      interval: 'day',
+      count: String(AFFILIATE_HISTORY_COUNT)
+    });
+    runePriceHistoryPromise = fetchJSONWithFallback(
+      `/v2/history/rune?${params.toString()}`,
+      {},
+      MIDGARD_ENDPOINTS
+    )
+      .then((payload) => Array.isArray(payload?.intervals) ? payload.intervals : [])
+      .catch((err) => {
+        runePriceHistoryPromise = null;
+        throw err;
+      });
+    return runePriceHistoryPromise;
+  }
+
   async function loadAffiliateHistory(affiliate, requestKey) {
     if (!affiliate?.thorname) return;
 
@@ -258,12 +306,24 @@
     });
 
     try {
-      const [statsRows, earningsRows] = await Promise.all([
-        fetchJSONWithFallback(`/v2/history/affiliate/stats?${params.toString()}`, {}, MIDGARD_ENDPOINTS),
-        fetchJSONWithFallback(`/v2/history/affiliate/earnings?${params.toString()}`, {}, MIDGARD_ENDPOINTS)
+      const [volumePayload, earningsRows, runePriceRows] = await Promise.all([
+        booneToolsApi.get('/dynamic-fee-affiliate-volume', {
+          query: {
+            affiliate: affiliate.thorname,
+            days: AFFILIATE_HISTORY_COUNT
+          },
+          errorMessage: 'Failed to load canonical affiliate volume'
+        }),
+        fetchJSONWithFallback(`/v2/history/affiliate/earnings?${params.toString()}`, {}, MIDGARD_ENDPOINTS),
+        getRunePriceHistory()
       ]);
 
-      const series = buildAffiliateMidgardSeries(statsRows, earningsRows, affiliate.thorname);
+      const series = buildAffiliateMidgardSeries(
+        volumePayload?.points,
+        earningsRows,
+        affiliate.thorname,
+        runePriceRows
+      );
       affiliateHistoryCache = {
         ...affiliateHistoryCache,
         [requestKey]: series
@@ -426,12 +486,26 @@
 
   function selectRecord(record) {
     selectedId = record.id;
+    closeEpochTransactions();
     tick().then(renderChart);
   }
 
   function selectAffiliate(affiliate) {
     selectedAffiliateId = affiliate.id;
+    closeAffiliateTransactions();
     tick().then(renderAffiliateChart);
+  }
+
+  function setAffiliateBucket(bucket) {
+    if (affiliateBucket === bucket) return;
+    affiliateBucket = bucket;
+    closeAffiliateTransactions();
+  }
+
+  function setAffiliateTimeframe(timeframe) {
+    if (affiliateTimeframe === timeframe) return;
+    affiliateTimeframe = timeframe;
+    closeAffiliateTransactions();
   }
 
   function selectDashboardTab(tab) {
@@ -450,6 +524,19 @@
       selectedRecord,
       model.config.currentEpoch
     );
+    const epochPoints = selectedRecord.history.map((row) => ({
+      ...row,
+      live: false
+    }));
+    if (labels.length > epochPoints.length) {
+      epochPoints.push({
+        epoch: model.config.currentEpoch,
+        volumeUsd: selectedRecord.currentVolumeUsd,
+        feesUsd: selectedRecord.currentFeesUsd,
+        bpsAtClose: selectedRecord.dynamicBps,
+        live: true
+      });
+    }
 
     chartInstance = new Chart(chartCanvas, {
       type: 'bar',
@@ -496,6 +583,14 @@
           mode: 'index',
           intersect: false
         },
+        onClick: (_event, elements) => {
+          const dataIndex = elements[0]?.index;
+          const point = dataIndex === undefined ? null : epochPoints[dataIndex];
+          if (point) loadEpochTransactions(selectedRecord, point);
+        },
+        onHover: (_event, elements) => {
+          if (chartCanvas) chartCanvas.style.cursor = elements.length ? 'pointer' : 'default';
+        },
         plugins: {
           legend: {
             display: true,
@@ -518,6 +613,14 @@
                 if (ctx.dataset.label === 'bps') return `bps: ${formatBps(ctx.parsed.y)}`;
                 if (ctx.dataset.label === 'volume') return `volume: ${formatUsd(ctx.parsed.y)}`;
                 return `fees: ${formatUsd(ctx.parsed.y)}`;
+              },
+              afterBody: (items) => {
+                const dataIndex = items[0]?.dataIndex;
+                if (dataIndex === undefined) return '';
+                const epochVolume = Number(volume[dataIndex]) || 0;
+                const epochFees = Number(fees[dataIndex]) || 0;
+                const rateBps = epochVolume > 0 ? (epochFees / epochVolume) * 10000 : null;
+                return `fees / volume: ${formatRateBps(rateBps)}`;
               }
             }
           }
@@ -563,12 +666,97 @@
     });
   }
 
+  function closeEpochTransactions() {
+    activeEpochRequestKey = '';
+    selectedEpoch = null;
+    epochTransactions = [];
+    epochTransactionsLoading = false;
+    epochTransactionsError = null;
+  }
+
+  async function loadEpochTransactions(record, point) {
+    const range = getEpochBlockRange(point.epoch, model?.config?.epochBlocks, {
+      live: point.live,
+      currentBlockHeight: model?.config?.blockHeight
+    });
+    if (!record || !range) return;
+
+    const requestKey = `${record.id}:${range.epoch}:${range.live ? 'live' : 'sealed'}`;
+    const selection = {
+      recordId: record.id,
+      epoch: range.epoch,
+      live: range.live,
+      startHeight: range.startHeight,
+      endHeight: range.endHeight,
+      volumeUsd: Number(point.volumeUsd) || 0,
+      feesUsd: Number(point.feesUsd) || 0,
+      rateBps: Number(point.volumeUsd) > 0
+        ? (Number(point.feesUsd) / Number(point.volumeUsd)) * 10000
+        : null
+    };
+
+    selectedEpoch = selection;
+    epochTransactionsError = null;
+    activeEpochRequestKey = requestKey;
+
+    if (!range.live && epochTransactionsCache[requestKey]) {
+      epochTransactions = epochTransactionsCache[requestKey];
+      epochTransactionsLoading = false;
+      return;
+    }
+
+    epochTransactions = [];
+    epochTransactionsLoading = true;
+
+    const query = {
+      affiliate: record.thorname,
+      asset: getPairFilterAsset(record.pair),
+      pair: record.pair,
+      start_height: range.startHeight,
+      end_height: range.endHeight,
+      epoch_blocks: model.config.epochBlocks,
+      live: range.live
+    };
+
+    try {
+      const payload = await booneToolsApi.get('/dynamic-fee-transactions', {
+        query,
+        cache: range.live ? 'no-store' : 'default',
+        errorMessage: 'Failed to load pair-level epoch transactions'
+      });
+      const normalized = Array.isArray(payload?.transactions) ? payload.transactions : [];
+      if (activeEpochRequestKey !== requestKey) return;
+
+      epochTransactions = normalized;
+      if (!range.live) {
+        epochTransactionsCache = {
+          ...epochTransactionsCache,
+          [requestKey]: normalized
+        };
+      }
+    } catch (err) {
+      if (activeEpochRequestKey === requestKey) {
+        epochTransactionsError = err?.message || 'failed to load epoch transactions';
+      }
+    } finally {
+      if (activeEpochRequestKey === requestKey) {
+        epochTransactionsLoading = false;
+      }
+    }
+  }
+
   function renderAffiliateChart() {
     affiliateChartInstance?.destroy();
     affiliateChartInstance = null;
 
     if (!affiliateChartCanvas || !affiliateHistory?.points?.length) return;
 
+    const selectedIndex = affiliateHistory.points.findIndex(
+      (point) => point.key === selectedAffiliateBucket?.key
+    );
+    const selectedBarColor = (index, normal, selected) => (
+      index === selectedIndex ? selected : normal
+    );
     const rollingDatasets = AFFILIATE_ROLLING_AVERAGES
       .filter((option) => affiliateRollingAverages.includes(option.days))
       .map((option) => ({
@@ -595,21 +783,22 @@
             type: 'bar',
             label: 'volume',
             data: affiliateHistory.volume,
-            backgroundColor: CHART.greenSoft,
+            backgroundColor: affiliateHistory.points.map((_, index) => (
+              selectedBarColor(index, CHART.greenSoft, 'rgba(0, 204, 102, 0.42)')
+            )),
             borderColor: CHART.green,
-            borderWidth: 1,
+            borderWidth: affiliateHistory.points.map((_, index) => index === selectedIndex ? 2 : 1),
             yAxisID: 'yVolume'
           },
           {
-            type: 'line',
+            type: 'bar',
             label: 'fees',
             data: affiliateHistory.fees,
             borderColor: CHART.amber,
-            backgroundColor: CHART.amberSoft,
-            pointBackgroundColor: CHART.amber,
-            pointRadius: 2,
-            borderWidth: 2,
-            tension: 0.25,
+            backgroundColor: affiliateHistory.points.map((_, index) => (
+              selectedBarColor(index, CHART.amberSoft, 'rgba(212, 160, 23, 0.42)')
+            )),
+            borderWidth: affiliateHistory.points.map((_, index) => index === selectedIndex ? 2 : 1),
             yAxisID: 'yFees'
           },
           {
@@ -633,6 +822,16 @@
         maintainAspectRatio: false,
         animation: { duration: 220 },
         interaction: { mode: 'index', intersect: false },
+        onClick: (_event, elements) => {
+          const dataIndex = elements[0]?.index;
+          const point = dataIndex === undefined ? null : affiliateHistory.points[dataIndex];
+          if (point) loadAffiliateTransactions(selectedAffiliate, point);
+        },
+        onHover: (_event, elements) => {
+          if (affiliateChartCanvas) {
+            affiliateChartCanvas.style.cursor = elements.length ? 'pointer' : 'default';
+          }
+        },
         plugins: {
           legend: {
             display: true,
@@ -706,6 +905,77 @@
         }
       }
     });
+  }
+
+  function closeAffiliateTransactions() {
+    activeAffiliateTransactionRequestKey = '';
+    selectedAffiliateBucket = null;
+    affiliateTransactions = [];
+    affiliateTransactionsLoading = false;
+    affiliateTransactionsError = null;
+  }
+
+  async function loadAffiliateTransactions(affiliate, point) {
+    const startTime = Math.max(0, Math.trunc(Number(point?.startTime) || 0));
+    const endTime = Math.max(startTime, Math.trunc(Number(point?.endTime) || 0));
+    if (!affiliate?.thorname || !startTime || endTime <= startTime) return;
+
+    const requestKey = `${affiliate.id}:${startTime}:${endTime}`;
+    selectedAffiliateBucket = {
+      key: point.key,
+      label: point.label,
+      bucket: affiliateBucket,
+      startTime,
+      endTime,
+      count: Number(point.count) || 0,
+      volumeUsd: Number(point.volumeUsd) || 0,
+      feesUsd: Number(point.feesUsd) || 0,
+      rateFeesUsd: point.rateFeesUsd === null ? null : Number(point.rateFeesUsd) || 0,
+      rateBps: point.rateBps === null ? null : Number(point.rateBps)
+    };
+    affiliateTransactionsError = null;
+    activeAffiliateTransactionRequestKey = requestKey;
+
+    if (affiliateTransactionsCache[requestKey]) {
+      affiliateTransactions = affiliateTransactionsCache[requestKey];
+      affiliateTransactionsLoading = false;
+      return;
+    }
+
+    affiliateTransactions = [];
+    affiliateTransactionsLoading = true;
+    const days = Math.max(1, Math.ceil((endTime - startTime) / (24 * 60 * 60)));
+
+    try {
+      const payload = await booneToolsApi.get('/dynamic-fee-affiliate-volume', {
+        query: {
+          affiliate: affiliate.thorname,
+          days,
+          to: endTime,
+          include_transactions: true
+        },
+        errorMessage: 'Failed to load affiliate bucket transactions'
+      });
+      const view = buildAffiliateTransactionView(
+        payload?.transactions,
+        affiliateHistorySource?.points
+      );
+      if (activeAffiliateTransactionRequestKey !== requestKey) return;
+
+      affiliateTransactions = view.rows;
+      affiliateTransactionsCache = {
+        ...affiliateTransactionsCache,
+        [requestKey]: view.rows
+      };
+    } catch (err) {
+      if (activeAffiliateTransactionRequestKey === requestKey) {
+        affiliateTransactionsError = err?.message || 'failed to load affiliate bucket transactions';
+      }
+    } finally {
+      if (activeAffiliateTransactionRequestKey === requestKey) {
+        affiliateTransactionsLoading = false;
+      }
+    }
   }
 
   function toggleAffiliateRollingAverage(days) {
@@ -784,6 +1054,31 @@
       minute: '2-digit',
       second: '2-digit'
     }).format(date);
+  }
+
+  function formatTransactionTime(value) {
+    if (!value) return '--';
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(new Date(value));
+  }
+
+  function formatAssetAmount(value) {
+    const amount = Number(value) || 0;
+    return formatNumber(amount, Math.abs(amount) >= 100 ? 2 : Math.abs(amount) >= 1 ? 4 : 6);
+  }
+
+  function transactionHeightLabel(transaction) {
+    const start = formatNumber(transaction.startHeight, 0);
+    if (!transaction.streaming || transaction.endHeight === transaction.startHeight) return start;
+    return `${start}-${formatNumber(transaction.endHeight, 0)}`;
+  }
+
+  function transactionUrl(txId) {
+    return `https://thorchain.net/tx/${encodeURIComponent(txId)}`;
   }
 
   function sortMark(field) {
@@ -941,7 +1236,11 @@
 
       <div class="chart-frame">
         {#if selectedRecord?.history?.length}
-          <canvas bind:this={chartCanvas}></canvas>
+          <canvas
+            bind:this={chartCanvas}
+            aria-label="Epoch volume, fees, and basis points chart. Click an epoch column to inspect its transactions."
+            title="Click an epoch column to inspect its transactions"
+          ></canvas>
         {:else}
           <div class="loading-block">
             <span class="loading-marker">----</span>
@@ -951,13 +1250,102 @@
       </div>
     </section>
 
-    <section class="block">
+    <section class="block pair-state-block">
       <div class="block-head">
-        <div class="block-title"><span class="title-marker">|</span><h2>Pair State</h2></div>
-        <div class="block-meta">[{selectedRecord?.stateLabel || '--'}]</div>
+        <div class="block-title">
+          <span class="title-marker">|</span>
+          <h2>{selectedEpoch ? 'Epoch Transactions' : 'Pair State'}</h2>
+        </div>
+        {#if selectedEpoch}
+          <div class="block-head-actions">
+            <div class="block-meta">
+              [E{selectedEpoch.epoch} {selectedEpoch.live ? 'live' : 'sealed'} · {epochTransactions.length} txns]
+            </div>
+            <button class="panel-back" type="button" on:click={closeEpochTransactions}>pair state</button>
+          </div>
+        {:else}
+          <div class="block-meta">[{selectedRecord?.stateLabel || '--'}]</div>
+        {/if}
       </div>
 
-      {#if selectedRecord}
+      {#if selectedEpoch}
+        <div class="epoch-summary">
+          <div>
+            <span>block range</span>
+            <strong>{formatNumber(selectedEpoch.startHeight, 0)}-{formatNumber(selectedEpoch.endHeight, 0)}</strong>
+          </div>
+          <div>
+            <span>epoch volume</span>
+            <strong>{formatUsdCompact(selectedEpoch.volumeUsd)}</strong>
+          </div>
+          <div>
+            <span>epoch fees</span>
+            <strong>{formatUsdCompact(selectedEpoch.feesUsd)}</strong>
+          </div>
+          <div>
+            <span>fees / volume</span>
+            <strong>{formatRateBps(selectedEpoch.rateBps)}</strong>
+          </div>
+        </div>
+
+        {#if epochTransactionsLoading}
+          <div class="transaction-state">
+            <span class="loading-marker">////</span>
+            <span>loading epoch transactions</span>
+          </div>
+        {:else if epochTransactionsError}
+          <div class="transaction-state err">
+            <span>ERR</span>
+            <span>{epochTransactionsError}</span>
+          </div>
+        {:else if epochTransactions.length}
+          <div class="transaction-list">
+            {#each epochTransactions as transaction}
+              <article class="transaction-row">
+                <div class="transaction-head">
+                  <a
+                    href={transactionUrl(transaction.txId)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={transaction.txId}
+                  >
+                    ...{transaction.txId.slice(-8)}
+                  </a>
+                  <span class:pending={transaction.status === 'pending'}>{transaction.status}</span>
+                </div>
+                <div class="transaction-route">
+                  <strong>
+                    {formatAssetAmount(transaction.inputAmount)}
+                    {formatAssetDisplayName(transaction.inputAsset)}
+                  </strong>
+                  <span>-&gt;</span>
+                  <strong>
+                    {formatAssetAmount(transaction.outputAmount)}
+                    {formatAssetDisplayName(transaction.outputAsset) || 'pending'}
+                  </strong>
+                </div>
+                <div class="transaction-meta">
+                  <span>block {transactionHeightLabel(transaction)}</span>
+                  <span>{formatTransactionTime(transaction.dateMs)}</span>
+                  <span>{formatUsdCompact(transaction.inputUsd)} input</span>
+                  <span
+                    class="transaction-fee"
+                    title="Liquidity fee collected by this transaction's selected pair leg during this epoch"
+                  >
+                    actual pair fee {formatRateBps(transaction.realizedFeeBps)}
+                  </span>
+                  {#if transaction.streaming}<span>streaming</span>{/if}
+                </div>
+              </article>
+            {/each}
+          </div>
+        {:else}
+          <div class="transaction-state">
+            <span class="loading-marker">----</span>
+            <span>no matching transactions in this epoch</span>
+          </div>
+        {/if}
+      {:else if selectedRecord}
         <div class="state-grid">
           <div class="state-row">
             <span>live volume</span>
@@ -1135,7 +1523,7 @@
     <section class="block">
       <div class="block-head">
         <div class="block-title"><span class="title-marker">|</span><h2>Affiliate Trend</h2></div>
-        <div class="block-meta">[{selectedAffiliate?.thorname || '--'} / {affiliateTimeframeOption.label} / {affiliateRollingLabel}]</div>
+        <div class="block-meta">[{selectedAffiliate?.thorname || '--'} / {affiliateTimeframeOption.label} / {affiliateBucket} / {affiliateRollingLabel}]</div>
       </div>
 
       <div class="affiliate-chart-toolbar">
@@ -1157,20 +1545,38 @@
             {/each}
           </div>
         </div>
-        <div class="affiliate-chart-control timeframe-control">
-          <span class="chart-control-label">range</span>
-          <div class="timeframe-tabs" role="tablist" aria-label="Affiliate chart timeframe">
-            {#each AFFILIATE_TIMEFRAMES as option}
-              <button
-                type="button"
-                role="tab"
-                aria-selected={affiliateTimeframe === option.id}
-                class:active={affiliateTimeframe === option.id}
-                on:click={() => (affiliateTimeframe = option.id)}
-              >
-                {option.label}
-              </button>
-            {/each}
+        <div class="affiliate-chart-view-controls">
+          <div class="affiliate-chart-control">
+            <span class="chart-control-label">bucket</span>
+            <div class="timeframe-tabs" role="tablist" aria-label="Affiliate chart bucket">
+              {#each AFFILIATE_BUCKETS as option}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={affiliateBucket === option.id}
+                  class:active={affiliateBucket === option.id}
+                  on:click={() => setAffiliateBucket(option.id)}
+                >
+                  {option.label}
+                </button>
+              {/each}
+            </div>
+          </div>
+          <div class="affiliate-chart-control timeframe-control">
+            <span class="chart-control-label">range</span>
+            <div class="timeframe-tabs" role="tablist" aria-label="Affiliate chart timeframe">
+              {#each AFFILIATE_TIMEFRAMES as option}
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={affiliateTimeframe === option.id}
+                  class:active={affiliateTimeframe === option.id}
+                  on:click={() => setAffiliateTimeframe(option.id)}
+                >
+                  {option.label}
+                </button>
+              {/each}
+            </div>
           </div>
         </div>
       </div>
@@ -1200,12 +1606,127 @@
         {:else if affiliateHistoryError}
           <div class="loading-block err"><span class="loading-marker">ERR</span><span>{affiliateHistoryError}</span></div>
         {:else if affiliateHistory?.points?.length}
-          <canvas bind:this={affiliateChartCanvas}></canvas>
+          <canvas
+            bind:this={affiliateChartCanvas}
+            aria-label="Affiliate volume, fees, and fees per volume chart. Click a column to inspect its transactions."
+            title="Click a column to inspect its transactions"
+          ></canvas>
         {:else}
           <div class="loading-block"><span class="loading-marker">----</span><span>no historical affiliate metrics</span></div>
         {/if}
       </div>
     </section>
+
+    {#if selectedAffiliateBucket}
+      <section class="block affiliate-transactions-block">
+        <div class="block-head">
+          <div class="block-title"><span class="title-marker">|</span><h2>Affiliate Bucket Transactions</h2></div>
+          <div class="block-head-actions">
+            <div class="block-meta">
+              [{selectedAffiliate?.thorname || '--'} / {selectedAffiliateBucket.label} / {affiliateTransactions.length} txns]
+            </div>
+            <button class="panel-back" type="button" on:click={closeAffiliateTransactions}>close</button>
+          </div>
+        </div>
+
+        <div class="selected-strip affiliate-transaction-summary">
+          <div>
+            <span>bucket</span>
+            <strong>{selectedAffiliateBucket.label}</strong>
+          </div>
+          <div>
+            <span>volume</span>
+            <strong>{formatUsdCompact(selectedAffiliateBucket.volumeUsd)}</strong>
+          </div>
+          <div>
+            <span>fees</span>
+            <strong>{formatUsdCompact(selectedAffiliateBucket.feesUsd)}</strong>
+          </div>
+          <div>
+            <span>fees / volume</span>
+            <strong>{formatRateBps(selectedAffiliateBucket.rateBps)}</strong>
+          </div>
+        </div>
+
+        {#if affiliateTransactionsLoading}
+          <div class="transaction-state">
+            <span class="loading-marker">////</span>
+            <span>loading affiliate bucket transactions</span>
+          </div>
+        {:else if affiliateTransactionsError}
+          <div class="transaction-state err">
+            <span>ERR</span>
+            <span>{affiliateTransactionsError}</span>
+          </div>
+        {:else if affiliateTransactions.length}
+          <div class="table-scroll affiliate-transaction-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>txn</th>
+                  <th>time</th>
+                  <th>route</th>
+                  <th>block</th>
+                  <th>volume</th>
+                  <th>fees</th>
+                  <th>fees / volume</th>
+                  <th>status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each affiliateTransactions as transaction}
+                  <tr>
+                    <td class="transaction-link-cell">
+                      <a
+                        href={transactionUrl(transaction.txId)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title={transaction.txId}
+                      >
+                        ...{transaction.txId.slice(-8)}
+                      </a>
+                    </td>
+                    <td class="mono">{formatTransactionTime(transaction.dateMs)}</td>
+                    <td class="affiliate-route-cell">
+                      <strong>
+                        {formatAssetAmount(transaction.inputAmount)}
+                        {formatAssetDisplayName(transaction.inputAsset)}
+                      </strong>
+                      <span>-&gt;</span>
+                      <strong>
+                        {formatAssetAmount(transaction.outputAmount)}
+                        {formatAssetDisplayName(transaction.outputAsset) || 'pending'}
+                      </strong>
+                      {#if transaction.streaming}<small>streaming</small>{/if}
+                    </td>
+                    <td class="mono">{transactionHeightLabel(transaction)}</td>
+                    <td>
+                      <strong>{formatUsdCompact(transaction.volumeUsd)}</strong>
+                      <small>{transaction.executedLegCount} pool{transaction.executedLegCount === 1 ? '' : 's'}</small>
+                    </td>
+                    <td>
+                      <strong>{transaction.feesUsd === null ? '--' : formatUsd(transaction.feesUsd)}</strong>
+                      <small>{formatAssetAmount(transaction.liquidityFeeRune)} RUNE</small>
+                    </td>
+                    <td class="transaction-fee">{formatRateBps(transaction.realizedFeeBps)}</td>
+                    <td>
+                      <span class={`pill ${transaction.status === 'success' ? 'active' : transaction.status === 'pending' ? 'monitor' : 'inactive'}`}>
+                        {transaction.status}
+                      </span>
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {:else}
+          <div class="transaction-state">
+            <span class="loading-marker">----</span>
+            <span>no matching transactions in this bucket</span>
+          </div>
+        {/if}
+      </section>
+    {/if}
 
     <section class="block">
       <div class="block-head">
@@ -1739,6 +2260,12 @@
 
   .timeframe-control {
     align-items: flex-end;
+  }
+
+  .affiliate-chart-view-controls {
+    align-items: flex-end;
+    display: flex;
+    gap: 12px;
     margin-left: auto;
   }
 
@@ -1874,6 +2401,259 @@
 
   .state-grid {
     border: 1px solid #141414;
+  }
+
+  .pair-state-block {
+    min-width: 0;
+  }
+
+  .pair-state-block .block-head {
+    flex-wrap: wrap;
+  }
+
+  .block-head-actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: flex-end;
+    margin-left: auto;
+    min-width: 0;
+  }
+
+  .panel-back {
+    background: transparent;
+    border: 1px solid #1a1a1a;
+    color: #777;
+    cursor: pointer;
+    flex-shrink: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    padding: 4px 7px;
+    text-transform: uppercase;
+  }
+
+  .panel-back:hover {
+    border-color: rgba(0, 204, 102, 0.45);
+    color: #00cc66;
+  }
+
+  .epoch-summary {
+    border: 1px solid #141414;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .epoch-summary div {
+    border-bottom: 1px solid #141414;
+    border-right: 1px solid #141414;
+    min-width: 0;
+    padding: 8px 10px;
+  }
+
+  .epoch-summary div:nth-child(2n) {
+    border-right: none;
+  }
+
+  .epoch-summary div:nth-last-child(-n + 2) {
+    border-bottom: none;
+  }
+
+  .epoch-summary span,
+  .transaction-meta {
+    color: #555;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .epoch-summary strong {
+    color: #d8d8d8;
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+  }
+
+  .transaction-state {
+    align-items: center;
+    color: #555;
+    display: flex;
+    flex-direction: column;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    gap: 8px;
+    justify-content: center;
+    min-height: 210px;
+    padding: 16px;
+    text-align: center;
+    text-transform: uppercase;
+  }
+
+  .transaction-state.err {
+    color: #f08089;
+  }
+
+  .transaction-list {
+    border: 1px solid #141414;
+    border-top: none;
+    max-height: 284px;
+    overflow-y: auto;
+    scrollbar-color: #222 #080808;
+  }
+
+  .transaction-row {
+    border-bottom: 1px solid #141414;
+    padding: 10px;
+  }
+
+  .transaction-row:last-child {
+    border-bottom: none;
+  }
+
+  .transaction-row:hover {
+    background: #0d0d0d;
+  }
+
+  .transaction-head,
+  .transaction-route,
+  .transaction-meta {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+  }
+
+  .transaction-head {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+  }
+
+  .transaction-head a {
+    color: #5588cc;
+    text-decoration: none;
+  }
+
+  .transaction-head a:hover {
+    color: #7aa7e2;
+    text-decoration: underline;
+  }
+
+  .transaction-head span {
+    color: #00cc66;
+    font-size: 8px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .transaction-head span.pending {
+    color: #d4a017;
+  }
+
+  .transaction-route {
+    justify-content: flex-start;
+    margin: 6px 0;
+    min-width: 0;
+  }
+
+  .transaction-route strong {
+    color: #c8c8c8;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 600;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .transaction-route span {
+    color: #00cc66;
+    flex-shrink: 0;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .transaction-meta {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    letter-spacing: 0.04em;
+  }
+
+  .transaction-meta .transaction-fee {
+    color: #d4a017;
+  }
+
+  .affiliate-transactions-block .block-head {
+    flex-wrap: wrap;
+  }
+
+  .affiliate-transaction-table {
+    max-height: 520px;
+    scrollbar-color: #222 #080808;
+  }
+
+  .affiliate-transaction-table table {
+    min-width: 1180px;
+  }
+
+  .affiliate-transaction-table th {
+    cursor: default;
+  }
+
+  .affiliate-transaction-table td {
+    white-space: nowrap;
+  }
+
+  .affiliate-transaction-table td strong,
+  .affiliate-transaction-table td small {
+    display: block;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .affiliate-transaction-table td strong {
+    color: #d8d8d8;
+    font-size: 10px;
+  }
+
+  .affiliate-transaction-table td small {
+    color: #555;
+    font-size: 8px;
+    letter-spacing: 0.06em;
+    margin-top: 3px;
+    text-transform: uppercase;
+  }
+
+  .affiliate-transaction-table .transaction-link-cell a {
+    color: #5588cc;
+    text-decoration: none;
+  }
+
+  .affiliate-transaction-table .transaction-link-cell a:hover {
+    color: #7aa7e2;
+    text-decoration: underline;
+  }
+
+  .affiliate-transaction-table .affiliate-route-cell {
+    align-items: center;
+    display: flex;
+    gap: 6px;
+    white-space: normal;
+  }
+
+  .affiliate-transaction-table .affiliate-route-cell > span {
+    color: #00cc66;
+    flex-shrink: 0;
+  }
+
+  .affiliate-transaction-table .affiliate-route-cell small {
+    color: #d4a017;
+    margin: 0 0 0 3px;
+  }
+
+  .affiliate-transaction-table .transaction-fee {
+    color: #d4a017;
+    font-weight: 700;
   }
 
   .state-row {
@@ -2133,6 +2913,12 @@
     .affiliate-chart-control,
     .timeframe-control {
       align-items: flex-start;
+      margin-left: 0;
+    }
+
+    .affiliate-chart-view-controls {
+      align-items: flex-start;
+      flex-wrap: wrap;
       margin-left: 0;
     }
 

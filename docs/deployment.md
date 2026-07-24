@@ -19,7 +19,7 @@ git remote get-url origin
 git status --short
 ```
 
-`pwd` should be the BooneTools `website` repo root shown above, and `origin` should be the BooneTools remote. A dirty Thornode or outer THORChain worktree is not a reason to deploy manually from that location. Use a clean BooneTools checkout/worktree, then run the guarded deploy script from `website`.
+`pwd` should be the BooneTools `website` repo root shown above, and `origin` should be the BooneTools remote. The deploy guard requires clean `main`, exact parity with `origin/main`, and a successful GitHub Actions `verify` check. A dirty Thornode or outer THORChain worktree is not a reason to deploy manually from that location. Use a clean BooneTools checkout/worktree, then run the guarded deploy script from `website`.
 
 ## Server
 
@@ -43,11 +43,12 @@ npm run boonetools:deploy:frontend
 
 That script:
 
-1. Verifies the current repo is the canonical BooneTools checkout
-2. Prints the current branch, `HEAD`, `origin`, and any local worktree changes
-3. Builds the frontend with `npm run build`
-4. Syncs `dist/` to `/var/www/boone-tools/`
-5. Verifies the public URL responds after deploy
+1. Verifies clean, CI-green `main` from the canonical BooneTools checkout
+2. Builds and checksums an immutable frontend artifact
+3. Acquires the shared BooneTools deployment lock
+4. Stages the release under `/var/www/boone-tools-releases/releases/<commit>`
+5. Verifies every `index.html` asset before atomically switching `current`
+6. Compares a public hashed asset with the staged file and rolls back automatically on failure
 
 Optional overrides:
 
@@ -55,6 +56,7 @@ Optional overrides:
 SERVER=root@boone.tools
 DEST=/var/www/boone-tools
 VERIFY_URL=https://boone.tools/
+KEEP_RELEASES=3
 ```
 
 Example:
@@ -65,7 +67,7 @@ SERVER=root@boone.tools DEST=/var/www/boone-tools VERIFY_URL=https://boone.tools
 
 ## Manual Sync
 
-Manual `rsync` is still possible, but it is no longer the recommended path. Use the guarded script unless you intentionally need a one-off deploy flow and have verified the repo source yourself.
+Do not deploy the production frontend with manual `rsync`; it bypasses the release lock, atomic cutover, artifact verification, and automatic rollback.
 
 Do not use manual `rsync` as a workaround for being in the wrong repo. If you need to avoid unrelated local changes, create or use a clean BooneTools `website` checkout/worktree, apply only the intended BooneTools patch there, and run the canonical deploy script from that checkout.
 

@@ -1,4 +1,4 @@
-import { getRapidSwapComparableVolumeUsd } from '../../../shared/rapid-swaps/volume.js';
+import { getRapidSwapLegVolumeUsd } from '../../../shared/rapid-swaps/volume.js';
 
 const AFFILIATE_NAMES = {
   t: 'THORSwap',
@@ -97,7 +97,7 @@ export function getTxUrl(txId) {
 }
 
 export function swapVolumeUsd(row) {
-  return getRapidSwapComparableVolumeUsd(row);
+  return getRapidSwapLegVolumeUsd(row);
 }
 
 export function filterSwaps(swaps, pathFilter, minUsd, minSubs) {

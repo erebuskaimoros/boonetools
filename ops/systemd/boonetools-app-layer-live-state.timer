@@ -2,7 +2,7 @@
 Description=Refresh BooneTools App Layer live state and Base Layer earnings every two minutes
 
 [Timer]
-OnBootSec=30
+OnActiveSec=30
 OnUnitActiveSec=2min
 Persistent=true
 Unit=boonetools-app-layer-live-state.service

@@ -6,10 +6,10 @@ Wants=network-online.target docker.service
 [Service]
 Type=simple
 User=deploy
-WorkingDirectory=/opt/boonetools-backend/backend
+WorkingDirectory=/opt/boonetools-backend/current/backend
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--dns-result-order=ipv4first
-EnvironmentFile=/opt/boonetools-backend/backend/.env
+EnvironmentFile=/opt/boonetools-backend/config/backend.env
 ExecStart=/usr/bin/node src/rujira-reserve-listener.js
 Restart=always
 RestartSec=10

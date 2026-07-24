@@ -6,10 +6,10 @@ Wants=network-online.target docker.service
 [Service]
 Type=simple
 User=deploy
-WorkingDirectory=/opt/boonetools-backend
+WorkingDirectory=/opt/boonetools-backend/current
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--dns-result-order=ipv4first
-EnvironmentFile=/opt/boonetools-backend/backend/.env
+EnvironmentFile=/opt/boonetools-backend/config/backend.env
 ExecStart=/usr/bin/node scripts/rapid-swap-listener.mjs
 Restart=always
 RestartSec=5

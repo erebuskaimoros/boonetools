@@ -2,7 +2,7 @@
 Description=Run BooneTools Node Votes Backfill hourly
 
 [Timer]
-OnBootSec=15min
+OnActiveSec=15min
 OnUnitActiveSec=1h
 RandomizedDelaySec=5min
 Persistent=true

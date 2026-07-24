@@ -1,6 +1,10 @@
 import { query } from '../db/pool.js';
 import { safeNumber, toIsoString } from '../lib/utils.js';
-import { getRapidSwapComparableVolumeUsd } from '../../../shared/rapid-swaps/volume.js';
+import {
+  getRapidSwapLegVolumeUsd,
+  getRapidSwapRouteVolumeUsd,
+  RAPID_SWAP_VOLUME_BASIS
+} from '../../../shared/rapid-swaps/volume.js';
 
 export const RAPID_SWAP_COLUMNS = [
   'tx_id', 'action_height', 'action_date', 'observed_at', 'memo', 'tx_status',
@@ -27,7 +31,10 @@ export function normalizeRapidSwapDashboardRow(row) {
     output_amount_base: String(row.output_amount_base || '0'),
     input_estimated_usd: Number(row.input_estimated_usd) || 0,
     output_estimated_usd: Number(row.output_estimated_usd) || 0,
-    comparable_volume_usd: getRapidSwapComparableVolumeUsd(row),
+    leg_volume_usd: getRapidSwapLegVolumeUsd(row),
+    route_volume_usd: getRapidSwapRouteVolumeUsd(row),
+    // Retained for clients that predate the explicit volume contract.
+    comparable_volume_usd: getRapidSwapLegVolumeUsd(row),
     liquidity_fee_base: String(row.liquidity_fee_base || '0'),
     swap_slip_bps: Number(row.swap_slip_bps) || 0,
     is_limit_order: Boolean(row.is_limit_order),
@@ -50,17 +57,19 @@ function normalizeDailyBuckets(rows) {
   let cumulativeVolumeUsd = 0;
   return rows.map((row) => {
     const swapCount = Number(row.swap_count) || 0;
-    const comparableVolumeUsd = roundUsd(row.comparable_volume_usd);
+    const legVolumeUsd = roundUsd(row.comparable_volume_usd);
     cumulativeCount += swapCount;
-    cumulativeVolumeUsd += comparableVolumeUsd;
+    cumulativeVolumeUsd += legVolumeUsd;
     return {
       bucket_start: toIsoString(row.bucket_start),
       swap_count: swapCount,
-      comparable_volume_usd: comparableVolumeUsd,
+      leg_volume_usd: legVolumeUsd,
+      comparable_volume_usd: legVolumeUsd,
       total_subs: Number(row.total_subs) || 0,
       total_blocks_used: Number(row.total_blocks_used) || 0,
       saved_blocks: Number(row.saved_blocks) || 0,
       cumulative_count: cumulativeCount,
+      cumulative_leg_volume_usd: roundUsd(cumulativeVolumeUsd),
       cumulative_volume_usd: roundUsd(cumulativeVolumeUsd)
     };
   });
@@ -88,7 +97,9 @@ export function selectRapidSwapChartBuckets(buckets, range = {}) {
     buckets: selected,
     rowCount: selected.reduce((sum, bucket) => sum + (Number(bucket.swap_count) || 0), 0),
     cumulativeCountBefore: Number(before?.cumulative_count) || 0,
-    cumulativeVolumeBefore: roundUsd(before?.cumulative_volume_usd)
+    cumulativeVolumeBefore: roundUsd(
+      before?.cumulative_leg_volume_usd ?? before?.cumulative_volume_usd
+    )
   };
 }
 
@@ -280,6 +291,7 @@ export async function buildRapidSwapsSummaryPayload(client = { query }, options 
     bucket: String(row.label || ''),
     sort_order: Number(row.sort_order) || 0,
     swap_count: Number(row.swap_count) || 0,
+    leg_volume_usd: roundUsd(row.volume_usd),
     volume_usd: roundUsd(row.volume_usd)
   }));
   const paths = pathsResult.rows.map((row) => ({
@@ -287,6 +299,7 @@ export async function buildRapidSwapsSummaryPayload(client = { query }, options 
     target_asset: String(row.target_asset || ''),
     path: `${String(row.source_asset || '')} -> ${String(row.target_asset || '')}`,
     swap_count: Number(row.swap_count) || 0,
+    leg_volume_usd: roundUsd(row.volume_usd),
     volume_usd: roundUsd(row.volume_usd),
     avg_saved_blocks: Number(row.avg_saved_blocks) || 0,
     avg_time_saved_seconds: (Number(row.avg_saved_blocks) || 0) * blockTimeSeconds,
@@ -294,7 +307,8 @@ export async function buildRapidSwapsSummaryPayload(client = { query }, options 
   }));
 
   return {
-    schema_version: 3,
+    schema_version: 4,
+    volume_basis: RAPID_SWAP_VOLUME_BASIS,
     as_of: now.toISOString(),
     tracker_started_at: toIsoString(trackerStartedAt),
     tracker_warmup_complete: trackerStartedAt
@@ -302,12 +316,14 @@ export async function buildRapidSwapsSummaryPayload(client = { query }, options 
       : false,
     recent_window_started_at: recentWindowStart,
     total_tracked: Number(summary.total_tracked) || 0,
+    cumulative_leg_volume_usd: roundUsd(summary.cumulative_volume_usd),
     cumulative_volume_usd: roundUsd(summary.cumulative_volume_usd),
     time_saved_seconds: (Number(summary.saved_blocks) || 0) * blockTimeSeconds,
     baseline_seconds: baselineSeconds,
     actual_seconds: actualSeconds,
     pct_faster: baselineSeconds > 0 ? Math.round((1 - actualSeconds / baselineSeconds) * 100) : 0,
     recent_24h_count: Number(summary.recent_24h_count) || 0,
+    recent_24h_leg_volume_usd: roundUsd(summary.recent_24h_volume_usd),
     recent_24h_volume_usd: roundUsd(summary.recent_24h_volume_usd),
     chain_status: sourceStatus,
     source_status: sourceStatus,
@@ -323,6 +339,7 @@ export async function buildRapidSwapsSummaryPayload(client = { query }, options 
       affiliates: affiliatesResult.rows.map((row) => ({
         affiliate: String(row.affiliate || ''),
         swap_count: Number(row.swap_count) || 0,
+        leg_volume_usd: roundUsd(row.volume_usd),
         volume_usd: roundUsd(row.volume_usd)
       })),
       paths,
@@ -330,6 +347,7 @@ export async function buildRapidSwapsSummaryPayload(client = { query }, options 
         source_asset: row.source_asset,
         target_asset: row.target_asset,
         swap_count: row.swap_count,
+        leg_volume_usd: row.leg_volume_usd,
         volume_usd: row.volume_usd
       }))
     },

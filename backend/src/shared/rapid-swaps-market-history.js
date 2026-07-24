@@ -360,6 +360,7 @@ export function selectRapidSwapMarketHistory(payload, params = {}) {
       interval,
       from,
       to,
+      volume_basis: 'executed-leg-usd',
       generated_at: payload.as_of,
       source_updated_at: sourceUpdatedAt,
       source_age_seconds: Number.isFinite(sourceUpdatedMs)

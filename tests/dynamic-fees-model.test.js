@@ -5,6 +5,7 @@ import {
   buildAffiliateChartSeries,
   buildAffiliateMidgardSeries,
   buildAffiliateRollups,
+  buildAffiliateTransactionView,
   buildAffiliateTrendView,
   buildEpochChartSeries,
   buildDynamicFeeModel,
@@ -135,16 +136,20 @@ test('buildAffiliateMidgardSeries merges historical affiliate volume and fees be
       {
         startTime: '1782604800',
         endTime: '1782691200',
-        totalVolumeUSD: '121800',
-        count: '1',
-        affiliates: [{ affiliate: 'symbiosis', volumeUSD: '121800', count: '1' }]
+        legVolumeUsd: 2436,
+        routeVolumeUsd: 1218,
+        routeCount: 1,
+        executedLegCount: 2,
+        volumeBasis: 'executed-leg-usd'
       },
       {
         startTime: '1782691200',
         endTime: '1782777600',
-        totalVolumeUSD: '0',
-        count: '0',
-        affiliates: []
+        legVolumeUsd: 0,
+        routeVolumeUsd: 0,
+        routeCount: 0,
+        executedLegCount: 0,
+        volumeBasis: 'executed-leg-usd'
       }
     ],
     [
@@ -152,28 +157,55 @@ test('buildAffiliateMidgardSeries merges historical affiliate volume and fees be
         startTime: '1782604800',
         endTime: '1782691200',
         totalEarningsUSD: '250',
+        totalEarningsRune: '200000000',
         count: '1',
-        affiliates: [{ affiliate: 'symbiosis', earningsUSD: '250', count: '1' }]
+        affiliates: [{
+          affiliate: 'symbiosis',
+          earningsUSD: '250',
+          earningsRUNE: '200000000',
+          count: '1'
+        }]
       },
       {
         startTime: '1782691200',
         endTime: '1782777600',
         totalEarningsUSD: '0',
+        totalEarningsRune: '0',
         count: '0',
         affiliates: []
       }
     ],
-    'SYMBIOSIS'
+    'SYMBIOSIS',
+    [
+      {
+        startTime: '1782604800',
+        endTime: '1782691200',
+        runePriceUSD: '1'
+      },
+      {
+        startTime: '1782691200',
+        endTime: '1782777600',
+        runePriceUSD: '1.1'
+      }
+    ]
   );
 
   assert.deepEqual(series.labels, ['06-28', '06-29']);
-  assert.deepEqual(series.volume, [1218, 0]);
+  assert.deepEqual(series.volume, [2436, 0]);
   assert.deepEqual(series.fees, [2.5, 0]);
-  assert.equal(Number(series.rateBps[0].toFixed(2)), 20.53);
+  assert.equal(Number(series.rateBps[0].toFixed(2)), 8.21);
   assert.equal(series.rateBps[1], null);
-  assert.equal(series.totalVolumeUsd, 1218);
+  assert.equal(series.points[0].rateFeesUsd, 2);
+  assert.equal(series.points[0].historicalRunePriceUsd, 1);
+  assert.equal(series.points[0].routeVolumeUsd, 1218);
+  assert.equal(series.points[0].executedLegCount, 2);
+  assert.equal(series.totalVolumeUsd, 2436);
   assert.equal(series.totalFeesUsd, 2.5);
+  assert.equal(series.totalRateFeesUsd, 2);
+  assert.equal(Number(series.totalRateBps.toFixed(2)), 8.21);
   assert.equal(series.totalCount, 1);
+  assert.equal(series.volumeBasis, 'executed-leg-usd');
+  assert.equal(series.rateFeeBasis, 'historical-rune-usd');
 });
 
 test('buildAffiliateTrendView uses cached warm-up rows for rolling volume averages', () => {
@@ -244,6 +276,117 @@ test('buildAffiliateTrendView excludes 2026 halt days from calendar-window avera
   assert.equal(averageByDate.get('2026-06-22'), 60);
   assert.equal(averageByDate.get('2026-06-23'), 75);
   assert.equal(averageByDate.get('2026-06-24'), 90);
+});
+
+test('buildAffiliateTrendView buckets visible daily rows into calendar weeks', () => {
+  const points = Array.from({ length: 10 }, (_, index) => {
+    const timestamp = Date.parse('2026-07-20T00:00:00.000Z') + index * 24 * 60 * 60 * 1000;
+    const volumeUsd = (index + 1) * 10;
+    return {
+      startTime: String(timestamp / 1000),
+      endTime: String((timestamp + 24 * 60 * 60 * 1000) / 1000),
+      label: new Date(timestamp).toISOString().slice(5, 10),
+      volumeUsd,
+      feesUsd: volumeUsd / 1000,
+      count: 1,
+      rateBps: 10
+    };
+  });
+
+  const view = buildAffiliateTrendView({ points }, 10, [3], 'week');
+
+  assert.deepEqual(view.labels, ['W 07-20', 'W 07-27']);
+  assert.deepEqual(view.volume, [280, 270]);
+  assert.deepEqual(view.fees, [0.28, 0.27]);
+  assert.deepEqual(view.rateBps, [10, 10]);
+  assert.deepEqual(view.rollingVolumeUsd[3], [200, 240]);
+  assert.deepEqual(view.points.map((point) => point.dayCount), [7, 3]);
+  assert.equal(view.totalVolumeUsd, 550);
+  assert.equal(view.bucket, 'week');
+});
+
+test('buildAffiliateTrendView keeps displayed fees separate from the rate numerator', () => {
+  const points = [
+    {
+      startTime: String(Date.parse('2026-07-20T00:00:00.000Z') / 1000),
+      label: '07-20',
+      volumeUsd: 1000,
+      feesUsd: 2.5,
+      rateFeesUsd: 1,
+      count: 1,
+      rateBps: 10
+    },
+    {
+      startTime: String(Date.parse('2026-07-21T00:00:00.000Z') / 1000),
+      label: '07-21',
+      volumeUsd: 1000,
+      feesUsd: 3.5,
+      rateFeesUsd: 1,
+      count: 1,
+      rateBps: 10
+    }
+  ];
+
+  const view = buildAffiliateTrendView({ points }, points.length, [], 'week');
+
+  assert.deepEqual(view.fees, [6]);
+  assert.deepEqual(view.rateBps, [10]);
+  assert.equal(view.points[0].rateFeesUsd, 2);
+  assert.equal(view.totalFeesUsd, 6);
+  assert.equal(view.totalRateFeesUsd, 2);
+  assert.equal(view.totalRateBps, 10);
+});
+
+test('buildAffiliateTransactionView prices rows consistently and sorts by volume', () => {
+  const dayStart = Date.parse('2026-06-23T00:00:00.000Z') / 1000;
+  const view = buildAffiliateTransactionView([
+    {
+      txId: 'SMALL',
+      dateMs: (dayStart + 120) * 1000,
+      volumeUsd: 100,
+      liquidityFeeRune: 1
+    },
+    {
+      txId: 'LARGE',
+      dateMs: (dayStart + 60) * 1000,
+      volumeUsd: 400,
+      liquidityFeeRune: 2
+    }
+  ], [{
+    startTime: String(dayStart),
+    feesRune: 4,
+    feesUsd: 2,
+    historicalRunePriceUsd: 0.4
+  }]);
+
+  assert.deepEqual(view.rows.map((row) => row.txId), ['LARGE', 'SMALL']);
+  assert.equal(view.rows[0].feesUsd, 1);
+  assert.equal(view.rows[0].rateFeesUsd, 0.8);
+  assert.equal(view.rows[0].realizedFeeBps, 20);
+  assert.equal(view.totalVolumeUsd, 500);
+  assert.equal(view.totalFeesUsd, 1.5);
+  assert.equal(Math.abs(view.totalRateFeesUsd - 1.2) < 1e-12, true);
+  assert.equal(Math.abs(view.totalRateBps - 24) < 1e-12, true);
+});
+
+test('buildAffiliateTrendView buckets visible daily rows into UTC calendar months', () => {
+  const dates = ['2026-07-30', '2026-07-31', '2026-08-01', '2026-08-02'];
+  const points = dates.map((date, index) => ({
+    startTime: String(Date.parse(`${date}T00:00:00.000Z`) / 1000),
+    label: date.slice(5),
+    volumeUsd: index + 1,
+    feesUsd: (index + 1) / 1000,
+    count: 1,
+    rateBps: 10
+  }));
+
+  const view = buildAffiliateTrendView({ points }, points.length, [], 'month');
+
+  assert.deepEqual(view.labels, ['2026-07', '2026-08']);
+  assert.deepEqual(view.volume, [3, 7]);
+  assert.deepEqual(view.fees, [0.003, 0.007]);
+  assert.deepEqual(view.rateBps, [10, 10]);
+  assert.equal(view.bucket, 'month');
 });
 
 test('buildAffiliateRollups includes whitelisted affiliates without merging sealed and live rows', () => {

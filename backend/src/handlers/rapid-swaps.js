@@ -243,6 +243,7 @@ export async function handleRapidSwapsSummary(_request, url) {
       bucket: 'day',
       truncated: chartTruncated,
       cumulative_count_before: selectedChart.cumulativeCountBefore,
+      cumulative_leg_volume_usd_before: selectedChart.cumulativeVolumeBefore,
       cumulative_volume_usd_before: selectedChart.cumulativeVolumeBefore
     }
   };

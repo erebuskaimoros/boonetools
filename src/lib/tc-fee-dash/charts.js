@@ -431,7 +431,7 @@ export function createTcFeeIncomeVolumeChart(canvas, { series, rollingSeries }) 
               return [
                 `income / volume: ${formatTcFeeBps(row.incomeVolumeBps)}`,
                 `liquidity fee income: ${formatUSD(row.tcFeesUsd)}`,
-                `THORChain swap volume: ${formatTcFeeUsdCompact(row.thorchainVolumeUsd)}`
+                `THORChain volume: ${formatTcFeeUsdCompact(row.thorchainVolumeUsd)}`
               ];
             }
           }

@@ -108,12 +108,18 @@
   $: dailyData = chartBuckets.length
     ? computeDailyBucketData(overviewBuckets, midgardSwapHistory, {
         cumulativeCountBefore: dashboard?.chart?.cumulative_count_before || 0,
-        cumulativeVolumeBefore: dashboard?.chart?.cumulative_volume_usd_before || 0
+        cumulativeVolumeBefore:
+          dashboard?.chart?.cumulative_leg_volume_usd_before
+          ?? dashboard?.chart?.cumulative_volume_usd_before
+          ?? 0
       })
     : computeDailyData(overviewSwaps, midgardSwapHistory, allSwaps, {
         useCumulativeSeeds: Boolean(dashboard?.chart),
         cumulativeCountBefore: dashboard?.chart?.cumulative_count_before || 0,
-        cumulativeVolumeBefore: dashboard?.chart?.cumulative_volume_usd_before || 0
+        cumulativeVolumeBefore:
+          dashboard?.chart?.cumulative_leg_volume_usd_before
+          ?? dashboard?.chart?.cumulative_volume_usd_before
+          ?? 0
       });
   $: cumulativeVolumeAxisBounds = getSeriesAxisBounds(dailyData.cumVolume, {
     clampMin: 0,
@@ -507,7 +513,7 @@
       <div class="metric-key">24H COUNT</div>
     </div>
     <div class="metric">
-      <div class="metric-val">{formatUSDCompact(dashboard?.recent_24h_volume_usd || 0)}</div>
+      <div class="metric-val">{formatUSDCompact(dashboard?.recent_24h_leg_volume_usd ?? dashboard?.recent_24h_volume_usd ?? 0)}</div>
       <div class="metric-key">24H VOLUME</div>
     </div>
     <div class="metric">
@@ -515,7 +521,7 @@
       <div class="metric-key">TOTAL SWAPS</div>
     </div>
     <div class="metric">
-      <div class="metric-val accent">{formatUSDCompact(dashboard?.cumulative_volume_usd || 0)}</div>
+      <div class="metric-val accent">{formatUSDCompact(dashboard?.cumulative_leg_volume_usd ?? dashboard?.cumulative_volume_usd ?? 0)}</div>
       <div class="metric-key">ALL-TIME VOLUME</div>
     </div>
     <div class="metric">

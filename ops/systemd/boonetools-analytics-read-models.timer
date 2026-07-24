@@ -2,7 +2,7 @@
 Description=Refresh BooneTools analytics read models every minute
 
 [Timer]
-OnBootSec=5s
+OnActiveSec=5s
 OnUnitActiveSec=1min
 AccuracySec=5s
 Persistent=true

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 process.env.DATABASE_URL ||= 'postgres://test:test@127.0.0.1:1/test';
@@ -147,8 +147,29 @@ test('market-history provider failure rejects without both prior segments', asyn
 });
 
 test('job registry, systemd timers, and deploy keep provider lanes isolated and recoverable', async () => {
-  const [registry, nodeService, nodeTimer, marketService, marketTimer, statusService, liveStatusService, liveStatusTimer, deployScript, perfSmoke] = await Promise.all([
+  const [
+    registry,
+    apiService,
+    backupService,
+    nodeService,
+    nodeTimer,
+    marketService,
+    marketTimer,
+    statusService,
+    liveStatusService,
+    liveStatusTimer,
+    bondRefreshTimer,
+    voteBackfillTimer,
+    deployScript,
+    remoteDeployScript,
+    frontendDeployScript,
+    remoteFrontendDeployScript,
+    sourceGuard,
+    perfSmoke
+  ] = await Promise.all([
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-api.service', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-db-backup.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-node-votes-summary.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-node-votes-summary.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-rapid-swaps-market-history.service', import.meta.url), 'utf8'),
@@ -156,17 +177,28 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
     readFile(new URL('../../ops/systemd/boonetools-status-dashboard.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-status-live.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-status-live.timer', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-bond-history-refresh.timer', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-node-votes-backfill.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../scripts/deploy-boonetools-backend.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../../scripts/deploy-boonetools-frontend.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../../scripts/deploy-boonetools-frontend-remote.sh', import.meta.url), 'utf8'),
+    readFile(new URL('../../scripts/require-canonical-boonetools-repo.sh', import.meta.url), 'utf8'),
     readFile(new URL('../../scripts/perf-smoke.mjs', import.meta.url), 'utf8')
   ]);
   assert.match(registry, /'node-votes-summary': runNodeVotesSummary/);
   assert.match(registry, /'rapid-swaps-market-history': runRapidSwapsMarketHistory/);
   assert.match(registry, /'status-live-scheduler': runStatusLiveScheduler/);
+  assert.match(apiService, /WorkingDirectory=\/opt\/boonetools-backend\/current\/backend/);
+  assert.match(apiService, /EnvironmentFile=\/opt\/boonetools-backend\/config\/backend\.env/);
+  assert.match(backupService, /ExecStart=\/usr\/bin\/bash \/opt\/boonetools-backend\/current\/scripts\/boonetools-db-backup\.sh/);
   assert.match(nodeService, /ExecStart=.* node-votes-summary/);
   assert.match(nodeService, /TimeoutStartSec=45s/);
+  assert.match(nodeTimer, /OnActiveSec=15s/);
   assert.match(nodeTimer, /OnUnitActiveSec=1min/);
   assert.match(marketService, /ExecStart=.* rapid-swaps-market-history/);
   assert.match(marketService, /TimeoutStartSec=5min/);
+  assert.match(marketTimer, /OnActiveSec=45s/);
   assert.match(marketTimer, /OnUnitActiveSec=30min/);
   assert.match(statusService, /After=.*boonetools-node-votes-summary\.service/);
   assert.match(statusService, /Wants=.*boonetools-node-votes-summary\.service/);
@@ -174,26 +206,50 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(liveStatusService, /ExecStart=.* status-live-scheduler/);
   assert.match(liveStatusService, /TimeoutStartSec=20s/);
   assert.match(liveStatusTimer, /OnUnitActiveSec=15s/);
-  for (const unit of ['boonetools-node-votes-summary', 'boonetools-rapid-swaps-market-history']) {
-    assert.match(deployScript, new RegExp(`${unit}\\.timer`));
-    assert.match(deployScript, new RegExp(`systemctl start ${unit}\\.service`));
-  }
-  assert.match(deployScript, /ROLLBACK_DEST\/systemd/);
-  assert.match(deployScript, /ROLLBACK_DEST\/Caddyfile/);
-  assert.match(deployScript, /\[\[ -f "\$unit_path" \]\] \|\| continue/);
-  assert.match(deployScript, /systemctl restart boonetools-api\.service/);
-  assert.match(deployScript, /Writer unit remained active after stop/);
-  assert.match(deployScript, /start_remote_unit_with_retry boonetools-app-layer-live-state\.service/);
-  assert.match(deployScript, /start_remote_unit_with_retry boonetools-status-dashboard\.service/);
-  assert.match(deployScript, /start_remote_unit_with_retry boonetools-status-live\.service/);
-  const statusPrime = deployScript.indexOf('Priming compact Status read model');
-  const liveStatusPrime = deployScript.indexOf('Priming compact live Status read model');
-  const publicSmoke = deployScript.indexOf('Verifying public latency, payload, and compression budgets');
-  const timerStart = deployScript.indexOf('Starting scheduler and maintenance timers after successful priming and smoke checks');
-  assert.ok(liveStatusPrime >= 0 && liveStatusPrime < statusPrime);
-  assert.ok(statusPrime >= 0 && statusPrime < publicSmoke);
-  assert.ok(publicSmoke < timerStart);
+  assert.match(bondRefreshTimer, /OnActiveSec=45s/);
+  assert.match(bondRefreshTimer, /OnUnitActiveSec=1min/);
+  assert.match(voteBackfillTimer, /OnActiveSec=15min/);
+  assert.match(voteBackfillTimer, /OnUnitActiveSec=1h/);
+  assert.match(sourceGuard, /production releases require a clean main commit matching origin\/main/);
+  assert.match(sourceGuard, /check-runs\?per_page=100/);
+  assert.match(deployScript, /git .*archive/s);
+  assert.match(deployScript, /ARCHIVE_SHA256/);
+  assert.match(remoteDeployScript, /flock -n 9/);
+  assert.match(remoteDeployScript, /atomic_point_current/);
+  assert.match(remoteDeployScript, /Rolling back to/);
+  assert.match(remoteDeployScript, /chmod 0640 "\$ENV_FILE"/);
+  assert.match(remoteDeployScript, /npm ci --omit=dev/);
+  assert.match(remoteDeployScript, /boonetools-db-migrate\.sh/);
+  assert.match(remoteDeployScript, /has no future trigger/);
+  assert.match(remoteDeployScript, /https:\/\/mail\.theaiguys\.ai\//);
+  assert.doesNotMatch(remoteDeployScript, /systemctl reload caddy/);
+  assert.doesNotMatch(remoteDeployScript, /Caddyfile\.boone\.tools/);
+  assert.match(frontendDeployScript, /ARCHIVE_SHA256/);
+  assert.match(remoteFrontendDeployScript, /flock -n 9/);
+  assert.match(remoteFrontendDeployScript, /atomic_point_current/);
+  assert.match(remoteFrontendDeployScript, /public asset does not match the activated release/);
+  assert.match(remoteFrontendDeployScript, /frontend rollback did not verify successfully/);
   assert.match(perfSmoke, /allowStale: false/);
   assert.match(perfSmoke, /stale response\(s\)/);
   assert.match(perfSmoke, /response content type was not JSON/);
+});
+
+test('every deploy-managed unit follows the atomic current release', async () => {
+  const systemdDirectory = new URL('../../ops/systemd/', import.meta.url);
+  const names = await readdir(systemdDirectory);
+  const services = names.filter((name) => name.endsWith('.service'));
+  const timers = names.filter((name) => name.endsWith('.timer'));
+
+  for (const service of services) {
+    const contents = await readFile(new URL(service, systemdDirectory), 'utf8');
+    assert.doesNotMatch(contents, /\/opt\/boonetools-backend\/backend/);
+    assert.doesNotMatch(contents, /\/opt\/boonetools-backend\/scripts/);
+    assert.match(contents, /EnvironmentFile=\/opt\/boonetools-backend\/config\/backend\.env/);
+  }
+
+  for (const timer of timers) {
+    const contents = await readFile(new URL(timer, systemdDirectory), 'utf8');
+    assert.doesNotMatch(contents, /^OnBootSec=/m);
+    assert.match(contents, /^(OnActiveSec|OnCalendar)=/m);
+  }
 });

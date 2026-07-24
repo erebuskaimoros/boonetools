@@ -326,6 +326,10 @@ export function midgardUsdCentsToUsd(value) {
   return parseNumeric(value) / 100;
 }
 
+export function midgardRuneBaseToRune(value) {
+  return parseNumeric(value) / 1e8;
+}
+
 function findAffiliateIntervalItem(row, thorname) {
   const target = String(thorname || '').toLowerCase();
   if (!target || !Array.isArray(row?.affiliates)) return null;
@@ -338,8 +342,21 @@ function formatUnixDayLabel(startTime) {
   return new Date(timestamp * 1000).toISOString().slice(5, 10);
 }
 
-export function buildAffiliateMidgardSeries(statsRows = [], earningsRows = [], thorname = '') {
+export function buildAffiliateMidgardSeries(
+  volumeRows = [],
+  earningsRows = [],
+  thorname = '',
+  runePriceRows = []
+) {
   const rows = new Map();
+  const runePriceByStartTime = new Map();
+  for (const row of Array.isArray(runePriceRows) ? runePriceRows : []) {
+    const startTime = String(row?.startTime ?? '');
+    const price = parseNumeric(row?.runePriceUSD, null);
+    if (startTime && Number.isFinite(price) && price > 0) {
+      runePriceByStartTime.set(startTime, price);
+    }
+  }
 
   function ensureRow(row) {
     const startTime = String(row?.startTime ?? '');
@@ -355,7 +372,12 @@ export function buildAffiliateMidgardSeries(statsRows = [], earningsRows = [], t
         label: formatUnixDayLabel(startTime),
         rollingAverageExcluded: isThorchain2026HackHalt(startTime),
         volumeUsd: 0,
+        routeVolumeUsd: 0,
+        executedLegCount: 0,
+        volumeBasis: 'executed-leg-usd',
         feesUsd: 0,
+        feesRune: 0,
+        feesRuneAvailable: false,
         count: 0
       });
     }
@@ -363,12 +385,14 @@ export function buildAffiliateMidgardSeries(statsRows = [], earningsRows = [], t
     return rows.get(key);
   }
 
-  for (const row of Array.isArray(statsRows) ? statsRows : []) {
+  for (const row of Array.isArray(volumeRows) ? volumeRows : []) {
     const point = ensureRow(row);
     if (!point) continue;
-    const affiliateItem = findAffiliateIntervalItem(row, thorname);
-    point.volumeUsd = midgardUsdCentsToUsd(affiliateItem?.volumeUSD ?? row.totalVolumeUSD ?? row.volumeUSD);
-    point.count = parseNumeric(affiliateItem?.count ?? row.count);
+    point.volumeUsd = parseNumeric(row?.legVolumeUsd);
+    point.routeVolumeUsd = parseNumeric(row?.routeVolumeUsd);
+    point.executedLegCount = parseNumeric(row?.executedLegCount);
+    point.volumeBasis = String(row?.volumeBasis || 'executed-leg-usd');
+    point.count = parseNumeric(row?.routeCount ?? row?.count);
   }
 
   for (const row of Array.isArray(earningsRows) ? earningsRows : []) {
@@ -378,18 +402,49 @@ export function buildAffiliateMidgardSeries(statsRows = [], earningsRows = [], t
     point.feesUsd = midgardUsdCentsToUsd(
       affiliateItem?.earningsUSD ?? row.totalEarningsUSD ?? row.earningsUSD
     );
+    const rawFeesRune =
+      affiliateItem?.earningsRUNE ??
+      row.totalEarningsRune ??
+      row.earningsRUNE;
+    point.feesRuneAvailable =
+      rawFeesRune !== undefined &&
+      rawFeesRune !== null &&
+      String(rawFeesRune) !== '';
+    point.feesRune = midgardRuneBaseToRune(rawFeesRune);
     point.count = Math.max(point.count, parseNumeric(affiliateItem?.count ?? row.count));
   }
 
   const points = Array.from(rows.values())
-    .map((point) => ({
-      ...point,
-      rateBps: point.volumeUsd > 0 ? (point.feesUsd / point.volumeUsd) * 10000 : null
-    }))
+    .map((point) => {
+      const historicalRunePriceUsd = runePriceByStartTime.get(point.startTime) ?? null;
+      const rateFeesUsd = point.feesRuneAvailable
+        ? point.feesRune === 0
+          ? 0
+          : historicalRunePriceUsd
+            ? point.feesRune * historicalRunePriceUsd
+            : null
+        : null;
+      return {
+        ...point,
+        historicalRunePriceUsd,
+        rateFeesUsd,
+        rateBps:
+          point.volumeUsd > 0 && rateFeesUsd !== null
+            ? (rateFeesUsd / point.volumeUsd) * 10000
+            : null
+      };
+    })
     .sort((a, b) => parseNumeric(a.startTime) - parseNumeric(b.startTime));
 
   const totalVolumeUsd = points.reduce((sum, point) => sum + point.volumeUsd, 0);
   const totalFeesUsd = points.reduce((sum, point) => sum + point.feesUsd, 0);
+  const rateFeesComplete = points.every(
+    (point) => point.volumeUsd <= 0 || point.rateFeesUsd !== null
+  );
+  const totalRateFeesUsd = points.reduce(
+    (sum, point) => sum + (Number(point.rateFeesUsd) || 0),
+    0
+  );
   const totalCount = points.reduce((sum, point) => sum + point.count, 0);
 
   return {
@@ -400,17 +455,209 @@ export function buildAffiliateMidgardSeries(statsRows = [], earningsRows = [], t
     points,
     totalVolumeUsd,
     totalFeesUsd,
-    totalRateBps: totalVolumeUsd > 0 ? (totalFeesUsd / totalVolumeUsd) * 10000 : null,
-    totalCount
+    totalRateFeesUsd: rateFeesComplete ? totalRateFeesUsd : null,
+    totalRateBps:
+      totalVolumeUsd > 0 && rateFeesComplete
+        ? (totalRateFeesUsd / totalVolumeUsd) * 10000
+        : null,
+    totalCount,
+    volumeBasis: 'executed-leg-usd',
+    rateFeeBasis: 'historical-rune-usd'
   };
 }
 
-export function buildAffiliateTrendView(series = {}, count = 90, rollingWindows = [30, 90, 180]) {
+export function buildAffiliateTransactionView(transactions = [], dailyPoints = []) {
+  const dailyByStartTime = new Map();
+  for (const point of Array.isArray(dailyPoints) ? dailyPoints : []) {
+    const startTime = String(point?.startTime || '');
+    if (startTime) dailyByStartTime.set(startTime, point);
+  }
+
+  const rows = (Array.isArray(transactions) ? transactions : [])
+    .map((transaction) => {
+      const dateMs = parseNumeric(transaction?.dateMs);
+      const dayStart = dateMs > 0
+        ? String(Math.floor(dateMs / (24 * 60 * 60 * 1000)) * 24 * 60 * 60)
+        : '';
+      const dailyPoint = dailyByStartTime.get(dayStart) || null;
+      const liquidityFeeRune = parseNumeric(transaction?.liquidityFeeRune);
+      const volumeUsd = parseNumeric(transaction?.volumeUsd);
+      const historicalRunePriceUsd = parseNumeric(dailyPoint?.historicalRunePriceUsd, null);
+      const dailyFeesRune = parseNumeric(dailyPoint?.feesRune);
+      const dailyFeesUsd = parseNumeric(dailyPoint?.feesUsd);
+      const displayRunePriceUsd = dailyFeesRune > 0
+        ? dailyFeesUsd / dailyFeesRune
+        : historicalRunePriceUsd;
+      const feesUsd = Number.isFinite(displayRunePriceUsd) && displayRunePriceUsd > 0
+        ? liquidityFeeRune * displayRunePriceUsd
+        : null;
+      const rateFeesUsd = Number.isFinite(historicalRunePriceUsd) && historicalRunePriceUsd > 0
+        ? liquidityFeeRune * historicalRunePriceUsd
+        : null;
+
+      return {
+        ...transaction,
+        volumeUsd,
+        liquidityFeeRune,
+        historicalRunePriceUsd,
+        displayRunePriceUsd,
+        feesUsd,
+        rateFeesUsd,
+        realizedFeeBps:
+          volumeUsd > 0 && rateFeesUsd !== null
+            ? (rateFeesUsd / volumeUsd) * 10000
+            : null
+      };
+    })
+    .sort((left, right) => (
+      right.volumeUsd - left.volumeUsd ||
+      parseNumeric(right.dateMs) - parseNumeric(left.dateMs) ||
+      String(left.txId || '').localeCompare(String(right.txId || ''))
+    ));
+
+  const totalVolumeUsd = rows.reduce((sum, row) => sum + row.volumeUsd, 0);
+  const totalFeesUsd = rows.reduce((sum, row) => sum + (Number(row.feesUsd) || 0), 0);
+  const rateFeesComplete = rows.every(
+    (row) => row.volumeUsd <= 0 || row.rateFeesUsd !== null
+  );
+  const totalRateFeesUsd = rows.reduce(
+    (sum, row) => sum + (Number(row.rateFeesUsd) || 0),
+    0
+  );
+
+  return {
+    rows,
+    totalVolumeUsd,
+    totalFeesUsd,
+    totalRateFeesUsd: rateFeesComplete ? totalRateFeesUsd : null,
+    totalRateBps:
+      totalVolumeUsd > 0 && rateFeesComplete
+        ? (totalRateFeesUsd / totalVolumeUsd) * 10000
+        : null
+  };
+}
+
+function pointRateFeesUsd(point) {
+  if (Object.prototype.hasOwnProperty.call(point || {}, 'rateFeesUsd')) {
+    const value = Number(point?.rateFeesUsd);
+    return point?.rateFeesUsd !== null && Number.isFinite(value) ? value : null;
+  }
+  return Number(point?.feesUsd) || 0;
+}
+
+function affiliateBucketIdentity(point, index, bucket) {
+  const timestamp = parseNumeric(point?.startTime);
+  if (!timestamp || bucket === 'day') {
+    return {
+      key: `day:${point?.key || point?.label || index}`,
+      label: point?.label || '--'
+    };
+  }
+
+  const date = new Date(timestamp * 1000);
+  if (bucket === 'week') {
+    const dayOffset = (date.getUTCDay() + 6) % 7;
+    date.setUTCDate(date.getUTCDate() - dayOffset);
+    const isoDate = date.toISOString().slice(0, 10);
+    return { key: `week:${isoDate}`, label: `W ${isoDate.slice(5)}` };
+  }
+
+  const month = date.toISOString().slice(0, 7);
+  return { key: `month:${month}`, label: month };
+}
+
+function bucketAffiliateTrendPoints(points, rollingVolumeUsd, bucket) {
+  if (bucket === 'day') {
+    return { points, rollingVolumeUsd };
+  }
+
+  const groups = new Map();
+  const rollingWindows = Object.keys(rollingVolumeUsd);
+
+  points.forEach((point, index) => {
+    const identity = affiliateBucketIdentity(point, index, bucket);
+    if (!groups.has(identity.key)) {
+      groups.set(identity.key, {
+        ...point,
+        key: identity.key,
+        label: identity.label,
+        volumeUsd: 0,
+        feesUsd: 0,
+        rateFeesUsd: 0,
+        rateFeesComplete: true,
+        count: 0,
+        dayCount: 0,
+        rollingSums: Object.fromEntries(rollingWindows.map((window) => [window, 0])),
+        rollingCounts: Object.fromEntries(rollingWindows.map((window) => [window, 0]))
+      });
+    }
+
+    const group = groups.get(identity.key);
+    group.volumeUsd += Number(point?.volumeUsd) || 0;
+    group.feesUsd += Number(point?.feesUsd) || 0;
+    const rateFeesUsd = pointRateFeesUsd(point);
+    if (rateFeesUsd === null) {
+      if ((Number(point?.volumeUsd) || 0) > 0) group.rateFeesComplete = false;
+    } else {
+      group.rateFeesUsd += rateFeesUsd;
+    }
+    group.count += Number(point?.count) || 0;
+    group.dayCount += 1;
+    group.endTime = point?.endTime || group.endTime;
+    group.rollingAverageExcluded =
+      Boolean(group.rollingAverageExcluded) && Boolean(point?.rollingAverageExcluded);
+
+    for (const window of rollingWindows) {
+      const value = rollingVolumeUsd[window]?.[index];
+      if (value !== null && value !== undefined && Number.isFinite(Number(value))) {
+        group.rollingSums[window] += Number(value);
+        group.rollingCounts[window] += 1;
+      }
+    }
+  });
+
+  const bucketedPoints = [...groups.values()].map((group) => {
+    const {
+      rollingSums: _rollingSums,
+      rollingCounts: _rollingCounts,
+      rateFeesComplete,
+      ...point
+    } = group;
+    const rateFeesUsd = rateFeesComplete ? point.rateFeesUsd : null;
+    return {
+      ...point,
+      rateFeesUsd,
+      rateBps:
+        point.volumeUsd > 0 && rateFeesUsd !== null
+          ? (rateFeesUsd / point.volumeUsd) * 10000
+          : null
+    };
+  });
+  const bucketedRollingVolumeUsd = Object.fromEntries(rollingWindows.map((window) => [
+    window,
+    [...groups.values()].map((group) => (
+      group.rollingCounts[window] > 0 ? group.rollingSums[window] : null
+    ))
+  ]));
+
+  return {
+    points: bucketedPoints,
+    rollingVolumeUsd: bucketedRollingVolumeUsd
+  };
+}
+
+export function buildAffiliateTrendView(
+  series = {},
+  count = 90,
+  rollingWindows = [30, 90, 180],
+  bucket = 'day'
+) {
   const sourcePoints = Array.isArray(series?.points) ? series.points : [];
   const visibleCount = Math.max(1, Math.floor(parseNumeric(count, sourcePoints.length || 1)));
   const startIndex = Math.max(0, sourcePoints.length - visibleCount);
-  const points = sourcePoints.slice(startIndex);
-  const rollingVolumeUsd = {};
+  const visiblePoints = sourcePoints.slice(startIndex);
+  const dailyRollingVolumeUsd = {};
+  const normalizedBucket = ['day', 'week', 'month'].includes(bucket) ? bucket : 'day';
 
   for (const rawWindow of new Set(Array.isArray(rollingWindows) ? rollingWindows : [])) {
     const windowDays = Math.max(1, Math.floor(parseNumeric(rawWindow, 1)));
@@ -442,11 +689,25 @@ export function buildAffiliateTrendView(series = {}, count = 90, rollingWindows 
       }
     }
 
-    rollingVolumeUsd[windowDays] = averages.slice(startIndex);
+    dailyRollingVolumeUsd[windowDays] = averages.slice(startIndex);
   }
 
+  const bucketed = bucketAffiliateTrendPoints(
+    visiblePoints,
+    dailyRollingVolumeUsd,
+    normalizedBucket
+  );
+  const points = bucketed.points;
+  const rollingVolumeUsd = bucketed.rollingVolumeUsd;
   const totalVolumeUsd = points.reduce((sum, point) => sum + (Number(point?.volumeUsd) || 0), 0);
   const totalFeesUsd = points.reduce((sum, point) => sum + (Number(point?.feesUsd) || 0), 0);
+  const rateFeesComplete = points.every(
+    (point) => (Number(point?.volumeUsd) || 0) <= 0 || pointRateFeesUsd(point) !== null
+  );
+  const totalRateFeesUsd = points.reduce(
+    (sum, point) => sum + (pointRateFeesUsd(point) || 0),
+    0
+  );
   const totalCount = points.reduce((sum, point) => sum + (Number(point?.count) || 0), 0);
 
   return {
@@ -458,9 +719,14 @@ export function buildAffiliateTrendView(series = {}, count = 90, rollingWindows 
     points,
     totalVolumeUsd,
     totalFeesUsd,
-    totalRateBps: totalVolumeUsd > 0 ? (totalFeesUsd / totalVolumeUsd) * 10000 : null,
+    totalRateFeesUsd: rateFeesComplete ? totalRateFeesUsd : null,
+    totalRateBps:
+      totalVolumeUsd > 0 && rateFeesComplete
+        ? (totalRateFeesUsd / totalVolumeUsd) * 10000
+        : null,
     totalCount,
-    sourcePointCount: sourcePoints.length
+    sourcePointCount: sourcePoints.length,
+    bucket: normalizedBucket
   };
 }
 

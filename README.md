@@ -163,7 +163,10 @@ BooneTools deploys must be run from the BooneTools website checkout, not from th
 cd /Users/boonewheeler/Desktop/Projects/THORChain/boonetools/website
 ```
 
-If the broader THORChain/Thornode worktree is dirty, use a clean BooneTools checkout/worktree for the intended patch. Do not work around that by manually deploying from the wrong repo.
+The guarded scripts require clean, CI-green `main` matching `origin/main`. If
+the broader THORChain/Thornode worktree is dirty, use a clean BooneTools
+checkout/worktree for the intended patch. Do not work around that by manually
+deploying from the wrong repo.
 
 The live frontend is served from:
 
@@ -188,6 +191,11 @@ Backend deploy script:
 ```bash
 npm run boonetools:deploy:backend
 ```
+
+Both flows use checksummed immutable releases, one server-wide deployment lock,
+an atomic `current` symlink, post-switch health gates, and verified automatic
+rollback. BooneTools application deploys do not modify the host-wide Caddy
+configuration.
 
 After a frontend deploy, verify the built bundle still contains the expected API base:
 

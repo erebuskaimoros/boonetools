@@ -13,7 +13,14 @@ function roundUsd(value) {
   return Math.round(value * 100) / 100;
 }
 
-export function getRapidSwapComparableVolumeUsd(row) {
+export const RAPID_SWAP_VOLUME_BASIS = 'executed-leg-usd';
+
+export function getRapidSwapLegVolumeUsd(row) {
+  const cachedLegVolume = Number(row?.leg_volume_usd);
+  if (Number.isFinite(cachedLegVolume)) {
+    return roundUsd(cachedLegVolume);
+  }
+
   const cachedVolume = Number(row?.comparable_volume_usd);
   if (Number.isFinite(cachedVolume)) {
     return roundUsd(cachedVolume);
@@ -35,11 +42,31 @@ export function getRapidSwapComparableVolumeUsd(row) {
   return roundUsd(inputUsd || outputUsd);
 }
 
-export function sumRapidSwapComparableVolumeUsd(rows) {
+// Compatibility alias for the persisted column's historical name.
+export function getRapidSwapComparableVolumeUsd(row) {
+  return getRapidSwapLegVolumeUsd(row);
+}
+
+export function getRapidSwapRouteVolumeUsd(row) {
+  const cachedRouteVolume = Number(row?.route_volume_usd);
+  if (Number.isFinite(cachedRouteVolume)) {
+    return roundUsd(cachedRouteVolume);
+  }
+
+  const inputUsd = safeNumber(row?.input_estimated_usd, 0);
+  const outputUsd = safeNumber(row?.output_estimated_usd, 0);
+  return roundUsd(inputUsd || outputUsd);
+}
+
+export function sumRapidSwapLegVolumeUsd(rows) {
   return roundUsd(
     (Array.isArray(rows) ? rows : []).reduce(
-      (sum, row) => sum + getRapidSwapComparableVolumeUsd(row),
+      (sum, row) => sum + getRapidSwapLegVolumeUsd(row),
       0
     )
   );
+}
+
+export function sumRapidSwapComparableVolumeUsd(rows) {
+  return sumRapidSwapLegVolumeUsd(rows);
 }

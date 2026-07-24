@@ -97,18 +97,19 @@ if (violations.length > 0) {
 }
 
 const smokeModules = [
-  ['shared/rapid-swaps/backend.js', 'fetchRapidSwapRows'],
-  ['shared/rapid-swaps/ingestion.js', 'buildRapidSwapCanonicalScanPlan'],
-  ['shared/rapid-swaps/model.js', 'normalizeRapidSwapAction'],
-  ['shared/rapid-swaps/reconciliation.js', 'normalizeRapidSwapHint'],
-  ['shared/rapid-swaps/volume.js', 'getRapidSwapComparableVolumeUsd'],
-  ['backend/src/shared/rapid-swaps.js', 'fetchRapidSwapRows']
+  ['shared/rapid-swaps/backend.js', 'fetchRapidSwapRows', 'function'],
+  ['shared/rapid-swaps/ingestion.js', 'buildRapidSwapCanonicalScanPlan', 'function'],
+  ['shared/rapid-swaps/model.js', 'normalizeRapidSwapAction', 'function'],
+  ['shared/rapid-swaps/reconciliation.js', 'normalizeRapidSwapHint', 'function'],
+  ['shared/rapid-swaps/volume.js', 'getRapidSwapLegVolumeUsd', 'function'],
+  ['shared/dynamic-fees/affiliate-volume.js', 'EXECUTED_LEG_VOLUME_BASIS', 'string'],
+  ['backend/src/shared/rapid-swaps.js', 'fetchRapidSwapRows', 'function']
 ];
 
-for (const [relativePath, expectedExport] of smokeModules) {
+for (const [relativePath, expectedExport, expectedType] of smokeModules) {
   const module = await import(pathToFileURL(path.join(repoRoot, relativePath)).href);
-  if (typeof module[expectedExport] !== 'function') {
-    throw new Error(`${relativePath} is missing expected export ${expectedExport}`);
+  if (typeof module[expectedExport] !== expectedType) {
+    throw new Error(`${relativePath} is missing ${expectedType} export ${expectedExport}`);
   }
 }
 

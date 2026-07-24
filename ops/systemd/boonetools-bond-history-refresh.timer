@@ -2,7 +2,7 @@
 Description=Process queued BooneTools bond history refreshes every minute
 
 [Timer]
-OnBootSec=45
+OnActiveSec=45s
 OnUnitActiveSec=1min
 Persistent=true
 Unit=boonetools-bond-history-refresh.service

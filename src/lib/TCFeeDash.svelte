@@ -566,7 +566,7 @@
         <div class="block-head secondary-chart-head">
           <div class="block-title">
             <span class="block-marker block-marker--amber">▌</span>
-            <span>LIQUIDITY FEE INCOME / THORCHAIN SWAP VOLUME</span>
+            <span>LIQUIDITY FEE INCOME / THORCHAIN VOLUME</span>
           </div>
           <div class="meta-strip">
             <span>[{granularity}]</span>
@@ -595,7 +595,7 @@
           >
             <canvas
               bind:this={incomeVolumeCanvas}
-              aria-label="THORChain liquidity fee income divided by THORChain swap volume over time"
+              aria-label="THORChain liquidity fee income divided by THORChain volume over time"
             ></canvas>
             {#if brush.active && brush.chartType === 'income-volume'}
               {@const left = Math.min(brush.startX, brush.currentX)}
@@ -607,7 +607,7 @@
             {/if}
           </div>
         {:else}
-          <div class="income-volume-state">SYNCING MIDGARD SWAP VOLUME HISTORY</div>
+          <div class="income-volume-state">SYNCING MIDGARD VOLUME HISTORY</div>
         {/if}
       </div>
 

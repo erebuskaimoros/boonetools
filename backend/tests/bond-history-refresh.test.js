@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  claimBondHistoryRefresh,
   completeBondHistoryRefresh,
   enqueueBondHistoryRefresh,
   failBondHistoryRefresh
@@ -32,6 +33,46 @@ test('enqueueBondHistoryRefresh normalizes the queue identity', async () => {
   assert.match(calls[0].sql, /status in \('completed', 'failed'\) then 0/i);
   assert.match(calls[0].sql, /status = 'pending' then bond_history_refresh_queue\.available_at/i);
   assert.match(calls[0].sql, /excluded\.include_bond_txs\s+and not bond_history_refresh_queue\.include_bond_txs then now\(\)/i);
+});
+
+test('claimBondHistoryRefresh uses JavaScript-safe timestamp precision for its claim token', async () => {
+  const calls = [];
+  const client = {
+    query: async (sql) => {
+      calls.push(sql);
+      if (/select bond_address/i.test(sql)) {
+        return {
+          rows: [{
+            bond_address: 'thor1bond',
+            scope: 'current',
+            include_bond_txs: false,
+            attempts: 0
+          }]
+        };
+      }
+      if (/update bond_history_refresh_queue/i.test(sql)) {
+        return {
+          rows: [{
+            bond_address: 'thor1bond',
+            scope: 'current',
+            started_at: new Date('2026-07-24T02:05:10.960Z')
+          }]
+        };
+      }
+      return { rows: [] };
+    },
+    release() {}
+  };
+
+  const result = await claimBondHistoryRefresh({
+    getClient: async () => client
+  });
+
+  assert.equal(result.bond_address, 'thor1bond');
+  const claimSql = calls.find((sql) => /update bond_history_refresh_queue/i.test(sql));
+  assert.match(claimSql, /started_at = date_trunc\('milliseconds', now\(\)\)/i);
+  assert.match(claimSql, /requested_at::text as requested_at/i);
+  assert.match(claimSql, /started_at::text as started_at/i);
 });
 
 test('runBondHistoryRefreshQueue processes a claimed job under its address lock', async () => {

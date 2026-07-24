@@ -18,6 +18,11 @@ the same model. It never replaces Postgres as source of truth: scheduler reads
 bypass it, publication invalidates it, and freshness/age are recomputed for
 every response.
 
+Volume-producing read models follow the canonical accounting contract in
+[`volume-accounting.md`](./volume-accounting.md). Backend aggregates always use
+executed-leg volume; any route-notional UI exception is an explicit,
+presentation-only field.
+
 ## Durable models
 
 | Public endpoint | Model key | Publisher | Cadence / TTL |
@@ -94,9 +99,11 @@ npm run perf:smoke -- --base http://127.0.0.1:8787/functions/v1 --endpoint statu
 
 ## Deployment safety
 
-The backend deploy snapshots the backend/shared trees, installed BooneTools
-systemd units and their enabled/active state, plus the active Caddy config. It
-quiesces writers, applies additive migrations, installs and primes models in
-dependency order (Node Votes before Status), reloads compression, then runs the
-public performance gates. Any failure after quiescing restores those snapshots,
-restarts the previous API, restores prior unit state, and reloads prior Caddy.
+The backend deploy creates a checksummed immutable release, installs its
+dependencies before production mutation, and serializes backend/frontend
+activation through one host lock. It quiesces writers only for migration and
+cutover, atomically changes `/opt/boonetools-backend/current`, primes models in
+dependency order, verifies every timer's next trigger, and runs public
+performance and all-domain health gates. Failure after cutover switches the
+symlink and systemd manifest back to the previous verified release. Caddy is
+owned by Web Ops and is not modified or reloaded by an application deploy.

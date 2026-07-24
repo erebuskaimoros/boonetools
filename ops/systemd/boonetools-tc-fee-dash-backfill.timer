@@ -2,7 +2,7 @@
 Description=Kick off BooneTools TC Fee Dash backfill
 
 [Timer]
-OnBootSec=20min
+OnActiveSec=20min
 OnUnitActiveSec=6h
 RandomizedDelaySec=30min
 Unit=boonetools-tc-fee-dash-backfill.service

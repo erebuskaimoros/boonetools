@@ -66,6 +66,30 @@ rollups. The Vote Tracker compares that roster with each key's current voter
 addresses so a consensus shortfall can list active node operators that have no
 current vote without repeating the full roster inside every vote-key row.
 
+The public `/functions/v1/dynamic-fee-transactions` endpoint powers the
+click-to-inspect ADR26 epoch drawer. Midgard supplies the matching action list,
+then THORNode RPC swap events supply the selected pair leg's actual
+`liquidity_fee_in_rune` and RUNE volume inside that epoch. Sealed responses are
+cached for 90 days because their underlying block events are immutable; live
+responses use a 15-second cache. This avoids assigning Midgard's whole-route
+fee to every pair in double, streaming, or affiliate-conversion swaps.
+
+The public `/functions/v1/dynamic-fee-affiliate-volume` endpoint supplies
+canonical affiliate trend volume. It derives route input notional from Midgard
+actions, counts each pool in `action.pools` as one executed leg, and returns
+both `legVolumeUsd` and the separate `routeVolumeUsd` presentation value.
+Selected day, week, and month chart buckets can opt into the same bounded
+action scan with `include_transactions=true`; those responses add
+volume-sorted route details and whole-route liquidity fees without bloating the
+default 400-day chart response. Transaction detail is capped at 31 days.
+Responses use persistent and single-flight caches because this is a bounded
+historical drill-down rather than a dashboard summary read model.
+
+All backend volume producers follow
+[`volume-accounting.md`](./volume-accounting.md): aggregates and fee-rate
+denominators use executed-leg volume, while intentional route-notional display
+values remain separate.
+
 The public `/functions/v1/app-layer-base-layer-earnings` endpoint powers lane
 01 of the App Layer dashboard. Migration `023_rujira_base_layer_earnings.sql`
 stores one midnight balance baseline and one replaceable accrual row per UTC
@@ -123,6 +147,11 @@ BOONETOOLS_DB_USER=boonetools
 BOONETOOLS_DB_PASSWORD=...
 ```
 
+Production configuration is server-owned at
+`/opt/boonetools-backend/config/backend.env`, with mode `0640` and ownership
+`root:deploy`. Deploys never place secrets in SSH arguments or copy a local
+`.env` over that file.
+
 ## Deploy
 
 ```bash
@@ -131,16 +160,19 @@ npm run boonetools:deploy:backend
 
 That script:
 
-1. Snapshots the current backend/shared tree, systemd unit state, and Caddy config, then quiesces writer timers and listeners
-2. Syncs backend code, the neutral `shared/` domain package, scripts, and ops assets to `/opt/boonetools-backend`; production does not copy or import frontend `src/` modules
-3. Installs backend dependencies and starts the dedicated Postgres container
-4. Applies each canonical DB migration and its applied marker in one transaction
-5. Installs/restarts the backend API, isolated read-model publishers, schedulers, Bond History refresh worker, and backup timer
-6. Primes dependency-ordered snapshots, reloads compressed delivery, and enforces public latency/payload gates
+1. Requires a clean `main` commit matching `origin/main` with a successful GitHub Actions `verify` check
+2. Creates and checksums an immutable commit artifact
+3. Acquires the server-wide BooneTools deployment lock
+4. Stages code and production dependencies under `/opt/boonetools-backend/releases/<commit>`
+5. Confirms the existing public baseline, quiesces writers, and applies backward-compatible migrations
+6. Installs the release's exact systemd manifest and atomically switches `/opt/boonetools-backend/current`
+7. Restarts listeners, primes read models, verifies that every timer has a future trigger, and runs API, performance, and all-domain health gates
 
-If deployment exits after writers are quiesced, the EXIT trap restores the
-snapshotted backend/shared tree, prior systemd files and active/enabled state,
-the previous API process, and the prior Caddy config.
+If any post-switch gate fails, the deploy atomically restores the previous
+release, reinstalls its unit manifest, restarts it, and verifies both API and
+public-route health. At least three immutable releases are retained by default.
+Migrations must use expand/contract compatibility because schema changes are
+forward-only during application rollback.
 
 Cached Bond History requests enqueue one refresh per address and scope in
 `bond_history_refresh_queue`. `boonetools-bond-history-refresh.timer` drains
@@ -148,6 +180,9 @@ that queue every minute. Normal request handlers never perform historical
 provider scans, including on cold misses: they return `202` until the worker
 has materialized a cache row. The frontend polls `refresh=status`, which reads
 the cache without re-enqueueing work or disturbing retry backoff.
+Maintenance timers use `OnActiveSec` for their initial activation so restarting
+them on a long-running host always produces a next trigger; `OnBootSec` must
+not be used for deploy-restarted timers.
 
 Migration `026_event_provenance.sql` gives Rapid Swaps, node votes, and Rujira
 Reserve payments a unique canonical identity plus per-provider observation
@@ -174,9 +209,11 @@ Rapid-Swap websocket ingestion is disabled by default in the shared
 enabled. The deploy keeps that shared process running whenever either lane is
 enabled; the Rapid scheduler/live tail remains its normal fresh-data path.
 
-Deploy validates, installs, and reloads
-`ops/caddy/Caddyfile.boone.tools` automatically before running the compressed
-public performance gate.
+The host-wide `/etc/caddy/Caddyfile` is owned and deployed independently by Web
+Ops because it also serves MemeMap, The AI Guys, webmail, traffic reports, and
+Landlord. BooneTools application deploys do not modify or reload Caddy. They
+verify every public route after activation and must never install the app-only
+`ops/caddy/Caddyfile.boone.tools` over the host-wide file.
 
 ## Notes
 

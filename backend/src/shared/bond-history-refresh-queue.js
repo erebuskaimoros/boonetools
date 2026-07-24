@@ -106,11 +106,16 @@ export async function claimBondHistoryRefresh(dependencies = {}) {
       `update bond_history_refresh_queue
        set status = 'running',
            attempts = attempts + 1,
-           started_at = now(),
+           started_at = date_trunc('milliseconds', now()),
            completed_at = null,
            updated_at = now()
        where bond_address = $1 and scope = $2
-       returning bond_address, scope, include_bond_txs, attempts, requested_at, started_at`,
+       returning bond_address,
+                 scope,
+                 include_bond_txs,
+                 attempts,
+                 requested_at::text as requested_at,
+                 started_at::text as started_at`,
       [job.bond_address, job.scope]
     );
     await client.query('commit');

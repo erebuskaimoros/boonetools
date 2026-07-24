@@ -16,6 +16,8 @@ import { handleAppLayerBaseFees } from './handlers/app-layer-base-fees.js';
 import { handleAppLayerLiveState } from './handlers/app-layer-live-state.js';
 import { handleAppLayerReservePayments } from './handlers/app-layer-reserve-payments.js';
 import { handleBondHistory } from './handlers/bond-history.js';
+import { handleDynamicFeeAffiliateVolume } from './handlers/dynamic-fee-affiliate-volume.js';
+import { handleDynamicFeeTransactions } from './handlers/dynamic-fee-transactions.js';
 import { handleHealth } from './handlers/health.js';
 import { handleNodeopLeaderboard } from './handlers/nodeop-leaderboard.js';
 import { handleNodeopMeta } from './handlers/nodeop-meta.js';
@@ -58,6 +60,8 @@ const routes = new Map([
   ['/rapid-swaps-summary', route(handleRapidSwapsSummary, 1, 64)],
   ['/rapid-swaps-swap-history', route(handleRapidSwapsSwapHistory, 1, 64)],
   ['/bond-history', route(handleBondHistory, 4, 3)],
+  ['/dynamic-fee-affiliate-volume', route(handleDynamicFeeAffiliateVolume, 5, 2)],
+  ['/dynamic-fee-transactions', route(handleDynamicFeeTransactions, 5, 2)],
   ['/app-layer-base-layer-earnings', route(handleAppLayerBaseLayerEarnings, 1, 64)],
   ['/app-layer-base-fees', route(handleAppLayerBaseFees, 1, 64)],
   ['/app-layer-live-state', route(handleAppLayerLiveState, 1, 64)],
