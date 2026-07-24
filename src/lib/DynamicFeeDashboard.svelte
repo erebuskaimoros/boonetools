@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte';
   import Chart from 'chart.js/auto';
+  import zoomPlugin from 'chartjs-plugin-zoom';
   import { fetchJSONWithFallback, MIDGARD_ENDPOINTS } from '$lib/utils/api';
   import { booneToolsApi } from '$lib/api/boonetools.js';
   import {
@@ -17,6 +18,8 @@
     getEpochBlockRange,
     getPairFilterAsset
   } from '$lib/dynamic-fees/transactions.js';
+
+  Chart.register(zoomPlugin);
 
   const CHART = {
     green: '#00cc66',
@@ -79,6 +82,7 @@
   let renderedChartKey = '';
   let affiliateChartCanvas;
   let affiliateChartInstance = null;
+  let affiliateChartZoomed = false;
   let renderedAffiliateChartKey = '';
   let affiliateHistoryCache = {};
   let affiliateHistoryLoading = false;
@@ -748,6 +752,7 @@
   function renderAffiliateChart() {
     affiliateChartInstance?.destroy();
     affiliateChartInstance = null;
+    affiliateChartZoomed = false;
 
     if (!affiliateChartCanvas || !affiliateHistory?.points?.length) return;
 
@@ -860,6 +865,23 @@
                 return `${ctx.dataset.label}: ${formatUsd(ctx.parsed.y)}${suffix}`;
               }
             }
+          },
+          zoom: {
+            limits: { x: { minRange: 1 } },
+            zoom: {
+              mode: 'x',
+              wheel: { enabled: false },
+              pinch: { enabled: true },
+              drag: {
+                enabled: true,
+                backgroundColor: 'rgba(0, 204, 102, 0.1)',
+                borderColor: 'rgba(0, 204, 102, 0.55)',
+                borderWidth: 1
+              },
+              onZoomComplete: () => {
+                affiliateChartZoomed = true;
+              }
+            }
           }
         },
         scales: {
@@ -905,6 +927,11 @@
         }
       }
     });
+  }
+
+  function resetAffiliateChartZoom() {
+    affiliateChartInstance?.resetZoom();
+    affiliateChartZoomed = false;
   }
 
   function closeAffiliateTransactions() {
@@ -1600,6 +1627,15 @@
         </div>
       </div>
 
+      <div class="affiliate-chart-zoom-controls">
+        <span>drag to highlight + zoom · double-click resets</span>
+        <button
+          type="button"
+          disabled={!affiliateChartZoomed}
+          on:click={resetAffiliateChartZoom}
+        >[reset zoom]</button>
+      </div>
+
       <div class="chart-frame affiliate-chart-frame">
         {#if affiliateHistoryLoading}
           <div class="loading-block"><span class="loading-marker">////</span><span>loading affiliate history</span></div>
@@ -1608,8 +1644,9 @@
         {:else if affiliateHistory?.points?.length}
           <canvas
             bind:this={affiliateChartCanvas}
-            aria-label="Affiliate volume, fees, and fees per volume chart. Click a column to inspect its transactions."
-            title="Click a column to inspect its transactions"
+            aria-label="Affiliate volume, fees, and fees per volume chart. Drag to highlight and zoom. Click a column to inspect its transactions."
+            title="Drag to highlight and zoom. Click a column to inspect its transactions."
+            on:dblclick={resetAffiliateChartZoom}
           ></canvas>
         {:else}
           <div class="loading-block"><span class="loading-marker">----</span><span>no historical affiliate metrics</span></div>
@@ -2325,6 +2362,43 @@
 
   .affiliate-chart-frame {
     height: 372px;
+  }
+
+  .affiliate-chart-zoom-controls {
+    align-items: center;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin: -2px 0 8px;
+  }
+
+  .affiliate-chart-zoom-controls span,
+  .affiliate-chart-zoom-controls button {
+    color: #555;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .affiliate-chart-zoom-controls button {
+    background: transparent;
+    border: 1px solid #1a1a1a;
+    cursor: pointer;
+    padding: 4px 7px;
+  }
+
+  .affiliate-chart-zoom-controls button:hover:not(:disabled),
+  .affiliate-chart-zoom-controls button:focus-visible {
+    border-color: #00cc66;
+    color: #00cc66;
+    outline: none;
+  }
+
+  .affiliate-chart-zoom-controls button:disabled {
+    color: #333;
+    cursor: default;
+    opacity: 0.7;
   }
 
   .loading-block.err {
