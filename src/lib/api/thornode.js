@@ -8,6 +8,7 @@
 
 import { fromBaseUnit } from '../utils/blockchain.js';
 import { requestFromProviders } from './provider.js';
+import { resolveCoreSnapshotPath } from './core-snapshot.js';
 
 /**
  * API Provider configurations
@@ -102,13 +103,33 @@ class ThorNodeClient {
       requestPath += `${separator}height=${encodeURIComponent(blockHeight)}`;
     }
 
+    if (!blockHeight && String(fetchOptions.method || 'GET').toUpperCase() === 'GET') {
+      try {
+        const core = await resolveCoreSnapshotPath(path, { blockHeight });
+        if (core.handled) {
+          const data = parseJson ? core.value : String(core.value);
+          if (cache) this.cache.set(cacheKey, { data, timestamp: Date.now() });
+          return data;
+        }
+      } catch {
+        // Preserve provider failover for interactive tools if the BooneTools
+        // read-model API itself is unavailable.
+      }
+    }
+
     const pending = requestFromProviders({
       bases: [PROVIDERS.thorchain.base, PROVIDERS.fallback.base],
       path: requestPath,
       responseType: parseJson ? 'json' : 'text',
       timeoutMs,
       fetchImpl,
-      request: fetchOptions,
+      request: {
+        ...fetchOptions,
+        headers: {
+          'x-client-id': 'BooneTools',
+          ...(fetchOptions.headers || {})
+        }
+      },
       shouldStop: (error) => Number(error?.status) === 429
     }).then((data) => {
       if (cache) {

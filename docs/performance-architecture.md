@@ -9,6 +9,7 @@ cursor/page query, and return a compact response.
 
 ```text
 providers -> scheduled ingestion -> canonical Postgres tables
+          -> durable mixed-cadence THORNode core snapshot
           -> scheduled read-model publishers -> api_read_models
           -> short single-flight row cache -> public handlers -> Caddy compression
 ```
@@ -27,6 +28,7 @@ presentation-only field.
 
 | Public endpoint | Model key | Publisher | Cadence / TTL |
 | --- | --- | --- | --- |
+| internal + `/network-snapshot` | `thornode-core:v1` | `boonetools-thornode-core-snapshot` | 15s / 45s |
 | `/status-live` | `status-live:v1` | `boonetools-status-live` | 15s / 45s |
 | `/status-dashboard` | `status-dashboard:v1` | `boonetools-status-dashboard` | 1m / 150s |
 | `/treasury-snapshot` | `treasury-snapshot:v1` | `boonetools-treasury-snapshot` | 5m / 10m |
@@ -38,6 +40,14 @@ presentation-only field.
 | `/app-layer-base-fees` | `app-layer-base-fees:v1` | `boonetools-analytics-read-models` | 1m / 330s |
 | `/app-layer-reserve-payments` | `app-layer-reserve-payments:v1` | `boonetools-analytics-read-models` | 1m / 330s |
 | `/tc-fee-dash` | `tc-fee-dash:v1` | `boonetools-analytics-read-models` | 1m / 15m |
+
+The core publisher is the sole scheduled owner of reusable current THORNode
+state. It refreshes `lastblock` every 15 seconds; inbound addresses, Mimir, and
+node-Mimir state every minute; network and pools every two minutes; nodes every
+five minutes; constants every fifteen minutes; and Midgard churns every ten
+minutes. Status, Node Votes, Treasury, Rapid Swaps, NodeOp, App Layer, and
+stable browser reads consume those persisted fields instead of repeating the
+same provider requests in separate processes.
 
 The Status page merges `/status-live` into the heavier minute-scale dashboard
 snapshot. The live lane contains only current network, chain, and churn values;
@@ -57,6 +67,18 @@ sequential requests of at most 400 intervals, matching Midgard's provider cap.
 ## Response and failure contract
 
 - A failed publisher never overwrites a last-good model.
+- Provider cooldowns are shared in Postgres by provider hostname. Rate-limit or
+  breach responses cool the provider for at least one hour; ordinary transport
+  failures cool it briefly, preventing independent systemd jobs from retrying
+  the same unavailable host.
+- Every THORNode, Midgard, and RPC wrapper identifies itself with the canonical
+  `x-client-id: BooneTools` header.
+- `THORNODE_URLS` and `MIDGARD_URLS` accept ordered provider lists, so a
+  dedicated node can replace the public defaults without a release.
+- The stuck-transaction scanner persists status/details by transaction and
+  queue fingerprint, so unchanged queue entries reuse their previous lookup.
+- App Layer balance/action calls are bounded by a shared concurrency limit;
+  collector config and contract history refresh only every fifteen minutes.
 - Stale data is explicit in response metadata and `X-Boone-Cache`/age headers.
 - Strong ETags are deterministic and representation-specific for legacy and v2
   response shapes.

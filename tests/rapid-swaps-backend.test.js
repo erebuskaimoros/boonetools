@@ -6,6 +6,7 @@ import {
   MIDGARD_BASES,
   THORNODE_BASES,
   classifyRapidSwapSourceStatus,
+  configureRapidSwapProviderLifecycle,
   fetchMidgardActions,
   fetchRapidSwapRows,
   getRapidSwapRateLimitCooldownMs,
@@ -34,6 +35,34 @@ test('rapid swap backend recognizes provider rate limits and daily cooldowns', (
 
   assert.equal(isRapidSwapRateLimitError(error), true);
   assert.equal(getRapidSwapRateLimitCooldownMs(error, 60 * 60 * 1000), 60 * 60 * 1000);
+});
+
+test('rapid swap lifecycle skips a cooling provider and continues to fallback', async () => {
+  const originalFetch = global.fetch;
+  const urls = [];
+  configureRapidSwapProviderLifecycle({
+    beforeRequest: ({ base }) => {
+      if (base === MIDGARD_BASES[0]) {
+        const error = new Error('primary provider is cooling down after a rate limit');
+        error.skipProvider = true;
+        throw error;
+      }
+    }
+  });
+  global.fetch = async (url) => {
+    urls.push(url);
+    return new Response(JSON.stringify({ actions: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' }
+    });
+  };
+  try {
+    await fetchMidgardActions({ limit: 1 });
+    assert.deepEqual(urls, [`${MIDGARD_BASES[1]}/actions?type=swap&limit=1&offset=0`]);
+  } finally {
+    configureRapidSwapProviderLifecycle();
+    global.fetch = originalFetch;
+  }
 });
 
 test('classifyRapidSwapSourceStatus reports halted idle when trading and signing are paused', () => {

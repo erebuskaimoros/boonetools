@@ -45,6 +45,10 @@ const rpcFallbackRestUrl = optional(process.env.RPC_FALLBACK_REST_URL) || 'https
 const rpcArchiveRestUrl = optional(process.env.RPC_ARCHIVE_REST_URL) || 'https://rpc.thorchain.liquify.com';
 const duneApiBaseUrl = optional(process.env.DUNE_API_BASE_URL) || 'https://api.dune.com';
 const cmcApiKey = optional(process.env.CMC_API_KEY || process.env.CMC_PRO_API_KEY);
+const providerCooldownEnabled = readBool(
+  'PROVIDER_COOLDOWN_ENABLED',
+  optional(process.env.NODE_ENV).toLowerCase() === 'production'
+);
 
 export const config = Object.freeze({
   port: readInt('PORT', 8787),
@@ -54,11 +58,23 @@ export const config = Object.freeze({
       || process.env.VITE_NODEOP_API_KEY
       || process.env.VITE_RAPID_SWAPS_API_KEY
   ),
+  providerClientId: optional(process.env.BOONETOOLS_PROVIDER_CLIENT_ID) || 'BooneTools',
+  providerCooldownEnabled,
+  providerFailureCooldownMs: readInt('PROVIDER_FAILURE_COOLDOWN_SECONDS', 60) * 1000,
+  providerRateLimitCooldownMs: readInt('PROVIDER_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000,
   thornodePrimaryUrl,
   thornodeArchiveUrl,
   thornodeFallbackUrl,
+  thornodeUrls: readList('THORNODE_URLS', [
+    thornodePrimaryUrl,
+    thornodeFallbackUrl
+  ]),
   midgardUrl,
   midgardFallbackUrl,
+  midgardUrls: readList('MIDGARD_URLS', [
+    midgardUrl,
+    midgardFallbackUrl
+  ]),
   rpcRestUrl,
   rpcArchiveRestUrl,
   rpcRestUrls: readList('RPC_REST_URLS', [
@@ -94,6 +110,8 @@ export const config = Object.freeze({
   rapidSwapsLiveTailPages: readInt('RAPID_SWAPS_LIVE_TAIL_PAGES', 2),
   rapidSwapsMarketHistoryDuneQueryId: optional(process.env.RAPID_SWAPS_MARKET_HISTORY_DUNE_QUERY_ID) || '7620035',
   appLayerLiveStateTtlMs: readInt('APP_LAYER_LIVE_STATE_TTL_SECONDS', 2 * 60) * 1000,
+  appLayerStaticStateTtlMs: readInt('APP_LAYER_STATIC_STATE_TTL_SECONDS', 15 * 60) * 1000,
+  appLayerRouteConcurrency: readInt('APP_LAYER_ROUTE_CONCURRENCY', 4),
   rujiraBaseFeesMidgardUrls: readList('RUJIRA_BASE_FEES_MIDGARD_URLS', [
     midgardUrl,
     midgardFallbackUrl

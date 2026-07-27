@@ -1,5 +1,9 @@
 import { config } from '../lib/config.js';
 import { executeDuneQueryRows, formatDuneDateTime } from './dune.js';
+import { providerLifecycleHooks } from './provider-cooldown.js';
+import { configureRapidSwapProviderLifecycle } from '../../../shared/rapid-swaps/backend.js';
+
+configureRapidSwapProviderLifecycle(providerLifecycleHooks());
 
 export {
   ACTION_PAGE_LIMIT,

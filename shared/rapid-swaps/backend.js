@@ -12,6 +12,12 @@ import {
 } from './reconciliation.js';
 import { ProviderRequestError, requestFromProviders } from '../provider-client.js';
 
+let providerLifecycle = {};
+
+export function configureRapidSwapProviderLifecycle(hooks = {}) {
+  providerLifecycle = hooks && typeof hooks === 'object' ? hooks : {};
+}
+
 function readEnv(name) {
   return typeof process !== 'undefined' ? String(process.env?.[name] || '').trim() : '';
 }
@@ -20,15 +26,25 @@ function uniqueBases(values) {
   return [...new Set(values.map((value) => String(value || '').replace(/\/$/, '')).filter(Boolean))];
 }
 
-export const MIDGARD_BASES = uniqueBases([
-  readEnv('MIDGARD_URL') || 'https://gateway.liquify.com/chain/thorchain_midgard/v2',
-  readEnv('MIDGARD_FALLBACK_URL') || 'https://midgard.thorchain.network/v2'
-]);
+function envBases(name) {
+  return readEnv(name).split(',').map((value) => value.trim()).filter(Boolean);
+}
 
-export const THORNODE_BASES = uniqueBases([
-  readEnv('THORNODE_PRIMARY_URL') || 'https://gateway.liquify.com/chain/thorchain_api',
-  readEnv('THORNODE_FALLBACK_URL') || 'https://thornode.thorchain.network'
-]);
+const configuredMidgardBases = envBases('MIDGARD_URLS');
+export const MIDGARD_BASES = uniqueBases(configuredMidgardBases.length
+  ? configuredMidgardBases
+  : [
+      readEnv('MIDGARD_URL') || 'https://gateway.liquify.com/chain/thorchain_midgard/v2',
+      readEnv('MIDGARD_FALLBACK_URL') || 'https://midgard.thorchain.network/v2'
+    ]);
+
+const configuredThornodeBases = envBases('THORNODE_URLS');
+export const THORNODE_BASES = uniqueBases(configuredThornodeBases.length
+  ? configuredThornodeBases
+  : [
+      readEnv('THORNODE_PRIMARY_URL') || 'https://gateway.liquify.com/chain/thorchain_api',
+      readEnv('THORNODE_FALLBACK_URL') || 'https://thornode.thorchain.network'
+    ]);
 
 export const ACTION_PAGE_LIMIT = 50;
 export const DIRECT_RESOLUTION_HEIGHT_BUFFER = 40;
@@ -56,6 +72,18 @@ function safeBoolean(value) {
   }
 
   return ['1', 'true', 'yes'].includes(String(value || '').toLowerCase());
+}
+
+function coreSnapshotStale(snapshot, requiredFields = []) {
+  const payload = snapshot?.payload || snapshot;
+  if (!payload || snapshot?.stale || payload.stale) return true;
+  if (!payload.field_meta) return false;
+  return requiredFields.some((key) => {
+    const status = payload.field_meta[key]?.status;
+    return !Object.prototype.hasOwnProperty.call(payload, key)
+      || status === 'reused'
+      || status === 'error';
+  });
 }
 
 function getSearchParams(path) {
@@ -151,7 +179,7 @@ async function fetchWithFallback(bases, path, options = {}) {
     timeoutMs: 10_000,
     headers: {
       Accept: 'application/json',
-      'x-client-id': 'RuneTools',
+      'x-client-id': readEnv('BOONETOOLS_PROVIDER_CLIENT_ID') || 'BooneTools',
       ...headers
     },
     validateResponse: typeof validatePayload === 'function'
@@ -159,7 +187,8 @@ async function fetchWithFallback(bases, path, options = {}) {
         ? `Invalid payload for ${path}`
         : null
       : null,
-    shouldStop: isRapidSwapRateLimitError
+    ...providerLifecycle,
+    shouldStop: (error) => !error?.skipProvider && isRapidSwapRateLimitError(error)
   });
   return { payload, index: startIndex };
 }
@@ -176,11 +205,17 @@ export async function fetchThorchainTx(txId) {
   return fetchThorchain(`/thorchain/tx/${encodeURIComponent(String(txId))}`);
 }
 
-export async function fetchRapidSwapPriceIndex() {
-  const [network, pools] = await Promise.all([
-    fetchThorchain('/thorchain/network'),
-    fetchThorchain('/thorchain/pools')
-  ]);
+export async function fetchRapidSwapPriceIndex(options = {}) {
+  const core = options.coreSnapshot?.payload || options.coreSnapshot || null;
+  if (core && coreSnapshotStale(options.coreSnapshot, ['network', 'pools'])) {
+    throw new Error('Durable THORNode core snapshot is stale');
+  }
+  const [network, pools] = core
+    ? [core.network, core.pools]
+    : await Promise.all([
+        fetchThorchain('/thorchain/network'),
+        fetchThorchain('/thorchain/pools')
+      ]);
 
   return buildAssetUsdIndex(network, Array.isArray(pools) ? pools : []);
 }
@@ -359,14 +394,24 @@ export function classifyRapidSwapSourceStatus(parts = {}) {
   };
 }
 
-export async function fetchRapidSwapSourceStatus() {
+export async function fetchRapidSwapSourceStatus(options = {}) {
   const observedAt = new Date().toISOString();
-  const [mimirResult, inboundResult, lastblockResult, midgardResult] = await Promise.allSettled([
-    fetchThorchain('/thorchain/mimir'),
-    fetchThorchain('/thorchain/inbound_addresses'),
-    fetchThorchain('/thorchain/lastblock'),
-    fetchMidgardActions({ limit: 1 })
-  ]);
+  const core = options.coreSnapshot?.payload || options.coreSnapshot || null;
+  const coreStale = core
+    ? coreSnapshotStale(options.coreSnapshot, ['mimir', 'inbound_addresses', 'lastblock'])
+    : false;
+  const midgardResult = (await Promise.allSettled([fetchMidgardActions({ limit: 1 })]))[0];
+  const [mimirResult, inboundResult, lastblockResult] = core
+    ? [
+        { status: 'fulfilled', value: core.mimir || {} },
+        { status: 'fulfilled', value: core.inbound_addresses || [] },
+        { status: 'fulfilled', value: core.lastblock || [] }
+      ]
+    : await Promise.allSettled([
+        fetchThorchain('/thorchain/mimir'),
+        fetchThorchain('/thorchain/inbound_addresses'),
+        fetchThorchain('/thorchain/lastblock')
+      ]);
 
   const midgardError = settledError(midgardResult);
   const thornodeErrors = [
@@ -383,7 +428,9 @@ export async function fetchRapidSwapSourceStatus() {
     latestSwapAction: settledValue(midgardResult, { actions: [] })?.actions?.[0] || null,
     midgardRateLimited: midgardResult.status === 'rejected' && isRapidSwapRateLimitError(midgardResult.reason),
     errors: {
-      thornode: thornodeErrors.join('; '),
+      thornode: coreStale
+        ? 'Durable THORNode core snapshot is stale'
+        : thornodeErrors.join('; '),
       midgard: midgardError
     }
   });

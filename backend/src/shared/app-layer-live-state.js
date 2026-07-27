@@ -3,8 +3,12 @@ import { query } from '../db/pool.js';
 import { config } from '../lib/config.js';
 import { toIsoString } from '../lib/utils.js';
 import { ANALYTICS_READ_MODEL_KEYS } from './analytics-read-model-keys.js';
-import { publishReadModel } from './read-models.js';
+import { getReadModel, publishReadModel } from './read-models.js';
 import { fetchThorchain } from './thornode.js';
+import {
+  getThorNodeCoreSnapshot,
+  isThorNodeCoreSnapshotStale
+} from './thornode-core-snapshot.js';
 
 // The v2 snapshot adds per-collector balances and conversion actions. Keep it
 // separate from v1 so a cached pre-v2 response cannot be rendered as live
@@ -41,47 +45,29 @@ function configQuery() {
   return Buffer.from(JSON.stringify({ config: {} })).toString('base64');
 }
 
-async function smartConfig(address) {
-  const payload = await fetchThorchain(
+async function smartConfig(address, fetchThor = fetchThorchain) {
+  const payload = await fetchThor(
     `/cosmwasm/wasm/v1/contract/${address}/smart/${configQuery()}`
   );
   return payload.data || {};
 }
 
-async function smartActions(address) {
+async function smartActions(address, fetchThor = fetchThorchain) {
   const query = Buffer.from(JSON.stringify({ actions: {} })).toString('base64');
-  const payload = await fetchThorchain(
+  const payload = await fetchThor(
     `/cosmwasm/wasm/v1/contract/${address}/smart/${query}`
   );
   return Array.isArray(payload.data?.actions) ? payload.data.actions : [];
 }
 
-async function contractBalances(address) {
-  const payload = await fetchThorchain(`/cosmos/bank/v1beta1/balances/${address}`);
+async function contractBalances(address, fetchThor = fetchThorchain) {
+  const payload = await fetchThor(`/cosmos/bank/v1beta1/balances/${address}`);
   return Array.isArray(payload?.balances) ? payload.balances : [];
 }
 
-async function contractHistory(address) {
-  const payload = await fetchThorchain(`/cosmwasm/wasm/v1/contract/${address}/history`);
+async function contractHistory(address, fetchThor = fetchThorchain) {
+  const payload = await fetchThor(`/cosmwasm/wasm/v1/contract/${address}/history`);
   return Array.isArray(payload.entries) ? payload.entries : [];
-}
-
-function normalizeRouteResult(type, collector, result) {
-  if (result.status === 'fulfilled') {
-    return {
-      ok: true,
-      key: collector.key,
-      type,
-      value: result.value
-    };
-  }
-
-  return {
-    ok: false,
-    key: collector.key,
-    type,
-    error: result.reason?.message || 'unknown error'
-  };
 }
 
 function buildObject(results) {
@@ -90,6 +76,33 @@ function buildObject(results) {
       .filter((result) => result.ok)
       .map((result) => [result.key, result.value])
   );
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function run() {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await worker(items[index], index);
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(Math.max(1, Math.trunc(concurrency) || 1), items.length) },
+    run
+  ));
+  return results;
+}
+
+function timestampMs(value) {
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function routeDue(previous, type, collectorKey, nowMs) {
+  if (!['config', 'history'].includes(type)) return true;
+  const fetchedAt = timestampMs(previous?.route_fetched_at?.[type]?.[collectorKey]);
+  return fetchedAt <= 0 || nowMs - fetchedAt >= config.appLayerStaticStateTtlMs;
 }
 
 function routeWarning(failures) {
@@ -150,32 +163,88 @@ async function writeCachedSnapshot(client, payload) {
   };
 }
 
-export async function fetchAppLayerLiveStatePayload() {
-  const startedAt = new Date().toISOString();
-  const [network, pools, balanceResults, configResults, actionResults, historyResults] = await Promise.all([
-    fetchThorchain('/thorchain/network'),
-    fetchThorchain('/thorchain/pools'),
-    Promise.allSettled(collectors.map((collector) => contractBalances(collector.address))),
-    Promise.allSettled(collectors.map((collector) => smartConfig(collector.address))),
-    Promise.allSettled(collectors.map((collector) => smartActions(collector.address))),
-    Promise.allSettled(collectors.map((collector) => contractHistory(collector.address)))
-  ]);
+export async function fetchAppLayerLiveStatePayload(options = {}) {
+  const now = typeof options.now === 'function' ? options.now() : new Date();
+  const startedAt = now.toISOString();
+  const nowMs = now.getTime();
+  const previous = options.previousSnapshot || null;
+  const core = options.coreSnapshot?.payload || options.coreSnapshot || null;
+  const coreStale = isThorNodeCoreSnapshotStale(options.coreSnapshot, ['network', 'pools']);
+  const fetchThor = options.fetchThorchain || ((path) => fetchThorchain(path, {
+    cooldownClient: options.cooldownClient
+  }));
+  let network;
+  let pools;
+  if (core) {
+    if (coreStale || !core.network || !Array.isArray(core.pools)) {
+      throw new Error('Durable THORNode core snapshot is stale or incomplete');
+    }
+    network = core.network;
+    pools = core.pools;
+  } else {
+    [network, pools] = await Promise.all([
+      fetchThor('/thorchain/network'),
+      fetchThor('/thorchain/pools')
+    ]);
+  }
 
-  const balanceRows = balanceResults.map((result, index) => (
-    normalizeRouteResult('balance', collectors[index], result)
+  const routeLoaders = {
+    balance: contractBalances,
+    config: smartConfig,
+    actions: smartActions,
+    history: contractHistory
+  };
+  const tasks = collectors.flatMap((collector) => (
+    Object.keys(routeLoaders)
+      .filter((type) => routeDue(previous, type, collector.key, nowMs))
+      .map((type) => ({ type, collector }))
   ));
-  const configRows = configResults.map((result, index) => (
-    normalizeRouteResult('config', collectors[index], result)
-  ));
-  const actionRows = actionResults.map((result, index) => (
-    normalizeRouteResult('actions', collectors[index], result)
-  ));
-  const historyRows = historyResults.map((result, index) => (
-    normalizeRouteResult('history', collectors[index], result)
-  ));
+  const loaded = await mapWithConcurrency(
+    tasks,
+    options.routeConcurrency || config.appLayerRouteConcurrency,
+    async ({ type, collector }) => {
+      try {
+        const value = await routeLoaders[type](collector.address, fetchThor);
+        return { ok: true, key: collector.key, type, value };
+      } catch (error) {
+        return { ok: false, key: collector.key, type, error: error.message || 'unknown error' };
+      }
+    }
+  );
+  const loadedByRoute = new Map(loaded.map((result) => [`${result.type}:${result.key}`, result]));
+  const rowsForType = (type, previousKey) => collectors.map((collector) => {
+    const result = loadedByRoute.get(`${type}:${collector.key}`);
+    if (result?.ok) return result;
+    const previousValue = previous?.[previousKey]?.[collector.key];
+    if (previousValue !== undefined) {
+      return {
+        ok: true,
+        key: collector.key,
+        type,
+        value: previousValue,
+        reused: true,
+        error: result?.error || ''
+      };
+    }
+    return result || { ok: false, key: collector.key, type, error: 'route data is unavailable' };
+  });
+  const balanceRows = rowsForType('balance', 'collector_balances');
+  const configRows = rowsForType('config', 'configs');
+  const actionRows = rowsForType('actions', 'actions');
+  const historyRows = rowsForType('history', 'histories');
   const collectorBalances = buildObject(balanceRows);
   const failures = [...balanceRows, ...configRows, ...actionRows, ...historyRows]
-    .filter((result) => !result.ok);
+    .filter((result) => !result.ok || result.error);
+  const routeFetchedAt = Object.fromEntries(Object.keys(routeLoaders).map((type) => [
+    type,
+    Object.fromEntries(collectors.map((collector) => {
+      const result = loadedByRoute.get(`${type}:${collector.key}`);
+      return [
+        collector.key,
+        result?.ok ? startedAt : previous?.route_fetched_at?.[type]?.[collector.key] || null
+      ];
+    }))
+  ]));
 
   return {
     schema_version: 2,
@@ -189,6 +258,7 @@ export async function fetchAppLayerLiveStatePayload() {
     configs: buildObject(configRows),
     actions: buildObject(actionRows),
     histories: buildObject(historyRows),
+    route_fetched_at: routeFetchedAt,
     route_query_failures: failures.map((failure) => ({
       key: failure.key,
       type: failure.type,
@@ -200,7 +270,23 @@ export async function fetchAppLayerLiveStatePayload() {
 
 export async function refreshAppLayerLiveState() {
   return withAdvisoryLock(LOCK_KEY, async (client) => {
-    const payload = await fetchAppLayerLiveStatePayload();
+    const cachedPrevious = await readCachedSnapshot(client);
+    const previousModel = cachedPrevious ? null : await getReadModel(
+      ANALYTICS_READ_MODEL_KEYS.appLayerLiveState,
+      { client, allowStale: true, cache: false }
+    );
+    const previous = cachedPrevious || previousModel?.payload || null;
+    const coreModel = await getThorNodeCoreSnapshot({
+      client,
+      allowStale: true,
+      cache: false
+    });
+    if (!coreModel) throw new Error('Durable THORNode core snapshot is not available');
+    const payload = await fetchAppLayerLiveStatePayload({
+      previousSnapshot: previous,
+      coreSnapshot: coreModel,
+      cooldownClient: client
+    });
     const snapshot = await writeCachedSnapshot(client, payload);
     await publishReadModel(ANALYTICS_READ_MODEL_KEYS.appLayerLiveState, snapshot, {
       client,

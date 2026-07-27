@@ -1,6 +1,7 @@
 import { TtlSingleFlightCache } from '../lib/ttl-cache.js';
 import { fetchMidgardChurns } from './midgard.js';
 import { fetchThorchain } from './thornode.js';
+import { getThorNodeCoreSnapshot } from './thornode-core-snapshot.js';
 
 const SNAPSHOT_TTL_MS = 15_000;
 const snapshotCache = new TtlSingleFlightCache({ ttlMs: SNAPSHOT_TTL_MS });
@@ -71,7 +72,12 @@ async function loadNetworkSnapshot(dependencies = {}) {
       : 'Invalid Midgard churn response';
   }
 
-  if (Object.keys(errors).length === results.length) {
+  const thornodeSuccesses = results
+    .slice(0, SNAPSHOT_FIELDS.length)
+    .filter((result, index) => (
+      result.status === 'fulfilled' && SNAPSHOT_FIELDS[index].valid(result.value)
+    )).length;
+  if (thornodeSuccesses === 0) {
     throw new AggregateError(
       results.filter((result) => result.status === 'rejected').map((result) => result.reason),
       `Network snapshot unavailable: ${Object.values(errors).join('; ')}`
@@ -95,7 +101,45 @@ async function loadNetworkSnapshot(dependencies = {}) {
   };
 }
 
+function fromCoreReadModel(model) {
+  const payload = model?.payload;
+  if (!payload) throw new Error('Durable THORNode core snapshot is not available');
+  const errors = payload.errors || {};
+  const warnings = Array.isArray(payload.warnings) ? payload.warnings : [];
+  return {
+    inbound_addresses: Array.isArray(payload.inbound_addresses) ? payload.inbound_addresses : [],
+    nodes: Array.isArray(payload.nodes) ? payload.nodes : [],
+    mimir: payload.mimir && typeof payload.mimir === 'object' ? payload.mimir : {},
+    lastblock: Array.isArray(payload.lastblock) ? payload.lastblock : [],
+    network: payload.network && typeof payload.network === 'object' ? payload.network : {},
+    pools: Array.isArray(payload.pools) ? payload.pools : [],
+    constants: payload.constants && typeof payload.constants === 'object' ? payload.constants : {},
+    node_mimirs: payload.node_mimirs ?? {},
+    churns: Array.isArray(payload.churns) ? payload.churns : [],
+    field_meta: payload.field_meta || {},
+    as_of: payload.as_of || model.generatedAt,
+    source_updated_at: payload.source_updated_at || model.sourceUpdatedAt,
+    source: payload.source || { live: 'thornode', churns: 'midgard' },
+    errors,
+    warnings,
+    partial: Boolean(payload.partial || warnings.length),
+    stale: Boolean(model.stale || payload.stale),
+    warning: warnings.join('; ')
+  };
+}
+
 export async function getNetworkSnapshot(options = {}) {
+  const hasLiveDependencies = Boolean(
+    options.cache || options.fetchThorchain || options.fetchMidgardChurns
+  );
+  if (!hasLiveDependencies) {
+    const model = await (options.getThorNodeCoreSnapshot || getThorNodeCoreSnapshot)({
+      client: options.client,
+      allowStale: true,
+      cache: options.readModelCache
+    });
+    return fromCoreReadModel(model);
+  }
   const cache = options.cache || snapshotCache;
   return cache.getOrLoad('network-status', () => loadNetworkSnapshot(options), {
     forceRefresh: Boolean(options.forceRefresh),

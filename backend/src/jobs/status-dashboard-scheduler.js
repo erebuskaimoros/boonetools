@@ -52,7 +52,10 @@ function latestSourceTimestamp(values) {
 export async function buildStatusDashboardSnapshot(options = {}) {
   const loadNetwork = options.loadLiveNetwork || (() => loadLiveNetwork(options.client));
   const loadVotes = options.loadVoteDashboard || loadVoteDashboard;
-  const loadStuck = options.loadStuckDashboard || buildStuckTransactionSnapshot;
+  const loadStuck = options.loadStuckDashboard || (() => buildStuckTransactionSnapshot(
+    undefined,
+    { client: options.client }
+  ));
   const loadBlockProduction = options.loadBlockProductionHistory || (() => (
     options.client
       ? refreshBlockProductionHistory(options.client, options.blockProductionOptions)

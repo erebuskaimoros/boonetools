@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { classifyStuckTransactions } from '../src/shared/stuck-transactions.js';
+import {
+  buildStuckTransactionSnapshot,
+  classifyStuckTransactions
+} from '../src/shared/stuck-transactions.js';
 
 const TX_ID = 'CF8793762848DD0712843397786D8AAB635D94F74334DDC86E1730B071BC0A80';
 const MAIN_COIN = {
@@ -90,7 +93,7 @@ test('does not classify paid, within-window, or signing-halted outbounds', () =>
   assert.equal(classifyStuckTransactions(paidInput).transactions.length, 0);
 
   const recentInput = baseInput();
-  recentInput.statuses.get(TX_ID).stages.outbound_signed.blocks_since_scheduled = 319;
+  recentInput.statuses.get(TX_ID).stages.outbound_signed.scheduled_outbound_height = 9681;
   assert.equal(classifyStuckTransactions(recentInput).transactions.length, 0);
 
   const haltedInput = baseInput({ mimir: { HALTSIGNINGTRON: 1 } });
@@ -159,4 +162,57 @@ test('excludes active limit orders and currently halted streaming swaps', () => 
     mimir: { STREAMINGSWAPPAUSE: 1 }
   });
   assert.equal(classifyStuckTransactions(pausedInput).transactions.length, 0);
+});
+
+test('stuck transaction scans reuse unchanged per-hash lookups across scheduler processes', async () => {
+  const lookupRows = new Map();
+  const client = {
+    async query(sql, params = []) {
+      if (sql.includes('select tx_id, queue_fingerprint')) {
+        const lookupType = params[0];
+        const hashes = params[1];
+        return {
+          rows: hashes.flatMap((hash) => {
+            const row = lookupRows.get(`${lookupType}:${hash}`);
+            return row ? [row] : [];
+          })
+        };
+      }
+      if (sql.includes('jsonb_to_recordset')) {
+        for (const row of JSON.parse(params[0])) {
+          lookupRows.set(`${row.lookup_type}:${row.tx_id}`, row);
+        }
+      }
+      return { rows: [] };
+    }
+  };
+  let statusCalls = 0;
+  const fetcher = async (path) => {
+    if (path === '/thorchain/queue/outbound') return baseInput().outboundQueue;
+    if (path === '/thorchain/queue/scheduled') return [];
+    if (path.startsWith('/thorchain/queue/swap/paginated')) return { swap_queue: [] };
+    if (path === '/thorchain/swaps/streaming') return [];
+    if (path.startsWith('/thorchain/tx/status/')) {
+      statusCalls += 1;
+      return baseInput().statuses.get(TX_ID);
+    }
+    throw new Error(`Unexpected endpoint ${path}`);
+  };
+  const coreSnapshot = {
+    lastblock: baseInput().lastBlocks,
+    mimir: baseInput().mimir,
+    constants: baseInput().constants,
+    inbound_addresses: baseInput().inboundAddresses,
+    stale: false
+  };
+
+  const first = await buildStuckTransactionSnapshot(fetcher, { client, coreSnapshot });
+  coreSnapshot.lastblock = [{ chain: 'THOR', thorchain: 10001 }];
+  const second = await buildStuckTransactionSnapshot(fetcher, { client, coreSnapshot });
+  assert.equal(first.lookups.fetched, 1);
+  assert.equal(second.lookups.fetched, 0);
+  assert.equal(second.lookups.reused, 1);
+  assert.equal(statusCalls, 1);
+  assert.equal(second.transactions.length, 1);
+  assert.equal(second.transactions[0].overdue_blocks, 1001);
 });

@@ -1,6 +1,6 @@
 [Unit]
-Description=BooneTools Compact Live Status Read Model Scheduler
-After=network-online.target docker.service boonetools-api.service boonetools-thornode-core-snapshot.service
+Description=BooneTools Durable THORNode Core Snapshot Publisher
+After=network-online.target docker.service boonetools-api.service
 Wants=network-online.target docker.service
 
 [Service]
@@ -10,8 +10,8 @@ WorkingDirectory=/opt/boonetools-backend/current/backend
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--dns-result-order=ipv4first
 EnvironmentFile=/opt/boonetools-backend/config/backend.env
-ExecStart=/usr/bin/node src/run-job.js status-live-scheduler
-TimeoutStartSec=20s
+ExecStart=/usr/bin/node src/run-job.js thornode-core-snapshot
+TimeoutStartSec=30s
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=boonetools-status-live
+SyslogIdentifier=boonetools-thornode-core

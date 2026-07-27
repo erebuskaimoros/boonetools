@@ -85,3 +85,11 @@ test('forced network refresh retains a usable stale snapshot on total outage', a
   assert.equal(stale.stale, true);
   assert.match(stale.warning, /Network snapshot unavailable/);
 });
+
+test('network snapshot rejects a Midgard-only result when every THORNode field fails', async () => {
+  await assert.rejects(() => getNetworkSnapshot({
+    cache: new TtlSingleFlightCache({ ttlMs: 15000 }),
+    fetchThorchain: async () => { throw new Error('thornode blocked'); },
+    fetchMidgardChurns: async () => [{ height: 100 }]
+  }), /Network snapshot unavailable/);
+});

@@ -27,7 +27,7 @@ export async function refreshNodeVotesReadModel(options = {}) {
       let chainState = options.chainState || null;
       if (!chainState) {
         const loadChainState = options.loadNodeVoteChainState || loadCurrentNodeVoteChainState;
-        const liveState = await loadChainState();
+        const liveState = await loadChainState({ client });
         if (
           !liveState.currentNodeMimirsAvailable ||
           !Number.isFinite(Number(liveState.activeNodeCount)) ||
@@ -35,8 +35,8 @@ export async function refreshNodeVotesReadModel(options = {}) {
         ) {
           throw new Error('THORNode returned an incomplete node-vote chain state');
         }
-        chainState = { ...liveState, source: 'thornode' };
-        const observedAt = now().toISOString();
+        chainState = { ...liveState, source: 'thornode-core-snapshot' };
+        const observedAt = liveState.sourceUpdatedAt || now().toISOString();
         await publishReadModel(ANALYTICS_READ_MODEL_KEYS.nodeVotesChainState, chainState, {
           client,
           ttlMs: NODE_VOTES_READ_MODEL_TTL_MS,

@@ -158,6 +158,8 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
     statusService,
     liveStatusService,
     liveStatusTimer,
+    thornodeCoreService,
+    thornodeCoreTimer,
     bondRefreshTimer,
     voteBackfillTimer,
     deployScript,
@@ -177,6 +179,8 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
     readFile(new URL('../../ops/systemd/boonetools-status-dashboard.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-status-live.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-status-live.timer', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-thornode-core-snapshot.service', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-thornode-core-snapshot.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-bond-history-refresh.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-node-votes-backfill.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../scripts/deploy-boonetools-backend.sh', import.meta.url), 'utf8'),
@@ -189,6 +193,7 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(registry, /'node-votes-summary': runNodeVotesSummary/);
   assert.match(registry, /'rapid-swaps-market-history': runRapidSwapsMarketHistory/);
   assert.match(registry, /'status-live-scheduler': runStatusLiveScheduler/);
+  assert.match(registry, /'thornode-core-snapshot': runThorNodeCoreSnapshot/);
   assert.match(apiService, /WorkingDirectory=\/opt\/boonetools-backend\/current\/backend/);
   assert.match(apiService, /EnvironmentFile=\/opt\/boonetools-backend\/config\/backend\.env/);
   assert.match(backupService, /ExecStart=\/usr\/bin\/bash \/opt\/boonetools-backend\/current\/scripts\/boonetools-db-backup\.sh/);
@@ -206,6 +211,9 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(liveStatusService, /ExecStart=.* status-live-scheduler/);
   assert.match(liveStatusService, /TimeoutStartSec=20s/);
   assert.match(liveStatusTimer, /OnUnitActiveSec=15s/);
+  assert.match(thornodeCoreService, /ExecStart=.* thornode-core-snapshot/);
+  assert.match(thornodeCoreTimer, /OnUnitActiveSec=15s/);
+  assert.match(liveStatusService, /After=.*boonetools-thornode-core-snapshot\.service/);
   assert.match(bondRefreshTimer, /OnActiveSec=45s/);
   assert.match(bondRefreshTimer, /OnUnitActiveSec=1min/);
   assert.match(voteBackfillTimer, /OnActiveSec=15min/);

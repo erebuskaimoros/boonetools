@@ -98,6 +98,9 @@ export async function requestFromProviders(options = {}) {
     fetchImpl = globalThis.fetch,
     validateResponse = null,
     shouldStop = null,
+    beforeRequest = null,
+    onProviderError = null,
+    onProviderSuccess = null,
     errorMessage = null
   } = options;
   const baseList = [...new Set((Array.isArray(bases) ? bases : [bases]).filter(Boolean))];
@@ -119,6 +122,9 @@ export async function requestFromProviders(options = {}) {
     const requestSignal = combinedSignal(request.signal, controller.signal);
 
     try {
+      if (typeof beforeRequest === 'function') {
+        await beforeRequest({ base, path, url });
+      }
       const response = await fetchImpl(url, {
         ...request,
         headers: {
@@ -164,9 +170,16 @@ export async function requestFromProviders(options = {}) {
         if (invalid) throw invalid;
       }
 
+      if (typeof onProviderSuccess === 'function') {
+        await onProviderSuccess({ base, path, url, response, payload });
+      }
+
       return payload;
     } catch (error) {
       lastError = error;
+      if (typeof onProviderError === 'function') {
+        await onProviderError(error, { base, path, url });
+      }
       if (typeof shouldStop === 'function' && shouldStop(error, { base, path, url })) {
         throw error;
       }

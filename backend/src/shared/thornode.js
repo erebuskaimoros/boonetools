@@ -1,18 +1,19 @@
 import { config } from '../lib/config.js';
 import { requestFromProviders } from '../lib/provider-client.js';
 import { fetchMidgardChurns } from './midgard.js';
+import { providerLifecycleHooks } from './provider-cooldown.js';
 
-const THORNODE_PRIMARY = config.thornodePrimaryUrl;
+const THORNODE_PRIMARY = config.thornodeUrls[0] || config.thornodePrimaryUrl;
 const THORNODE_ARCHIVE = config.thornodeArchiveUrl;
-const THORNODE_FALLBACK = config.thornodeFallbackUrl;
+const THORNODE_FALLBACK = config.thornodeUrls[1] || config.thornodeFallbackUrl;
 
 const THORNODE_REQUEST_TIMEOUT_MS = 4000;
 
 export async function fetchThorchain(endpoint, options = {}) {
   const responseType = options.responseType || 'json';
   const configuredBases = options.historical
-    ? [THORNODE_PRIMARY, THORNODE_ARCHIVE, THORNODE_FALLBACK]
-    : [THORNODE_PRIMARY, THORNODE_FALLBACK];
+    ? [config.thornodeUrls[0], THORNODE_ARCHIVE, ...config.thornodeUrls.slice(1)]
+    : config.thornodeUrls;
   const bases = [...new Set(configuredBases.filter(Boolean))];
   const timeoutMs = Number.isFinite(Number(options.timeoutMs)) && Number(options.timeoutMs) > 0
     ? Number(options.timeoutMs)
@@ -24,8 +25,13 @@ export async function fetchThorchain(endpoint, options = {}) {
     timeoutMs,
     headers: {
       Accept: responseType === 'text' ? 'text/plain' : 'application/json',
+      'x-client-id': config.providerClientId,
       ...(options.headers || {})
     },
+    ...providerLifecycleHooks({
+      client: options.cooldownClient,
+      enabled: options.sharedCooldown
+    }),
     validateResponse: options.validateResponse,
     shouldStop: options.shouldStop,
     errorMessage: ({ status }) => `Request failed (${status}) for ${endpoint}`

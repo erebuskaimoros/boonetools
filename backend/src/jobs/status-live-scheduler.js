@@ -30,7 +30,10 @@ function compactRunResult(result) {
 }
 
 export async function buildStatusLiveSnapshot(options = {}) {
-  const loadNetwork = options.loadNetworkSnapshot || (() => getNetworkSnapshot({ forceRefresh: true }));
+  const loadNetwork = options.loadNetworkSnapshot || (() => getNetworkSnapshot({
+    client: options.client,
+    readModelCache: false
+  }));
   const networkSnapshot = await loadNetwork();
   if (networkSnapshot?.stale) {
     throw new Error('Network providers did not produce a fresh live status snapshot');

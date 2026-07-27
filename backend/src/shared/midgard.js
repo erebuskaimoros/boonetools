@@ -1,12 +1,13 @@
 import { config } from '../lib/config.js';
 import { ProviderRequestError, requestFromProviders } from '../lib/provider-client.js';
+import { providerLifecycleHooks } from './provider-cooldown.js';
 
-const MIDGARD_PRIMARY = config.midgardUrl.replace(/\/$/, '');
-const MIDGARD_FALLBACK = config.midgardFallbackUrl.replace(/\/$/, '');
+const MIDGARD_PRIMARY = (config.midgardUrls[0] || config.midgardUrl).replace(/\/$/, '');
+const MIDGARD_FALLBACK = (config.midgardUrls[1] || config.midgardFallbackUrl).replace(/\/$/, '');
 const MIDGARD_REQUEST_TIMEOUT_MS = 10000;
 
 const MIDGARD_BASES = Array.from(
-  new Set([MIDGARD_PRIMARY, MIDGARD_FALLBACK].filter(Boolean))
+  new Set(config.midgardUrls.map((base) => base.replace(/\/$/, '')).filter(Boolean))
 );
 
 function getPathSearchParams(path) {
@@ -62,13 +63,20 @@ export async function fetchMidgard(path, options = {}) {
     bases: baseList,
     path,
     timeoutMs: options.timeoutMs || MIDGARD_REQUEST_TIMEOUT_MS,
-    headers: { Accept: 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      'x-client-id': config.providerClientId
+    },
+    ...providerLifecycleHooks({
+      client: options.cooldownClient,
+      enabled: options.sharedCooldown
+    }),
     validateResponse: (payload) => (
       typeof validateResponse === 'function' && validateResponse(path, payload)
         ? createMidgardError(`Midgard returned an unusable response for ${path}`)
         : null
     ),
-    shouldStop: isMidgardRateLimitError,
+    shouldStop: (error) => !error?.skipProvider && isMidgardRateLimitError(error),
     errorMessage: ({ status, statusText }) => (
       `Midgard error: ${status} ${statusText} for ${path}`
     )
@@ -94,8 +102,9 @@ export async function fetchMidgardActions(params = {}) {
   });
 }
 
-export async function fetchMidgardChurns() {
+export async function fetchMidgardChurns(options = {}) {
   const payload = await fetchMidgard('/churns', {
+    ...options,
     validateResponse: (_path, data) => !Array.isArray(data)
   });
 

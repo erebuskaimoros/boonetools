@@ -6,6 +6,7 @@ import {
   TREASURY_SNAPSHOT_TTL_MS,
   buildTreasurySnapshot
 } from '../shared/treasury-snapshot.js';
+import { getThorNodeCoreSnapshot } from '../shared/thornode-core-snapshot.js';
 
 const LOCK_KEY = 'boonetools:treasury-snapshot';
 
@@ -15,10 +16,20 @@ export async function buildTreasurySnapshotReadModel(options = {}) {
     TREASURY_SNAPSHOT_MODEL_KEY,
     { client, allowStale: true }
   );
+  const coreModel = await (options.getThorNodeCoreSnapshot || getThorNodeCoreSnapshot)({
+    client,
+    allowStale: true,
+    cache: false
+  });
+  if (!coreModel) throw new Error('Durable THORNode core snapshot is not available');
   const payload = await (options.buildSnapshot || buildTreasurySnapshot)({
     previousSnapshot: previousModel?.payload || null,
     providers: options.providers,
-    providerOptions: options.providerOptions,
+    providerOptions: {
+      ...(options.providerOptions || {}),
+      coreSnapshot: coreModel,
+      cooldownClient: client
+    },
     now: options.now
   });
 

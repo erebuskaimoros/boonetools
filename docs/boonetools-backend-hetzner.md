@@ -52,13 +52,19 @@ Successful legacy responses gain additive contract metadata. Request the v2
 `{ data, meta }` envelope using `?schema_version=2` or the media type
 `application/vnd.boonetools.v2+json`.
 
-The public `/functions/v1/stuck-transactions` endpoint powers the `/status` dashboard's high-confidence stuck-payment list. It composes current THORNode queue and transaction-stage state behind a 30-second in-process cache; it requires no database migration or additional environment variable.
+The public `/functions/v1/stuck-transactions` endpoint powers the `/status`
+dashboard's high-confidence stuck-payment list. The scheduled scanner fetches
+only the four queue surfaces, reuses current network/Mimir/constants/inbound
+state from `thornode-core:v1`, and persists status/details by transaction and
+queue fingerprint. Unchanged queue entries therefore require no repeated
+per-hash provider calls.
 
-The public `/functions/v1/network-snapshot` endpoint coalesces Status dashboard
-reads behind one short-lived cache. THORNode fields and Midgard churns fail
-independently, so a churn outage does not erase healthy node/Mimir state. A
-forced refresh retains the previous snapshot as stale fallback if every
-provider is unavailable.
+The public `/functions/v1/network-snapshot` endpoint is provider-free. It reads
+the durable `thornode-core:v1` model published by
+`boonetools-thornode-core-snapshot.timer`. THORNode fields use mixed cadences
+based on volatility and retain their last successful value independently. A
+Midgard-only result can never be published as a fresh network snapshot when
+all due THORNode work failed.
 
 The public `/functions/v1/node-votes-summary` payload includes one deduplicated
 `active_nodes` roster from the same THORNode state used for current vote
@@ -111,10 +117,16 @@ Start from `backend/.env.example` and set at least:
 PORT=8787
 DATABASE_URL=postgresql://boonetools:...@127.0.0.1:5433/boonetools
 PUBLIC_API_KEY= # optional legacy client token, not a secret
+BOONETOOLS_PROVIDER_CLIENT_ID=BooneTools
+PROVIDER_COOLDOWN_ENABLED=true
+PROVIDER_FAILURE_COOLDOWN_SECONDS=60
+PROVIDER_RATE_LIMIT_COOLDOWN_SECONDS=3600
 THORNODE_PRIMARY_URL=https://gateway.liquify.com/chain/thorchain_api
 THORNODE_FALLBACK_URL=https://thornode.thorchain.network
+THORNODE_URLS=
 MIDGARD_URL=https://gateway.liquify.com/chain/thorchain_midgard/v2
 MIDGARD_FALLBACK_URL=https://midgard.thorchain.network/v2
+MIDGARD_URLS=
 RPC_REST_URL=https://gateway.liquify.com/chain/thorchain_rpc
 RPC_FALLBACK_REST_URL=https://rpc.thorchain.network
 RPC_WS_URL=wss://gateway.liquify.com/chain/thorchain_rpc/websocket
@@ -128,7 +140,15 @@ RAPID_SWAPS_DUNE_QUERY_ID=7619996
 RAPID_SWAPS_DUNE_SCAN_INTERVAL_SECONDS=21600
 RAPID_SWAPS_LIVE_TAIL_INTERVAL_SECONDS=300
 RAPID_SWAPS_LIVE_TAIL_PAGES=2
+APP_LAYER_LIVE_STATE_TTL_SECONDS=120
+APP_LAYER_STATIC_STATE_TTL_SECONDS=900
+APP_LAYER_ROUTE_CONCURRENCY=4
 ```
+
+`THORNODE_URLS` and `MIDGARD_URLS` are optional comma-separated ordered lists.
+Use them to put a dedicated node or paid provider ahead of the public defaults
+without changing application code. The older primary/fallback variables remain
+the defaults when the list variables are empty.
 
 Rapid Swaps is hybrid in the Dune-backed deployment. Dune query `7619996`
 remains the canonical source and runs on its own cadence, while the scheduler
@@ -197,12 +217,18 @@ summary and drill-down routes. The additive public routes are
 `/rapid-swaps-summary`; the established Node/Rapid routes remain compatibility
 surfaces during frontend rollout but never contact providers on a GET.
 
-`boonetools-status-live.timer` publishes a compact network-only read model every
-15 seconds. The Status frontend conditionally polls that small endpoint while
-visible and merges it with the one-minute dashboard snapshot, so current block,
-chain, node, and churn values update without repeating history or stuck-tx work.
-The one-minute publisher reads the same live model from Postgres rather than
-repeating the current-network provider requests.
+`boonetools-thornode-core-snapshot.timer` publishes the canonical mixed-cadence
+provider snapshot every 15 seconds. `boonetools-status-live.timer` is now a
+database-only projection of that core model. The Status frontend conditionally
+polls the compact status endpoint while visible and merges it with the
+one-minute dashboard snapshot, without repeating current-network provider
+requests.
+
+Migration `030_thornode_efficiency.sql` adds shared provider circuit-breaker
+state and persistent stuck-transaction lookup reuse. Production providers
+should still be independently operated; configure a dedicated THORNode/RPC in
+the server-owned environment when available. The shared cooldown prevents an
+unreachable configured fallback from being retried by every oneshot process.
 
 Rapid-Swap websocket ingestion is disabled by default in the shared
 `rapid-swap-listener.service`, while Node-Vote websocket ingestion remains

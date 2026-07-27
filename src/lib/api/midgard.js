@@ -117,7 +117,13 @@ class MidgardClient {
       path,
       timeoutMs,
       fetchImpl,
-      request: fetchOptions,
+      request: {
+        ...fetchOptions,
+        headers: {
+          'x-client-id': 'BooneTools',
+          ...(fetchOptions.headers || {})
+        }
+      },
       validateResponse: (data) => (
         typeof validateResponse === 'function' && validateResponse(path, data)
           ? `Midgard returned an unusable response for ${path}`

@@ -17,6 +17,7 @@ import {
 } from '../shared/rapid-swaps.js';
 import { mergePendingCandidateBatches } from '../shared/rapid-swap-candidates.js';
 import { upsertRapidSwaps } from '../db/rapid-swaps-store.js';
+import { getThorNodeCoreSnapshot } from '../shared/thornode-core-snapshot.js';
 
 const SYNC_KEY = 'rapid-swaps-canonical';
 const FRESH_PENDING_CANDIDATE_RATIO = 0.75;
@@ -182,8 +183,13 @@ async function runRapidSwapsLiveTail(client, syncState, previousStats) {
   }
 
   try {
+    const coreModel = await getThorNodeCoreSnapshot({
+      client,
+      allowStale: true,
+      cache: false
+    });
     const [priceIndex, knownTxIds] = await Promise.all([
-      fetchRapidSwapPriceIndex(),
+      fetchRapidSwapPriceIndex({ coreSnapshot: coreModel }),
       loadRecentRapidSwapTxIds(client)
     ]);
     const scan = await fetchRapidSwapRows({
@@ -962,6 +968,7 @@ export async function runRapidSwapsScheduler() {
 
       let sourceStatus = null;
       let sourceStatusFresh = false;
+      let coreModel = null;
       if (scanPlan.shouldScan) {
         if (scanPlan.skipReason === 'source_idle_catchup') {
           const stats = safeStats(syncState);
@@ -972,7 +979,12 @@ export async function runRapidSwapsScheduler() {
             source_idle_reason: stats.source_idle_reason || 'chain_halted_action_head_unchanged'
           };
         } else {
-          sourceStatus = await fetchRapidSwapSourceStatus();
+          coreModel = await getThorNodeCoreSnapshot({
+            client,
+            allowStale: true,
+            cache: false
+          });
+          sourceStatus = await fetchRapidSwapSourceStatus({ coreSnapshot: coreModel });
           sourceStatusFresh = true;
         }
 
@@ -1095,7 +1107,12 @@ export async function runRapidSwapsScheduler() {
         };
       }
 
-      const priceIndex = await fetchRapidSwapPriceIndex();
+      coreModel ||= await getThorNodeCoreSnapshot({
+        client,
+        allowStale: true,
+        cache: false
+      });
+      const priceIndex = await fetchRapidSwapPriceIndex({ coreSnapshot: coreModel });
 
       const knownTxIds = await loadRecentRapidSwapTxIds(client);
 

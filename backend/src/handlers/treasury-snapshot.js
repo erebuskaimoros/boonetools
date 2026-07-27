@@ -19,7 +19,7 @@ function etagMatches(request, etag) {
 }
 
 function responseEtag(model) {
-  return createReadModelEtag({ etag: model.etag, stale: model.stale });
+  return createReadModelEtag({ etag: model.etag, stale: Boolean(model.stale || model.payload?.stale) });
 }
 
 export async function handleTreasurySnapshot(request, _url, options = {}) {
@@ -32,25 +32,26 @@ export async function handleTreasurySnapshot(request, _url, options = {}) {
   }
 
   const etag = responseEtag(model);
+  const stale = Boolean(model.stale || model.payload?.stale);
   const headers = {
-    'Cache-Control': model.stale
+    'Cache-Control': stale
       ? 'public, max-age=15, stale-if-error=3600'
       : 'public, max-age=60, stale-while-revalidate=240, stale-if-error=3600',
     ETag: etag,
     'Last-Modified': model.publishedAt || model.generatedAt,
     'X-Boone-Age': String(model.ageSeconds ?? 0),
-    'X-Boone-Cache': model.stale ? 'stale' : 'hit'
+    'X-Boone-Cache': stale ? 'stale' : 'hit'
   };
   if (etagMatches(request, etag)) return { status: 304, body: null, headers };
 
   const { control: _control, ...publicPayload } = model.payload || {};
   const warnings = [...new Set([
     ...(Array.isArray(publicPayload.warnings) ? publicPayload.warnings : []),
-    ...(model.stale ? ['Serving the last successful Treasury snapshot'] : [])
+    ...(stale ? ['Serving a Treasury snapshot with reused core data'] : [])
   ])];
   return json({
     ...publicPayload,
-    stale: Boolean(publicPayload.stale || model.stale),
+    stale,
     warnings,
     read_model: {
       key: model.key,

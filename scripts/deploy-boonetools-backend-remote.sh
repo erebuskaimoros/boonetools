@@ -324,6 +324,7 @@ start_persistent_services() {
 
 prime_read_models() {
   local prime_units=(
+    boonetools-thornode-core-snapshot.service
     boonetools-app-layer-live-state.service
     boonetools-rujira-base-fees.service
     boonetools-rujira-reserve-payments.service

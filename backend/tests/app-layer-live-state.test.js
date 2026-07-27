@@ -86,3 +86,47 @@ test('fetchAppLayerLiveStatePayload builds a backend snapshot through the Thorno
     globalThis.fetch = originalFetch;
   }
 });
+
+test('App Layer refresh reuses slow config/history routes and bounds volatile route fan-out', async () => {
+  const { fetchAppLayerLiveStatePayload } = await import('../src/shared/app-layer-live-state.js');
+  const now = new Date('2026-07-27T12:00:00.000Z');
+  const previousRouteValues = Object.fromEntries(
+    ['trade', 'core', 'swap', 'index', 'base'].map((key) => [key, [{ cached: key }]])
+  );
+  const previous = {
+    configs: previousRouteValues,
+    histories: previousRouteValues,
+    collector_balances: previousRouteValues,
+    actions: previousRouteValues,
+    route_fetched_at: {
+      config: Object.fromEntries(Object.keys(previousRouteValues).map((key) => [key, now.toISOString()])),
+      history: Object.fromEntries(Object.keys(previousRouteValues).map((key) => [key, now.toISOString()]))
+    }
+  };
+  let active = 0;
+  let maxActive = 0;
+  const paths = [];
+  const fetchThorchain = async (path) => {
+    paths.push(path);
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    await Promise.resolve();
+    active -= 1;
+    if (path.includes('/balances/')) return { balances: [] };
+    if (path.includes('/smart/')) return { data: { actions: [] } };
+    throw new Error(`Unexpected route ${path}`);
+  };
+  const payload = await fetchAppLayerLiveStatePayload({
+    now: () => now,
+    previousSnapshot: previous,
+    coreSnapshot: { network: {}, pools: [], stale: false },
+    fetchThorchain,
+    routeConcurrency: 3
+  });
+
+  assert.equal(paths.length, 10);
+  assert.equal(paths.some((path) => path.endsWith('/history')), false);
+  assert.equal(maxActive <= 3, true);
+  assert.deepEqual(payload.configs, previous.configs);
+  assert.deepEqual(payload.histories, previous.histories);
+});

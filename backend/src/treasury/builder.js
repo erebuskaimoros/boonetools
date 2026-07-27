@@ -491,6 +491,8 @@ export async function buildTreasurySnapshot(options = {}) {
     previousControl,
     nowMs
   );
+  const coreSegmentStale = ['network', 'pools', 'nodes', 'module']
+    .some((key) => ['reused', 'error'].includes(segmentStates[key]?.status));
 
   return {
     schema_version: TREASURY_SNAPSHOT_SCHEMA_VERSION,
@@ -505,6 +507,7 @@ export async function buildTreasurySnapshot(options = {}) {
     unpricedBalanceCount: countUnpricedBalances(sectionPayloads),
     warnings: uniqueWarnings,
     partial: uniqueWarnings.length > 0,
+    stale: coreSegmentStale,
     segment_health: {
       fresh: countStates(segmentStates, 'fresh'),
       reused: countStates(segmentStates, 'reused'),

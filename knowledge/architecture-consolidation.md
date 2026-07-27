@@ -41,8 +41,19 @@ are monotonic under replay and concurrent writers.
   summary model.
 - Bond History normal reads only return cached data and enqueue durable work.
   Cold misses return `202`; the frontend polls the cache-only status mode.
-- Provider requests share ordered fallback, challenge detection, response
-  validation, caller cancellation, and transport deadlines.
+- Provider requests share configurable ordered fallback, challenge detection,
+  response validation, caller cancellation, transport deadlines, and the
+  canonical `BooneTools` client identifier.
+- Reusable current THORNode state has one durable owner:
+  `boonetools-thornode-core-snapshot`. Field cadences range from 15 seconds for
+  height to fifteen minutes for constants. Status, Node Votes, Treasury,
+  NodeOp, Rapid Swaps, App Layer, and the frontend's stable THORNode helpers
+  read that model rather than repeating `/lastblock`, `/mimir`, `/nodes`,
+  `/network`, `/pools`, or `/inbound_addresses`.
+- Provider-host circuit breakers live in Postgres, making cooldowns effective
+  across systemd oneshot processes. App Layer static routes use a slower
+  persistent refresh and bounded concurrency; stuck-transaction status/details
+  reuse is keyed by transaction plus queue fingerprint.
 - Caddy compresses API responses, deploys enforce public latency/payload gates,
   and failed rollouts restore backend/shared code, systemd state, the API
   process, and Caddy.

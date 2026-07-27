@@ -14,6 +14,7 @@
  */
 
 import { requestFromProviders } from '../api/provider.js';
+import { resolveCoreSnapshotPath } from '../api/core-snapshot.js';
 
 // ============================================
 // API Endpoint Configuration
@@ -86,7 +87,13 @@ export async function fetchWithFallback(endpoint, options = {}, endpoints = THOR
     responseType: 'response',
     timeoutMs,
     fetchImpl,
-    request: fetchOptions,
+    request: {
+      ...fetchOptions,
+      headers: {
+        'x-client-id': 'BooneTools',
+        ...(fetchOptions.headers || {})
+      }
+    },
     shouldStop: (error) => stopOnRateLimit && Number(error?.status) === 429
   });
 }
@@ -107,6 +114,15 @@ export async function fetchWithFallback(endpoint, options = {}, endpoints = THOR
  * console.log(nodes.length);
  */
 export async function fetchJSONWithFallback(endpoint, options = {}, endpoints = THORNODE_ENDPOINTS) {
+  if (endpoints === THORNODE_ENDPOINTS) {
+    try {
+      const core = await resolveCoreSnapshotPath(endpoint, options);
+      if (core.handled) return core.value;
+    } catch {
+      // Interactive tools retain direct provider fallback when the BooneTools
+      // read-model endpoint is unavailable.
+    }
+  }
   const response = await fetchWithFallback(endpoint, options, endpoints);
   return response.json();
 }
@@ -127,6 +143,14 @@ export async function fetchJSONWithFallback(endpoint, options = {}, endpoints = 
  * console.log(Number(minBond) / 1e8);
  */
 export async function fetchTextWithFallback(endpoint, options = {}, endpoints = THORNODE_ENDPOINTS) {
+  if (endpoints === THORNODE_ENDPOINTS) {
+    try {
+      const core = await resolveCoreSnapshotPath(endpoint, options);
+      if (core.handled) return String(core.value);
+    } catch {
+      // See fetchJSONWithFallback.
+    }
+  }
   const response = await fetchWithFallback(endpoint, options, endpoints);
   return response.text();
 }

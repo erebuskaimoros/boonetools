@@ -1,6 +1,7 @@
 import { config } from '../lib/config.js';
 import { fetchMidgard } from '../shared/midgard.js';
 import { fetchThorchain } from '../shared/thornode.js';
+import { isThorNodeCoreSnapshotStale } from '../shared/thornode-core-snapshot.js';
 
 const REQUEST_TIMEOUT_MS = 6_000;
 const EVM_RPC_ENDPOINTS = Object.freeze({
@@ -107,19 +108,38 @@ function settled(name, result) {
 
 export async function fetchTreasuryCore(options = {}) {
   const fetchThor = options.fetchThorchain || fetchThorchain;
-  const requests = [
-    ['network', '/thorchain/network'],
-    ['pools', '/thorchain/pools'],
-    ['nodes', '/thorchain/nodes'],
-    ['module', '/thorchain/balance/module/treasury']
-  ];
+  const shared = options.coreSnapshot?.payload || options.coreSnapshot || null;
+  const sharedStale = isThorNodeCoreSnapshotStale(
+    options.coreSnapshot,
+    ['network', 'pools', 'nodes']
+  );
+  const requests = shared
+    ? [['module', '/thorchain/balance/module/treasury']]
+    : [
+        ['network', '/thorchain/network'],
+        ['pools', '/thorchain/pools'],
+        ['nodes', '/thorchain/nodes'],
+        ['module', '/thorchain/balance/module/treasury']
+      ];
   const results = await Promise.allSettled(requests.map(([, path]) => fetchThor(path, {
-    timeoutMs: options.timeoutMs || REQUEST_TIMEOUT_MS
+    timeoutMs: options.timeoutMs || REQUEST_TIMEOUT_MS,
+    cooldownClient: options.cooldownClient
   })));
-  return Object.fromEntries(results.map((result, index) => [
+  const output = Object.fromEntries(results.map((result, index) => [
     requests[index][0],
     settled(requests[index][0], result)
   ]));
+  if (shared) {
+    for (const key of ['network', 'pools', 'nodes']) {
+      const valid = key === 'network'
+        ? Boolean(shared[key]) && typeof shared[key] === 'object' && !Array.isArray(shared[key])
+        : Array.isArray(shared[key]);
+      output[key] = valid && !sharedStale
+        ? { ok: true, name: key, value: shared[key], shared: true }
+        : { ok: false, name: key, error: `shared THORNode ${key} snapshot is unavailable or stale` };
+    }
+  }
+  return output;
 }
 
 export async function fetchThorBalance(address, options = {}) {

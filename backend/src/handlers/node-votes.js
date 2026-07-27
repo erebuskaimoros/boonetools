@@ -1,10 +1,13 @@
 import { query } from '../db/pool.js';
 import { json, parseIntegerParam } from '../lib/http.js';
 import { toIsoString } from '../lib/utils.js';
-import { fetchNodes, fetchThorchain } from '../shared/thornode.js';
 import { NODE_VOTES_SYNC_KEY } from '../shared/node-votes.js';
 import { ANALYTICS_READ_MODEL_KEYS } from '../shared/analytics-read-model-keys.js';
 import { getReadModel } from '../shared/read-models.js';
+import {
+  getThorNodeCoreSnapshot,
+  isThorNodeCoreSnapshotStale
+} from '../shared/thornode-core-snapshot.js';
 
 export const NODE_VOTES_READ_MODEL_KEY = ANALYTICS_READ_MODEL_KEYS.nodeVotes;
 
@@ -852,36 +855,34 @@ function buildStats(rows, latestRows, voteGroups, nodeGroups, activeNodeCount, o
   };
 }
 
-export async function loadCurrentNodeVoteChainState() {
-  const [mimirResult, nodesResult, nodeMimirResult] = await Promise.allSettled([
-    fetchThorchain('/thorchain/mimir'),
-    fetchNodes(),
-    fetchThorchain('/thorchain/mimir/nodes_all')
-  ]);
-
-  const currentMimirValues = mimirResult.status === 'fulfilled' && mimirResult.value
-    ? normalizeMimirValues(mimirResult.value)
-    : {};
-  const nodes = nodesResult.status === 'fulfilled' && Array.isArray(nodesResult.value)
-    ? nodesResult.value
-    : [];
+export async function loadCurrentNodeVoteChainState(options = {}) {
+  const model = options.coreSnapshot || await (
+    options.getThorNodeCoreSnapshot || getThorNodeCoreSnapshot
+  )({ client: options.client, allowStale: true, cache: false });
+  const core = model?.payload || model;
+  const mimir = core?.mimir;
+  const nodes = Array.isArray(core?.nodes) ? core.nodes : [];
+  const nodeMimirs = core?.node_mimirs;
+  const currentMimirValues = mimir ? normalizeMimirValues(mimir) : {};
   const activeNodes = buildActiveNodeOperators(nodes);
   const activeNodeCount = activeNodes.length;
   const nodeMetadataByAddress = buildNodeMetadataByAddress(nodes);
   const currentNodeMimirsAvailable = (
-    mimirResult.status === 'fulfilled' &&
-    nodeMimirResult.status === 'fulfilled' &&
-    nodesResult.status === 'fulfilled'
+    Boolean(mimir) &&
+    Boolean(nodeMimirs) &&
+    nodes.length > 0 &&
+    !isThorNodeCoreSnapshotStale(model, ['mimir', 'nodes', 'node_mimirs'])
   );
 
   return {
     currentMimirValues,
-    currentNodeMimirsByKey: nodeMimirResult.status === 'fulfilled' && nodeMimirResult.value
-      ? normalizeNodeMimirValues(nodeMimirResult.value, nodeMetadataByAddress)
+    currentNodeMimirsByKey: nodeMimirs
+      ? normalizeNodeMimirValues(nodeMimirs, nodeMetadataByAddress)
       : {},
     currentNodeMimirsAvailable,
     activeNodeCount,
-    activeNodes
+    activeNodes,
+    sourceUpdatedAt: core?.source_updated_at || model?.sourceUpdatedAt || null
   };
 }
 

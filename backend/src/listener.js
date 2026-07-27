@@ -14,6 +14,7 @@ import {
   writeRapidSwapListenerHeartbeat
 } from './db/rapid-swaps-store.js';
 import { getClient } from './db/pool.js';
+import { getThorNodeCoreSnapshot } from './shared/thornode-core-snapshot.js';
 import {
   enrichRowsWithNodeMetadata,
   parseNodeVoteEvents,
@@ -57,7 +58,8 @@ async function getCachedPriceIndex() {
     return cachedPriceIndex;
   }
 
-  cachedPriceIndex = await fetchRapidSwapPriceIndex();
+  const coreModel = await getThorNodeCoreSnapshot({ allowStale: true });
+  cachedPriceIndex = await fetchRapidSwapPriceIndex({ coreSnapshot: coreModel });
   cachedPriceIndexAt = now;
   return cachedPriceIndex;
 }
@@ -438,7 +440,7 @@ function connect() {
   log(`Connecting to ${rpcWsUrl}...`);
   ws = new WebSocket(rpcWsUrl, {
     headers: {
-      'x-client-id': 'RuneTools'
+      'x-client-id': config.providerClientId
     }
   });
 

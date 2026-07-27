@@ -5,11 +5,12 @@ import {
   buildChainSyncRows,
   computeMajorityVersion,
   extractThorHeight,
-  fetchChurns,
-  fetchHistoricalNodesAtHeight,
-  fetchLastblock,
-  fetchNodes
+  fetchHistoricalNodesAtHeight
 } from '../shared/thornode.js';
+import {
+  getThorNodeCoreSnapshot,
+  isThorNodeCoreSnapshotStale
+} from '../shared/thornode-core-snapshot.js';
 import {
   computeLeaderboardRows,
   normalizeBoundarySnapshot
@@ -161,11 +162,18 @@ export async function runNodeopScheduler() {
       const previousTopChurn = Number(existingChurnResult.rows[0]?.height) || 0;
       const previousLeaderboardAsOf = existingLeaderboardResult.rows[0]?.as_of || null;
 
-      const [nodes, lastblockRows, churns] = await Promise.all([
-        fetchNodes(),
-        fetchLastblock(),
-        fetchChurns()
-      ]);
+      const coreModel = await getThorNodeCoreSnapshot({
+        client,
+        allowStale: true,
+        cache: false
+      });
+      const core = coreModel?.payload;
+      if (isThorNodeCoreSnapshotStale(coreModel, ['nodes', 'lastblock'])) {
+        throw new Error('Durable THORNode core snapshot is unavailable or stale');
+      }
+      const nodes = Array.isArray(core.nodes) ? core.nodes : [];
+      const lastblockRows = Array.isArray(core.lastblock) ? core.lastblock : [];
+      const churns = Array.isArray(core.churns) ? core.churns : [];
 
       const now = new Date();
       const asOf = now.toISOString();

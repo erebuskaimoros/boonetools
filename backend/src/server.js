@@ -54,7 +54,7 @@ const routes = new Map([
   ['/node-votes/node', route(handleNodeVoteNodeDetails, 2, 6)],
   ['/status-dashboard', route(handleStatusDashboard, 1, 64)],
   ['/status-live', route(handleStatusLive, 1, 64)],
-  ['/network-snapshot', route(handleNetworkSnapshot, 5, 2)],
+  ['/network-snapshot', route(handleNetworkSnapshot, 1, 64)],
   ['/tc-fee-dash', route(handleTcFeeDash, 1, 64)],
   ['/rapid-swaps', route(handleRapidSwaps, 5, 3)],
   ['/rapid-swaps-summary', route(handleRapidSwapsSummary, 1, 64)],
