@@ -14,6 +14,7 @@ import {
 import { safeNumber, sleep, toIsoString } from '../lib/utils.js';
 import { executeDuneQueryRows, formatDuneDateTime, summarizeDuneError } from './dune.js';
 import { fetchMidgard, fetchMidgardActions, isMidgardRateLimitError } from './midgard.js';
+import { fetchThorchain } from './thornode.js';
 
 const ACTION_SYNC_KEY = 'rujira-reserve-payment-actions:v1';
 const SCHEDULE_SYNC_KEY = 'rujira-reserve-payment-schedule:v1';
@@ -715,39 +716,240 @@ async function fetchRpcStatus() {
   return Number(payload?.result?.sync_info?.latest_block_height || 0);
 }
 
-export async function ingestRujiraReservePaymentScheduledCandidates(client, options = {}) {
-  const syncState = await loadSyncState(client, SCHEDULE_SYNC_KEY);
-  const schedule = Math.max(1, Number(config.rujiraReservePaymentsScheduleBlocks) || 101);
-  const startHeight = Number(syncState?.next_scheduled_height || 0) || Number(config.rujiraReservePaymentsStartHeight);
-  const maxHeights = Math.max(0, Number(options.maxHeights ?? config.rujiraReservePaymentsCandidateMaxHeights) || 0);
-  const latestHeight = await fetchRpcStatus();
-  const stopHeight = Math.max(0, latestHeight - config.rujiraReservePaymentsHeadLagBlocks);
-  const rows = [];
+function decodeScheduledMessage(value) {
+  try {
+    const decoded = Buffer.from(String(value || ''), 'base64').toString('utf8');
+    return JSON.parse(decoded);
+  } catch {
+    return null;
+  }
+}
 
-  for (let height = startHeight; height > 0 && height <= stopHeight && rows.length < maxHeights; height += schedule) {
-    rows.push({
-      height,
-      source: 'scheduled-cadence',
-      scan_json: {
-        schedule,
-        start_height: Number(config.rujiraReservePaymentsStartHeight)
+export function parseRujiraReservePaymentSchedule(payload) {
+  const matches = [];
+
+  for (const schedule of payload?.schedules || []) {
+    const height = Number(schedule?.height || 0);
+    if (!Number.isSafeInteger(height) || height <= 0) continue;
+
+    for (const message of schedule?.msgs || []) {
+      const after = Number(message?.after);
+      const decoded = decodeScheduledMessage(message?.msg);
+      if (
+        message?.sender !== BASE_LAYER_REVENUE_COLLECTOR ||
+        !Number.isSafeInteger(after) ||
+        after < 0 ||
+        !decoded ||
+        typeof decoded.run !== 'object'
+      ) {
+        continue;
       }
-    });
+
+      matches.push({
+        height,
+        after,
+        cadence: after + 1
+      });
+    }
   }
 
+  return matches.sort((left, right) => left.height - right.height)[0] || null;
+}
+
+async function fetchRujiraReservePaymentSchedule(client) {
+  const queryString = new URLSearchParams({
+    sender: BASE_LAYER_REVENUE_COLLECTOR,
+    'pagination.limit': '10'
+  }).toString();
+  const payload = await fetchThorchain(`/schedules?${queryString}`, {
+    cooldownClient: client
+  });
+  const schedule = parseRujiraReservePaymentSchedule(payload);
+  if (!schedule) {
+    throw new Error('THORNode returned no active Base Layer revenue schedule');
+  }
+  return schedule;
+}
+
+async function loadLatestStoredReservePaymentHeight(client) {
+  const { rows } = await client.query(
+    `select max(height)::text as height
+     from rujira_reserve_payment_events`
+  );
+  return Number(rows[0]?.height || 0);
+}
+
+export function buildRujiraReservePaymentScheduleCandidates({
+  anchorHeight,
+  stopHeight,
+  cadence,
+  minHeight = 1,
+  limit
+}) {
+  const anchor = Number(anchorHeight);
+  const stop = Number(stopHeight);
+  const interval = Number(cadence);
+  const floor = Math.max(1, Number(minHeight) || 1);
+  const maxCandidates = Math.max(0, Math.trunc(Number(limit) || 0));
+
+  if (
+    !Number.isSafeInteger(anchor) ||
+    anchor <= 0 ||
+    !Number.isSafeInteger(stop) ||
+    stop <= 0 ||
+    !Number.isSafeInteger(interval) ||
+    interval <= 0 ||
+    maxCandidates === 0
+  ) {
+    return [];
+  }
+
+  const distance = stop - anchor;
+  const steps = distance >= 0
+    ? Math.floor(distance / interval)
+    : -Math.ceil(Math.abs(distance) / interval);
+  const lastHeight = anchor + steps * interval;
+  if (lastHeight < floor) return [];
+
+  const available = Math.floor((lastHeight - floor) / interval) + 1;
+  const count = Math.min(maxCandidates, available);
+  const firstHeight = lastHeight - (count - 1) * interval;
+
+  return Array.from({ length: count }, (_, index) => firstHeight + index * interval);
+}
+
+export function buildRujiraReservePaymentScheduleRangeCandidates({
+  anchorHeight,
+  startHeight,
+  stopHeight,
+  cadence,
+  limit
+}) {
+  const anchor = Number(anchorHeight);
+  const start = Math.max(1, Number(startHeight) || 1);
+  const stop = Number(stopHeight);
+  const interval = Number(cadence);
+  const maxCandidates = Math.max(0, Math.trunc(Number(limit) || 0));
+
+  if (
+    !Number.isSafeInteger(anchor) ||
+    anchor <= 0 ||
+    !Number.isSafeInteger(stop) ||
+    stop < start ||
+    !Number.isSafeInteger(interval) ||
+    interval <= 0 ||
+    maxCandidates === 0
+  ) {
+    return [];
+  }
+
+  const steps = Math.ceil((start - anchor) / interval);
+  const firstHeight = anchor + steps * interval;
+  if (firstHeight > stop) return [];
+
+  const available = Math.floor((stop - firstHeight) / interval) + 1;
+  const count = Math.min(maxCandidates, available);
+  return Array.from({ length: count }, (_, index) => firstHeight + index * interval);
+}
+
+export async function ingestRujiraReservePaymentScheduledCandidates(client, options = {}) {
+  const syncState = await loadSyncState(client, SCHEDULE_SYNC_KEY);
+  const maxHeights = Math.max(0, Number(options.maxHeights ?? config.rujiraReservePaymentsCandidateMaxHeights) || 0);
+  const latestHeight = await (options.fetchLatestHeight || fetchRpcStatus)();
+  const stopHeight = Math.max(0, latestHeight - config.rujiraReservePaymentsHeadLagBlocks);
+  const configuredCadence = Math.max(1, Number(config.rujiraReservePaymentsScheduleBlocks) || 101);
+  let scheduleError = '';
+  let anchor = null;
+  let anchorSource = 'thornode-scheduler';
+
+  try {
+    anchor = options.fetchSchedule
+      ? await options.fetchSchedule()
+      : await fetchRujiraReservePaymentSchedule(client);
+  } catch (error) {
+    scheduleError = String(error?.message || error || '').slice(0, 500);
+  }
+
+  if (!anchor) {
+    const previousAnchorHeight = Number(syncState?.stats_json?.anchor_height || 0);
+    const previousCadence = Number(syncState?.stats_json?.cadence || 0);
+    if (previousAnchorHeight > 0 && previousCadence > 0) {
+      anchor = {
+        height: previousAnchorHeight,
+        cadence: previousCadence
+      };
+      anchorSource = 'previous-scheduler-anchor';
+    } else {
+      const latestStoredHeight = await loadLatestStoredReservePaymentHeight(client);
+      anchor = {
+        height: latestStoredHeight || Number(syncState?.next_scheduled_height || 0) || Number(config.rujiraReservePaymentsStartHeight),
+        cadence: configuredCadence
+      };
+      anchorSource = latestStoredHeight > 0 ? 'latest-reserve-event' : 'configured-bootstrap';
+    }
+  }
+
+  const cadence = Math.max(1, Number(anchor?.cadence) || configuredCadence);
+  const scannerVersion = 2;
+  const minimumHeight = Number(config.rujiraReservePaymentsStartHeight);
+  const hasCurrentCursor = Number(syncState?.stats_json?.scanner_version || 0) === scannerVersion
+    && Number(syncState?.next_scheduled_height || 0) > 0;
+  const bootstrapStartHeight = Math.max(
+    minimumHeight,
+    stopHeight - Math.max(0, maxHeights - 1) * cadence
+  );
+  const scanStartHeight = hasCurrentCursor
+    ? Math.max(minimumHeight, Number(syncState.next_scheduled_height) - cadence)
+    : bootstrapStartHeight;
+  const heights = buildRujiraReservePaymentScheduleRangeCandidates({
+    anchorHeight: Number(anchor?.height || 0),
+    startHeight: scanStartHeight,
+    stopHeight,
+    cadence,
+    limit: maxHeights
+  });
+  const rows = heights.map((height) => ({
+    height,
+    source: 'scheduled-cadence',
+    scan_json: {
+      cadence,
+      anchor_height: Number(anchor?.height || 0),
+      anchor_source: anchorSource,
+      start_height: minimumHeight,
+      scan_start_height: scanStartHeight
+    }
+  }));
+
   const inserted = await upsertCandidateBlocks(client, rows);
-  const nextHeight = rows.length ? rows.at(-1).height + schedule : startHeight;
+  const latestDueHeight = buildRujiraReservePaymentScheduleCandidates({
+    anchorHeight: Number(anchor?.height || 0),
+    stopHeight,
+    cadence,
+    minHeight: minimumHeight,
+    limit: 1
+  }).at(-1);
+  const nextHeight = heights.length
+    ? heights.at(-1) + cadence
+    : latestDueHeight
+      ? latestDueHeight + cadence
+      : Number(anchor?.height || 0);
+  const complete = stopHeight > 0 && nextHeight > stopHeight;
   await saveSyncState(client, SCHEDULE_SYNC_KEY, {
     next_page_token: '',
     next_scheduled_height: nextHeight,
-    complete: stopHeight > 0 && nextHeight > stopHeight,
+    complete,
     rate_limited_until: null,
     stats_json: {
       latest_height: latestHeight,
       stop_height: stopHeight,
       selected: rows.length,
       inserted,
-      schedule
+      cadence,
+      scanner_version: scannerVersion,
+      scan_start_height: scanStartHeight,
+      anchor_height: Number(anchor?.height || 0),
+      anchor_source: anchorSource,
+      schedule_error: scheduleError
     }
   });
 
@@ -757,7 +959,11 @@ export async function ingestRujiraReservePaymentScheduledCandidates(client, opti
     selected: rows.length,
     inserted,
     next_scheduled_height: nextHeight,
-    complete: stopHeight > 0 && nextHeight > stopHeight
+    complete,
+    cadence,
+    anchor_height: Number(anchor?.height || 0),
+    anchor_source: anchorSource,
+    schedule_error: scheduleError
   };
 }
 

@@ -178,3 +178,83 @@ test('buildRujiraReservePaymentRowsFromDune requires the explicit Reserve path a
   assert.equal(rows[0].amount_base, '609308000');
   assert.equal(rows[0].amount_rune, 6.09308);
 });
+
+test('parseRujiraReservePaymentSchedule finds the collector in a shared scheduler entry', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    BASE_LAYER_REVENUE_COLLECTOR,
+    parseRujiraReservePaymentSchedule
+  } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const schedule = parseRujiraReservePaymentSchedule({
+    schedules: [{
+      height: '27184778',
+      msgs: [
+        {
+          sender: 'thor1unrelated',
+          after: '100',
+          msg: Buffer.from(JSON.stringify({ run: {} })).toString('base64')
+        },
+        {
+          sender: BASE_LAYER_REVENUE_COLLECTOR,
+          after: '100',
+          msg: Buffer.from(JSON.stringify({ run: {} })).toString('base64')
+        }
+      ]
+    }]
+  });
+
+  assert.deepEqual(schedule, {
+    height: 27184778,
+    after: 100,
+    cadence: 101
+  });
+});
+
+test('buildRujiraReservePaymentScheduleCandidates keeps a rolling recovery window', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { buildRujiraReservePaymentScheduleCandidates } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const heights = buildRujiraReservePaymentScheduleCandidates({
+    anchorHeight: 1101,
+    stopHeight: 1000,
+    cadence: 101,
+    minHeight: 1,
+    limit: 4
+  });
+
+  assert.deepEqual(heights, [697, 798, 899, 1000]);
+});
+
+test('schedule range candidates resume an outage from the oldest unscanned height', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { buildRujiraReservePaymentScheduleRangeCandidates } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const heights = buildRujiraReservePaymentScheduleRangeCandidates({
+    anchorHeight: 1101,
+    startHeight: 1000,
+    stopHeight: 100000,
+    cadence: 101,
+    limit: 4
+  });
+
+  assert.deepEqual(heights, [1000, 1101, 1202, 1303]);
+});
+
+test('live scheduler phase recovers the July 26 heights missed by the fixed phase scanner', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { buildRujiraReservePaymentScheduleCandidates } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const heights = buildRujiraReservePaymentScheduleCandidates({
+    anchorHeight: 27184778,
+    stopHeight: 27183780,
+    cadence: 101,
+    minHeight: 25982820,
+    limit: 300
+  });
+
+  assert.equal(heights.includes(27160134), true);
+  assert.equal(heights.includes(27173769), true);
+  assert.equal(heights.includes(27160076), false);
+  assert.equal((27160134 - 25982820) % 101, 58);
+});

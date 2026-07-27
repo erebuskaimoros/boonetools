@@ -70,7 +70,7 @@
   let selectedId = '';
   let search = '';
   let stateFilter = 'all';
-  let activeDashboardTab = 'pair';
+  let activeDashboardTab = 'affiliate';
   let selectedAffiliateId = '';
   let affiliateTimeframe = '90d';
   let affiliateBucket = 'day';
