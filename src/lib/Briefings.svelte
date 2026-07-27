@@ -2,16 +2,37 @@
   const BASE_PATH = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
   const BRIEFINGS_ROOT = `${BASE_PATH}/briefings`;
   const TRON_SLUG = 'tron-performance-since-launch';
-  const TRON_PATH = `${BRIEFINGS_ROOT}/${TRON_SLUG}`;
+  const SS_SLUG = 'ss-dynamic-fee-impact';
   const ASSET_ROOT = `${BASE_PATH}/assets/briefings/${TRON_SLUG}`;
+  const SS_ASSET_ROOT = `${BASE_PATH}/assets/briefings/${SS_SLUG}`;
 
   const briefing = {
+    slug: TRON_SLUG,
     title: 'TRON performance on THORChain',
     description: 'Native TRX and TRON-USDT pool volume, liquidity fees, usage, and rankings since launch.',
     published: 'July 18, 2026',
     window: 'Oct 1, 2025 → Jul 18, 2026',
     readTime: '5 min read'
   };
+
+  const ssBriefing = {
+    slug: SS_SLUG,
+    title: 'SS dynamic-fee impact',
+    description: 'ShapeShift affiliate volume, liquidity fees, fee yield, and rolling trends before and after ADR-026 activation.',
+    published: 'July 27, 2026',
+    window: 'Jan 27, 2026 → Jul 26, 2026',
+    readTime: '10 min read'
+  };
+
+  const briefings = [ssBriefing, briefing];
+
+  function briefingPath(slug) {
+    return `${BRIEFINGS_ROOT}/${slug}`;
+  }
+
+  function briefingNumber(index) {
+    return String(briefings.length - index).padStart(2, '0');
+  }
 
   function getActiveSlug() {
     const pathname = BASE_PATH && window.location.pathname.startsWith(BASE_PATH)
@@ -22,6 +43,7 @@
   }
 
   let activeSlug = getActiveSlug();
+  $: activeBriefing = briefings.find((entry) => entry.slug === activeSlug) || null;
 
   function navigate(event, slug = '') {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -35,7 +57,7 @@
 
     if (typeof gtag !== 'undefined') {
       gtag('event', 'page_view', {
-        page_title: slug === TRON_SLUG ? briefing.title : 'Briefings',
+        page_title: briefings.find((entry) => entry.slug === slug)?.title || 'Briefings',
         page_path: nextPath,
         page_location: window.location.href
       });
@@ -46,13 +68,13 @@
     });
   }
 
-  $: pageTitle = activeSlug === TRON_SLUG
-    ? `${briefing.title} - BOONE Tools`
+  $: pageTitle = activeBriefing
+    ? `${activeBriefing.title} - BOONE Tools`
     : activeSlug
       ? 'Briefing not found - BOONE Tools'
       : 'Briefings - BOONE Tools';
-  $: pageDescription = activeSlug === TRON_SLUG
-    ? briefing.description
+  $: pageDescription = activeBriefing
+    ? activeBriefing.description
     : 'Reports, research, and analysis from BooneTools.';
 </script>
 
@@ -73,23 +95,228 @@
     <section class="briefing-block" aria-labelledby="latest-briefings">
       <div class="block-head">
         <div class="block-title"><span class="marker">▌</span><h2 id="latest-briefings">latest</h2></div>
-        <span class="block-meta">[1 entry]</span>
+        <span class="block-meta">[{briefings.length} entries]</span>
       </div>
 
-      <a class="briefing-row" href={TRON_PATH} on:click={(event) => navigate(event, TRON_SLUG)}>
-        <span class="row-index">01</span>
-        <span class="row-copy">
-          <strong>{briefing.title}</strong>
-          <span>{briefing.description}</span>
-        </span>
-        <span class="row-meta">
-          <span>{briefing.published}</span>
-          <span>{briefing.readTime}</span>
-        </span>
-        <span class="row-arrow" aria-hidden="true">→</span>
-      </a>
+      <div class="briefing-list">
+        {#each briefings as item, index (item.slug)}
+          <a class="briefing-row" href={briefingPath(item.slug)} on:click={(event) => navigate(event, item.slug)}>
+            <span class="row-index">{briefingNumber(index)}</span>
+            <span class="row-copy">
+              <strong>{item.title}</strong>
+              <span>{item.description}</span>
+            </span>
+            <span class="row-meta">
+              <span>{item.published}</span>
+              <span>{item.readTime}</span>
+            </span>
+            <span class="row-arrow" aria-hidden="true">→</span>
+          </a>
+        {/each}
+      </div>
     </section>
   </div>
+{:else if activeSlug === SS_SLUG}
+  <article class="briefings-page report-page">
+    <nav class="breadcrumbs" aria-label="Breadcrumb">
+      <a href={BRIEFINGS_ROOT} on:click={(event) => navigate(event)}>briefings</a>
+      <span>/</span>
+      <span>{SS_SLUG}</span>
+    </nav>
+
+    <header class="report-head">
+      <div class="head-top">
+        <div class="command-line"><span class="prompt">$</span> <span class="cmd">read</span> <span class="arg">./briefings/{SS_SLUG}.md</span></div>
+        <span class="status"><span class="status-dot"></span> PUBLISHED</span>
+      </div>
+      <h1>SS DYNAMIC FEES <span class="arrow">→</span> IMPACT<span class="cursor">_</span></h1>
+      <p class="report-meta">{ssBriefing.published} <span>│</span> {ssBriefing.window} <span>│</span> {ssBriefing.readTime}</p>
+      <p class="lede">
+        The first 23 complete days after SS entered the ADR-026 dynamic-fee program show a large reduction in
+        THORChain liquidity fees per dollar of ShapeShift volume. After the requested curation, volume has not
+        increased enough to offset that reduction. See the
+        <a href="https://dev.thorchain.org/architecture/adr-026-dynamic-l1-min-fee-per-thorname.html" target="_blank" rel="noreferrer">ADR-026 specification</a>
+        and the <a href="https://blog.thorchain.org/adr026-dynamic-fee-model" target="_blank" rel="noreferrer">official explainer</a>.
+      </p>
+      <div class="rule"></div>
+    </header>
+
+    <section class="metric-grid" aria-label="Curated equal-window impact summary">
+      <div class="metric">
+        <span class="metric-index">01</span>
+        <strong>-53.3%</strong>
+        <span>curated volume</span>
+      </div>
+      <div class="metric">
+        <span class="metric-index">02</span>
+        <strong>-84.1%</strong>
+        <span>curated fees</span>
+      </div>
+      <div class="metric">
+        <span class="metric-index">03</span>
+        <strong>-65.9%</strong>
+        <span>curated fee yield</span>
+      </div>
+      <div class="metric">
+        <span class="metric-index">04</span>
+        <strong>23 days</strong>
+        <span>complete post window</span>
+      </div>
+    </section>
+
+    <section class="report-block" aria-labelledby="ss-equal-window">
+      <div class="block-head">
+        <div class="block-title"><span class="marker">▌</span><h2 id="ss-equal-window">equal-window impact</h2></div>
+        <span class="block-meta">[23 eligible days pre / post]</span>
+      </div>
+      <p class="block-lede">July 3 is omitted as the activation and cold-start day. The pre period is the last 23 eligible days before activation; the post period is July 4–26.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>view</th><th>metric</th><th>pre</th><th>post</th><th>change</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Uncurated</td><td>Executed-leg volume</td><td>$897,444</td><td>$1,406,662</td><td>+56.7%</td></tr>
+            <tr><td>Uncurated</td><td>Liquidity fees</td><td>$873.20</td><td>$643.22</td><td>-26.3%</td></tr>
+            <tr><td>Uncurated</td><td>Fees / volume</td><td>9.730 bps</td><td>4.573 bps</td><td>-53.0%</td></tr>
+            <tr class="highlight"><td>Curated</td><td>Executed-leg volume</td><td>$897,444</td><td>$419,085</td><td>-53.3%</td></tr>
+            <tr class="highlight"><td>Curated</td><td>Liquidity fees</td><td>$873.20</td><td>$138.85</td><td>-84.1%</td></tr>
+            <tr class="highlight"><td>Curated</td><td>Fees / volume</td><td>9.730 bps</td><td>3.313 bps</td><td>-65.9%</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="report-block" aria-labelledby="ss-uncurated-trends">
+      <div class="block-head">
+        <div class="block-title"><span class="marker">▌</span><h2 id="ss-uncurated-trends">uncurated affiliate trends</h2></div>
+        <span class="block-meta">[all indexed SS flow]</span>
+      </div>
+      <p class="block-lede">Green bars show executed-leg volume, amber bars show historical USD liquidity fees, blue shows fees / volume, cyan is the trailing 30-day average volume, and dashed purple is the trailing 90-day average.</p>
+      <figure>
+        <figcaption>Uncurated // six months // 30D + 90D</figcaption>
+        <img src={`${SS_ASSET_ROOT}/affiliate-trend-uncurated-6m.svg`} alt="Uncurated six-month SS volume, fees, fee yield, and trailing 30-day and 90-day average volume">
+      </figure>
+      <figure>
+        <figcaption>Uncurated // one month // 30D + 90D</figcaption>
+        <img src={`${SS_ASSET_ROOT}/affiliate-trend-uncurated-1m.svg`} alt="Uncurated one-month SS volume, fees, fee yield, and trailing 30-day and 90-day average volume">
+      </figure>
+    </section>
+
+    <section class="report-block" aria-labelledby="ss-curation">
+      <div class="block-head">
+        <div class="block-title"><span class="marker">▌</span><h2 id="ss-curation">curation applied</h2></div>
+        <span class="block-meta">[37 days + 2 addresses]</span>
+      </div>
+      <p class="block-lede">
+        Full halt days are removed from eligible-day and rolling-average denominators. The whole action is removed
+        when the inbound sender matches either requested address. Address labels are requester-supplied assumptions;
+        the analysis verifies the indexed actions and sensitivity to removal, not provenance.
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>exclusion</th><th>dates</th><th>routes</th><th>volume removed</th><th>fees removed</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Full network halt</td><td>May 16–Jun 21</td><td>0</td><td>$0</td><td>$0</td></tr>
+            <tr><td><code>0xa6d623…bdaa</code> · hacked funds</td><td>Apr 24</td><td>16</td><td>$60,964,148</td><td>$60,736.66</td></tr>
+            <tr><td><code>thor1wqg9…s780</code> · TC OG selling</td><td>Jul 6–7</td><td>3</td><td>$987,578</td><td>$504.37</td></tr>
+            <tr class="total"><td>Union</td><td>—</td><td>19</td><td>$61,951,726</td><td>$61,241.04</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="report-block" aria-labelledby="ss-curated-trends">
+      <div class="block-head">
+        <div class="block-title"><span class="marker">▌</span><h2 id="ss-curated-trends">curated affiliate trends</h2></div>
+        <span class="block-meta">[halt + address exclusions]</span>
+      </div>
+      <p class="block-lede">The chart keeps the halt span on the calendar axis but omits those full days from curated calculations. Rolling averages use fixed 30- and 90-calendar-day spans and do not reach farther back for additional active observations.</p>
+      <figure>
+        <figcaption>Curated // six months // 30D + 90D</figcaption>
+        <img src={`${SS_ASSET_ROOT}/affiliate-trend-curated-6m.svg`} alt="Curated six-month SS volume, fees, fee yield, and trailing 30-day and 90-day average volume">
+      </figure>
+      <figure>
+        <figcaption>Curated // one month // 30D + 90D</figcaption>
+        <img src={`${SS_ASSET_ROOT}/affiliate-trend-curated-1m.svg`} alt="Curated one-month SS volume, fees, fee yield, and trailing 30-day and 90-day average volume">
+      </figure>
+    </section>
+
+    <section class="report-block" aria-labelledby="ss-monthly">
+      <div class="block-head">
+        <div class="block-title"><span class="marker">▌</span><h2 id="ss-monthly">monthly observations</h2></div>
+        <span class="block-meta">[Jan 27–Jul 26 UTC]</span>
+      </div>
+      <p class="block-lede">January and July are partial months. May and June include the network-halt period; curated eligible-day counts are 15 and 9 respectively.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>month</th><th>raw volume</th><th>raw fees</th><th>raw yield</th><th>curated volume</th><th>curated fees</th><th>curated yield</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>2026-01*</td><td>$710,406</td><td>$719.41</td><td>10.127 bps</td><td>$710,406</td><td>$719.41</td><td>10.127 bps</td></tr>
+            <tr><td>2026-02</td><td>$1,207,836</td><td>$1,178.58</td><td>9.758 bps</td><td>$1,207,836</td><td>$1,178.58</td><td>9.758 bps</td></tr>
+            <tr><td>2026-03</td><td>$568,246</td><td>$578.87</td><td>10.187 bps</td><td>$568,246</td><td>$578.87</td><td>10.187 bps</td></tr>
+            <tr><td>2026-04</td><td>$73,278,715</td><td>$73,567.99</td><td>10.039 bps</td><td>$12,314,567</td><td>$12,831.32</td><td>10.420 bps</td></tr>
+            <tr><td>2026-05</td><td>$237,645</td><td>$255.26</td><td>10.741 bps</td><td>$237,645</td><td>$255.26</td><td>10.741 bps</td></tr>
+            <tr><td>2026-06</td><td>$695,119</td><td>$652.98</td><td>9.394 bps</td><td>$695,119</td><td>$652.98</td><td>9.394 bps</td></tr>
+            <tr><td>2026-07*</td><td>$1,413,795</td><td>$650.19</td><td>4.599 bps</td><td>$426,218</td><td>$145.82</td><td>3.421 bps</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="report-block" aria-labelledby="ss-findings">
+      <div class="block-head">
+        <div class="block-title"><span class="marker">▌</span><h2 id="ss-findings">key findings</h2></div>
+        <span class="block-meta">[5 observations]</span>
+      </div>
+      <ol class="findings">
+        <li><span>01</span><p><strong>The apparent uncurated volume gain is not robust.</strong> Three July 6–7 TC OG selling routes contributed $987,578, or 70.2% of raw post-window volume.</p></li>
+        <li><span>02</span><p><strong>Fee generation fell much faster than curated volume.</strong> In equal windows, volume declined 53.3%, fees declined 84.1%, and fee yield declined 65.9%.</p></li>
+        <li><span>03</span><p><strong>Endpoint-route mix does not explain away the compression.</strong> Across 11 matched routes, observed post fees were $88.33 versus $278.35 at each route's pre-period yield, a 68.3% shortfall.</p></li>
+        <li><span>04</span><p><strong>The July 23 rolling-average cliff is an expiry artifact.</strong> The April 24 hacked-address burst leaves the 90-day lookback on that date; it is not a delayed ADR-026 response.</p></li>
+        <li><span>05</span><p><strong>The evidence is associative, not causal.</strong> The post sample is short, follows a five-week halt, and does not control swap size, streaming quantity, natural slip, cold starts, or route mix.</p></li>
+      </ol>
+    </section>
+
+    <section class="report-block methodology" aria-labelledby="ss-methodology">
+      <div class="block-head">
+        <div class="block-title"><span class="marker">▌</span><h2 id="ss-methodology">methodology</h2></div>
+        <span class="block-meta">[Midgard actions + historical RUNE/USD]</span>
+      </div>
+      <p class="block-lede">
+        The analysis paginates successful <a href="https://gateway.liquify.com/chain/thorchain_midgard/v2/actions?type=swap&affiliate=ss&limit=50&fromTimestamp=1761696000&timestamp=1785110400" target="_blank" rel="noreferrer">Midgard SS swap actions</a>,
+        joins the <a href="https://gateway.liquify.com/chain/thorchain_midgard/v2/history/rune?interval=day&from=1761696000&to=1785110400" target="_blank" rel="noreferrer">historical RUNE/USD series</a>,
+        and uses BooneTools' <a href="https://boone.tools/functions/v1/node-votes/vote?key=DYNAMICFEE-WHITELIST-SS" target="_blank" rel="noreferrer">on-chain Mimir vote history</a>
+        for the July 3 01:43 UTC activation cutoff.
+      </p>
+      <ul>
+        <li>Volume is executed-leg USD: route input notional is counted once per distinct executed pool leg.</li>
+        <li>Fees are whole-route THORChain liquidity fees in RUNE converted with that UTC day's historical RUNE/USD price.</li>
+        <li>Fees / volume is aggregate historical fee USD divided by aggregate executed-leg USD; daily or swap ratios are not averaged.</li>
+        <li>Streaming routes are assigned to their inbound action timestamp, so the daily series is an action-level approximation rather than a sub-swap replay.</li>
+        <li>Removing the TC OG selling observations cannot undo their effect on the subsequent on-chain ETH.USDC controller state.</li>
+      </ul>
+    </section>
+
+    <section class="report-block" aria-labelledby="ss-bottom-line">
+      <div class="block-head">
+        <div class="block-title"><span class="marker">▌</span><h2 id="ss-bottom-line">bottom line</h2></div>
+        <span class="block-meta">[as of Jul 26]</span>
+      </div>
+      <p class="block-lede">
+        SS flow is paying substantially less protocol liquidity fee per dollar after ADR-026, but the first 23 complete
+        days show no evidence that curated volume increased enough to compensate. The current read is directionally
+        negative for fee generation, inconclusive-to-negative for volume, and too early for a causal verdict. The next
+        useful checkpoint is one full 90-day post-activation window using the same exclusions.
+      </p>
+    </section>
+
+    <a class="back-link" href={BRIEFINGS_ROOT} on:click={(event) => navigate(event)}><span>[←]</span> all briefings</a>
+  </article>
 {:else if activeSlug === TRON_SLUG}
   <article class="briefings-page report-page">
     <nav class="breadcrumbs" aria-label="Breadcrumb">
@@ -410,12 +637,15 @@
     text-transform: uppercase;
   }
 
+  .briefing-list {
+    margin: 18px -20px -20px;
+  }
+
   .briefing-row {
     display: grid;
     grid-template-columns: 34px minmax(0, 1fr) auto 18px;
     align-items: center;
     gap: 16px;
-    margin: 18px -20px -20px;
     padding: 18px 20px;
     border-top: 1px solid #1a1a1a;
     color: inherit;
@@ -707,6 +937,15 @@
 
   .methodology li::marker {
     color: #00cc66;
+  }
+
+  .report-page code {
+    padding: 1px 5px;
+    border: 1px solid #1a1a1a;
+    background: #111;
+    color: #00cc66;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9em;
   }
 
   .back-link {
