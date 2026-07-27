@@ -27,6 +27,7 @@ The known fixed THORNode request baseline is expected to fall from roughly 56,70
 - Stuck-transaction status payloads can be cached, but elapsed blocks must be derived from the current height and original scheduled height so cached records can cross the overdue threshold correctly.
 - JavaScript arrays passed through node-postgres are encoded as Postgres arrays, so bulk `jsonb_to_recordset` inputs must be explicitly JSON-stringified.
 - Public fallback endpoints remain operationally uncertain; configurable ordered provider lists allow a dedicated node to be inserted without another application release.
+- Concurrent generated updates to `public/ip-info.json` change the checked public-byte total; the surface baseline must be ratcheted to the exact post-update size before CI can pass.
 
 ## Files Changed
 
@@ -43,6 +44,7 @@ The known fixed THORNode request baseline is expected to fall from roughly 56,70
 | `src/lib/api/{thornode,midgard}.js`, `src/lib/utils/api.js` | Added core resolution and canonical provider headers |
 | `ops/systemd/boonetools-thornode-core-snapshot.*` | Added the 15-second core publisher service and timer |
 | `scripts/deploy-boonetools-backend-remote.sh` | Primed the core model before dependent publishers |
+| `scripts/frontend-surface-baseline.json` | Ratcheted the public-byte budget for the concurrent IP-info update |
 | `backend/tests/`, `tests/rapid-swaps-backend.test.js` | Added cadence, outage, cooldown, concurrency, and incremental-lookup coverage |
 | `docs/`, `knowledge/` | Documented the architecture, runtime configuration, and failure behavior |
 
@@ -56,4 +58,3 @@ Production deployment and post-deploy verification follow this commit and push.
 - [ ] Monitor `thornode-core:v1` freshness and field warnings during the first production cycles.
 - [ ] Confirm shared provider cooldown rows behave correctly during the next rate-limit or transport failure.
 - [ ] Measure production provider-call volume and compare it with the estimated 54% fixed-baseline reduction.
-
