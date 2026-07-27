@@ -128,6 +128,43 @@ test('Cosmos transaction responses paginate and preserve vote timestamps', async
   assert.equal(parseNodeVoteCosmosTxResponse({ events: [] }).length, 0);
 });
 
+test('height lookup recovers from one path-specific archive block failure', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { findNodeVotesStartHeight } = await import('../src/shared/node-votes.js');
+  const times = new Map([
+    [100, '2026-07-27T12:00:00Z'],
+    [101, '2026-07-27T12:00:06Z'],
+    [103, '2026-07-27T12:00:18Z'],
+    [104, '2026-07-27T12:00:24Z']
+  ]);
+  const calls = [];
+  const status = {
+    result: {
+      sync_info: {
+        earliest_block_height: '100',
+        earliest_block_time: times.get(100),
+        latest_block_height: '104',
+        latest_block_time: times.get(104)
+      }
+    }
+  };
+
+  const height = await findNodeVotesStartHeight(
+    '2026-07-27T12:00:12Z',
+    status,
+    {
+      fetchBlockTime: async (blockHeight) => {
+        calls.push(blockHeight);
+        if (blockHeight === 102) throw new Error('Too many hops');
+        return times.get(blockHeight);
+      }
+    }
+  );
+
+  assert.equal(height, 102);
+  assert.deepEqual(calls.slice(0, 2), [102, 101]);
+});
+
 test('resolveNodeVoteBackfillWindow uses recent lookback when votes already exist', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { resolveNodeVoteBackfillWindow } = await import('../src/shared/node-votes.js');

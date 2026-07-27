@@ -461,20 +461,23 @@ function statusHeights(status) {
   };
 }
 
-export async function fetchNodeVotesRpcStatus() {
-  return fetchNodeVotesRpc('/status');
+export async function fetchNodeVotesRpcStatus(options = {}) {
+  return fetchNodeVotesRpc('/status', {}, options);
 }
 
-export async function fetchNodeVotesBlockTime(height) {
+export async function fetchNodeVotesBlockTime(height, options = {}) {
   const payload = await fetchNodeVotesRpc('/block', {
     height: Math.trunc(Number(height))
-  });
+  }, options);
 
   return toIsoOrNull(payload?.result?.block?.header?.time);
 }
 
-export async function findNodeVotesStartHeight(startTime, status = null) {
-  const rpcStatus = status || await fetchNodeVotesRpcStatus();
+export async function findNodeVotesStartHeight(startTime, status = null, options = {}) {
+  const transportOptions = { sharedCooldown: false, ...(options.transportOptions || {}) };
+  const fetchBlockTime = options.fetchBlockTime
+    || ((height) => fetchNodeVotesBlockTime(height, transportOptions));
+  const rpcStatus = status || await fetchNodeVotesRpcStatus(transportOptions);
   const bounds = statusHeights(rpcStatus);
   const targetMs = Date.parse(startTime);
 
@@ -500,9 +503,10 @@ export async function findNodeVotesStartHeight(startTime, status = null) {
   while (low < high) {
     const mid = Math.floor((low + high) / 2);
     let midTime = null;
+    let sampledHeight = mid;
     let initialError = null;
     try {
-      midTime = await fetchNodeVotesBlockTime(mid);
+      midTime = await fetchBlockTime(mid);
     } catch (error) {
       initialError = error;
       // Liquify archive routing can occasionally reject one otherwise valid
@@ -511,7 +515,8 @@ export async function findNodeVotesStartHeight(startTime, status = null) {
       for (const nearbyHeight of [mid - 1, mid + 1]) {
         if (nearbyHeight < low || nearbyHeight > high) continue;
         try {
-          midTime = await fetchNodeVotesBlockTime(nearbyHeight);
+          midTime = await fetchBlockTime(nearbyHeight);
+          sampledHeight = nearbyHeight;
           break;
         } catch {
           // Try the other adjacent height before preserving the first error.
@@ -519,7 +524,8 @@ export async function findNodeVotesStartHeight(startTime, status = null) {
       }
     }
     if (!midTime && initialError) throw initialError;
-    const midMs = Date.parse(midTime || '');
+    const sampledMs = Date.parse(midTime || '');
+    const midMs = sampledMs + ((mid - sampledHeight) * 6_000);
 
     if (!Number.isFinite(midMs)) {
       throw new Error(`Unable to read block time for height ${mid}`);
@@ -638,14 +644,18 @@ export async function fetchNodeVoteCosmosTxs({ startHeight, endHeight }, options
 }
 
 async function resolveNodeVoteHeightRange(startTime, endTime) {
-  const status = await fetchNodeVotesRpcStatus();
+  // Block-level archive routing errors are path-specific. Do not let one bad
+  // historical height cool down the healthy gateway before the adjacent-block
+  // recovery or Cosmos transaction query can run.
+  const transportOptions = { sharedCooldown: false };
+  const status = await fetchNodeVotesRpcStatus(transportOptions);
   const bounds = statusHeights(status);
-  const startHeight = await findNodeVotesStartHeight(startTime, status);
+  const startHeight = await findNodeVotesStartHeight(startTime, status, { transportOptions });
   const endMs = Date.parse(endTime || '');
   let endHeight = bounds.latestHeight;
 
   if (Number.isFinite(endMs) && bounds.latestTime && Date.parse(bounds.latestTime) > endMs) {
-    endHeight = await findNodeVotesStartHeight(endTime, status);
+    endHeight = await findNodeVotesStartHeight(endTime, status, { transportOptions });
   }
 
   return { startHeight, endHeight };
