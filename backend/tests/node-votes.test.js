@@ -70,6 +70,64 @@ test('parseNodeVoteTxSearchTx handles tx_search rows', async () => {
   assert.equal(rows[0].block_time, '2026-05-26T01:00:00.000Z');
 });
 
+test('Cosmos transaction responses paginate and preserve vote timestamps', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    fetchNodeVoteCosmosTxs,
+    parseNodeVoteCosmosTxResponse
+  } = await import('../src/shared/node-votes.js');
+  const makeResponse = (txhash, height, timestamp, key) => ({
+    txhash,
+    height: String(height),
+    timestamp,
+    events: [event('set_node_mimir', {
+      key,
+      value: '1',
+      address: 'thor1operatorvoteaddressxxxxxxxxxxxxxxxx'
+    })]
+  });
+  const pages = [
+    {
+      total: '3',
+      tx_responses: [
+        makeResponse('abc123', 100, '2026-07-27T12:00:00Z', 'HALTBTCTRADING'),
+        makeResponse('def456', 101, '2026-07-27T12:01:00Z', 'PAUSELP')
+      ]
+    },
+    {
+      total: '3',
+      tx_responses: [
+        makeResponse('ghi789', 102, '2026-07-27T12:02:00Z', 'HALTSIGNING')
+      ]
+    }
+  ];
+  const calls = [];
+
+  const result = await fetchNodeVoteCosmosTxs(
+    { startHeight: 100, endHeight: 102 },
+    {
+      limit: 2,
+      fetchPage: async (page) => {
+        calls.push(page);
+        return pages[page - 1];
+      }
+    }
+  );
+
+  assert.deepEqual(calls, [1, 2]);
+  assert.equal(result.total, 3);
+  assert.equal(result.txs.length, 3);
+  assert.deepEqual(result.rows.map((row) => row.mimir_key), [
+    'HALTBTCTRADING',
+    'PAUSELP',
+    'HALTSIGNING'
+  ]);
+  assert.equal(result.rows[2].block_time, '2026-07-27T12:02:00.000Z');
+  assert.equal(result.rows[2].source, 'rpc');
+
+  assert.equal(parseNodeVoteCosmosTxResponse({ events: [] }).length, 0);
+});
+
 test('resolveNodeVoteBackfillWindow uses recent lookback when votes already exist', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { resolveNodeVoteBackfillWindow } = await import('../src/shared/node-votes.js');

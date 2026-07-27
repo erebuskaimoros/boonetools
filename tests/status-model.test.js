@@ -198,6 +198,26 @@ test('status updates translate effective halt values into plain language', () =>
   assert.equal(updates[1].description, 'BASE trading halted');
 });
 
+test('network changes include newer effective non-halt Mimirs', () => {
+  const updates = getRecentStatusUpdates([
+    {
+      mimir_key: 'HALTBASETRADING',
+      effective_history: [{ effective_value: '1', block_time: '2026-07-17T16:30:00Z', height: 100 }]
+    },
+    {
+      mimir_key: 'ADVSWAPQUEUERAPIDSWAPMAX',
+      effective_history: [{ effective_value: '3', block_time: '2026-07-24T20:21:00Z', height: 200 }]
+    }
+  ]);
+
+  assert.deepEqual(updates.map((update) => update.key), [
+    'ADVSWAPQUEUERAPIDSWAPMAX',
+    'HALTBASETRADING'
+  ]);
+  assert.equal(updates[0].description, 'ADVSWAPQUEUERAPIDSWAPMAX set to 3');
+  assert.equal(updates[0].tone, 'ok');
+});
+
 test('status updates keep only the newest observation of the same effective state', () => {
   const updates = getRecentStatusUpdates([
     {

@@ -42,7 +42,13 @@ function sources() {
           consensus_threshold: 64,
           consensus_ready: true,
           latest_vote_at: '2026-07-18T11:55:00Z',
-          latest_height: 999
+          latest_height: 999,
+          effective_history: [{
+            effective_value: '5000',
+            block_time: '2026-07-18T11:55:00Z',
+            height: 999,
+            tx_id: 'DEF'
+          }]
         },
         {
           mimir_key: 'HALTBTCTRADING',
@@ -110,7 +116,8 @@ test('status dashboard read model compacts network, governance, updates, and stu
   assert.equal(payload.block_production.points.length, 1);
   assert.equal(payload.block_production.points[0].seconds_per_block, 6.125);
   assert.equal(payload.votes.governance.length, 1);
-  assert.equal(payload.votes.status_updates[0].description, 'BTC trading resumed');
+  assert.equal(payload.votes.status_updates[0].description, 'MAXSYNTHPERPOOLDEPTH set to 5000');
+  assert.equal(payload.votes.status_updates[1].description, 'BTC trading resumed');
   assert.equal(payload.stuck_transactions.count, 1);
   assert.equal(payload.stuck_transactions.transactions[0].raw_provider_field_that_must_not_leak, undefined);
   assert.ok(Buffer.byteLength(JSON.stringify(payload)) < 25_000);
@@ -158,7 +165,7 @@ test('status dashboard snapshot loads all source lanes concurrently into one pay
     chains: 2,
     active_nodes: 2,
     governance_votes: 1,
-    status_updates: 1,
+    status_updates: 2,
     stuck_transactions: 1,
     block_production_points: 1,
     partial: false

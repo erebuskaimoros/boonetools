@@ -1,4 +1,4 @@
-const STATUS_UPDATE_KEY = /^(HALT|PAUSELP|SOLVENCYHALT|NODEPAUSE)/i;
+const STATUS_STATE_KEY = /^(HALT|PAUSELP|SOLVENCYHALT|NODEPAUSE)/i;
 export const MAX_STATUS_STUCK_TRANSACTIONS = 20;
 export const MAX_BLOCK_PRODUCTION_POINTS = 150;
 
@@ -183,7 +183,6 @@ function updateDescription(key, value) {
 export function getRecentStatusUpdates(voteRows = [], limit = 5) {
   const seen = new Set();
   return voteRows
-    .filter((row) => STATUS_UPDATE_KEY.test(row.mimir_key || ''))
     .flatMap((row) => (row.effective_history || []).map((change) => ({
       key: row.mimir_key,
       value: change.effective_value,
@@ -191,7 +190,9 @@ export function getRecentStatusUpdates(voteRows = [], limit = 5) {
       blockTime: timestamp(change.block_time),
       height: numberValue(change.height),
       txId: change.tx_id || '',
-      tone: numberValue(change.effective_value) > 0 ? 'warn' : 'ok'
+      tone: STATUS_STATE_KEY.test(row.mimir_key || '') && numberValue(change.effective_value) > 0
+        ? 'warn'
+        : 'ok'
     })))
     .sort((left, right) => Date.parse(right.blockTime || '') - Date.parse(left.blockTime || ''))
     .filter((update) => {

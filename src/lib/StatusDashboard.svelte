@@ -486,7 +486,7 @@
         {#if votesError}
           <div class="inline-alert"><span>WRN</span>{votesError}</div>
         {:else if statusUpdates.length === 0}
-          <div class="empty-state">No halt, resume, or LP status changes in this window.</div>
+          <div class="empty-state">No effective Mimir changes in this window.</div>
         {:else}
           <ol class="timeline">
             {#each statusUpdates as update, index}

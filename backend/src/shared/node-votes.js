@@ -228,6 +228,16 @@ export function parseNodeVoteTxSearchTx(tx, blockTime = null) {
   });
 }
 
+export function parseNodeVoteCosmosTxResponse(txResponse) {
+  return parseNodeVoteEvents(txResponse?.events || [], {
+    txId: txResponse?.txhash || '',
+    height: Number(txResponse?.height || 0),
+    txIndex: Number(txResponse?.tx_index || 0),
+    blockTime: txResponse?.timestamp || null,
+    source: 'rpc'
+  });
+}
+
 export function buildNodeVoteRowsFromDune(rows) {
   return (Array.isArray(rows) ? rows : [])
     .map((row) => {
@@ -489,7 +499,26 @@ export async function findNodeVotesStartHeight(startTime, status = null) {
 
   while (low < high) {
     const mid = Math.floor((low + high) / 2);
-    const midTime = await fetchNodeVotesBlockTime(mid);
+    let midTime = null;
+    let initialError = null;
+    try {
+      midTime = await fetchNodeVotesBlockTime(mid);
+    } catch (error) {
+      initialError = error;
+      // Liquify archive routing can occasionally reject one otherwise valid
+      // block with "Too many hops". An adjacent block is close enough for the
+      // time-to-height binary search and avoids failing the entire backfill.
+      for (const nearbyHeight of [mid - 1, mid + 1]) {
+        if (nearbyHeight < low || nearbyHeight > high) continue;
+        try {
+          midTime = await fetchNodeVotesBlockTime(nearbyHeight);
+          break;
+        } catch {
+          // Try the other adjacent height before preserving the first error.
+        }
+      }
+    }
+    if (!midTime && initialError) throw initialError;
     const midMs = Date.parse(midTime || '');
 
     if (!Number.isFinite(midMs)) {
@@ -563,7 +592,52 @@ export async function fetchNodeVoteTxs({ startHeight, endHeight }) {
   };
 }
 
-async function fetchNodeVoteRowsFromRpc(startTime, endTime) {
+export async function fetchNodeVoteCosmosTxs({ startHeight, endHeight }, options = {}) {
+  const limit = Math.min(
+    TX_SEARCH_MAX_PAGE_SIZE,
+    Math.max(1, Number(options.limit || config.nodeVotesTxSearchPageSize || TX_SEARCH_MAX_PAGE_SIZE))
+  );
+  const fetchPage = options.fetchPage || (async (page) => fetchThornodeApi(
+    '/cosmos/tx/v1beta1/txs',
+    {
+      timeoutMs: 30_000,
+      params: {
+        query: `tx.height>=${startHeight} AND tx.height<=${endHeight} AND set_node_mimir.key EXISTS`,
+        page,
+        limit,
+        order_by: 'ORDER_BY_ASC'
+      }
+    }
+  ));
+  const responses = [];
+  let total = 0;
+
+  for (let page = 1; ; page += 1) {
+    const payload = await fetchPage(page);
+    const pageResponses = Array.isArray(payload?.tx_responses) ? payload.tx_responses : [];
+    total = Math.max(0, Number(payload?.total || 0));
+    responses.push(...pageResponses);
+
+    if (pageResponses.length === 0 || (total > 0 && responses.length >= total)) {
+      break;
+    }
+    if (total === 0 && pageResponses.length < limit) {
+      break;
+    }
+
+    if (config.nodeVotesRequestDelayMs > 0) {
+      await sleep(config.nodeVotesRequestDelayMs);
+    }
+  }
+
+  return {
+    total: total || responses.length,
+    txs: responses,
+    rows: responses.flatMap(parseNodeVoteCosmosTxResponse)
+  };
+}
+
+async function resolveNodeVoteHeightRange(startTime, endTime) {
   const status = await fetchNodeVotesRpcStatus();
   const bounds = statusHeights(status);
   const startHeight = await findNodeVotesStartHeight(startTime, status);
@@ -573,6 +647,18 @@ async function fetchNodeVoteRowsFromRpc(startTime, endTime) {
   if (Number.isFinite(endMs) && bounds.latestTime && Date.parse(bounds.latestTime) > endMs) {
     endHeight = await findNodeVotesStartHeight(endTime, status);
   }
+
+  return { startHeight, endHeight };
+}
+
+async function fetchNodeVoteRowsFromCosmos(startTime, endTime) {
+  const { startHeight, endHeight } = await resolveNodeVoteHeightRange(startTime, endTime);
+  const result = await fetchNodeVoteCosmosTxs({ startHeight, endHeight });
+  return { ...result, startHeight, endHeight };
+}
+
+async function fetchNodeVoteRowsFromRpc(startTime, endTime) {
+  const { startHeight, endHeight } = await resolveNodeVoteHeightRange(startTime, endTime);
 
   const txResult = await fetchNodeVoteTxs({ startHeight, endHeight });
   const heights = [...new Set(
@@ -674,6 +760,7 @@ export async function runNodeVoteBackfill(client, options = {}) {
   let source = 'dune';
   let duneExecutionId = '';
   let duneError = '';
+  let cosmosRestError = '';
   let txSearchTotal = 0;
   let txCount = 0;
 
@@ -692,13 +779,24 @@ export async function runNodeVoteBackfill(client, options = {}) {
   }
 
   if (rows.length === 0 && duneError) {
-    const rpcResult = await fetchNodeVoteRowsFromRpc(startTime, latestTime);
-    rows = rpcResult.rows;
-    startHeight = rpcResult.startHeight;
-    endHeight = rpcResult.endHeight;
-    txSearchTotal = rpcResult.total;
-    txCount = rpcResult.txs.length;
-    source = 'rpc';
+    try {
+      const cosmosResult = await fetchNodeVoteRowsFromCosmos(startTime, latestTime);
+      rows = cosmosResult.rows;
+      startHeight = cosmosResult.startHeight;
+      endHeight = cosmosResult.endHeight;
+      txSearchTotal = cosmosResult.total;
+      txCount = cosmosResult.txs.length;
+      source = 'cosmos-rest';
+    } catch (error) {
+      cosmosRestError = error?.message || String(error);
+      const rpcResult = await fetchNodeVoteRowsFromRpc(startTime, latestTime);
+      rows = rpcResult.rows;
+      startHeight = rpcResult.startHeight;
+      endHeight = rpcResult.endHeight;
+      txSearchTotal = rpcResult.total;
+      txCount = rpcResult.txs.length;
+      source = 'rpc';
+    }
   }
 
   rows = await enrichRowsWithNodeMetadata(rows);
@@ -713,6 +811,7 @@ export async function runNodeVoteBackfill(client, options = {}) {
     dune_query_id: config.nodeVotesDuneQueryId || '',
     dune_execution_id: duneExecutionId,
     dune_error: duneError,
+    cosmos_rest_error: cosmosRestError,
     latest_stored_time: window.latestStoredTime,
     lookback_days: window.lookbackDays,
     start_height: startHeight,
