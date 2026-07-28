@@ -204,6 +204,11 @@ Maintenance timers use `OnActiveSec` for their initial activation so restarting
 them on a long-running host always produces a next trigger; `OnBootSec` must
 not be used for deploy-restarted timers.
 
+Scheduled jobs write one bounded JSON completion or failure record to the
+journal. Job return payloads can contain whole provider snapshots and must not
+be printed: the journal is duplicated into host syslog, so pretty-printing a
+15-second job result can exhaust the server filesystem.
+
 Migration `026_event_provenance.sql` gives Rapid Swaps, node votes, and Rujira
 Reserve payments a unique canonical identity plus per-provider observation
 history. Canonical upserts enforce source precedence and monotonic first/last

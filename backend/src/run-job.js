@@ -1,4 +1,5 @@
 import { closePool } from './db/pool.js';
+import { createJobCompletionLog, createJobFailureLog } from './lib/job-log.js';
 import { runAnalyticsReadModels } from './jobs/analytics-read-models.js';
 import { runAppLayerLiveStateScheduler } from './jobs/app-layer-live-state-scheduler.js';
 import { runBondHistoryRefreshQueue } from './jobs/bond-history-refresh.js';
@@ -16,6 +17,7 @@ import { runTreasurySnapshot } from './jobs/treasury-snapshot.js';
 import { runThorNodeCoreSnapshot } from './shared/thornode-core-snapshot.js';
 
 const jobName = process.argv[2] || '';
+const startedAt = Date.now();
 
 const runners = {
   'analytics-read-models': runAnalyticsReadModels,
@@ -41,12 +43,12 @@ if (!runners[jobName]) {
 }
 
 try {
-  const result = await runners[jobName]();
-  console.log(JSON.stringify(result, null, 2));
+  await runners[jobName]();
+  console.log(createJobCompletionLog(jobName, Date.now() - startedAt));
   await closePool();
   process.exit(0);
 } catch (error) {
-  console.error(error);
+  console.error(createJobFailureLog(jobName, error, Date.now() - startedAt));
   await closePool().catch(() => {});
   process.exit(1);
 }
