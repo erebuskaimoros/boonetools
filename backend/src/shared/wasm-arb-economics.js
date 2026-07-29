@@ -23,13 +23,18 @@ function normalizeRegime(row) {
     previousMimirValue: row.previous_mimir_value == null
       ? null
       : safeNumber(row.previous_mimir_value),
+    spreadBps: row.spread_bps == null ? null : safeNumber(row.spread_bps),
+    previousSpreadBps: row.previous_spread_bps == null
+      ? null
+      : safeNumber(row.previous_spread_bps),
     arbContract: String(row.arb_contract || ''),
     tradeCollector: String(row.trade_collector || ''),
     baseLayerCollector: String(row.base_layer_collector || ''),
     tcShare: safeNumber(row.tc_share, 0.5),
     source: String(row.source || ''),
     observedAt: iso(row.observed_at),
-    metadata: row.metadata_json || {}
+    metadata: row.metadata_json || {},
+    changeKind: String(row.metadata_json?.change_kind || '')
   };
 }
 
@@ -67,9 +72,13 @@ function syncStateMap(rows) {
 }
 
 function isMimirRegime(regime) {
-  return regime?.metadata?.change_kind === 'mimir'
+  return regime?.changeKind?.includes('mimir')
     || regime?.previousMimirValue == null
     || regime?.mimirValue !== regime?.previousMimirValue;
+}
+
+function isSpreadRegime(regime) {
+  return regime?.changeKind?.includes('spread');
 }
 
 export async function buildWasmArbEconomicsPayload(client, options = {}) {
@@ -82,31 +91,58 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
   ).toISOString();
   const regimeResult = await client.query(
     `select activation_height, activation_time, mimir_value, previous_mimir_value,
+            spread_bps, previous_spread_bps,
             arb_contract, trade_collector, base_layer_collector, tc_share,
             source, observed_at, metadata_json
      from wasm_arb_economics_regimes
      order by activation_time asc`
   );
   const regimes = regimeResult.rows.map(normalizeRegime);
+  const allInterventions = regimes.filter(
+    (regime) => isMimirRegime(regime) || isSpreadRegime(regime)
+  );
+  const firstMimirRegime = regimes.find(isMimirRegime) || null;
   const currentRegime = [...regimes].reverse().find(isMimirRegime)
     || regimes.at(-1)
     || null;
-  const archiveAnchorMs = Date.parse(currentRegime?.activationTime || '');
-  const archiveStart = Number.isFinite(archiveAnchorMs)
-    ? new Date(archiveAnchorMs - COMPARISON_ARCHIVE_DAYS * 24 * 60 * 60 * 1000).toISOString()
-    : since;
-  const archiveEnd = Number.isFinite(archiveAnchorMs)
-    ? new Date(archiveAnchorMs + COMPARISON_ARCHIVE_DAYS * 24 * 60 * 60 * 1000).toISOString()
-    : since;
-  const seriesParams = [since, archiveStart, archiveEnd];
+  const currentSpreadRegime = [...regimes].reverse().find(isSpreadRegime) || null;
+  const currentIntervention = allInterventions.at(-1) || currentRegime;
+  const archiveAnchors = [...new Map(
+    [firstMimirRegime, currentRegime, currentSpreadRegime]
+      .filter(Boolean)
+      .map((regime) => [regime.activationHeight, regime])
+  ).values()];
+  const archiveRanges = archiveAnchors.flatMap((regime) => {
+    const anchorMs = Date.parse(regime.activationTime || '');
+    if (!Number.isFinite(anchorMs)) return [];
+    const radiusMs = COMPARISON_ARCHIVE_DAYS * 24 * 60 * 60 * 1000;
+    return [[
+      new Date(anchorMs - radiusMs).toISOString(),
+      new Date(anchorMs + radiusMs).toISOString()
+    ]];
+  });
+  const seriesParams = [since, ...archiveRanges.flat()];
+  const seriesPredicate = (column) => [
+    `${column} >= $1::timestamptz`,
+    ...archiveRanges.map((_, index) => {
+      const startIndex = 2 + index * 2;
+      return `(${column} >= $${startIndex}::timestamptz
+              and ${column} < $${startIndex + 1}::timestamptz)`;
+    })
+  ].join('\n        or ');
+  const archiveHeights = new Set(archiveAnchors.map((regime) => regime.activationHeight));
+  const sinceMs = Date.parse(since);
+  const interventions = allInterventions.filter((regime) => (
+    archiveHeights.has(regime.activationHeight)
+      || Date.parse(regime.activationTime || '') >= sinceMs
+  ));
 
   const networkResult = await client.query(
     `select bucket_start, bucket_end, network_volume_usd,
             network_liquidity_fee_rune, network_liquidity_fee_usd,
             network_swap_leg_count, rune_price_usd, updated_at
      from wasm_arb_economics_network_buckets
-     where bucket_start >= $1::timestamptz
-        or (bucket_start >= $2::timestamptz and bucket_start < $3::timestamptz)
+     where ${seriesPredicate('bucket_start')}
      order by bucket_start asc`,
     seriesParams
   );
@@ -114,6 +150,7 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
     `with first_regime as (
            select coalesce(previous_mimir_value, mimir_value) as reference_value
            from wasm_arb_economics_regimes
+           where coalesce(metadata_json->>'change_kind', 'mimir') like '%mimir%'
            order by activation_time asc
            limit 1
          ), action_base as (
@@ -130,11 +167,12 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
              select mimir_value, previous_mimir_value
              from wasm_arb_economics_regimes
              where activation_time <= action.block_time
+               and coalesce(metadata_json->>'change_kind', 'mimir') like '%mimir%'
              order by activation_time desc
              limit 1
            ) regime on true
-           where action.block_time >= $1::timestamptz
-              or (action.block_time >= $2::timestamptz and action.block_time < $3::timestamptz)
+           where action.action_key like 'wasm-arb-action:v2:%'
+             and (${seriesPredicate('action.block_time')})
          ), action_summary as (
            select bucket_start,
                 count(*)::integer as wasm_action_count,
@@ -195,8 +233,47 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
                   where wasm_linked and fee_kind = 'fin_range'
                 ), 0) as linked_fin_range_fee_usd
          from wasm_arb_economics_rujira_fees
-         where block_time >= $1::timestamptz
-            or (block_time >= $2::timestamptz and block_time < $3::timestamptz)
+         where event_key like 'wasm-arb-rujira-fee:v2:%'
+           and (${seriesPredicate('block_time')})
+         group by 1
+     order by 1 asc`,
+    seriesParams
+  );
+  const oracleResult = await client.query(
+    `select to_timestamp(floor(extract(epoch from block_time) / 300) * 300)
+                  as bucket_start,
+                count(*)::integer as oracle_observation_count,
+                coalesce(sum(absolute_deviation_bps), 0) as oracle_abs_deviation_sum_bps,
+                coalesce(sum(signed_deviation_bps), 0) as oracle_signed_deviation_sum_bps,
+                coalesce(sum(absolute_deviation_bps * rune_depth_usd), 0)
+                  as oracle_weighted_abs_numerator,
+                coalesce(sum(rune_depth_usd), 0) as oracle_depth_weight_usd,
+                count(*) filter (where absolute_deviation_bps <= 10)::integer
+                  as oracle_within_10_count,
+                count(*) filter (where absolute_deviation_bps <= 25)::integer
+                  as oracle_within_25_count,
+                coalesce(max(absolute_deviation_bps), 0) as oracle_max_abs_deviation_bps,
+                count(*) filter (where oracle_symbol <> 'LTC')::integer
+                  as oracle_ex_ltc_observation_count,
+                coalesce(sum(absolute_deviation_bps) filter (where oracle_symbol <> 'LTC'), 0)
+                  as oracle_ex_ltc_abs_deviation_sum_bps,
+                coalesce(sum(signed_deviation_bps) filter (where oracle_symbol <> 'LTC'), 0)
+                  as oracle_ex_ltc_signed_deviation_sum_bps,
+                coalesce(sum(absolute_deviation_bps * rune_depth_usd)
+                  filter (where oracle_symbol <> 'LTC'), 0)
+                  as oracle_ex_ltc_weighted_abs_numerator,
+                coalesce(sum(rune_depth_usd) filter (where oracle_symbol <> 'LTC'), 0)
+                  as oracle_ex_ltc_depth_weight_usd,
+                count(*) filter (
+                  where oracle_symbol <> 'LTC' and absolute_deviation_bps <= 10
+                )::integer as oracle_ex_ltc_within_10_count,
+                count(*) filter (
+                  where oracle_symbol <> 'LTC' and absolute_deviation_bps <= 25
+                )::integer as oracle_ex_ltc_within_25_count,
+                coalesce(max(absolute_deviation_bps) filter (where oracle_symbol <> 'LTC'), 0)
+                  as oracle_ex_ltc_max_abs_deviation_bps
+         from wasm_arb_economics_oracle_samples
+         where ${seriesPredicate('block_time')}
          group by 1
      order by 1 asc`,
     seriesParams
@@ -207,12 +284,21 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
      order by sync_key`
   );
   const blockResult = await client.query(
-    `select count(*) filter (where status in ('pending', 'error'))::integer as pending,
-            count(*) filter (where status = 'fetched')::integer as fetched,
-            min(height) filter (where status in ('pending', 'error')) as oldest_pending_height,
-            max(height) filter (where status = 'fetched') as latest_fetched_height,
-            max(fetched_at) as latest_fetched_at
-     from wasm_arb_economics_blocks`
+    `select count(*) filter (
+              where status in ('pending', 'error') or fetched_version < 2
+            )::integer as pending,
+            count(*) filter (
+              where status = 'fetched' and fetched_version >= 2
+            )::integer as fetched,
+            min(height) filter (
+              where status in ('pending', 'error') or fetched_version < 2
+            ) as oldest_pending_height,
+            max(height) filter (
+              where status = 'fetched' and fetched_version >= 2
+            ) as latest_fetched_height,
+            max(fetched_at) filter (where fetched_version >= 2) as latest_fetched_at
+     from wasm_arb_economics_blocks
+     where scan_version >= 2`
   );
   const jobResult = await client.query(
     `select finished_at, stats_json
@@ -224,17 +310,22 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
 
   const actions = rowMap(actionResult.rows);
   const fees = rowMap(feeResult.rows);
+  const oracle = rowMap(oracleResult.rows);
   const sync = syncStateMap(stateResult.rows);
-  const actionBackfillComplete = Boolean(sync['actions-backfill:arb']?.complete);
+  const actionBackfillComplete = Boolean(sync['actions-backfill:arb:v2']?.complete);
   const pendingBlocks = safeNumber(blockResult.rows[0]?.pending);
-  const feeBackfillComplete = Boolean(sync['collector-transfers-backfill']?.complete)
+  const feeBackfillComplete = Boolean(sync['collector-tx-search-backfill']?.complete)
+    && Boolean(sync['collector-block-search-backfill']?.complete)
     && pendingBlocks === 0;
+  const oracleBackfillComplete = Boolean(sync['oracle:backfill']?.complete);
 
   const rows = networkResult.rows.map((network) => {
     const bucketStart = iso(network.bucket_start);
     const action = actions.get(bucketStart) || {};
     const fee = fees.get(bucketStart) || {};
+    const oracleRow = oracle.get(bucketStart) || {};
     const regime = regimeForTime(regimes, bucketStart);
+    const mimirRegime = regimeForTime(regimes.filter(isMimirRegime), bucketStart);
     const runePriceUsd = safeNumber(network.rune_price_usd);
     const wasmLiquidityFeeRune = safeNumber(action.wasm_liquidity_fee_rune);
     return {
@@ -268,12 +359,37 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
       linkedFinRangeFeeUsd: safeNumber(fee.linked_fin_range_fee_usd),
       rujiraFeeEventCount: safeNumber(fee.rujira_fee_event_count),
       unpricedRujiraFeeEventCount: safeNumber(fee.unpriced_rujira_fee_event_count),
+      oracleObservationCount: safeNumber(oracleRow.oracle_observation_count),
+      oracleAbsDeviationSumBps: safeNumber(oracleRow.oracle_abs_deviation_sum_bps),
+      oracleSignedDeviationSumBps: safeNumber(oracleRow.oracle_signed_deviation_sum_bps),
+      oracleWeightedAbsNumerator: safeNumber(oracleRow.oracle_weighted_abs_numerator),
+      oracleDepthWeightUsd: safeNumber(oracleRow.oracle_depth_weight_usd),
+      oracleWithin10Count: safeNumber(oracleRow.oracle_within_10_count),
+      oracleWithin25Count: safeNumber(oracleRow.oracle_within_25_count),
+      oracleMaxAbsDeviationBps: safeNumber(oracleRow.oracle_max_abs_deviation_bps),
+      oracleExLtcObservationCount: safeNumber(oracleRow.oracle_ex_ltc_observation_count),
+      oracleExLtcAbsDeviationSumBps: safeNumber(
+        oracleRow.oracle_ex_ltc_abs_deviation_sum_bps
+      ),
+      oracleExLtcSignedDeviationSumBps: safeNumber(
+        oracleRow.oracle_ex_ltc_signed_deviation_sum_bps
+      ),
+      oracleExLtcWeightedAbsNumerator: safeNumber(
+        oracleRow.oracle_ex_ltc_weighted_abs_numerator
+      ),
+      oracleExLtcDepthWeightUsd: safeNumber(oracleRow.oracle_ex_ltc_depth_weight_usd),
+      oracleExLtcWithin10Count: safeNumber(oracleRow.oracle_ex_ltc_within_10_count),
+      oracleExLtcWithin25Count: safeNumber(oracleRow.oracle_ex_ltc_within_25_count),
+      oracleExLtcMaxAbsDeviationBps: safeNumber(
+        oracleRow.oracle_ex_ltc_max_abs_deviation_bps
+      ),
       tcShare: regime.tcShare,
-      mimirValue: regime.mimirValue,
-      referenceMimirValue: regime.previousMimirValue ?? regime.mimirValue,
+      mimirValue: mimirRegime.mimirValue,
+      referenceMimirValue: mimirRegime.previousMimirValue ?? mimirRegime.mimirValue,
       networkComplete: true,
       actionsComplete: actionBackfillComplete,
-      feesComplete: feeBackfillComplete
+      feesComplete: feeBackfillComplete,
+      oracleComplete: oracleBackfillComplete
     };
   });
 
@@ -281,6 +397,7 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
   const latestJob = jobResult.rows[0] || {};
   const sourceUpdatedAt = [
     networkResult.rows.at(-1)?.bucket_end,
+    oracleResult.rows.at(-1)?.bucket_start,
     blockCoverage.latest_fetched_at,
     latestJob.finished_at
   ].map((value) => Date.parse(value || '')).filter(Number.isFinite).reduce(
@@ -291,7 +408,7 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
 
   return {
     payload: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       meta: {
         source: 'boonetools-postgres',
         generatedAt,
@@ -301,6 +418,9 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
         comparisonArchiveDays: COMPARISON_ARCHIVE_DAYS,
         volumeBasis: 'executed-leg-usd',
         currentRegime,
+        currentSpreadRegime,
+        currentIntervention,
+        interventions,
         contracts: {
           wasmArb: WASM_ARB_CONTRACT,
           rujiraTradeCollector: RUJIRA_TRADE_COLLECTOR,
@@ -312,6 +432,11 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
           networkComplete: Boolean(sync['network:5min']?.complete),
           actionBackfillComplete,
           feeBackfillComplete,
+          oracleBackfillComplete,
+          collectorTxSearchComplete: Boolean(sync['collector-tx-search-backfill']?.complete),
+          collectorBlockSearchComplete: Boolean(
+            sync['collector-block-search-backfill']?.complete
+          ),
           pendingBlocks,
           fetchedBlocks: safeNumber(blockCoverage.fetched),
           oldestPendingHeight: blockCoverage.oldest_pending_height == null
@@ -325,13 +450,15 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
         methodology: {
           network: 'Midgard five-minute swap history; USD values are converted from e2 fields.',
           wasm: 'Successful Midgard swaps whose inbound address is the configured WasmArbContract.',
-          volume: 'Executed-leg USD: one leg for RUNE routes, both legs for asset-to-asset routes.',
+          volume: 'Executed-leg USD: one leg for RUNE routes and both legs for asset-to-asset routes, after collapsing identical duplicate outbound records inside an action.',
           thorFees: 'Midgard action liquidityFee in base RUNE, priced with the matching five-minute RUNE price.',
-          rujiraFees: 'Actual bank transfers from every configured FIN code deployment and the Wasm arb contract to the RUJI Trade collector.',
+          rujiraFees: 'Actual bank transfers from every configured FIN code deployment and the Wasm arb contract to the RUJI Trade collector; tx_search and block_search independently discover transaction and finalize-block recipients.',
           linked: 'A FIN transfer is Wasm-linked only when the same transaction executes the configured Wasm arb contract.',
           tcAllocation: 'Economic accrual uses the observed Base Layer collector target weight; it is not same-window Reserve settlement.',
           finRange: 'FIN range fees are a subset of total FIN fees and are matched to rujira-fin/range.fee event amounts.',
-          exclusions: 'Protocol price quality, LVR, and arbitrage profit are not yet included in the TC cash-flow verdict.'
+          pricing: 'RUNE, stable, and Midgard historical prices are supplemented by the same-context FIN execution rate when a fee denom has no direct historical pool price.',
+          oracle: 'Pool balance-ratio prices and THORChain oracle prices are sampled at the same historical height for the 12 comparable Wasm-path pools; depth weighting uses USD RUNE-side depth.',
+          exclusions: 'Pool/oracle tracking is reported separately; LVR and arbitrage profit are not included in the TC cash-flow verdict.'
         }
       },
       regimes,
@@ -344,7 +471,8 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
       regimes: regimes.length,
       pending_blocks: pendingBlocks,
       action_backfill_complete: actionBackfillComplete,
-      fee_backfill_complete: feeBackfillComplete
+      fee_backfill_complete: feeBackfillComplete,
+      oracle_backfill_complete: oracleBackfillComplete
     }
   };
 }

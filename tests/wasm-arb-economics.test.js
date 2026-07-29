@@ -37,52 +37,53 @@ function distributedRows(start, count, totals, options = {}) {
     referenceMimirValue: 7,
     networkComplete: true,
     actionsComplete: true,
-    feesComplete: true
+    feesComplete: true,
+    oracleComplete: true
   }));
 }
 
 const beforeTotals = {
-  networkVolumeUsd: 9_264_198.89,
-  networkLiquidityFeeUsd: 9_490.8221985,
-  networkLiquidityFeeRune: 21_926.33539319,
-  networkSwapLegCount: 35_750,
-  wasmActionCount: 1_436,
-  wasmLegCount: 2_657,
-  wasmInputVolumeUsd: 51_348.88986,
-  wasmLegVolumeUsd: 83_511.36196,
-  wasmLiquidityFeeUsd: 79.35973308,
-  wasmLiquidityFeeRune: 183.0059479,
+  networkVolumeUsd: 16_502_790.12,
+  networkLiquidityFeeUsd: 16_861.6162,
+  networkLiquidityFeeRune: 38_000,
+  networkSwapLegCount: 60_000,
+  wasmActionCount: 2_096,
+  wasmLegCount: 3_700,
+  wasmInputVolumeUsd: 75_000,
+  wasmLegVolumeUsd: 120_130.0273,
+  wasmLiquidityFeeUsd: 106.63687,
+  wasmLiquidityFeeRune: 240,
   zeroSlipActionCount: 0,
   zeroFeeActionCount: 0,
   belowReferenceActionCount: 0,
-  ammFeeUsd: 7.439835,
-  finFeeUsd: 154.884194,
-  finRangeFeeUsd: 6.905009,
-  linkedAmmFeeUsd: 7.439835,
-  linkedFinFeeUsd: 131.403252,
-  linkedFinRangeFeeUsd: 6.905009
+  ammFeeUsd: 17.54586,
+  finFeeUsd: 226.81572,
+  finRangeFeeUsd: 15.42806,
+  linkedAmmFeeUsd: 17.54586,
+  linkedFinFeeUsd: 199.99342,
+  linkedFinRangeFeeUsd: 15.42806
 };
 
 const afterTotals = {
-  networkVolumeUsd: 14_102_026.05,
-  networkLiquidityFeeUsd: 15_023.5720739,
-  networkLiquidityFeeRune: 34_637.84062717,
-  networkSwapLegCount: 44_501,
-  wasmActionCount: 2_337,
-  wasmLegCount: 4_306,
-  wasmInputVolumeUsd: 73_808.85691,
-  wasmLegVolumeUsd: 138_155.38724,
-  wasmLiquidityFeeUsd: 32.17802615,
-  wasmLiquidityFeeRune: 74.04540743,
-  zeroSlipActionCount: 1_693,
-  zeroFeeActionCount: 654,
-  belowReferenceActionCount: 2_285,
-  ammFeeUsd: 9.252612,
-  finFeeUsd: 148.552742,
-  finRangeFeeUsd: 6.89169,
-  linkedAmmFeeUsd: 9.252612,
-  linkedFinFeeUsd: 133.432174,
-  linkedFinRangeFeeUsd: 6.89169
+  networkVolumeUsd: 20_119_000.71,
+  networkLiquidityFeeUsd: 21_211.8039,
+  networkLiquidityFeeRune: 48_000,
+  networkSwapLegCount: 75_000,
+  wasmActionCount: 3_646,
+  wasmLegCount: 6_500,
+  wasmInputVolumeUsd: 135_000,
+  wasmLegVolumeUsd: 222_722.9178,
+  wasmLiquidityFeeUsd: 44.31959,
+  wasmLiquidityFeeRune: 100,
+  zeroSlipActionCount: 2_678,
+  zeroFeeActionCount: 1_001,
+  belowReferenceActionCount: 3_581,
+  ammFeeUsd: 29.16352,
+  finFeeUsd: 268.96874,
+  finRangeFeeUsd: 25.13919,
+  linkedAmmFeeUsd: 29.16352,
+  linkedFinFeeUsd: 245.87339,
+  linkedFinRangeFeeUsd: 25.13919
 };
 
 test('normalizes snake-case economics buckets without losing zero values', () => {
@@ -101,41 +102,65 @@ test('normalizes snake-case economics buckets without losing zero values', () =>
 });
 
 test('summary keeps FIN range fees as a subset and applies the TC collector share once', () => {
-  const summary = summarizeWasmArbWindow(distributedRows(1_785_161_100, 235, afterTotals));
+  const summary = summarizeWasmArbWindow(distributedRows(1_785_161_100, 353, afterTotals));
 
-  assert.equal(Number(summary.linkedRujiraFeeUsd.toFixed(6)), 142.684786);
-  assert.equal(Number(summary.linkedTcReserveUsd.toFixed(6)), 71.342393);
-  assert.equal(Number(summary.tcLinkedValueUsd.toFixed(6)), 103.520419);
-  assert.equal(Number(summary.finRangeFeeUsd.toFixed(6)), 6.89169);
-  assert.equal(Number(summary.allRujiraFeeUsd.toFixed(6)), 157.805354);
+  assert.equal(Number(summary.linkedRujiraFeeUsd.toFixed(6)), 275.03691);
+  assert.equal(Number(summary.linkedTcReserveUsd.toFixed(6)), 137.518455);
+  assert.equal(Number(summary.tcLinkedValueUsd.toFixed(6)), 181.838045);
+  assert.equal(Number(summary.finRangeFeeUsd.toFixed(6)), 25.13919);
+  assert.equal(Number(summary.allRujiraFeeUsd.toFixed(6)), 298.13226);
+  assert.equal(Number(summary.tcBroadValueUsd.toFixed(6)), 193.38572);
+});
+
+test('oracle completeness requires observations across the selected window', () => {
+  const rows = distributedRows(1_785_161_100, 10, afterTotals).map((row, index) => ({
+    ...row,
+    oracleObservationCount: index === 0 ? 0 : 12,
+    oracleAbsDeviationSumBps: index === 0 ? 0 : 120,
+    oracleSignedDeviationSumBps: index === 0 ? 0 : -12,
+    oracleWeightedAbsNumerator: index === 0 ? 0 : 240,
+    oracleDepthWeightUsd: index === 0 ? 0 : 24,
+    oracleWithin10Count: index === 0 ? 0 : 8,
+    oracleWithin25Count: index === 0 ? 0 : 11
+  }));
+  const summary = summarizeWasmArbWindow(rows);
+
+  assert.equal(summary.oracleCoverageComplete, true);
+  assert.equal(summary.oracleBucketCoverage, 0.9);
+  assert.equal(summary.priceTracking.observations, 108);
+  assert.equal(summary.priceTracking.depthWeightedAbsoluteDeviationBps, 10);
 });
 
 test('equal-window comparison excludes the Mimir transition bucket and reproduces corrected economics', () => {
-  const preStart = 1_785_090_300;
+  const preStart = Date.parse('2026-07-26T08:35:00Z') / 1000;
   const postStart = 1_785_161_100;
   const rows = [
-    ...distributedRows(preStart, 235, beforeTotals, { mimirValue: 7 }),
-    ...distributedRows(postStart, 235, afterTotals, { mimirValue: 0 })
+    ...distributedRows(preStart, 353, beforeTotals, { mimirValue: 7 }),
+    ...distributedRows(postStart, 353, afterTotals, { mimirValue: 0 })
   ];
   const result = compareWasmArbEqualWindows(rows, {
     anchorTime: '2026-07-27T14:04:45Z',
-    windowSeconds: 235 * 300
+    windowSeconds: 353 * 300
   });
 
   assert.equal(result.ready, true);
   assert.equal(result.dataComplete, true);
   assert.equal(result.verdict, 'negative');
   assert.equal(result.bounds.preStart, preStart);
-  assert.equal(result.bounds.preEnd, 1_785_160_800);
+  assert.equal(result.bounds.preEnd, Date.parse('2026-07-27T14:00:00Z') / 1000);
   assert.equal(result.bounds.postStart, postStart);
-  assert.equal(Number(result.before.tcLinkedValueUsd.toFixed(6)), 148.781277);
-  assert.equal(Number(result.after.tcLinkedValueUsd.toFixed(6)), 103.520419);
-  assert.equal(Number(result.deltas.tcLinkedValueUsd.absolute.toFixed(6)), -45.260857);
-  assert.equal(Number((result.deltas.tcLinkedValueUsd.percent * 100).toFixed(2)), -30.42);
-  assert.equal(Number(result.before.tcPerMillionNetworkVolumeUsd.toFixed(4)), 16.0598);
-  assert.equal(Number(result.after.tcPerMillionNetworkVolumeUsd.toFixed(4)), 7.3408);
-  assert.equal(Number(result.breakEven.breakEvenRujiraIncreaseUsd.toFixed(6)), 94.363414);
-  assert.equal(Number((result.breakEven.coverage * 100).toFixed(2)), 4.07);
+  assert.equal(Number(result.before.tcLinkedValueUsd.toFixed(6)), 215.40651);
+  assert.equal(Number(result.after.tcLinkedValueUsd.toFixed(6)), 181.838045);
+  assert.equal(Number(result.deltas.tcLinkedValueUsd.absolute.toFixed(6)), -33.568465);
+  assert.equal(Number((result.deltas.tcLinkedValueUsd.percent * 100).toFixed(2)), -15.58);
+  assert.equal(Number(result.before.tcPerMillionNetworkVolumeUsd.toFixed(4)), 13.0527);
+  assert.equal(Number(result.after.tcPerMillionNetworkVolumeUsd.toFixed(4)), 9.0381);
+  assert.equal(Number(result.before.tcPerMillionWasmVolumeUsd.toFixed(2)), 1793.11);
+  assert.equal(Number(result.after.tcPerMillionWasmVolumeUsd.toFixed(2)), 816.43);
+  assert.equal(Number(result.before.tcBroadValueUsd.toFixed(5)), 228.81766);
+  assert.equal(Number(result.after.tcBroadValueUsd.toFixed(5)), 193.38572);
+  assert.equal(Number(result.breakEven.breakEvenRujiraIncreaseUsd.toFixed(6)), 124.63456);
+  assert.equal(Number((result.breakEven.coverage * 100).toFixed(2)), 46.13);
 });
 
 test('comparison refuses to issue a verdict when a source window has gaps', () => {

@@ -151,7 +151,7 @@ export async function refreshWasmArbEconomicsReadModel(options = {}) {
     modelKey,
     client: options.client,
     ttlMs: WASM_ARB_ECONOMICS_TTL_MS,
-    schemaVersion: 1,
+    schemaVersion: 2,
     now,
     build: (client) => buildWasmArbEconomicsPayload(client, {
       generatedAt: now().toISOString()

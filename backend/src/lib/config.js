@@ -210,6 +210,18 @@ export const config = Object.freeze({
   wasmArbEconomicsTransferHeadPages: readInt('WASM_ARB_ECONOMICS_TRANSFER_HEAD_PAGES', 6),
   wasmArbEconomicsNetworkChunks: readInt('WASM_ARB_ECONOMICS_NETWORK_CHUNKS', 3),
   wasmArbEconomicsBlockMaxHeights: readInt('WASM_ARB_ECONOMICS_BLOCK_MAX_HEIGHTS', 80),
+  wasmArbEconomicsOracleStartHeight: readInt(
+    'WASM_ARB_ECONOMICS_ORACLE_START_HEIGHT',
+    27164000
+  ),
+  wasmArbEconomicsOracleStrideBlocks: readInt(
+    'WASM_ARB_ECONOMICS_ORACLE_STRIDE_BLOCKS',
+    30
+  ),
+  wasmArbEconomicsOracleSamplesPerRun: readInt(
+    'WASM_ARB_ECONOMICS_ORACLE_SAMPLES_PER_RUN',
+    40
+  ),
   wasmArbEconomicsRequestDelayMs: readInt('WASM_ARB_ECONOMICS_REQUEST_DELAY_MS', 75),
   wasmArbEconomicsRetentionDays: readInt('WASM_ARB_ECONOMICS_RETENTION_DAYS', 400),
   wasmArbEconomicsFinCodeIds: readList('WASM_ARB_ECONOMICS_FIN_CODE_IDS', ['180'])
