@@ -1,0 +1,208 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import {
+  normalizeCollectorTransferCandidates,
+  normalizeWasmArbAction,
+  normalizeWasmArbNetworkBucket,
+  parseWasmArbRujiraFeeEvents,
+  RUJIRA_TRADE_COLLECTOR,
+  WASM_ARB_CONTRACT
+} from '../src/shared/wasm-arb-economics-ingestion.js';
+
+const FIN = 'thor1fincontract000000000000000000000000000000000000000000000000000000';
+
+function event(type, attributes) {
+  return {
+    type,
+    attributes: Object.entries(attributes).map(([key, value]) => ({ key, value: String(value) }))
+  };
+}
+
+function eventAttributes(type, attributes) {
+  return {
+    type,
+    attributes: attributes.map(([key, value]) => ({ key, value: String(value) }))
+  };
+}
+
+test('normalizes authoritative Wasm swap actions with executed-leg volume', () => {
+  const action = normalizeWasmArbAction({
+    height: '27190000',
+    date: '1785231600000000000',
+    type: 'swap',
+    status: 'success',
+    in: [{
+      txID: 'abc',
+      address: WASM_ARB_CONTRACT,
+      coins: [{ asset: 'BTC.BTC', amount: '100000000' }]
+    }],
+    out: [{
+      txID: 'def',
+      address: WASM_ARB_CONTRACT,
+      coins: [{ asset: 'ETH.ETH', amount: '200000000' }]
+    }],
+    metadata: {
+      swap: {
+        inPriceUSD: '10',
+        outPriceUSD: '6',
+        liquidityFee: '125000000',
+        swapSlip: '3'
+      }
+    }
+  });
+
+  assert.equal(action.leg_count, 2);
+  assert.equal(action.input_volume_usd, 10);
+  assert.equal(action.executed_leg_volume_usd, 22);
+  assert.equal(action.liquidity_fee_rune, 1.25);
+  assert.equal(action.swap_slip_bps, 3);
+  assert.equal(action.tx_id, 'ABC');
+});
+
+test('network buckets convert Midgard USD cents and base RUNE exactly once', () => {
+  const row = normalizeWasmArbNetworkBucket({
+    startTime: '1785231600',
+    endTime: '1785231900',
+    totalVolumeUSD: '123456',
+    totalFees: '250000000',
+    totalCount: '42',
+    runePriceUSD: '4'
+  });
+
+  assert.equal(row.network_volume_usd, 1234.56);
+  assert.equal(row.network_liquidity_fee_rune, 2.5);
+  assert.equal(row.network_liquidity_fee_usd, 10);
+  assert.equal(row.network_swap_leg_count, 42);
+});
+
+test('fee parser includes all FIN transfers, treats range as a subset, and links by tx context', () => {
+  const rows = parseWasmArbRujiraFeeEvents({
+    height: 27190000,
+    blockTime: '2026-07-28T09:40:00Z',
+    origin: 'tx_0',
+    events: [
+      event('wasm-rujira-thorchain-swap/swap', {
+        _contract_address: WASM_ARB_CONTRACT,
+        amm_fee: '25rune'
+      }),
+      event('wasm-rujira-fin/range.fee', {
+        _contract_address: FIN,
+        base: '30',
+        quote: '0'
+      }),
+      event('transfer', {
+        sender: FIN,
+        recipient: RUJIRA_TRADE_COLLECTOR,
+        amount: '30rune'
+      }),
+      event('transfer', {
+        sender: FIN,
+        recipient: RUJIRA_TRADE_COLLECTOR,
+        amount: '70rune'
+      }),
+      event('transfer', {
+        sender: WASM_ARB_CONTRACT,
+        recipient: RUJIRA_TRADE_COLLECTOR,
+        amount: '25rune'
+      })
+    ],
+    finContracts: [FIN]
+  });
+
+  assert.deepEqual(rows.map((row) => row.fee_kind), ['fin_range', 'fin', 'amm']);
+  assert.ok(rows.every((row) => row.wasm_linked));
+  assert.equal(rows.reduce((sum, row) => sum + Number(row.amount_base), 0), 125);
+});
+
+test('fee parser does not count arbitrary senders or unrelated recipients', () => {
+  const rows = parseWasmArbRujiraFeeEvents({
+    height: 27190000,
+    blockTime: '2026-07-28T09:40:00Z',
+    origin: 'tx_0',
+    events: [
+      event('transfer', {
+        sender: 'thor1someoneelse',
+        recipient: RUJIRA_TRADE_COLLECTOR,
+        amount: '10rune'
+      }),
+      event('transfer', {
+        sender: FIN,
+        recipient: 'thor1notcollector',
+        amount: '10rune'
+      })
+    ],
+    finContracts: [FIN]
+  });
+
+  assert.deepEqual(rows, []);
+});
+
+test('fee parser preserves every indexed transfer when one event contains parallel attributes', () => {
+  const rows = parseWasmArbRujiraFeeEvents({
+    height: 27190001,
+    blockTime: '2026-07-28T09:41:00Z',
+    origin: 'tx_1',
+    events: [
+      eventAttributes('transfer', [
+        ['recipient', 'thor1unrelated'],
+        ['sender', FIN],
+        ['amount', '11rune'],
+        ['recipient', RUJIRA_TRADE_COLLECTOR],
+        ['sender', FIN],
+        ['amount', '22rune'],
+        ['recipient', RUJIRA_TRADE_COLLECTOR],
+        ['sender', WASM_ARB_CONTRACT],
+        ['amount', '33rune']
+      ])
+    ],
+    finContracts: [FIN]
+  });
+
+  assert.deepEqual(rows.map((row) => row.amount_base), ['22', '33']);
+  assert.deepEqual(rows.map((row) => row.fee_kind), ['fin', 'amm']);
+});
+
+test('collector transaction discovery filters failed, old, and unrelated indexed responses', () => {
+  const transfer = (recipient) => event('transfer', {
+    sender: FIN,
+    recipient,
+    amount: '10rune'
+  });
+  const responses = [
+    {
+      height: '27190010',
+      code: 0,
+      timestamp: '2026-07-28T09:42:00Z',
+      events: [transfer(RUJIRA_TRADE_COLLECTOR)]
+    },
+    {
+      height: '27190011',
+      code: 4,
+      timestamp: '2026-07-28T09:42:06Z',
+      events: [transfer(RUJIRA_TRADE_COLLECTOR)]
+    },
+    {
+      height: '27180000',
+      code: 0,
+      timestamp: '2026-07-27T09:42:00Z',
+      events: [transfer(RUJIRA_TRADE_COLLECTOR)]
+    },
+    {
+      height: '27190012',
+      code: 0,
+      timestamp: '2026-07-28T09:42:12Z',
+      events: [transfer('thor1unrelated')]
+    }
+  ];
+
+  assert.deepEqual(normalizeCollectorTransferCandidates(
+    responses,
+    RUJIRA_TRADE_COLLECTOR,
+    27185000
+  ), [{
+    height: 27190010,
+    blockTime: '2026-07-28T09:42:00.000Z',
+    source: 'trade-collector-tx'
+  }]);
+});

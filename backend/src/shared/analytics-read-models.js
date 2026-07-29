@@ -3,6 +3,7 @@ import { getRujiraBaseLayerEarningsDashboardPayload } from './rujira-base-layer-
 import { getRujiraReservePaymentsDashboardPayload } from './rujira-reserve-payments.js';
 import { buildRapidSwapsSummaryPayload } from './rapid-swaps-dashboard.js';
 import { buildTcFeeDashPayload } from './tc-fee-dash.js';
+import { buildWasmArbEconomicsPayload } from './wasm-arb-economics.js';
 import { ANALYTICS_READ_MODEL_KEYS } from './analytics-read-model-keys.js';
 import { buildAndPublishReadModel } from './read-models.js';
 import {
@@ -14,6 +15,7 @@ import {
 const RAPID_TTL_MS = 150_000;
 const APP_LAYER_TTL_MS = 330_000;
 const TC_FEE_TTL_MS = 900_000;
+const WASM_ARB_ECONOMICS_TTL_MS = 330_000;
 
 export async function refreshRapidSwapsReadModel(options = {}) {
   const modelKey = ANALYTICS_READ_MODEL_KEYS.rapidSwaps;
@@ -140,6 +142,23 @@ export async function refreshTcFeeDashReadModel(options = {}) {
   });
 }
 
+export async function refreshWasmArbEconomicsReadModel(options = {}) {
+  const modelKey = ANALYTICS_READ_MODEL_KEYS.wasmArbEconomics;
+  const existing = await getRecentlyBuiltReadModel(modelKey, options, 60_000);
+  if (existing) return minimumIntervalResult(existing);
+  const now = scheduledNow(options);
+  return buildAndPublishReadModel({
+    modelKey,
+    client: options.client,
+    ttlMs: WASM_ARB_ECONOMICS_TTL_MS,
+    schemaVersion: 1,
+    now,
+    build: (client) => buildWasmArbEconomicsPayload(client, {
+      generatedAt: now().toISOString()
+    })
+  });
+}
+
 // Keep this list limited to database-backed builders. Provider-backed models
 // run in independent processes so a slow THORNode or market-history provider
 // cannot hold the shared analytics advisory lock or delay these snapshots.
@@ -148,7 +167,8 @@ export const ANALYTICS_DATABASE_READ_MODEL_REFRESHERS = Object.freeze([
   ['appLayerReservePayments', refreshAppLayerReservePaymentsReadModel],
   ['appLayerBaseLayerEarnings', refreshAppLayerBaseLayerEarningsReadModel],
   ['appLayerBaseFees', refreshAppLayerBaseFeesReadModel],
-  ['tcFeeDash', refreshTcFeeDashReadModel]
+  ['tcFeeDash', refreshTcFeeDashReadModel],
+  ['wasmArbEconomics', refreshWasmArbEconomicsReadModel]
 ]);
 
 export async function refreshAnalyticsReadModels(options = {}) {

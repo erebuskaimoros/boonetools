@@ -62,6 +62,14 @@
     description: "Track seven-day THORChain pool price deviation from oracle and Binance references"
   };
 
+  const wasmArbEconomicsApp = {
+    name: "Wasm Arb Economics",
+    component: () => import("./lib/WasmArbEconomics.svelte"),
+    icon: "↔",
+    path: "wasm-arb-economics",
+    description: "Measure Wasm arb activity, liquidity fees, Rujira revenue, and value captured by THORChain"
+  };
+
   const bondTrackerApp = {
     name: "Bond Tracker",
     component: () => import("./lib/BondTrackerV2.svelte"),
@@ -131,6 +139,7 @@
     rapidSwapsApp,
     tcFeeDashApp,
     poolDislocationApp,
+    wasmArbEconomicsApp,
     bondTrackerApp,
     vaultExplorerApp,
     treasuryTrackerApp,

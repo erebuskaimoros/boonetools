@@ -38,6 +38,7 @@ import { handleStatusDashboard } from './handlers/status-dashboard.js';
 import { handleStatusLive } from './handlers/status-live.js';
 import { handleTcFeeDash } from './handlers/tc-fee-dash.js';
 import { handleTreasurySnapshot } from './handlers/treasury-snapshot.js';
+import { handleWasmArbEconomics } from './handlers/wasm-arb-economics.js';
 
 function route(handler, cost = 1, maxConcurrent = 8) {
   return { auth: 'none', handler, cost, maxConcurrent };
@@ -71,7 +72,8 @@ const routes = new Map([
   ['/app-layer-reserve-payments', route(handleAppLayerReservePayments, 1, 64)],
   ['/stock-prices', route(handleStockPrices, 2, 4)],
   ['/stuck-transactions', route(handleStuckTransactions, 3, 3)],
-  ['/treasury-snapshot', route(handleTreasurySnapshot, 1, 64)]
+  ['/treasury-snapshot', route(handleTreasurySnapshot, 1, 64)],
+  ['/wasm-arb-economics', route(handleWasmArbEconomics, 1, 64)]
 ]);
 
 const checkRateLimit = createFixedWindowRateLimiter();
