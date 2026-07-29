@@ -17,7 +17,7 @@
     sortPoolDislocationPools
   } from './pool-dislocation/model.js';
 
-  const CHART = Object.freeze({ width: 1000, height: 330, left: 72, right: 24, top: 30, bottom: 276 });
+  const CHART = Object.freeze({ width: 1000, height: 520, left: 84, right: 24, top: 30, bottom: 456 });
   const MAX_CONTIGUOUS_GAP_MS = 7.5 * 60 * 1000;
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   const thresholds = [0.5, 1, 2];
@@ -87,6 +87,8 @@
   $: yMin = chartScale.min;
   $: yMax = chartScale.max;
   $: yTicks = chartScale.ticks;
+  $: positiveThresholdVisible = threshold >= yMin && threshold <= yMax;
+  $: negativeThresholdVisible = -threshold >= yMin && -threshold <= yMax;
   $: oraclePath = makeLinePath(chartPoints, 'oracleDislocation', yMin, yMax);
   $: binancePath = makeLinePath(chartPoints, 'binanceDislocation', yMin, yMax);
   $: hoverPoint = chartPoints.find((point) => point.observedAt === chartHoverPoint?.observedAt) || null;
@@ -215,12 +217,15 @@
     return path;
   }
 
-  function formatPercent(value, { signed = true } = {}) {
+  function formatBasisPoints(value, { signed = true } = {}) {
     if (value === null || value === undefined || value === '') return '—';
     const numeric = Number(value);
     if (!Number.isFinite(numeric)) return '—';
-    const sign = signed && numeric > 0 ? '+' : '';
-    return `${sign}${numeric.toFixed(2)}%`;
+    const basisPoints = numeric * 100;
+    const absolute = Math.abs(basisPoints);
+    const maximumFractionDigits = absolute >= 100 ? 0 : absolute >= 10 ? 1 : 2;
+    const sign = signed && basisPoints > 0 ? '+' : '';
+    return `${sign}${new Intl.NumberFormat('en-US', { maximumFractionDigits }).format(basisPoints)} BPS`;
   }
 
   function formatPrice(value) {
@@ -235,9 +240,8 @@
     }).format(numeric);
   }
 
-  function formatAxisPercent(value) {
-    if (value === 0) return '0%';
-    return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+  function formatAxisBasisPoints(value) {
+    return formatBasisPoints(value);
   }
 
   function formatChartTick(observedAt, index) {
@@ -437,20 +441,20 @@
     <div class="metric-cell">
       <span class="metric-index">02</span>
       <span class="metric-label">MOST DISLOCATED NOW</span>
-      <strong class={dislocationState(dashboard.currentLeader?.currentAbsolute, threshold)}>{formatPercent(dashboard.currentLeader?.currentAbsolute, { signed: false })}</strong>
+      <strong class={dislocationState(dashboard.currentLeader?.currentAbsolute, threshold)}>{formatBasisPoints(dashboard.currentLeader?.currentAbsolute, { signed: false })}</strong>
       <small>{dashboard.currentLeader?.symbol || '—'} · max reference gap</small>
     </div>
     <div class="metric-cell">
       <span class="metric-index">03</span>
       <span class="metric-label">7D PEAK</span>
-      <strong class={dislocationState(dashboard.peakLeader?.peakAbsolute, threshold)}>{formatPercent(dashboard.peakLeader?.peakAbsolute, { signed: false })}</strong>
+      <strong class={dislocationState(dashboard.peakLeader?.peakAbsolute, threshold)}>{formatBasisPoints(dashboard.peakLeader?.peakAbsolute, { signed: false })}</strong>
       <small>{dashboard.peakLeader?.symbol || '—'} · absolute deviation</small>
     </div>
     <div class="metric-cell">
       <span class="metric-index">04</span>
       <span class="metric-label">OUTSIDE THRESHOLD</span>
       <strong>{dashboard.outsideThreshold}</strong>
-      <small>pools ≥ {threshold.toFixed(1)}% now</small>
+      <small>pools ≥ {formatBasisPoints(threshold, { signed: false })} now</small>
     </div>
   </section>
 
@@ -509,7 +513,7 @@
           <span class="zoom-hint">{chartViewport.zoomed ? 'ZOOM ACTIVE · DRAG AGAIN OR RESET' : 'DRAG TO HIGHLIGHT + ZOOM'}</span>
           {#if sourceMode !== 'binance'}<span class="oracle-key"><i></i>TC / ORACLE</span>{/if}
           {#if sourceMode !== 'oracle'}<span class="binance-key"><i></i>TC / BINANCE</span>{/if}
-          <span class="band-key"><i></i>±{threshold.toFixed(1)}% WATCH BAND</span>
+          <span class="band-key"><i></i>±{formatBasisPoints(threshold, { signed: false })} WATCH BAND</span>
         </div>
         <svg
           bind:this={chartSvg}
@@ -517,14 +521,18 @@
           role="img"
           aria-label={`${selectedPool?.symbol} ${chartRangeLabel} pool price deviation chart. Drag horizontally to zoom; double click to reset.`}
         >
-          <rect class="watch-zone top" x={CHART.left} y={CHART.top} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, chartY(threshold) - CHART.top)} />
-          <rect class="watch-zone bottom" x={CHART.left} y={chartY(-threshold)} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, CHART.bottom - chartY(-threshold))} />
+          {#if positiveThresholdVisible}
+            <rect class="watch-zone top" x={CHART.left} y={CHART.top} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, chartY(threshold) - CHART.top)} />
+          {/if}
+          {#if negativeThresholdVisible}
+            <rect class="watch-zone bottom" x={CHART.left} y={chartY(-threshold)} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, CHART.bottom - chartY(-threshold))} />
+          {/if}
           {#each yTicks as tick}
             <line class:zero={tick === 0} class="grid-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(tick)} y2={chartY(tick)} />
-            <text class="axis-label y" x={CHART.left - 12} y={chartY(tick) + 4}>{formatAxisPercent(tick)}</text>
+            <text class="axis-label y" x={CHART.left - 12} y={chartY(tick) + 4}>{formatAxisBasisPoints(tick)}</text>
           {/each}
-          <line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(threshold)} y2={chartY(threshold)} />
-          <line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(-threshold)} y2={chartY(-threshold)} />
+          {#if positiveThresholdVisible}<line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(threshold)} y2={chartY(threshold)} />{/if}
+          {#if negativeThresholdVisible}<line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(-threshold)} y2={chartY(-threshold)} />{/if}
           {#each xTicks as tick}
             <line class="x-tick" x1={chartX(tick.observedAt)} x2={chartX(tick.observedAt)} y1={CHART.bottom} y2={CHART.bottom + 5} />
             <text class="axis-label x" x={chartX(tick.observedAt)} y={CHART.bottom + 24}>{formatChartTick(tick.observedAt, tick.index)}</text>
@@ -581,8 +589,8 @@
             <div><span>TC POOL</span><b>{formatPrice(hoverPoint.poolPrice)}</b></div>
             <div><span>TC ORACLE</span><b>{formatPrice(hoverPoint.oraclePrice)}</b></div>
             <div><span>BINANCE</span><b>{formatPrice(hoverPoint.binancePrice)}</b></div>
-            <div><span>VS ORACLE</span><b class={dislocationState(hoverPoint.oracleDislocation, threshold)}>{formatPercent(hoverPoint.oracleDislocation)}</b></div>
-            <div><span>VS BINANCE</span><b class={dislocationState(hoverPoint.binanceDislocation, threshold)}>{formatPercent(hoverPoint.binanceDislocation)}</b></div>
+            <div><span>VS ORACLE</span><b class={dislocationState(hoverPoint.oracleDislocation, threshold)}>{formatBasisPoints(hoverPoint.oracleDislocation)}</b></div>
+            <div><span>VS BINANCE</span><b class={dislocationState(hoverPoint.binanceDislocation, threshold)}>{formatBasisPoints(hoverPoint.binanceDislocation)}</b></div>
           </div>
         {/if}
         {#if seriesLoading}
@@ -604,18 +612,18 @@
         <div class="delta-stack">
           <div>
             <span>VS ORACLE</span>
-            <strong class={dislocationState(selectedPool?.current?.oracleDislocation, threshold)}>{formatPercent(selectedPool?.current?.oracleDislocation)}</strong>
+            <strong class={dislocationState(selectedPool?.current?.oracleDislocation, threshold)}>{formatBasisPoints(selectedPool?.current?.oracleDislocation)}</strong>
           </div>
           <div>
             <span>VS BINANCE</span>
-            <strong class={dislocationState(selectedPool?.current?.binanceDislocation, threshold)}>{formatPercent(selectedPool?.current?.binanceDislocation)}</strong>
+            <strong class={dislocationState(selectedPool?.current?.binanceDislocation, threshold)}>{formatBasisPoints(selectedPool?.current?.binanceDislocation)}</strong>
           </div>
         </div>
         <div class="reading-foot">
           {#each DISLOCATION_WINDOWS as window}
-            <div><span>{window.label} AVG ABS</span><strong>{formatPercent(selectedPool?.averageAbsoluteByWindow?.[window.id], { signed: false })}</strong></div>
+            <div><span>{window.label} AVG ABS</span><strong>{formatBasisPoints(selectedPool?.averageAbsoluteByWindow?.[window.id], { signed: false })}</strong></div>
           {/each}
-          <div><span>7D PEAK ABS</span><strong>{formatPercent(selectedPool?.peakAbsolute, { signed: false })}</strong></div>
+          <div><span>7D PEAK ABS</span><strong>{formatBasisPoints(selectedPool?.peakAbsolute, { signed: false })}</strong></div>
           <div><span>TIME OUTSIDE</span><strong>{formatHours(selectedPool?.hoursOutsideThreshold)}</strong></div>
           <div><span>OBSERVED</span><strong>{formatTimestamp(selectedPool?.current?.observedAt)}</strong></div>
         </div>
@@ -646,7 +654,7 @@
         <div class="control-row threshold-controls">
           <span class="control-label">THRESHOLD</span>
           {#each thresholds as value}
-            <button class:active={threshold === value} on:click={() => threshold = value}><i>[{value.toFixed(1)}%]</i></button>
+            <button class:active={threshold === value} on:click={() => threshold = value}><i>[{formatBasisPoints(value, { signed: false })}]</i></button>
           {/each}
         </div>
       </div>
@@ -682,12 +690,12 @@
                 </button>
               </td>
               <td class="number">{formatPrice(pool.current?.poolPrice)}</td>
-              <td class={`number ${dislocationState(pool.current?.oracleDislocation, threshold)}`}>{formatPercent(pool.current?.oracleDislocation)}</td>
-              <td class={`number ${dislocationState(pool.current?.binanceDislocation, threshold)}`}>{formatPercent(pool.current?.binanceDislocation)}</td>
+              <td class={`number ${dislocationState(pool.current?.oracleDislocation, threshold)}`}>{formatBasisPoints(pool.current?.oracleDislocation)}</td>
+              <td class={`number ${dislocationState(pool.current?.binanceDislocation, threshold)}`}>{formatBasisPoints(pool.current?.binanceDislocation)}</td>
               {#each DISLOCATION_WINDOWS as window}
-                <td class="number muted">{formatPercent(pool.averageAbsoluteByWindow?.[window.id], { signed: false })}</td>
+                <td class="number muted">{formatBasisPoints(pool.averageAbsoluteByWindow?.[window.id], { signed: false })}</td>
               {/each}
-              <td class="number">{formatPercent(pool.peakAbsolute, { signed: false })}</td>
+              <td class="number">{formatBasisPoints(pool.peakAbsolute, { signed: false })}</td>
               <td class="number muted">{formatHours(pool.hoursOutsideThreshold)}</td>
               <td class="spark-cell"><svg viewBox="0 0 92 26" aria-hidden="true"><line x1="0" x2="92" y1="25" y2="25"></line><path class={state} d={sparkPath(pool)} /></svg></td>
               <td><span class={`state-pill ${state}`}><i></i>{state}</span></td>
@@ -704,7 +712,7 @@
 
   <footer class="method-line">
     <span>FORMULA</span>
-    <code>100 × (TC_POOL / REFERENCE − 1)</code>
+    <code>10,000 × (TC_POOL / REFERENCE − 1) BPS</code>
     <span>WINDOW ABS = MEAN MAX SOURCE GAP</span>
     <span>GAPS ARE NOT INTERPOLATED</span>
     <span>BACKFILL = SAME-BLOCK TC/ORACLE + BINANCE 5M CLOSE</span>
@@ -814,7 +822,7 @@
   .control-row button.zoom-reset { border-color: rgba(85, 136, 204, 0.35); color: var(--term-info, #5588cc); }
   .control-row button.zoom-reset i { color: inherit; }
 
-  .focus-grid { display: grid; grid-template-columns: minmax(0, 1fr) 242px; min-height: 390px; }
+  .focus-grid { display: grid; grid-template-columns: minmax(0, 1fr) 242px; min-height: 560px; }
   .chart-wrap { position: relative; min-width: 0; padding: 15px 17px 10px; border-right: 1px solid var(--term-border-faint, #111); overflow: hidden; }
   .chart-legend { justify-content: flex-end; gap: 17px; min-height: 22px; padding-right: 7px; color: var(--term-text-5, #444); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; letter-spacing: 0.06em; }
   .chart-legend span { display: inline-flex; align-items: center; gap: 6px; font-family: inherit; }
@@ -822,7 +830,7 @@
   .chart-legend i { display: inline-block; width: 16px; height: 2px; background: var(--term-accent, #00cc66); }
   .chart-legend .binance-key i { background: var(--term-info, #5588cc); }
   .chart-legend .band-key i { height: 5px; border: 1px solid rgba(212, 160, 23, 0.28); background: var(--term-amber-soft, rgba(212, 160, 23, 0.06)); }
-  .chart-wrap svg { display: block; width: 100%; height: auto; min-height: 300px; }
+  .chart-wrap svg { display: block; width: 100%; height: auto; min-height: 450px; }
   .watch-zone { fill: rgba(212, 160, 23, 0.035); }
   .grid-line { stroke: var(--term-border-faint, #111); stroke-width: 1; }
   .grid-line.zero { stroke: var(--term-text-5, #444); stroke-dasharray: 4 5; }
@@ -947,7 +955,7 @@
     .watchlist-controls { justify-content: flex-start; }
     .chart-wrap { padding-left: 4px; padding-right: 4px; }
     .chart-legend { justify-content: center; gap: 10px; }
-    .chart-wrap svg { min-height: 250px; }
+    .chart-wrap svg { min-height: 360px; }
     .reading-panel { display: block; }
     .price-stack { margin-top: 16px; }
     .delta-stack { margin: 16px -16px 0; }

@@ -32,11 +32,19 @@ test('chart scale follows the visible points and selected reference source', () 
     { oracleDislocation: -8.2, binanceDislocation: 0.4 },
     { oracleDislocation: -6.1, binanceDislocation: 0.5 }
   ], { sourceMode: 'binance', threshold: 1 });
+  const differentThreshold = buildPoolDislocationChartScale([
+    { oracleDislocation: -0.2, binanceDislocation: 0.4 },
+    { oracleDislocation: 0.3, binanceDislocation: 0.5 }
+  ], { sourceMode: 'both', threshold: 2 });
 
-  assert.ok(quiet.min <= -1 && quiet.max >= 1);
-  assert.ok(volatile.min < quiet.min);
-  assert.ok(volatile.max >= 1);
-  assert.deepEqual(binanceOnly, quiet);
+  assert.ok(quiet.min < -0.2 && quiet.max > 0.5);
+  assert.ok((quiet.max - 0.5) / (quiet.max - quiet.min) < 0.05);
+  assert.ok((-0.2 - quiet.min) / (quiet.max - quiet.min) < 0.05);
+  assert.ok(volatile.min < -8.2 && volatile.max === 0);
+  assert.ok(binanceOnly.max > 0.5);
+  assert.ok(binanceOnly.max - binanceOnly.min < volatile.max - volatile.min);
+  assert.deepEqual(differentThreshold, quiet);
+  assert.equal(volatile.ticks.length, 7);
   assert.ok(volatile.ticks.every((tick, index) => index === 0 || tick < volatile.ticks[index - 1]));
 });
 

@@ -146,22 +146,12 @@ export function buildPoolDislocationChartViewport(points = [], options = {}) {
   };
 }
 
-function niceChartStep(value) {
-  if (!Number.isFinite(value) || value <= 0) return 0.5;
-  const exponent = Math.floor(Math.log10(value));
-  const fraction = value / (10 ** exponent);
-  const niceFraction = fraction < 1.5 ? 1
-    : fraction < 3 ? 2
-      : fraction < 7 ? 5 : 10;
-  return niceFraction * (10 ** exponent);
-}
-
 export function buildPoolDislocationChartScale(points = [], options = {}) {
   const sourceMode = ['oracle', 'binance'].includes(options.sourceMode)
     ? options.sourceMode
     : 'both';
   const threshold = Math.abs(finiteNumber(options.threshold) ?? 1);
-  const values = [0, -threshold, threshold];
+  const values = [];
 
   for (const point of Array.isArray(points) ? points : []) {
     if (sourceMode !== 'binance') {
@@ -174,23 +164,27 @@ export function buildPoolDislocationChartScale(points = [], options = {}) {
     }
   }
 
+  if (values.length === 0) values.push(-threshold, threshold);
+  else values.push(0);
   let dataMin = Math.min(...values);
   let dataMax = Math.max(...values);
-  const minimumSpan = Math.max(0.2, threshold * 2, 0.01);
-  if (dataMax - dataMin < minimumSpan) {
+  if (dataMax === dataMin) {
+    const minimumSpan = Math.max(0.1, Math.abs(dataMax) * 0.08);
     const midpoint = (dataMin + dataMax) / 2;
     dataMin = midpoint - (minimumSpan / 2);
     dataMax = midpoint + (minimumSpan / 2);
   }
-  const padding = Math.max((dataMax - dataMin) * 0.1, 0.02);
-  const paddedMin = dataMin - padding;
-  const paddedMax = dataMax + padding;
-  const step = niceChartStep((paddedMax - paddedMin) / 4);
-  const min = Math.floor(paddedMin / step) * step;
-  const max = Math.ceil(paddedMax / step) * step;
-  const ticks = [];
-  for (let value = max; value >= min - (step / 2); value -= step) {
-    ticks.push(Math.abs(value) < step / 1_000_000 ? 0 : Number(value.toPrecision(12)));
+  const padding = Math.max((dataMax - dataMin) * 0.04, 0.0025);
+  const min = dataMin === 0 && dataMax > 0 ? 0 : dataMin - padding;
+  const max = dataMax === 0 && dataMin < 0 ? 0 : dataMax + padding;
+  const step = (max - min) / 6;
+  const ticks = Array.from({ length: 7 }, (_, index) => {
+    const value = max - (step * index);
+    return Math.abs(value) < step / 1_000_000 ? 0 : Number(value.toPrecision(12));
+  });
+  if (min < 0 && max > 0 && !ticks.some((value) => value === 0)) {
+    ticks.push(0);
+    ticks.sort((left, right) => right - left);
   }
 
   return { min, max, step, ticks };

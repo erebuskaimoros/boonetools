@@ -142,10 +142,12 @@ The mockup establishes these production interactions:
   count beyond the selected threshold
 - one selected-pool chart with trailing 1h, 1d, and 7d controls, horizontal
   highlight-to-zoom with an explicit reset, a zero line, threshold band, and
-  independent oracle/Binance series toggles; the Y scale derives from only the
-  currently visible points and selected references, while hover resolves the
+  independent oracle/Binance series toggles; the taller Y scale derives from
+  only the currently visible points and selected references with four-percent
+  edge padding, while hover resolves the
   nearest exact five-minute point and shows all three prices plus both signed
-  deviations. Gaps are not interpolated.
+  deviations. All displayed deviations use basis points. Gaps are not
+  interpolated.
 - threshold controls at 0.5%, 1%, and 2%
 - a default-on `HIDE HALTED` toggle backed by current THORChain inbound-address
   trading flags; enabling it also excludes those pools from leaders, coverage,
