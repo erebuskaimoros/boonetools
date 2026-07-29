@@ -43,7 +43,14 @@ async function captureJob(run, expectedLockKey) {
 test('generic analytics loop contains only database-backed refresh lanes', () => {
   assert.deepEqual(
     ANALYTICS_DATABASE_READ_MODEL_REFRESHERS.map(([name]) => name),
-    ['rapidSwaps', 'appLayerReservePayments', 'appLayerBaseLayerEarnings', 'appLayerBaseFees', 'tcFeeDash']
+    [
+      'rapidSwaps',
+      'appLayerReservePayments',
+      'appLayerBaseLayerEarnings',
+      'appLayerBaseFees',
+      'tcFeeDash',
+      'wasmArbEconomics'
+    ]
   );
 });
 

@@ -7,5 +7,6 @@ export const ANALYTICS_READ_MODEL_KEYS = Object.freeze({
   appLayerLiveState: 'app-layer-live-state:v3',
   nodeVotes: 'node-votes-summary:v1',
   nodeVotesChainState: 'node-votes-chain-state:v1',
-  tcFeeDash: 'tc-fee-dash:v1'
+  tcFeeDash: 'tc-fee-dash:v1',
+  wasmArbEconomics: 'wasm-arb-economics:v1'
 });

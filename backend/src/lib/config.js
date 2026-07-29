@@ -179,7 +179,19 @@ export const config = Object.freeze({
   tcFeeDashDaysPerRun: readInt('TC_FEE_DASH_DAYS_PER_RUN', 90),
   tcFeeDashHeadLagDays: readInt('TC_FEE_DASH_HEAD_LAG_DAYS', 1),
   tcFeeDashRequestDelayMs: readInt('TC_FEE_DASH_REQUEST_DELAY_MS', 1000),
-  tcFeeDashRateLimitCooldownMs: readInt('TC_FEE_DASH_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000
+  tcFeeDashRateLimitCooldownMs: readInt('TC_FEE_DASH_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000,
+  wasmArbEconomicsStartTime: optional(process.env.WASM_ARB_ECONOMICS_START_TIME)
+    || '2026-07-13T00:00:00Z',
+  wasmArbEconomicsStartHeight: readInt('WASM_ARB_ECONOMICS_START_HEIGHT', 26950000),
+  wasmArbEconomicsActionBackfillPages: readInt('WASM_ARB_ECONOMICS_ACTION_BACKFILL_PAGES', 12),
+  wasmArbEconomicsActionHeadPages: readInt('WASM_ARB_ECONOMICS_ACTION_HEAD_PAGES', 6),
+  wasmArbEconomicsTransferBackfillPages: readInt('WASM_ARB_ECONOMICS_TRANSFER_BACKFILL_PAGES', 12),
+  wasmArbEconomicsTransferHeadPages: readInt('WASM_ARB_ECONOMICS_TRANSFER_HEAD_PAGES', 6),
+  wasmArbEconomicsNetworkChunks: readInt('WASM_ARB_ECONOMICS_NETWORK_CHUNKS', 3),
+  wasmArbEconomicsBlockMaxHeights: readInt('WASM_ARB_ECONOMICS_BLOCK_MAX_HEIGHTS', 80),
+  wasmArbEconomicsRequestDelayMs: readInt('WASM_ARB_ECONOMICS_REQUEST_DELAY_MS', 75),
+  wasmArbEconomicsRetentionDays: readInt('WASM_ARB_ECONOMICS_RETENTION_DAYS', 400),
+  wasmArbEconomicsFinCodeIds: readList('WASM_ARB_ECONOMICS_FIN_CODE_IDS', ['180'])
 });
 
 export function requireConfig(key) {

@@ -328,6 +328,7 @@ prime_read_models() {
     boonetools-app-layer-live-state.service
     boonetools-rujira-base-fees.service
     boonetools-rujira-reserve-payments.service
+    boonetools-wasm-arb-economics.service
     boonetools-analytics-read-models.service
     boonetools-node-votes-summary.service
     boonetools-rapid-swaps-market-history.service

@@ -53,6 +53,14 @@
     description: "Track TC fee capture against global exchange volume"
   };
 
+  const wasmArbEconomicsApp = {
+    name: "Wasm Arb Economics",
+    component: () => import("./lib/WasmArbEconomics.svelte"),
+    icon: "↔",
+    path: "wasm-arb-economics",
+    description: "Measure Wasm arb activity, liquidity fees, Rujira revenue, and value captured by THORChain"
+  };
+
   const bondTrackerApp = {
     name: "Bond Tracker",
     component: () => import("./lib/BondTrackerV2.svelte"),
@@ -121,6 +129,7 @@
     statusApp,
     rapidSwapsApp,
     tcFeeDashApp,
+    wasmArbEconomicsApp,
     bondTrackerApp,
     vaultExplorerApp,
     treasuryTrackerApp,
