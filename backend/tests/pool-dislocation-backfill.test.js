@@ -5,8 +5,10 @@ import { runPoolDislocationBackfill } from '../src/jobs/pool-dislocation-backfil
 import {
   buildHistoricalPoolDislocationRows,
   buildPoolDislocationBackfillBuckets,
+  isTransientPoolDislocationBackfillError,
   loadPoolDislocationBackfillPlan,
   normalizeBinanceKlineCloses,
+  retryPoolDislocationBackfillOperation,
   resolvePoolDislocationBlockAnchors
 } from '../src/shared/pool-dislocation-backfill.js';
 import { upsertPoolDislocationRows } from '../src/shared/pool-dislocation-store.js';
@@ -33,6 +35,52 @@ test('Binance five-minute closes map to the following exact boundary', () => {
   ]);
   assert.equal(closes.get('2026-07-22T12:05:00.000Z'), 101);
   assert.equal(closes.get('2026-07-22T12:10:00.000Z'), 102);
+});
+
+test('historical state retries honor transient failures and provider cooldowns', async () => {
+  let calls = 0;
+  let now = 1_000;
+  const delays = [];
+  const retries = [];
+  const result = await retryPoolDislocationBackfillOperation(async () => {
+    calls += 1;
+    if (calls === 1) throw new TypeError('fetch failed');
+    if (calls === 2) {
+      const error = new Error('provider is cooling down');
+      error.name = 'ProviderCooldownError';
+      error.blockedUntil = new Date(4_000).toISOString();
+      throw error;
+    }
+    return { ok: true };
+  }, {
+    attempts: 4,
+    baseDelayMs: 10,
+    maxDelayMs: 5_000,
+    now: () => now,
+    sleep: async (delayMs) => {
+      delays.push(delayMs);
+      now += delayMs;
+    },
+    onRetry: (event) => retries.push(event)
+  });
+  assert.deepEqual(result, { ok: true });
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [10, 3_240]);
+  assert.deepEqual(retries.map(({ nextAttempt }) => nextAttempt), [2, 3]);
+});
+
+test('historical state retry rejects non-transient provider responses', async () => {
+  const error = new Error('bad request');
+  error.status = 400;
+  assert.equal(isTransientPoolDislocationBackfillError(error), false);
+  await assert.rejects(
+    retryPoolDislocationBackfillOperation(async () => { throw error; }, {
+      attempts: 8,
+      baseDelayMs: 0,
+      maxDelayMs: 0
+    }),
+    /bad request/
+  );
 });
 
 test('height interpolation resolves the latest finalized block at or before each point', async () => {

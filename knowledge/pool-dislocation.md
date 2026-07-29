@@ -127,7 +127,9 @@ null bid/ask fields and are explicitly labeled `historical_backfill` plus
 The job discovers already-written historical buckets before fetching sources,
 writes bounded transactional batches, verifies the complete bucket range, and
 rebuilds the provider-free summary read model when it finishes. It can be
-rerun safely after an interruption.
+rerun safely after an interruption. Historical state reads also retry bounded
+transport failures and honor the shared provider-cooldown window in place, so
+a dropped THORNode request does not force another block-anchor reconstruction.
 
 ## Interface Scope
 

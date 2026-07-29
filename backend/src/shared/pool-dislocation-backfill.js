@@ -15,6 +15,7 @@ const FIVE_MINUTES_MS = POOL_DISLOCATION_SAMPLE_MINUTES * 60 * 1000;
 const WINDOW_MS = POOL_DISLOCATION_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 const BINANCE_KLINE_LIMIT = 1000;
 const BINANCE_TIMEOUT_MS = 12_000;
+const TRANSIENT_ERROR_PATTERN = /fetch failed|network|socket|timeout|timed out|aborted|cooling down|temporarily unavailable/i;
 
 function finiteInteger(value) {
   const number = Number(value);
@@ -36,6 +37,50 @@ function timestampMilliseconds(value) {
 
 function sleep(delayMs) {
   return delayMs > 0 ? new Promise((resolve) => setTimeout(resolve, delayMs)) : Promise.resolve();
+}
+
+export function isTransientPoolDislocationBackfillError(error) {
+  const status = Number(error?.status) || 0;
+  if (error?.name === 'ProviderCooldownError' || error?.name === 'AbortError') return true;
+  if (status === 0 && TRANSIENT_ERROR_PATTERN.test(String(error?.message || ''))) return true;
+  return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+export async function retryPoolDislocationBackfillOperation(operation, options = {}) {
+  const attempts = Math.max(1, finiteInteger(
+    options.attempts ?? config.poolDislocationBackfillRetryAttempts
+  ));
+  const baseDelayMs = Math.max(0, finiteInteger(
+    options.baseDelayMs ?? config.poolDislocationBackfillRetryBaseDelayMs
+  ));
+  const maxDelayMs = Math.max(baseDelayMs, finiteInteger(
+    options.maxDelayMs ?? config.poolDislocationBackfillRetryMaxDelayMs
+  ));
+  const sleepFor = options.sleep || sleep;
+  const now = options.now || Date.now;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation(attempt);
+    } catch (error) {
+      if (attempt >= attempts || !isTransientPoolDislocationBackfillError(error)) throw error;
+      const blockedUntilMs = Date.parse(String(error?.blockedUntil || ''));
+      const cooldownDelayMs = Number.isFinite(blockedUntilMs)
+        ? Math.max(0, blockedUntilMs - now() + 250)
+        : 0;
+      const exponentialDelayMs = baseDelayMs * (2 ** (attempt - 1));
+      const delayMs = Math.min(maxDelayMs, Math.max(exponentialDelayMs, cooldownDelayMs));
+      await options.onRetry?.({
+        attempt,
+        nextAttempt: attempt + 1,
+        attempts,
+        delayMs,
+        error
+      });
+      await sleepFor(delayMs);
+    }
+  }
+  throw new Error('Pool-dislocation backfill retry loop exhausted unexpectedly');
 }
 
 function progressLogger(event) {
@@ -334,9 +379,28 @@ export async function runPoolDislocationHistoricalBackfill(client, options = {})
     const batch = anchors.slice(index, index + batchSize);
     const batchRows = [];
     for (const anchor of batch) {
-      const state = await (options.fetchHistoricalState || fetchHistoricalPoolDislocationState)(
-        anchor.height,
-        options
+      const state = await retryPoolDislocationBackfillOperation(
+        () => (options.fetchHistoricalState || fetchHistoricalPoolDislocationState)(
+          anchor.height,
+          options
+        ),
+        {
+          attempts: options.retryAttempts,
+          baseDelayMs: options.retryBaseDelayMs,
+          maxDelayMs: options.retryMaxDelayMs,
+          sleep: options.retrySleep,
+          now: options.now,
+          onRetry: ({ attempt, nextAttempt, attempts, delayMs, error }) => report({
+            stage: 'retrying_historical_state',
+            observed_at: anchor.observedAt,
+            height: anchor.height,
+            attempt,
+            next_attempt: nextAttempt,
+            max_attempts: attempts,
+            delay_ms: delayMs,
+            error: String(error?.message || error)
+          })
+        }
       );
       const rows = (options.buildRows || buildHistoricalPoolDislocationRows)(anchor, state, binanceHistory);
       if (!rows.length) throw new Error(`No Available pools at historical height ${anchor.height}`);
