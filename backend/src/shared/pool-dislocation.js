@@ -1,5 +1,5 @@
 export const POOL_DISLOCATION_MODEL_KEY = 'pool-dislocation-summary:v1';
-export const POOL_DISLOCATION_SCHEMA_VERSION = 1;
+export const POOL_DISLOCATION_SCHEMA_VERSION = 2;
 export const POOL_DISLOCATION_TTL_MS = 15 * 60 * 1000;
 export const POOL_DISLOCATION_SAMPLE_MINUTES = 5;
 export const POOL_DISLOCATION_WINDOW_DAYS = 7;
@@ -159,7 +159,12 @@ export function buildObservationRows({
   observedAt,
   poolObservedAt,
   oracleObservedAt = null,
-  binanceObservedAt = null
+  binanceObservedAt = null,
+  sampleOrigin = 'scheduled',
+  thorchainHeight = null,
+  poolPriceMethod = 'thornode-asset-tor',
+  oraclePriceMethod = 'thornode-oracle',
+  binancePriceMethod = 'book-ticker-mid'
 } = {}) {
   const bucket = floorToFiveMinuteBucket(observedAt);
   const poolTime = isoTimestamp(poolObservedAt);
@@ -209,7 +214,12 @@ export function buildObservationRows({
         binanceAskUsd: binanceAligned ? binance?.ask ?? null : null,
         binancePriceUsd: binanceAligned ? binance?.mid ?? null : null,
         binanceObservedAt: binanceAligned ? binanceTime : null,
-        sourceSkewMs
+        sourceSkewMs,
+        sampleOrigin,
+        thorchainHeight,
+        poolPriceMethod,
+        oraclePriceMethod: oracleAligned ? oraclePriceMethod : null,
+        binancePriceMethod: binanceAligned ? binancePriceMethod : null
       };
     })
     .sort((left, right) => left.asset.localeCompare(right.asset));
@@ -225,7 +235,24 @@ function rowPoint(row) {
     oracle_price_usd: oraclePrice,
     binance_price_usd: binancePrice,
     oracle_dislocation: computeDislocationPercent(poolPrice, oraclePrice),
-    binance_dislocation: computeDislocationPercent(poolPrice, binancePrice)
+    binance_dislocation: computeDislocationPercent(poolPrice, binancePrice),
+    sample_origin: String(row.sample_origin ?? row.sampleOrigin ?? 'scheduled'),
+    thorchain_height: finiteNumber(row.thorchain_height ?? row.thorchainHeight),
+    pool_price_method: row.pool_price_method ?? row.poolPriceMethod ?? null,
+    oracle_price_method: row.oracle_price_method ?? row.oraclePriceMethod ?? null,
+    binance_price_method: row.binance_price_method ?? row.binancePriceMethod ?? null
+  };
+}
+
+function summarizeProvenance(points = []) {
+  const origins = points.map((point) => String(point?.sample_origin || 'scheduled'));
+  const methods = (field) => [...new Set(points.map((point) => point?.[field]).filter(Boolean))].sort();
+  return {
+    scheduled_samples: origins.filter((origin) => origin === 'scheduled').length,
+    backfilled_samples: origins.filter((origin) => origin === 'historical_backfill').length,
+    pool_price_methods: methods('pool_price_method'),
+    oracle_price_methods: methods('oracle_price_method'),
+    binance_price_methods: methods('binance_price_method')
   };
 }
 
@@ -292,17 +319,26 @@ function summarizeRows(rows, asOf) {
     samples: {
       total: points.length,
       oracle: points.filter((point) => point.oracle_dislocation !== null).length,
-      binance: points.filter((point) => point.binance_dislocation !== null).length
+      binance: points.filter((point) => point.binance_dislocation !== null).length,
+      scheduled: points.filter((point) => point.sample_origin === 'scheduled').length,
+      backfilled: points.filter((point) => point.sample_origin === 'historical_backfill').length
     },
+    provenance: summarizeProvenance(points),
     sparkline: compactHourly(points)
   };
 }
 
 export function buildPoolDislocationSummary(rows = [], options = {}) {
+  const currentAssets = Array.isArray(options.currentAssets)
+    ? new Set(options.currentAssets.map((asset) => String(asset || '').toUpperCase()).filter(Boolean))
+    : null;
   const grouped = new Map();
+  const includedRows = [];
   for (const row of rows) {
     const asset = String(row?.asset || '').toUpperCase();
     if (!asset) continue;
+    if (currentAssets && !currentAssets.has(asset)) continue;
+    includedRows.push(row);
     if (!grouped.has(asset)) grouped.set(asset, []);
     grouped.get(asset).push(row);
   }
@@ -350,6 +386,13 @@ export function buildPoolDislocationSummary(rows = [], options = {}) {
         pool.latest.oracle_dislocation !== null && pool.latest.binance_dislocation !== null
       )).length
     },
+    provenance: {
+      scheduled_observations: includedRows.filter((row) => String(row?.sample_origin || 'scheduled') === 'scheduled').length,
+      backfilled_observations: includedRows.filter((row) => row?.sample_origin === 'historical_backfill').length,
+      pool_price_methods: [...new Set(includedRows.map((row) => row?.pool_price_method).filter(Boolean))].sort(),
+      oracle_price_methods: [...new Set(includedRows.map((row) => row?.oracle_price_method).filter(Boolean))].sort(),
+      binance_price_methods: [...new Set(includedRows.map((row) => row?.binance_price_method).filter(Boolean))].sort()
+    },
     pools,
     warnings: options.warnings || []
   };
@@ -357,6 +400,7 @@ export function buildPoolDislocationSummary(rows = [], options = {}) {
 
 export function buildPoolDislocationSeries(rows = [], options = {}) {
   const first = rows[0] || {};
+  const points = rows.map(rowPoint);
   return {
     schema_version: POOL_DISLOCATION_SCHEMA_VERSION,
     as_of: isoTimestamp(options.asOf) || isoTimestamp(rows.at(-1)?.observed_at) || new Date().toISOString(),
@@ -369,6 +413,7 @@ export function buildPoolDislocationSeries(rows = [], options = {}) {
     chain: String(first.chain || assetParts(options.asset || first.asset).chain),
     oracle_symbol: first.oracle_symbol || null,
     binance_symbol: first.binance_symbol || null,
-    points: rows.map(rowPoint)
+    provenance: summarizeProvenance(points),
+    points
   };
 }

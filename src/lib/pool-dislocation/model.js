@@ -164,7 +164,12 @@ function normalizePoint(point = {}) {
     oracleDislocation: finiteNumber(point.oracle_dislocation ?? point.oracleDislocation)
       ?? computeDislocationPercent(poolPrice, oraclePrice),
     binanceDislocation: finiteNumber(point.binance_dislocation ?? point.binanceDislocation)
-      ?? computeDislocationPercent(poolPrice, binancePrice)
+      ?? computeDislocationPercent(poolPrice, binancePrice),
+    sampleOrigin: String(point.sample_origin ?? point.sampleOrigin ?? 'scheduled'),
+    thorchainHeight: finiteNumber(point.thorchain_height ?? point.thorchainHeight),
+    poolPriceMethod: point.pool_price_method ?? point.poolPriceMethod ?? null,
+    oraclePriceMethod: point.oracle_price_method ?? point.oraclePriceMethod ?? null,
+    binancePriceMethod: point.binance_price_method ?? point.binancePriceMethod ?? null
   };
 }
 
@@ -271,6 +276,7 @@ export function filterPoolDislocationDashboardByTrading(dashboard = {}, excludeH
 }
 
 export function normalizePoolDislocationSeries(payload = {}) {
+  const provenance = payload?.provenance || {};
   return {
     ...payload,
     asset: String(payload?.asset || ''),
@@ -278,6 +284,13 @@ export function normalizePoolDislocationSeries(payload = {}) {
     chain: String(payload?.chain || ''),
     oracleSymbol: payload?.oracle_symbol || null,
     binanceSymbol: payload?.binance_symbol || null,
+    provenance: {
+      scheduledSamples: Number(provenance.scheduled_samples || 0),
+      backfilledSamples: Number(provenance.backfilled_samples || 0),
+      poolPriceMethods: Array.isArray(provenance.pool_price_methods) ? provenance.pool_price_methods.map(String) : [],
+      oraclePriceMethods: Array.isArray(provenance.oracle_price_methods) ? provenance.oracle_price_methods.map(String) : [],
+      binancePriceMethods: Array.isArray(provenance.binance_price_methods) ? provenance.binance_price_methods.map(String) : []
+    },
     points: (Array.isArray(payload?.points) ? payload.points : []).map(normalizePoint)
   };
 }

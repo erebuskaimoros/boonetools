@@ -69,7 +69,9 @@ export async function handlePoolDislocationSeries(_request, url, options = {}) {
   const { rows } = await execute(
     `select observed_at, asset, symbol, chain, pool_status,
             pool_price_usd, oracle_symbol, oracle_price_usd,
-            binance_symbol, binance_price_usd
+            binance_symbol, binance_price_usd,
+            sample_origin, thorchain_height, pool_price_method,
+            oracle_price_method, binance_price_method
      from pool_dislocation_observations
      where asset = $1
        and observed_at between $2::timestamptz - interval '7 days' and $2::timestamptz

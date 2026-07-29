@@ -126,6 +126,8 @@ THORNODE_FALLBACK_URL=https://thornode.thorchain.network
 THORNODE_URLS=
 BINANCE_API_BASE_URL=https://data-api.binance.vision
 BINANCE_API_BASE_URLS=https://data-api.binance.vision
+POOL_DISLOCATION_BACKFILL_REQUEST_DELAY_MS=100
+POOL_DISLOCATION_BACKFILL_BATCH_BUCKETS=12
 MIDGARD_URL=https://gateway.liquify.com/chain/thorchain_midgard/v2
 MIDGARD_FALLBACK_URL=https://midgard.thorchain.network/v2
 MIDGARD_URLS=
@@ -237,6 +239,23 @@ state and persistent stuck-transaction lookup reuse. Production providers
 should still be independently operated; configure a dedicated THORNode/RPC in
 the server-owned environment when available. The shared cooldown prevents an
 unreachable configured fallback from being retried by every oneshot process.
+
+Migration `033_pool_dislocation_provenance.sql` records whether each exact
+five-minute Pool Dislocation point came from the live sampler or historical
+reconstruction and records each price method. After deploying that migration,
+an operator can fill the seven days preceding the first scheduled point with:
+
+```bash
+systemctl start --no-block boonetools-pool-dislocation-backfill.service
+journalctl -fu boonetools-pool-dislocation-backfill.service
+```
+
+The resumable service reads pool and oracle state at the same historical
+THORChain block. Its Binance leg uses the matching five-minute kline close,
+because the public Spot archive has no historical best-bid/best-ask stream.
+It writes in bounded transactions, preserves any live row at a conflicting
+timestamp, verifies every planned bucket, and refreshes the public read model.
+It has no timer and does not run automatically during future deploys.
 
 Rapid-Swap websocket ingestion is disabled by default in the shared
 `rapid-swap-listener.service`, while Node-Vote websocket ingestion remains

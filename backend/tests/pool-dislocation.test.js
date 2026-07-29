@@ -179,6 +179,26 @@ test('summary uses every five-minute sample for windows and hourly peak-preservi
   assert.equal(pool.trading_status_known, true);
 });
 
+test('summary limits historical groups to the current Available pool set', () => {
+  const rows = ['BTC.BTC', 'ETH.ETH'].map((asset) => ({
+    observed_at: '2026-07-29T12:00:00Z',
+    asset,
+    symbol: asset.split('.')[1],
+    chain: asset.split('.')[0],
+    pool_status: 'Available',
+    pool_price_usd: 100,
+    sample_origin: 'historical_backfill',
+    pool_price_method: 'thornode-asset-tor'
+  }));
+  const summary = buildPoolDislocationSummary(rows, {
+    asOf: '2026-07-29T12:00:00Z',
+    currentAssets: ['BTC.BTC']
+  });
+  assert.deepEqual(summary.pools.map((pool) => pool.asset), ['BTC.BTC']);
+  assert.equal(summary.pools[0].samples.backfilled, 1);
+  assert.equal(summary.provenance.backfilled_observations, 1);
+});
+
 test('selected series returns exact ordered points without interpolation', () => {
   const rows = [{
     observed_at: '2026-07-29T12:00:00Z',
@@ -299,17 +319,24 @@ test('public handlers are provider-free and the series query is bounded', async 
 });
 
 test('migration, job registry, timer, and deploy encode the production contract', async () => {
-  const [migration, registry, service, timer, deploy] = await Promise.all([
+  const [migration, provenanceMigration, registry, service, backfillService, timer, deploy] = await Promise.all([
     readFile(new URL('../migrations/031_pool_dislocation.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/033_pool_dislocation_provenance.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-dislocation.service', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-pool-dislocation-backfill.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-dislocation.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8')
   ]);
   assert.match(migration, /primary key \(observed_at, asset\)/i);
+  assert.match(provenanceMigration, /historical_backfill/);
+  assert.match(provenanceMigration, /kline-close/);
+  assert.match(registry, /'pool-dislocation-backfill': runPoolDislocationBackfill/);
   assert.match(registry, /'pool-dislocation-scheduler': runPoolDislocationScheduler/);
   assert.match(service, /pool-dislocation-scheduler/);
   assert.match(service, /After=.*boonetools-thornode-core-snapshot\.service/);
+  assert.match(backfillService, /pool-dislocation-backfill/);
+  assert.match(backfillService, /TimeoutStartSec=2h/);
   assert.match(timer, /OnCalendar=\*-\*-\* \*:0\/5:00 UTC/);
   assert.match(deploy, /prime_read_models[\s\S]*boonetools-pool-dislocation\.service/);
 });

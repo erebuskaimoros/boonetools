@@ -52,6 +52,12 @@
   );
   $: selectedPool = dashboard.pools.find((pool) => pool.asset === selectedAsset) || dashboard.pools[0];
   $: selectedPoints = selectedSeries?.asset === selectedAsset ? selectedSeries.points : [];
+  $: backfilledSamples = selectedSeries?.asset === selectedAsset
+    ? selectedSeries?.provenance?.backfilledSamples || 0
+    : 0;
+  $: scheduledSamples = selectedSeries?.asset === selectedAsset
+    ? selectedSeries?.provenance?.scheduledSamples || 0
+    : 0;
   $: visibleValues = selectedPoints.flatMap((point) => {
     if (sourceMode === 'oracle') return [point.oracleDislocation];
     if (sourceMode === 'binance') return [point.binanceDislocation];
@@ -326,6 +332,13 @@
     </div>
   {/if}
 
+  {#if backfilledSamples > 0}
+    <div class="preview-alert info" role="note">
+      <span>INF</span>
+      {backfilledSamples} HISTORICAL POINTS USE SAME-BLOCK THORNODE POOL + ORACLE STATE AND BINANCE 5M CLOSE; {scheduledSamples} LIVE POINTS USE BINANCE BBO MID.
+    </div>
+  {/if}
+
   <section class="block focus-block" aria-labelledby="focus-title">
     <div class="block-head">
       <div class="block-title"><span>▌</span><h2 id="focus-title">{selectedPool?.symbol || 'POOL'} DISLOCATION / 7 DAYS</h2></div>
@@ -486,6 +499,7 @@
     <code>100 × (TC_POOL / REFERENCE − 1)</code>
     <span>WINDOW ABS = MEAN MAX SOURCE GAP</span>
     <span>GAPS ARE NOT INTERPOLATED</span>
+    <span>BACKFILL = SAME-BLOCK TC/ORACLE + BINANCE 5M CLOSE</span>
     <span>POSITIVE = TC PREMIUM</span>
     <span>NEGATIVE = TC DISCOUNT</span>
   </footer>
@@ -570,6 +584,8 @@
   .preview-alert.syncing span { color: var(--term-info, #5588cc); }
   .preview-alert.error { border-left-color: var(--term-error, #dc3545); }
   .preview-alert.error span { color: var(--term-error, #dc3545); }
+  .preview-alert.info { border-left-color: var(--term-info, #5588cc); }
+  .preview-alert.info span { color: var(--term-info, #5588cc); }
   .source-line { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 12px 0 18px; padding: 7px 10px; border-left: 2px solid var(--term-accent, #00cc66); background: var(--term-surface-deep, #050505); color: var(--term-text-5, #444); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; letter-spacing: 0.06em; }
   .source-line span:first-child { margin-right: auto; color: var(--term-text-3, #666); }
 

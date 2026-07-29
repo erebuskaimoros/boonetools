@@ -161,12 +161,22 @@ test('production selected series retains null source gaps and exact timestamps',
   const series = normalizePoolDislocationSeries({
     asset: 'BTC.BTC',
     expected_samples: 2017,
+    provenance: {
+      scheduled_samples: 1,
+      backfilled_samples: 1,
+      pool_price_methods: ['thornode-asset-tor'],
+      oracle_price_methods: ['thornode-oracle'],
+      binance_price_methods: ['book-ticker-mid', 'kline-close']
+    },
     points: [
       {
         observed_at: '2026-07-29T11:55:00Z',
         pool_price_usd: 101,
         oracle_price_usd: 100,
-        binance_price_usd: 100
+        binance_price_usd: 100,
+        sample_origin: 'historical_backfill',
+        thorchain_height: 123,
+        binance_price_method: 'kline-close'
       },
       {
         observed_at: '2026-07-29T12:00:00Z',
@@ -180,4 +190,8 @@ test('production selected series retains null source gaps and exact timestamps',
   assert.equal(series.points[1].observedAt, '2026-07-29T12:00:00Z');
   assert.equal(series.points[1].oracleDislocation, null);
   assert.ok(Math.abs(series.points[1].binanceDislocation - 1) < Number.EPSILON * 10);
+  assert.equal(series.points[0].sampleOrigin, 'historical_backfill');
+  assert.equal(series.points[0].thorchainHeight, 123);
+  assert.equal(series.points[0].binancePriceMethod, 'kline-close');
+  assert.equal(series.provenance.backfilledSamples, 1);
 });

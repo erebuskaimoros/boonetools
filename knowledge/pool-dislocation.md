@@ -73,14 +73,17 @@ dislocation calculations, while their last timestamp remains visible.
 
 ## Persistence and API
 
-Migration: `031_pool_dislocation.sql`, which creates
-`pool_dislocation_observations`.
+Migration `031_pool_dislocation.sql` creates
+`pool_dislocation_observations`. Migration
+`033_pool_dislocation_provenance.sql` adds reconstruction provenance.
 
 ```text
 observed_at, asset, pool_status,
 pool_price_usd, pool_balance_rune, pool_balance_asset,
 oracle_symbol, oracle_price_usd, oracle_observed_at,
 binance_symbol, binance_bid_usd, binance_ask_usd, binance_observed_at,
+sample_origin, thorchain_height,
+pool_price_method, oracle_price_method, binance_price_method,
 primary key (observed_at, asset)
 ```
 
@@ -104,6 +107,27 @@ Both endpoints should cap their responses to the seven-day contract and expose
 nulls plus source-age metadata instead of substituting old values. The latest
 table and metric values come directly from the newest aligned five-minute
 observation.
+
+## Historical Reconstruction
+
+`boonetools-pool-dislocation-backfill.service` is an operator-triggered,
+resumable one-shot job for the seven days preceding the first scheduled
+observation. It resolves the latest finalized THORChain block at or before
+every exact five-minute UTC boundary, then reads both `/thorchain/pools` and
+`/thorchain/oracle/prices` at that same height. This preserves one THORChain
+state boundary for each reconstructed point.
+
+Binance's public Spot archive does not expose historical `bookTicker` best
+bid/ask snapshots. Reconstructed points therefore use the close of the
+five-minute Binance kline ending at the same UTC boundary. Those rows retain
+null bid/ask fields and are explicitly labeled `historical_backfill` plus
+`kline-close`; live scheduled rows remain labeled `scheduled` plus
+`book-ticker-mid`. Scheduled rows win any primary-key conflict.
+
+The job discovers already-written historical buckets before fetching sources,
+writes bounded transactional batches, verifies the complete bucket range, and
+rebuilds the provider-free summary read model when it finishes. It can be
+rerun safely after an interruption.
 
 ## Interface Scope
 
@@ -132,8 +156,8 @@ The mockup establishes these production interactions:
    health, retention, and backend tests.
 3. Provider-free summary and exact five-minute selected-pool endpoints plus the
    frontend API adapter.
-4. Production deploy, timer priming, and continuity monitoring while the first
-   seven-day history accumulates.
+4. Provenance-safe seven-day historical reconstruction, production deploy,
+   timer priming, and continuity monitoring.
 
 ## Explicitly Out of Scope for V1
 
@@ -142,4 +166,3 @@ The mockup establishes these production interactions:
 - additional CEX/DEX references
 - user-defined windows beyond seven days
 - inferred mappings based only on ticker text
-- historical reconstruction before BooneTools begins collecting aligned samples

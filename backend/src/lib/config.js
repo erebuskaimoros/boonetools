@@ -169,6 +169,8 @@ export const config = Object.freeze({
   duneApiBaseUrl,
   binanceApiBaseUrl,
   binanceApiBaseUrls: readList('BINANCE_API_BASE_URLS', [binanceApiBaseUrl]),
+  poolDislocationBackfillRequestDelayMs: readInt('POOL_DISLOCATION_BACKFILL_REQUEST_DELAY_MS', 100),
+  poolDislocationBackfillBatchBuckets: readInt('POOL_DISLOCATION_BACKFILL_BATCH_BUCKETS', 12),
   dunePerformance: optional(process.env.DUNE_PERFORMANCE) || 'small',
   duneExecutionPollMs: readInt('DUNE_EXECUTION_POLL_MS', 5000),
   duneExecutionTimeoutMs: readInt('DUNE_EXECUTION_TIMEOUT_MS', 10 * 60 * 1000),

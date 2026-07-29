@@ -42,6 +42,12 @@ presentation-only field.
 | `/tc-fee-dash` | `tc-fee-dash:v1` | `boonetools-analytics-read-models` | 1m / 15m |
 | `/pool-dislocation` | `pool-dislocation-summary:v1` | `boonetools-pool-dislocation` | exact 5m UTC / 15m |
 
+The operator-triggered Pool Dislocation backfill populates canonical
+observations before the live sampler's first point and then invokes the normal
+publisher. It never runs on a public request path. Reconstructed THORChain pool
+and oracle prices share one historical height; reconstructed Binance prices
+are provenance-labeled five-minute kline closes rather than live BBO midpoints.
+
 The core publisher is the sole scheduled owner of reusable current THORNode
 state. It refreshes `lastblock` every 15 seconds; inbound addresses, Mimir, and
 node-Mimir state every minute; network and pools every two minutes; nodes every

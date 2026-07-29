@@ -23,6 +23,10 @@ import {
   normalizeChainTradingStatus,
   normalizeOraclePrices
 } from '../shared/pool-dislocation.js';
+import {
+  loadPoolDislocationWindow as loadStoredPoolDislocationWindow,
+  persistPoolDislocationRows
+} from '../shared/pool-dislocation-store.js';
 
 const LOCK_KEY = 'boonetools:pool-dislocation';
 const BINANCE_TIMEOUT_MS = 6_000;
@@ -152,83 +156,14 @@ export async function collectPoolDislocationSnapshot(options = {}) {
 }
 
 export async function persistPoolDislocationSnapshot(client, snapshot, options = {}) {
-  await client.query('begin');
-  try {
-    for (const row of snapshot.rows) {
-      await client.query(
-        `insert into pool_dislocation_observations (
-           observed_at, asset, symbol, chain, pool_status, pool_price_usd,
-           pool_balance_asset, pool_balance_rune,
-           oracle_symbol, oracle_price_usd, oracle_observed_at,
-           binance_symbol, binance_bid_usd, binance_ask_usd,
-           binance_price_usd, binance_observed_at, source_skew_ms
-         ) values (
-           $1, $2, $3, $4, $5, $6,
-           $7, $8, $9, $10, $11,
-           $12, $13, $14, $15, $16, $17
-         )
-         on conflict (observed_at, asset)
-         do update set
-           symbol = excluded.symbol,
-           chain = excluded.chain,
-           pool_status = excluded.pool_status,
-           pool_price_usd = excluded.pool_price_usd,
-           pool_balance_asset = excluded.pool_balance_asset,
-           pool_balance_rune = excluded.pool_balance_rune,
-           oracle_symbol = excluded.oracle_symbol,
-           oracle_price_usd = excluded.oracle_price_usd,
-           oracle_observed_at = excluded.oracle_observed_at,
-           binance_symbol = excluded.binance_symbol,
-           binance_bid_usd = excluded.binance_bid_usd,
-           binance_ask_usd = excluded.binance_ask_usd,
-           binance_price_usd = excluded.binance_price_usd,
-           binance_observed_at = excluded.binance_observed_at,
-           source_skew_ms = excluded.source_skew_ms,
-           updated_at = now()`,
-        [
-          row.observedAt,
-          row.asset,
-          row.symbol,
-          row.chain,
-          row.poolStatus,
-          row.poolPriceUsd,
-          row.poolBalanceAsset || null,
-          row.poolBalanceRune || null,
-          row.oracleSymbol,
-          row.oraclePriceUsd,
-          row.oracleObservedAt,
-          row.binanceSymbol,
-          row.binanceBidUsd,
-          row.binanceAskUsd,
-          row.binancePriceUsd,
-          row.binanceObservedAt,
-          row.sourceSkewMs
-        ]
-      );
-    }
-    await client.query(
-      `delete from pool_dislocation_observations
-       where observed_at < $1::timestamptz - ($2::text || ' days')::interval`,
-      [snapshot.observedAt, options.retentionDays || POOL_DISLOCATION_RETENTION_DAYS]
-    );
-    await client.query('commit');
-  } catch (error) {
-    await client.query('rollback').catch(() => {});
-    throw error;
-  }
+  return persistPoolDislocationRows(client, snapshot.rows, {
+    pruneBefore: snapshot.observedAt,
+    retentionDays: options.retentionDays || POOL_DISLOCATION_RETENTION_DAYS
+  });
 }
 
 export async function loadPoolDislocationWindow(client, asOf) {
-  const { rows } = await client.query(
-    `select observed_at, asset, symbol, chain, pool_status,
-            pool_price_usd, oracle_symbol, oracle_price_usd,
-            binance_symbol, binance_price_usd
-     from pool_dislocation_observations
-     where observed_at between $1::timestamptz - interval '7 days' and $1::timestamptz
-     order by asset, observed_at`,
-    [asOf]
-  );
-  return rows;
+  return loadStoredPoolDislocationWindow(client, asOf);
 }
 
 function compactRunResult(result) {
@@ -263,7 +198,8 @@ export async function runPoolDislocationScheduler(options = {}) {
         asOf: snapshot.observedAt,
         sources: snapshot.sources,
         warnings: snapshot.warnings,
-        chainTrading: snapshot.chainTrading
+        chainTrading: snapshot.chainTrading,
+        currentAssets: snapshot.rows.map((row) => row.asset)
       });
       return {
         payload,

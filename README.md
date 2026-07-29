@@ -107,7 +107,11 @@ the selected pool's exact seven-day points from
 `/functions/v1/pool-dislocation-series?asset=...`. Binance uses its public
 market-data-only endpoint and requires no API key. The default-on halted-chain
 filter reuses the canonical `thornode-core:v1` inbound-address state; unknown
-or stale trading state does not hide pools.
+or stale trading state does not hide pools. A resumable one-shot backfill can
+reconstruct the initial seven-day window from same-height historical THORNode
+pool/oracle state and Binance five-minute kline closes. API points label their
+origin and pricing method because Binance does not expose historical
+`bookTicker` midpoints through its public archive.
 
 All read-only `/functions/v1` routes are public and protected by backend request
 rate limiting. Successful responses retain their established shape and gain a
