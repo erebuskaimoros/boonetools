@@ -146,6 +146,8 @@ The mockup establishes these production interactions:
   trading flags; enabling it also excludes those pools from leaders, coverage,
   threshold counts, and selected-pool fallback
 - all-pool watchlist ranked by current maximum absolute dislocation
+- every watchlist column header is sortable in both directions; null source
+  values stay at the end of the selected ordering
 - current prices, signed source deviations, average/peak absolute deviation,
   trailing 1h/4h/1d/3d/7d absolute averages, time beyond threshold, trend
   sparkline, and state per row

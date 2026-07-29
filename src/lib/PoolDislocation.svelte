@@ -3,6 +3,7 @@
   import { fetchPoolDislocation, fetchPoolDislocationSeries } from './pool-dislocation/api.js';
   import {
     POOL_DISLOCATION_CHART_WINDOWS,
+    POOL_DISLOCATION_TABLE_COLUMNS,
     buildPoolDislocationChartViewport,
     buildPoolDislocationDashboard,
     DISLOCATION_WINDOWS,
@@ -11,7 +12,8 @@
     maxAbsoluteDislocation,
     normalizePoolDislocationSeries,
     normalizePoolDislocationSummary,
-    projectPoolDislocationChartSelection
+    projectPoolDislocationChartSelection,
+    sortPoolDislocationPools
   } from './pool-dislocation/model.js';
 
   const CHART = Object.freeze({ width: 1000, height: 330, left: 72, right: 24, top: 30, bottom: 276 });
@@ -43,6 +45,7 @@
   let coverageMode = 'all';
   let excludeHaltedChains = true;
   let search = '';
+  let tableSort = { column: 'trend', direction: 'desc' };
   let loading = true;
   let refreshing = false;
   let seriesLoading = false;
@@ -92,12 +95,15 @@
     index
   }));
   $: pointMarkerStep = Math.max(1, Math.floor(chartPoints.length / 8));
-  $: filteredPools = dashboard.pools.filter((pool) => {
-    const query = search.trim().toUpperCase();
-    const matchesSearch = !query || `${pool.asset} ${pool.symbol} ${pool.chain}`.includes(query);
-    const coverage = coverageState(pool);
-    return matchesSearch && (coverageMode === 'all' || coverageMode === coverage);
-  });
+  $: filteredPools = sortPoolDislocationPools(
+    dashboard.pools.filter((pool) => {
+      const query = search.trim().toUpperCase();
+      const matchesSearch = !query || `${pool.asset} ${pool.symbol} ${pool.chain}`.includes(query);
+      const coverage = coverageState(pool);
+      return matchesSearch && (coverageMode === 'all' || coverageMode === coverage);
+    }),
+    { ...tableSort, threshold }
+  );
   $: liveState = summary?.stale ? 'STALE' : summaryError || (summary?.warnings || []).length ? 'DEGRADED' : loading ? 'SYNCING' : 'LIVE';
 
   onMount(() => {
@@ -315,6 +321,24 @@
   function cancelChartSelection() {
     chartSelectionStartX = null;
     chartSelectionCurrentX = null;
+  }
+
+  function selectTableSort(columnId) {
+    const column = POOL_DISLOCATION_TABLE_COLUMNS.find(({ id }) => id === columnId);
+    if (!column) return;
+    tableSort = tableSort.column === columnId
+      ? { column: columnId, direction: tableSort.direction === 'asc' ? 'desc' : 'asc' }
+      : { column: columnId, direction: column.defaultDirection };
+  }
+
+  function tableSortAria(columnId) {
+    if (tableSort.column !== columnId) return 'none';
+    return tableSort.direction === 'asc' ? 'ascending' : 'descending';
+  }
+
+  function tableSortIndicator(columnId) {
+    if (tableSort.column !== columnId) return '↕';
+    return tableSort.direction === 'asc' ? '↑' : '↓';
   }
 
   function formatHours(value) {
@@ -586,17 +610,19 @@
       <table>
         <thead>
           <tr>
-            <th>POOL</th>
-            <th>TC PRICE</th>
-            <th>VS ORACLE</th>
-            <th>VS BINANCE</th>
-            {#each DISLOCATION_WINDOWS as window}
-              <th>{window.label} ABS</th>
+            {#each POOL_DISLOCATION_TABLE_COLUMNS as column}
+              <th aria-sort={tableSortAria(column.id)}>
+                <button
+                  class="table-sort"
+                  class:active={tableSort.column === column.id}
+                  aria-label={`Sort by ${column.label}; ${tableSort.column === column.id ? tableSortAria(column.id) : `default ${column.defaultDirection === 'asc' ? 'ascending' : 'descending'}`}`}
+                  on:click={() => selectTableSort(column.id)}
+                >
+                  <span>{column.label}</span>
+                  <i aria-hidden="true">{tableSortIndicator(column.id)}</i>
+                </button>
+              </th>
             {/each}
-            <th>7D PEAK</th>
-            <th>TIME &gt; LIMIT</th>
-            <th>TREND / ABS</th>
-            <th>STATE</th>
           </tr>
         </thead>
         <tbody>
@@ -796,8 +822,14 @@
   .pool-search input { width: 118px; padding: 5px 7px; border: 1px solid var(--term-border, #1a1a1a); border-radius: 0; outline: none; background: var(--term-surface-deep, #050505); color: var(--term-text-2, #888); font-family: inherit; font-size: 8px; text-transform: uppercase; }
   .pool-search input:focus { border-color: rgba(0, 204, 102, 0.45); }
   table { width: 100%; min-width: 1320px; border-collapse: collapse; }
-  th { position: sticky; top: 0; z-index: 1; padding: 10px 12px; border-bottom: 1px solid var(--term-border, #1a1a1a); background: var(--term-surface, #0a0a0a); color: var(--term-text-5, #444); font-size: 8px; text-align: right; letter-spacing: 0.08em; white-space: nowrap; }
-  th:first-child { text-align: left; padding-left: 18px; }
+  th { position: sticky; top: 0; z-index: 1; padding: 0; border-bottom: 1px solid var(--term-border, #1a1a1a); background: var(--term-surface, #0a0a0a); color: var(--term-text-5, #444); font-size: 8px; text-align: right; letter-spacing: 0.08em; white-space: nowrap; }
+  th:first-child { text-align: left; }
+  .table-sort { display: flex; align-items: center; justify-content: flex-end; gap: 6px; width: 100%; padding: 10px 12px; border: 0; background: none; color: inherit; font-family: inherit; font-size: inherit; letter-spacing: inherit; white-space: nowrap; cursor: pointer; }
+  th:first-child .table-sort { justify-content: flex-start; padding-left: 18px; }
+  .table-sort i { min-width: 8px; color: var(--term-text-7, #222); font-style: normal; text-align: center; }
+  .table-sort:hover,
+  .table-sort.active { color: var(--term-accent, #00cc66); }
+  .table-sort.active i { color: inherit; }
   td { padding: 9px 12px; border-bottom: 1px solid var(--term-border-faint, #111); color: var(--term-text-2, #888); font-size: 9px; text-align: right; white-space: nowrap; }
   tbody tr { transition: background var(--term-transition, 0.15s ease); }
   tbody tr:hover,

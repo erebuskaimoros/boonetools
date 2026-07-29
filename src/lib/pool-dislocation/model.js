@@ -18,6 +18,22 @@ export const DISLOCATION_WINDOWS = Object.freeze([
   { id: '7d', label: '7D', durationMs: 7 * 24 * HOUR_MS }
 ]);
 
+export const POOL_DISLOCATION_TABLE_COLUMNS = Object.freeze([
+  { id: 'pool', label: 'POOL', defaultDirection: 'asc' },
+  { id: 'pool_price', label: 'TC PRICE', defaultDirection: 'desc' },
+  { id: 'oracle', label: 'VS ORACLE', defaultDirection: 'desc' },
+  { id: 'binance', label: 'VS BINANCE', defaultDirection: 'desc' },
+  ...DISLOCATION_WINDOWS.map((window) => ({
+    id: `abs_${window.id}`,
+    label: `${window.label} ABS`,
+    defaultDirection: 'desc'
+  })),
+  { id: 'peak', label: '7D PEAK', defaultDirection: 'desc' },
+  { id: 'time', label: 'TIME > LIMIT', defaultDirection: 'desc' },
+  { id: 'trend', label: 'TREND / ABS', defaultDirection: 'desc' },
+  { id: 'state', label: 'STATE', defaultDirection: 'desc' }
+]);
+
 const PREVIEW_POOLS = Object.freeze([
   { asset: 'BTC.BTC', symbol: 'BTC', chain: 'BTC', basePrice: 63_700, bias: 0.18, amplitude: 0.42, phase: 0.2, spike: 0.35 },
   { asset: 'ETH.ETH', symbol: 'ETH', chain: 'ETH', basePrice: 1_892, bias: 0.58, amplitude: 0.72, phase: 1.1, spike: 0.85 },
@@ -220,6 +236,53 @@ export function dislocationState(value, threshold = 1) {
   if (magnitude >= Math.max(2.5, threshold * 2.5)) return 'critical';
   if (magnitude >= threshold) return 'watch';
   return 'normal';
+}
+
+function poolDislocationSortValue(pool, columnId, threshold) {
+  if (columnId === 'pool') return `${pool?.symbol || ''} ${pool?.asset || ''}`.trim().toUpperCase();
+  if (columnId === 'pool_price') return finiteNumber(pool?.current?.poolPrice);
+  if (columnId === 'oracle') return finiteNumber(pool?.current?.oracleDislocation);
+  if (columnId === 'binance') return finiteNumber(pool?.current?.binanceDislocation);
+  if (columnId.startsWith('abs_')) {
+    return finiteNumber(pool?.averageAbsoluteByWindow?.[columnId.slice(4)]);
+  }
+  if (columnId === 'peak') return finiteNumber(pool?.peakAbsolute);
+  if (columnId === 'time') return finiteNumber(pool?.hoursOutsideThreshold);
+  if (columnId === 'trend') return finiteNumber(pool?.currentAbsolute);
+  if (columnId === 'state') {
+    if (finiteNumber(pool?.currentAbsolute) === null) return null;
+    return { missing: 0, normal: 1, watch: 2, critical: 3 }[
+      dislocationState(pool?.currentAbsolute, threshold)
+    ];
+  }
+  return finiteNumber(pool?.currentAbsolute);
+}
+
+export function sortPoolDislocationPools(pools = [], options = {}) {
+  const column = POOL_DISLOCATION_TABLE_COLUMNS.find(({ id }) => id === options.column)
+    || POOL_DISLOCATION_TABLE_COLUMNS.find(({ id }) => id === 'trend');
+  const direction = options.direction === 'asc' || options.direction === 'desc'
+    ? options.direction
+    : column.defaultDirection;
+  const multiplier = direction === 'asc' ? 1 : -1;
+  const threshold = finiteNumber(options.threshold) ?? 1;
+
+  return [...(Array.isArray(pools) ? pools : [])].sort((left, right) => {
+    const leftValue = poolDislocationSortValue(left, column.id, threshold);
+    const rightValue = poolDislocationSortValue(right, column.id, threshold);
+    const leftMissing = leftValue === null || leftValue === undefined || leftValue === '';
+    const rightMissing = rightValue === null || rightValue === undefined || rightValue === '';
+    if (leftMissing !== rightMissing) return leftMissing ? 1 : -1;
+
+    let comparison = 0;
+    if (typeof leftValue === 'string' || typeof rightValue === 'string') {
+      comparison = String(leftValue).localeCompare(String(rightValue));
+    } else {
+      comparison = Number(leftValue) - Number(rightValue);
+    }
+    if (comparison !== 0) return comparison * multiplier;
+    return String(left?.asset || '').localeCompare(String(right?.asset || ''));
+  });
 }
 
 function normalizePoint(point = {}) {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   POOL_DISLOCATION_CHART_WINDOWS,
+  POOL_DISLOCATION_TABLE_COLUMNS,
   buildPoolDislocationChartViewport,
   buildPoolDislocationDashboard,
   buildPoolDislocationPreview,
@@ -12,6 +13,7 @@ import {
   normalizePoolDislocationSeries,
   normalizePoolDislocationSummary,
   projectPoolDislocationChartSelection,
+  sortPoolDislocationPools,
   summarizePool,
   summarizePoolDislocation
 } from '../src/lib/pool-dislocation/model.js';
@@ -66,6 +68,58 @@ test('drag selection projects either direction into a bounded chart zoom', () =>
     viewportStartMs: 0,
     viewportEndMs: 24 * 60 * 60 * 1000
   }), null);
+});
+
+test('every watchlist column sorts deterministically and keeps missing values last', () => {
+  const pools = [
+    {
+      asset: 'BTC.BTC',
+      current: { poolPrice: 100, oracleDislocation: -2, binanceDislocation: 1 },
+      currentAbsolute: 2,
+      averageAbsoluteByWindow: { '1h': 1.5, '4h': 1.4, '1d': 1.3, '3d': 1.2, '7d': 1.1 },
+      peakAbsolute: 3,
+      hoursOutsideThreshold: 4
+    },
+    {
+      asset: 'ETH.ETH',
+      current: { poolPrice: 200, oracleDislocation: 0.5, binanceDislocation: 0.25 },
+      currentAbsolute: 0.5,
+      averageAbsoluteByWindow: { '1h': 0.4, '4h': 0.5, '1d': 0.6, '3d': 0.7, '7d': 0.8 },
+      peakAbsolute: 1,
+      hoursOutsideThreshold: 0
+    },
+    {
+      asset: 'AVAX.AVAX',
+      current: { poolPrice: null, oracleDislocation: null, binanceDislocation: null },
+      currentAbsolute: null,
+      averageAbsoluteByWindow: {},
+      peakAbsolute: null,
+      hoursOutsideThreshold: 0
+    }
+  ];
+
+  assert.equal(POOL_DISLOCATION_TABLE_COLUMNS.length, 13);
+  for (const column of POOL_DISLOCATION_TABLE_COLUMNS) {
+    const sorted = sortPoolDislocationPools(pools, {
+      column: column.id,
+      direction: column.defaultDirection,
+      threshold: 1
+    });
+    assert.equal(sorted.length, pools.length, column.id);
+    assert.equal(new Set(sorted.map(({ asset }) => asset)).size, pools.length, column.id);
+  }
+  assert.deepEqual(
+    sortPoolDislocationPools(pools, { column: 'pool', direction: 'asc' }).map(({ asset }) => asset),
+    ['AVAX.AVAX', 'BTC.BTC', 'ETH.ETH']
+  );
+  assert.deepEqual(
+    sortPoolDislocationPools(pools, { column: 'oracle', direction: 'asc' }).map(({ asset }) => asset),
+    ['BTC.BTC', 'ETH.ETH', 'AVAX.AVAX']
+  );
+  assert.deepEqual(
+    sortPoolDislocationPools(pools, { column: 'state', direction: 'desc', threshold: 1 }).map(({ asset }) => asset),
+    ['BTC.BTC', 'ETH.ETH', 'AVAX.AVAX']
+  );
 });
 
 test('pool dislocation is signed relative to the reference market', () => {
