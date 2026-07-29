@@ -146,6 +146,44 @@ export function buildPoolDislocationChartViewport(points = [], options = {}) {
   };
 }
 
+export function buildPoolDislocationLinePath(points = [], field, options = {}) {
+  const projectX = typeof options.projectX === 'function'
+    ? options.projectX
+    : (_point, index) => index;
+  const projectY = typeof options.projectY === 'function'
+    ? options.projectY
+    : (value) => value;
+  const maximumGapMs = finiteNumber(options.maximumGapMs) ?? Number.POSITIVE_INFINITY;
+  let path = '';
+  let previousTimestamp = null;
+  let penDown = false;
+
+  for (const [index, point] of (Array.isArray(points) ? points : []).entries()) {
+    const value = finiteNumber(point?.[field]);
+    const timestamp = Date.parse(point?.observedAt || '');
+    if (value === null || !Number.isFinite(timestamp)) {
+      penDown = false;
+      previousTimestamp = timestamp;
+      continue;
+    }
+    if (previousTimestamp !== null && timestamp - previousTimestamp > maximumGapMs) penDown = false;
+
+    const x = finiteNumber(projectX(point, index));
+    const y = finiteNumber(projectY(value, point, index));
+    if (x === null || y === null) {
+      penDown = false;
+      previousTimestamp = timestamp;
+      continue;
+    }
+
+    path += `${penDown ? ' L' : path ? ' M' : 'M'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    penDown = true;
+    previousTimestamp = timestamp;
+  }
+
+  return path;
+}
+
 export function buildPoolDislocationChartScale(points = [], options = {}) {
   const sourceMode = ['oracle', 'binance'].includes(options.sourceMode)
     ? options.sourceMode

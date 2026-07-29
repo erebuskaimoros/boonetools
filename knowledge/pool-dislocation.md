@@ -146,8 +146,10 @@ The mockup establishes these production interactions:
   only the currently visible points and selected references with four-percent
   edge padding, while hover resolves the
   nearest exact five-minute point and shows all three prices plus both signed
-  deviations. All displayed deviations use basis points. Gaps are not
-  interpolated.
+  deviations. All displayed deviations use basis points. Missing reference
+  values break the corresponding chart path instead of rendering as zero;
+  source controls and legends only expose references mapped for the selected
+  pool. Gaps are not interpolated.
 - threshold controls at 0.5%, 1%, and 2%
 - a default-on `HIDE HALTED` toggle backed by current THORChain inbound-address
   trading flags; enabling it also excludes those pools from leaders, coverage,

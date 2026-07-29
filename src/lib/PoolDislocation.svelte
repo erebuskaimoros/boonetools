@@ -4,6 +4,7 @@
   import {
     POOL_DISLOCATION_CHART_WINDOWS,
     POOL_DISLOCATION_TABLE_COLUMNS,
+    buildPoolDislocationLinePath,
     buildPoolDislocationChartScale,
     buildPoolDislocationChartViewport,
     buildPoolDislocationDashboard,
@@ -63,6 +64,15 @@
     excludeHaltedChains
   );
   $: selectedPool = dashboard.pools.find((pool) => pool.asset === selectedAsset) || dashboard.pools[0];
+  $: availableSourceModes = sourceModes.filter((mode) => {
+    const oracleAvailable = Boolean(selectedPool?.oracleSymbol);
+    const binanceAvailable = Boolean(selectedPool?.binanceSymbol);
+    if (mode.id === 'both') return oracleAvailable && binanceAvailable;
+    return mode.id === 'oracle' ? oracleAvailable : binanceAvailable;
+  });
+  $: if (availableSourceModes.length && !availableSourceModes.some((mode) => mode.id === sourceMode)) {
+    sourceMode = availableSourceModes[0].id;
+  }
   $: selectedPoints = selectedSeries?.asset === selectedAsset ? selectedSeries.points : [];
   $: backfilledSamples = selectedSeries?.asset === selectedAsset
     ? selectedSeries?.provenance?.backfilledSamples || 0
@@ -198,23 +208,11 @@
   }
 
   function makeLinePath(points, field, min, max) {
-    let path = '';
-    let previousTimestamp = null;
-    let penDown = false;
-    for (const point of points) {
-      const value = Number(point?.[field]);
-      const timestamp = Date.parse(point?.observedAt || '');
-      if (!Number.isFinite(value) || !Number.isFinite(timestamp)) {
-        penDown = false;
-        previousTimestamp = timestamp;
-        continue;
-      }
-      if (previousTimestamp !== null && timestamp - previousTimestamp > MAX_CONTIGUOUS_GAP_MS) penDown = false;
-      path += `${penDown ? ' L' : path ? ' M' : 'M'} ${chartX(point).toFixed(2)} ${chartY(value, min, max).toFixed(2)}`;
-      penDown = true;
-      previousTimestamp = timestamp;
-    }
-    return path;
+    return buildPoolDislocationLinePath(points, field, {
+      projectX: chartX,
+      projectY: (value) => chartY(value, min, max),
+      maximumGapMs: MAX_CONTIGUOUS_GAP_MS
+    });
   }
 
   function formatBasisPoints(value, { signed = true } = {}) {
@@ -500,9 +498,13 @@
         </div>
         <div class="control-row">
           <span class="control-label">REF</span>
-          {#each sourceModes as mode}
-            <button class:active={sourceMode === mode.id} on:click={() => sourceMode = mode.id}><i>[{mode.label}]</i> {mode.text}</button>
-          {/each}
+          {#if availableSourceModes.length}
+            {#each availableSourceModes as mode}
+              <button class:active={sourceMode === mode.id} on:click={() => sourceMode = mode.id}><i>[{mode.label}]</i> {mode.text}</button>
+            {/each}
+          {:else}
+            <span class="source-unavailable">[—] NO EXTERNAL REFERENCE</span>
+          {/if}
         </div>
       </div>
     </div>
@@ -511,8 +513,8 @@
       <div class="chart-wrap">
         <div class="chart-legend">
           <span class="zoom-hint">{chartViewport.zoomed ? 'ZOOM ACTIVE · DRAG AGAIN OR RESET' : 'DRAG TO HIGHLIGHT + ZOOM'}</span>
-          {#if sourceMode !== 'binance'}<span class="oracle-key"><i></i>TC / ORACLE</span>{/if}
-          {#if sourceMode !== 'oracle'}<span class="binance-key"><i></i>TC / BINANCE</span>{/if}
+          {#if selectedPool?.oracleSymbol && sourceMode !== 'binance'}<span class="oracle-key"><i></i>TC / ORACLE</span>{/if}
+          {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle'}<span class="binance-key"><i></i>TC / BINANCE</span>{/if}
           <span class="band-key"><i></i>±{formatBasisPoints(threshold, { signed: false })} WATCH BAND</span>
         </div>
         <svg
@@ -537,8 +539,8 @@
             <line class="x-tick" x1={chartX(tick.observedAt)} x2={chartX(tick.observedAt)} y1={CHART.bottom} y2={CHART.bottom + 5} />
             <text class="axis-label x" x={chartX(tick.observedAt)} y={CHART.bottom + 24}>{formatChartTick(tick.observedAt, tick.index)}</text>
           {/each}
-          {#if sourceMode !== 'binance'}<path class="series oracle" d={oraclePath} />{/if}
-          {#if sourceMode !== 'oracle'}<path class="series binance" d={binancePath} />{/if}
+          {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && oraclePath}<path class="series oracle" d={oraclePath} />{/if}
+          {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && binancePath}<path class="series binance" d={binancePath} />{/if}
           {#each chartPoints as point, index}
             {#if index % pointMarkerStep === 0 || index === chartPoints.length - 1}
               {#if sourceMode !== 'binance' && Number.isFinite(point.oracleDislocation)}<circle class="point oracle" cx={chartX(point)} cy={chartY(point.oracleDislocation)} r={index === chartPoints.length - 1 ? 4 : 2.25} />{/if}
@@ -819,6 +821,7 @@
   .control-row button:hover,
   .control-row button.active { border-color: var(--term-border, #1a1a1a); color: var(--term-accent, #00cc66); }
   .control-row button.active i { color: var(--term-accent, #00cc66); }
+  .source-unavailable { color: var(--term-text-5, #444); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; letter-spacing: 0.08em; }
   .control-row button.zoom-reset { border-color: rgba(85, 136, 204, 0.35); color: var(--term-info, #5588cc); }
   .control-row button.zoom-reset i { color: inherit; }
 

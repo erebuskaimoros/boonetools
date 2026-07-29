@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   POOL_DISLOCATION_CHART_WINDOWS,
   POOL_DISLOCATION_TABLE_COLUMNS,
+  buildPoolDislocationLinePath,
   buildPoolDislocationChartScale,
   buildPoolDislocationChartViewport,
   buildPoolDislocationDashboard,
@@ -18,6 +19,25 @@ import {
   summarizePool,
   summarizePoolDislocation
 } from '../src/lib/pool-dislocation/model.js';
+
+test('chart paths preserve missing reference values as gaps instead of zeroes', () => {
+  const points = [
+    { observedAt: '2026-07-29T11:50:00Z', oracleDislocation: 0.25, binanceDislocation: null },
+    { observedAt: '2026-07-29T11:55:00Z', oracleDislocation: null, binanceDislocation: null },
+    { observedAt: '2026-07-29T12:00:00Z', oracleDislocation: 0, binanceDislocation: null }
+  ];
+  const options = {
+    projectX: (_point, index) => index * 10,
+    projectY: (value) => value * 100,
+    maximumGapMs: 7.5 * 60 * 1000
+  };
+
+  assert.equal(buildPoolDislocationLinePath(points, 'binanceDislocation', options), '');
+  assert.equal(
+    buildPoolDislocationLinePath(points, 'oracleDislocation', options),
+    'M 0.00 25.00 M 20.00 0.00'
+  );
+});
 
 test('chart scale follows the visible points and selected reference source', () => {
   const quiet = buildPoolDislocationChartScale([
