@@ -291,9 +291,7 @@ export async function fetchHistoricalPoolDislocationState(height, options = {}) 
     fetchHistorical(`/thorchain/oracle/prices?height=${height}`)
   ]);
   if (!Array.isArray(pools)) throw new Error(`Historical THORChain pools are invalid at height ${height}`);
-  if (!Array.isArray(oracle?.prices) || oracle.prices.length === 0) {
-    throw new Error(`Historical THORChain oracle is empty at height ${height}`);
-  }
+  if (!Array.isArray(oracle?.prices)) throw new Error(`Historical THORChain oracle is invalid at height ${height}`);
   return { pools, oracle };
 }
 
@@ -402,6 +400,14 @@ export async function runPoolDislocationHistoricalBackfill(client, options = {})
           })
         }
       );
+      if (state.oracle.prices.length === 0) {
+        report({
+          stage: 'source_gap',
+          source: 'thornode_oracle',
+          observed_at: anchor.observedAt,
+          height: anchor.height
+        });
+      }
       const rows = (options.buildRows || buildHistoricalPoolDislocationRows)(anchor, state, binanceHistory);
       if (!rows.length) throw new Error(`No Available pools at historical height ${anchor.height}`);
       batchRows.push(...rows);

@@ -146,6 +146,56 @@ export function buildPoolDislocationChartViewport(points = [], options = {}) {
   };
 }
 
+function niceChartStep(value) {
+  if (!Number.isFinite(value) || value <= 0) return 0.5;
+  const exponent = Math.floor(Math.log10(value));
+  const fraction = value / (10 ** exponent);
+  const niceFraction = fraction < 1.5 ? 1
+    : fraction < 3 ? 2
+      : fraction < 7 ? 5 : 10;
+  return niceFraction * (10 ** exponent);
+}
+
+export function buildPoolDislocationChartScale(points = [], options = {}) {
+  const sourceMode = ['oracle', 'binance'].includes(options.sourceMode)
+    ? options.sourceMode
+    : 'both';
+  const threshold = Math.abs(finiteNumber(options.threshold) ?? 1);
+  const values = [0, -threshold, threshold];
+
+  for (const point of Array.isArray(points) ? points : []) {
+    if (sourceMode !== 'binance') {
+      const value = finiteNumber(point?.oracleDislocation);
+      if (value !== null) values.push(value);
+    }
+    if (sourceMode !== 'oracle') {
+      const value = finiteNumber(point?.binanceDislocation);
+      if (value !== null) values.push(value);
+    }
+  }
+
+  let dataMin = Math.min(...values);
+  let dataMax = Math.max(...values);
+  const minimumSpan = Math.max(0.2, threshold * 2, 0.01);
+  if (dataMax - dataMin < minimumSpan) {
+    const midpoint = (dataMin + dataMax) / 2;
+    dataMin = midpoint - (minimumSpan / 2);
+    dataMax = midpoint + (minimumSpan / 2);
+  }
+  const padding = Math.max((dataMax - dataMin) * 0.1, 0.02);
+  const paddedMin = dataMin - padding;
+  const paddedMax = dataMax + padding;
+  const step = niceChartStep((paddedMax - paddedMin) / 4);
+  const min = Math.floor(paddedMin / step) * step;
+  const max = Math.ceil(paddedMax / step) * step;
+  const ticks = [];
+  for (let value = max; value >= min - (step / 2); value -= step) {
+    ticks.push(Math.abs(value) < step / 1_000_000 ? 0 : Number(value.toPrecision(12)));
+  }
+
+  return { min, max, step, ticks };
+}
+
 export function projectPoolDislocationChartSelection(options = {}) {
   const plotLeft = finiteNumber(options.plotLeft);
   const plotRight = finiteNumber(options.plotRight);

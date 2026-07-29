@@ -130,6 +130,9 @@ rebuilds the provider-free summary read model when it finishes. It can be
 rerun safely after an interruption. Historical state reads also retry bounded
 transport failures and honor the shared provider-cooldown window in place, so
 a dropped THORNode request does not force another block-anchor reconstruction.
+If THORNode returns a valid but empty historical oracle list at a height, the
+job writes that exact five-minute bucket with a null oracle leg and reports a
+source gap; it does not substitute a neighboring price or omit the bucket.
 
 ## Interface Scope
 
@@ -138,9 +141,11 @@ The mockup establishes these production interactions:
 - four top metrics for coverage, largest current gap, seven-day peak, and pool
   count beyond the selected threshold
 - one selected-pool chart with trailing 1h, 1d, and 7d controls, horizontal
-  highlight-to-zoom with an explicit reset, a zero line, symmetric threshold
-  band, and independent oracle/Binance series toggles; every visible point is
-  an exact five-minute observation and gaps are not interpolated
+  highlight-to-zoom with an explicit reset, a zero line, threshold band, and
+  independent oracle/Binance series toggles; the Y scale derives from only the
+  currently visible points and selected references, while hover resolves the
+  nearest exact five-minute point and shows all three prices plus both signed
+  deviations. Gaps are not interpolated.
 - threshold controls at 0.5%, 1%, and 2%
 - a default-on `HIDE HALTED` toggle backed by current THORChain inbound-address
   trading flags; enabling it also excludes those pools from leaders, coverage,

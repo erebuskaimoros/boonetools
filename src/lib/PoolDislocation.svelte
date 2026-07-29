@@ -4,6 +4,7 @@
   import {
     POOL_DISLOCATION_CHART_WINDOWS,
     POOL_DISLOCATION_TABLE_COLUMNS,
+    buildPoolDislocationChartScale,
     buildPoolDislocationChartViewport,
     buildPoolDislocationDashboard,
     DISLOCATION_WINDOWS,
@@ -41,6 +42,7 @@
   let chartZoom = null;
   let chartSelectionStartX = null;
   let chartSelectionCurrentX = null;
+  let chartHoverPoint = null;
   let chartSvg;
   let coverageMode = 'all';
   let excludeHaltedChains = true;
@@ -81,15 +83,13 @@
   $: chartEndMs = chartViewport.endMs;
   $: chartDurationMs = chartViewport.durationMs;
   $: chartRangeLabel = chartViewport.zoomed ? `${formatChartDuration(chartDurationMs)} ZOOM` : chartWindowConfig.label;
-  $: visibleValues = chartPoints.flatMap((point) => {
-    if (sourceMode === 'oracle') return [point.oracleDislocation];
-    if (sourceMode === 'binance') return [point.binanceDislocation];
-    return [point.oracleDislocation, point.binanceDislocation];
-  }).filter((value) => Number.isFinite(Number(value)));
-  $: yMax = Math.max(2, Math.ceil(Math.max(threshold * 1.4, 0, ...visibleValues.map((value) => Math.abs(value))) * 2) / 2);
-  $: yTicks = [yMax, yMax / 2, 0, -yMax / 2, -yMax];
-  $: oraclePath = makeLinePath(chartPoints, 'oracleDislocation', yMax);
-  $: binancePath = makeLinePath(chartPoints, 'binanceDislocation', yMax);
+  $: chartScale = buildPoolDislocationChartScale(chartPoints, { sourceMode, threshold });
+  $: yMin = chartScale.min;
+  $: yMax = chartScale.max;
+  $: yTicks = chartScale.ticks;
+  $: oraclePath = makeLinePath(chartPoints, 'oracleDislocation', yMin, yMax);
+  $: binancePath = makeLinePath(chartPoints, 'binanceDislocation', yMin, yMax);
+  $: hoverPoint = chartPoints.find((point) => point.observedAt === chartHoverPoint?.observedAt) || null;
   $: xTicks = Array.from({ length: 5 }, (_, index) => ({
     observedAt: new Date(chartStartMs + ((index / 4) * chartDurationMs)).toISOString(),
     index
@@ -189,12 +189,13 @@
     return CHART.left + (ratio * plotWidth);
   }
 
-  function chartY(value, range = yMax) {
+  function chartY(value, min = yMin, max = yMax) {
     const plotHeight = CHART.bottom - CHART.top;
-    return CHART.top + (((range - Number(value || 0)) / (range * 2)) * plotHeight);
+    const span = max - min;
+    return CHART.top + (((max - Number(value || 0)) / span) * plotHeight);
   }
 
-  function makeLinePath(points, field, range) {
+  function makeLinePath(points, field, min, max) {
     let path = '';
     let previousTimestamp = null;
     let penDown = false;
@@ -207,7 +208,7 @@
         continue;
       }
       if (previousTimestamp !== null && timestamp - previousTimestamp > MAX_CONTIGUOUS_GAP_MS) penDown = false;
-      path += `${penDown ? ' L' : path ? ' M' : 'M'} ${chartX(point).toFixed(2)} ${chartY(value, range).toFixed(2)}`;
+      path += `${penDown ? ' L' : path ? ' M' : 'M'} ${chartX(point).toFixed(2)} ${chartY(value, min, max).toFixed(2)}`;
       penDown = true;
       previousTimestamp = timestamp;
     }
@@ -275,6 +276,7 @@
     chartZoom = null;
     chartSelectionStartX = null;
     chartSelectionCurrentX = null;
+    chartHoverPoint = null;
   }
 
   function chartPointerX(event) {
@@ -294,17 +296,29 @@
     event.currentTarget.setPointerCapture?.(event.pointerId);
     chartSelectionStartX = pointerX;
     chartSelectionCurrentX = pointerX;
+    chartHoverPoint = null;
   }
 
-  function updateChartSelection(event) {
-    if (!Number.isFinite(chartSelectionStartX)) return;
+  function updateChartInteraction(event) {
     const pointerX = chartPointerX(event);
-    if (Number.isFinite(pointerX)) chartSelectionCurrentX = pointerX;
+    if (!Number.isFinite(pointerX)) return;
+    if (Number.isFinite(chartSelectionStartX)) {
+      chartSelectionCurrentX = pointerX;
+      return;
+    }
+    const pointerTime = chartStartMs
+      + (((pointerX - CHART.left) / (CHART.width - CHART.left - CHART.right)) * chartDurationMs);
+    chartHoverPoint = chartPoints.reduce((nearest, point) => {
+      if (!nearest) return point;
+      return Math.abs(Date.parse(point.observedAt) - pointerTime)
+        < Math.abs(Date.parse(nearest.observedAt) - pointerTime) ? point : nearest;
+    }, null);
   }
 
   function finishChartSelection(event) {
     if (!Number.isFinite(chartSelectionStartX)) return;
-    updateChartSelection(event);
+    const pointerX = chartPointerX(event);
+    if (Number.isFinite(pointerX)) chartSelectionCurrentX = pointerX;
     const nextZoom = projectPoolDislocationChartSelection({
       plotLeft: CHART.left,
       plotRight: CHART.width - CHART.right,
@@ -315,12 +329,18 @@
     });
     chartSelectionStartX = null;
     chartSelectionCurrentX = null;
+    chartHoverPoint = null;
     if (nextZoom) chartZoom = nextZoom;
   }
 
   function cancelChartSelection() {
     chartSelectionStartX = null;
     chartSelectionCurrentX = null;
+    chartHoverPoint = null;
+  }
+
+  function clearChartHover() {
+    if (!Number.isFinite(chartSelectionStartX)) chartHoverPoint = null;
   }
 
   function selectTableSort(columnId) {
@@ -517,6 +537,15 @@
               {#if sourceMode !== 'oracle' && Number.isFinite(point.binanceDislocation)}<circle class="point binance" cx={chartX(point)} cy={chartY(point.binanceDislocation)} r={index === chartPoints.length - 1 ? 4 : 2.25} />{/if}
             {/if}
           {/each}
+          {#if hoverPoint && !Number.isFinite(chartSelectionStartX)}
+            <line class="hover-crosshair" x1={chartX(hoverPoint)} x2={chartX(hoverPoint)} y1={CHART.top} y2={CHART.bottom} />
+            {#if Number.isFinite(hoverPoint.oracleDislocation)}
+              <circle class="hover-point oracle" cx={chartX(hoverPoint)} cy={chartY(hoverPoint.oracleDislocation)} r="5" />
+            {/if}
+            {#if Number.isFinite(hoverPoint.binanceDislocation)}
+              <circle class="hover-point binance" cx={chartX(hoverPoint)} cy={chartY(hoverPoint.binanceDislocation)} r="5" />
+            {/if}
+          {/if}
           {#if Number.isFinite(chartSelectionStartX) && Number.isFinite(chartSelectionCurrentX)}
             <rect
               class="zoom-selection"
@@ -534,12 +563,28 @@
             width={CHART.width - CHART.left - CHART.right}
             height={CHART.bottom - CHART.top}
             on:pointerdown={startChartSelection}
-            on:pointermove={updateChartSelection}
+            on:pointermove={updateChartInteraction}
             on:pointerup={finishChartSelection}
             on:pointercancel={cancelChartSelection}
+            on:pointerleave={clearChartHover}
             on:dblclick={resetChartZoom}
           />
         </svg>
+        {#if hoverPoint && !Number.isFinite(chartSelectionStartX)}
+          <div
+            class:right={chartX(hoverPoint) > CHART.width * 0.64}
+            class="chart-tooltip"
+            role="tooltip"
+            style={`left: ${((chartX(hoverPoint) / CHART.width) * 100).toFixed(2)}%`}
+          >
+            <strong>{formatTimestamp(hoverPoint.observedAt)} UTC</strong>
+            <div><span>TC POOL</span><b>{formatPrice(hoverPoint.poolPrice)}</b></div>
+            <div><span>TC ORACLE</span><b>{formatPrice(hoverPoint.oraclePrice)}</b></div>
+            <div><span>BINANCE</span><b>{formatPrice(hoverPoint.binancePrice)}</b></div>
+            <div><span>VS ORACLE</span><b class={dislocationState(hoverPoint.oracleDislocation, threshold)}>{formatPercent(hoverPoint.oracleDislocation)}</b></div>
+            <div><span>VS BINANCE</span><b class={dislocationState(hoverPoint.binanceDislocation, threshold)}>{formatPercent(hoverPoint.binanceDislocation)}</b></div>
+          </div>
+        {/if}
         {#if seriesLoading}
           <div class="chart-status">SYNCING EXACT FIVE-MINUTE POINTS…</div>
         {:else if seriesError}
@@ -792,8 +837,18 @@
   .point { stroke: var(--term-bg, #080808); stroke-width: 1.5; }
   .point.oracle { fill: var(--term-accent, #00cc66); }
   .point.binance { fill: var(--term-info, #5588cc); }
+  .hover-crosshair { stroke: rgba(232, 232, 232, 0.4); stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+  .hover-point { stroke: var(--term-bg, #080808); stroke-width: 2; pointer-events: none; }
+  .hover-point.oracle { fill: var(--term-accent, #00cc66); }
+  .hover-point.binance { fill: var(--term-info, #5588cc); }
   .zoom-selection { fill: rgba(85, 136, 204, 0.14); stroke: rgba(85, 136, 204, 0.85); stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
   .chart-hitbox { fill: transparent; cursor: crosshair; touch-action: pan-y; }
+  .chart-tooltip { position: absolute; z-index: 3; top: 52px; width: 190px; padding: 10px 11px; border: 1px solid var(--term-border, #1a1a1a); background: rgba(5, 5, 5, 0.96); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); color: var(--term-text-2, #888); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; pointer-events: none; transform: translateX(10px); }
+  .chart-tooltip.right { transform: translateX(calc(-100% - 10px)); }
+  .chart-tooltip > strong { display: block; margin-bottom: 7px; padding-bottom: 7px; border-bottom: 1px solid var(--term-border-faint, #111); color: var(--term-text, #e8e8e8); font-size: 9px; letter-spacing: 0.04em; }
+  .chart-tooltip > div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
+  .chart-tooltip span { color: var(--term-text-5, #444); letter-spacing: 0.06em; }
+  .chart-tooltip b { color: var(--term-text-2, #888); font-weight: 700; }
   .chart-status { position: absolute; inset: 54px 17px 35px; display: grid; place-items: center; background: rgba(5, 5, 5, 0.74); color: var(--term-text-4, #555); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 9px; letter-spacing: 0.08em; text-align: center; }
   .chart-status.error { color: var(--term-error, #dc3545); }
 

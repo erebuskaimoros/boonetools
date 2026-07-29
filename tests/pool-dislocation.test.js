@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   POOL_DISLOCATION_CHART_WINDOWS,
   POOL_DISLOCATION_TABLE_COLUMNS,
+  buildPoolDislocationChartScale,
   buildPoolDislocationChartViewport,
   buildPoolDislocationDashboard,
   buildPoolDislocationPreview,
@@ -17,6 +18,27 @@ import {
   summarizePool,
   summarizePoolDislocation
 } from '../src/lib/pool-dislocation/model.js';
+
+test('chart scale follows the visible points and selected reference source', () => {
+  const quiet = buildPoolDislocationChartScale([
+    { oracleDislocation: -0.2, binanceDislocation: 0.4 },
+    { oracleDislocation: 0.3, binanceDislocation: 0.5 }
+  ], { sourceMode: 'both', threshold: 1 });
+  const volatile = buildPoolDislocationChartScale([
+    { oracleDislocation: -8.2, binanceDislocation: 0.4 },
+    { oracleDislocation: -6.1, binanceDislocation: 0.5 }
+  ], { sourceMode: 'oracle', threshold: 1 });
+  const binanceOnly = buildPoolDislocationChartScale([
+    { oracleDislocation: -8.2, binanceDislocation: 0.4 },
+    { oracleDislocation: -6.1, binanceDislocation: 0.5 }
+  ], { sourceMode: 'binance', threshold: 1 });
+
+  assert.ok(quiet.min <= -1 && quiet.max >= 1);
+  assert.ok(volatile.min < quiet.min);
+  assert.ok(volatile.max >= 1);
+  assert.deepEqual(binanceOnly, quiet);
+  assert.ok(volatile.ticks.every((tick, index) => index === 0 || tick < volatile.ticks[index - 1]));
+});
 
 test('chart viewport switches between exact trailing windows and preserves gaps', () => {
   const points = [

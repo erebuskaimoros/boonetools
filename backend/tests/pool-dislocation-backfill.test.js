@@ -5,6 +5,7 @@ import { runPoolDislocationBackfill } from '../src/jobs/pool-dislocation-backfil
 import {
   buildHistoricalPoolDislocationRows,
   buildPoolDislocationBackfillBuckets,
+  fetchHistoricalPoolDislocationState,
   isTransientPoolDislocationBackfillError,
   loadPoolDislocationBackfillPlan,
   normalizeBinanceKlineCloses,
@@ -137,6 +138,28 @@ test('historical rows retain same-height THORChain and labelled Binance close pr
   assert.equal(rows[0].binanceBidUsd, null);
   assert.equal(rows[0].binanceAskUsd, null);
   assert.equal(rows[0].binancePriceMethod, 'kline-close');
+});
+
+test('an empty historical oracle remains an explicit source gap', async () => {
+  const responses = [[{
+    asset: 'BTC.BTC',
+    status: 'Available',
+    asset_tor_price: '10100000000'
+  }], { prices: [] }];
+  const state = await fetchHistoricalPoolDislocationState(123, {
+    fetchHistorical: async () => responses.shift()
+  });
+  const rows = buildHistoricalPoolDislocationRows({
+    observedAt: '2026-07-22T12:05:00.000Z',
+    height: 123,
+    blockTime: '2026-07-22T12:04:57.000Z'
+  }, state, new Map([['BTCUSDT', new Map([['2026-07-22T12:05:00.000Z', 100.5]])]]));
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].poolPriceUsd, 101);
+  assert.equal(rows[0].oraclePriceUsd, null);
+  assert.equal(rows[0].binancePriceUsd, 100.5);
+  assert.equal(rows[0].oraclePriceMethod, null);
 });
 
 test('backfill planning resumes missing buckets without touching scheduled history', async () => {
