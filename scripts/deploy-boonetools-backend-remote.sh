@@ -334,6 +334,7 @@ prime_read_models() {
     boonetools-treasury-snapshot.service
     boonetools-status-live.service
     boonetools-status-dashboard.service
+    boonetools-pool-dislocation.service
   )
   local unit
   for unit in "${prime_units[@]}"; do

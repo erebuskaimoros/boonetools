@@ -33,7 +33,8 @@ const ENDPOINTS = [
     maxMs: 1_000,
     maxBytes: 150_000
   },
-  { name: 'tc-fee', path: '/tc-fee-dash', maxMs: 1_000, maxBytes: 250_000 }
+  { name: 'tc-fee', path: '/tc-fee-dash', maxMs: 1_000, maxBytes: 250_000 },
+  { name: 'pool-dislocation', path: '/pool-dislocation', maxMs: 1_000, maxBytes: 750_000 }
 ];
 
 function parseArgs(argv) {

@@ -29,6 +29,7 @@ import {
   handleNodeVotesSummary
 } from './handlers/node-votes.js';
 import { handleNetworkSnapshot } from './handlers/network-snapshot.js';
+import { handlePoolDislocation, handlePoolDislocationSeries } from './handlers/pool-dislocation.js';
 import { handleRapidSwaps, handleRapidSwapsSummary } from './handlers/rapid-swaps.js';
 import { handleRapidSwapsSwapHistory } from './handlers/rapid-swaps-swap-history.js';
 import { handleStockPrices } from './handlers/stock-prices.js';
@@ -55,6 +56,8 @@ const routes = new Map([
   ['/status-dashboard', route(handleStatusDashboard, 1, 64)],
   ['/status-live', route(handleStatusLive, 1, 64)],
   ['/network-snapshot', route(handleNetworkSnapshot, 1, 64)],
+  ['/pool-dislocation', route(handlePoolDislocation, 1, 64)],
+  ['/pool-dislocation-series', route(handlePoolDislocationSeries, 2, 16)],
   ['/tc-fee-dash', route(handleTcFeeDash, 1, 64)],
   ['/rapid-swaps', route(handleRapidSwaps, 5, 3)],
   ['/rapid-swaps-summary', route(handleRapidSwapsSummary, 1, 64)],

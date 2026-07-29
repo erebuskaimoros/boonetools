@@ -6,6 +6,7 @@ import { runBondHistoryRefreshQueue } from './jobs/bond-history-refresh.js';
 import { runNodeopScheduler } from './jobs/nodeop-scheduler.js';
 import { runNodeVotesBackfill } from './jobs/node-votes-backfill.js';
 import { runNodeVotesSummary } from './jobs/node-votes-summary.js';
+import { runPoolDislocationScheduler } from './jobs/pool-dislocation-scheduler.js';
 import { runRapidSwapsMarketHistory } from './jobs/rapid-swaps-market-history.js';
 import { runRapidSwapsScheduler } from './jobs/rapid-swaps-scheduler.js';
 import { runRujiraBaseFeesScheduler } from './jobs/rujira-base-fees-scheduler.js';
@@ -26,6 +27,7 @@ const runners = {
   'nodeop-scheduler': runNodeopScheduler,
   'node-votes-backfill': runNodeVotesBackfill,
   'node-votes-summary': runNodeVotesSummary,
+  'pool-dislocation-scheduler': runPoolDislocationScheduler,
   'rapid-swaps-market-history': runRapidSwapsMarketHistory,
   'rapid-swaps-scheduler': runRapidSwapsScheduler,
   'rujira-base-fees-scheduler': runRujiraBaseFeesScheduler,

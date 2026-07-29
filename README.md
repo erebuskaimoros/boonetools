@@ -100,6 +100,15 @@ transport metadata can call `getBooneToolsApiMeta(payload)` from
 
 Backend runtime values live in `backend/.env` on the server. Start from `backend/.env.example` and set real values there, including `DATABASE_URL`, `DUNE_API_KEY`, and the CMC settings used by TC Fee Dash. `PUBLIC_API_KEY` is retained only as a legacy optional client token; it is not access control because frontend values are public.
 
+Pool Dislocation samples every `Available` THORChain pool on exact five-minute
+UTC buckets. The scheduled backend job persists 30 days of observations,
+publishes the compact `/functions/v1/pool-dislocation` read model, and serves
+the selected pool's exact seven-day points from
+`/functions/v1/pool-dislocation-series?asset=...`. Binance uses its public
+market-data-only endpoint and requires no API key. The default-on halted-chain
+filter reuses the canonical `thornode-core:v1` inbound-address state; unknown
+or stale trading state does not hide pools.
+
 All read-only `/functions/v1` routes are public and protected by backend request
 rate limiting. Successful responses retain their established shape and gain a
 standard `meta` object. Clients can request the versioned `{ data, meta }`

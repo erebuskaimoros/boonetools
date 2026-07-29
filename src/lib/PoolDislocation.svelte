@@ -1,0 +1,710 @@
+<script>
+  import { onDestroy, onMount } from 'svelte';
+  import { fetchPoolDislocation, fetchPoolDislocationSeries } from './pool-dislocation/api.js';
+  import {
+    buildPoolDislocationDashboard,
+    DISLOCATION_WINDOWS,
+    dislocationState,
+    filterPoolDislocationDashboardByTrading,
+    maxAbsoluteDislocation,
+    normalizePoolDislocationSeries,
+    normalizePoolDislocationSummary
+  } from './pool-dislocation/model.js';
+
+  const CHART = Object.freeze({ width: 1000, height: 330, left: 72, right: 24, top: 30, bottom: 276 });
+  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+  const MAX_CONTIGUOUS_GAP_MS = 7.5 * 60 * 1000;
+  const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+  const thresholds = [0.5, 1, 2];
+  const sourceModes = [
+    { id: 'both', label: 'B', text: 'both' },
+    { id: 'oracle', label: 'O', text: 'oracle' },
+    { id: 'binance', label: 'X', text: 'binance' }
+  ];
+  const coverageModes = [
+    { id: 'all', label: 'ALL' },
+    { id: 'both', label: 'BOTH' },
+    { id: 'partial', label: 'PARTIAL' },
+    { id: 'tc', label: 'TC ONLY' }
+  ];
+
+  let summary = null;
+  let selectedSeries = null;
+  let selectedAsset = '';
+  let threshold = 1;
+  let sourceMode = 'both';
+  let coverageMode = 'all';
+  let excludeHaltedChains = true;
+  let search = '';
+  let loading = true;
+  let refreshing = false;
+  let seriesLoading = false;
+  let summaryError = '';
+  let seriesError = '';
+  let refreshTimer;
+  let visibilityHandler;
+  let requestSequence = 0;
+  let seriesController;
+
+  $: dashboard = filterPoolDislocationDashboardByTrading(
+    buildPoolDislocationDashboard(summary, threshold),
+    excludeHaltedChains
+  );
+  $: selectedPool = dashboard.pools.find((pool) => pool.asset === selectedAsset) || dashboard.pools[0];
+  $: selectedPoints = selectedSeries?.asset === selectedAsset ? selectedSeries.points : [];
+  $: visibleValues = selectedPoints.flatMap((point) => {
+    if (sourceMode === 'oracle') return [point.oracleDislocation];
+    if (sourceMode === 'binance') return [point.binanceDislocation];
+    return [point.oracleDislocation, point.binanceDislocation];
+  }).filter((value) => Number.isFinite(Number(value)));
+  $: yMax = Math.max(2, Math.ceil(Math.max(threshold * 1.4, 0, ...visibleValues.map((value) => Math.abs(value))) * 2) / 2);
+  $: yTicks = [yMax, yMax / 2, 0, -yMax / 2, -yMax];
+  $: chartEndMs = Date.parse(summary?.as_of || '') || Date.now();
+  $: chartStartMs = chartEndMs - SEVEN_DAYS_MS;
+  $: oraclePath = makeLinePath(selectedPoints, 'oracleDislocation', yMax);
+  $: binancePath = makeLinePath(selectedPoints, 'binanceDislocation', yMax);
+  $: xTicks = Array.from({ length: 5 }, (_, index) => ({
+    observedAt: new Date(chartStartMs + ((index / 4) * SEVEN_DAYS_MS)).toISOString(),
+    index
+  }));
+  $: pointMarkerStep = Math.max(1, Math.floor(selectedPoints.length / 8));
+  $: filteredPools = dashboard.pools.filter((pool) => {
+    const query = search.trim().toUpperCase();
+    const matchesSearch = !query || `${pool.asset} ${pool.symbol} ${pool.chain}`.includes(query);
+    const coverage = coverageState(pool);
+    return matchesSearch && (coverageMode === 'all' || coverageMode === coverage);
+  });
+  $: liveState = summary?.stale ? 'STALE' : summaryError || (summary?.warnings || []).length ? 'DEGRADED' : loading ? 'SYNCING' : 'LIVE';
+
+  onMount(() => {
+    loadSummary({ forceRefresh: true });
+    refreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') loadSummary({ forceRefresh: true, silent: true });
+    }, REFRESH_INTERVAL_MS);
+    visibilityHandler = () => {
+      if (document.visibilityState !== 'visible') return;
+      const age = Date.now() - Date.parse(summary?.as_of || '');
+      if (!Number.isFinite(age) || age >= REFRESH_INTERVAL_MS) {
+        loadSummary({ forceRefresh: true, silent: true });
+      }
+    };
+    document.addEventListener('visibilitychange', visibilityHandler);
+    window.addEventListener('focus', visibilityHandler);
+  });
+
+  onDestroy(() => {
+    clearInterval(refreshTimer);
+    seriesController?.abort();
+    document.removeEventListener('visibilitychange', visibilityHandler);
+    window.removeEventListener('focus', visibilityHandler);
+  });
+
+  async function loadSummary(options = {}) {
+    if (refreshing) return;
+    refreshing = true;
+    if (!options.silent) loading = !summary;
+    summaryError = '';
+    try {
+      const payload = await fetchPoolDislocation({ forceRefresh: options.forceRefresh });
+      const nextSummary = normalizePoolDislocationSummary(payload);
+      summary = nextSummary;
+      const nextDashboard = filterPoolDislocationDashboardByTrading(
+        buildPoolDislocationDashboard(nextSummary, threshold),
+        excludeHaltedChains
+      );
+      const nextAsset = nextDashboard.pools.some((pool) => pool.asset === selectedAsset)
+        ? selectedAsset
+        : nextDashboard.currentLeader?.asset || nextDashboard.pools[0]?.asset || '';
+      if (nextAsset) await selectPool(nextAsset, { forceRefresh: options.forceRefresh });
+    } catch (error) {
+      summaryError = error?.message || 'Pool dislocation history is unavailable.';
+    } finally {
+      loading = false;
+      refreshing = false;
+    }
+  }
+
+  async function selectPool(asset, options = {}) {
+    const nextAsset = String(asset || '');
+    if (!nextAsset) return;
+    selectedAsset = nextAsset;
+    seriesError = '';
+    seriesLoading = true;
+    const sequence = ++requestSequence;
+    seriesController?.abort();
+    seriesController = new AbortController();
+    try {
+      const payload = await fetchPoolDislocationSeries(nextAsset, {
+        forceRefresh: options.forceRefresh,
+        signal: seriesController.signal
+      });
+      if (sequence === requestSequence) selectedSeries = normalizePoolDislocationSeries(payload);
+    } catch (error) {
+      if (error?.name !== 'AbortError' && sequence === requestSequence) {
+        selectedSeries = null;
+        seriesError = error?.message || 'Exact five-minute series is unavailable.';
+      }
+    } finally {
+      if (sequence === requestSequence) seriesLoading = false;
+    }
+  }
+
+  function chartX(point) {
+    const plotWidth = CHART.width - CHART.left - CHART.right;
+    const timestamp = Date.parse(point?.observedAt || point || '');
+    const ratio = Number.isFinite(timestamp)
+      ? Math.min(1, Math.max(0, (timestamp - chartStartMs) / SEVEN_DAYS_MS))
+      : 0;
+    return CHART.left + (ratio * plotWidth);
+  }
+
+  function chartY(value, range = yMax) {
+    const plotHeight = CHART.bottom - CHART.top;
+    return CHART.top + (((range - Number(value || 0)) / (range * 2)) * plotHeight);
+  }
+
+  function makeLinePath(points, field, range) {
+    let path = '';
+    let previousTimestamp = null;
+    let penDown = false;
+    for (const point of points) {
+      const value = Number(point?.[field]);
+      const timestamp = Date.parse(point?.observedAt || '');
+      if (!Number.isFinite(value) || !Number.isFinite(timestamp)) {
+        penDown = false;
+        previousTimestamp = timestamp;
+        continue;
+      }
+      if (previousTimestamp !== null && timestamp - previousTimestamp > MAX_CONTIGUOUS_GAP_MS) penDown = false;
+      path += `${penDown ? ' L' : path ? ' M' : 'M'} ${chartX(point).toFixed(2)} ${chartY(value, range).toFixed(2)}`;
+      penDown = true;
+      previousTimestamp = timestamp;
+    }
+    return path;
+  }
+
+  function formatPercent(value, { signed = true } = {}) {
+    if (value === null || value === undefined || value === '') return '—';
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '—';
+    const sign = signed && numeric > 0 ? '+' : '';
+    return `${sign}${numeric.toFixed(2)}%`;
+  }
+
+  function formatPrice(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return '—';
+    const maximumFractionDigits = numeric >= 1000 ? 0 : numeric >= 10 ? 2 : numeric >= 1 ? 3 : 5;
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits
+    }).format(numeric);
+  }
+
+  function formatAxisPercent(value) {
+    if (value === 0) return '0%';
+    return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
+  }
+
+  function formatDay(observedAt, index) {
+    if (index === 4) return 'NOW';
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC'
+    }).format(new Date(observedAt)).toUpperCase();
+  }
+
+  function formatHours(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return '0H';
+    if (numeric < 1) return `${Math.round(numeric * 60)}M`;
+    if (numeric < 10) return `${numeric.toFixed(1)}H`;
+    return `${Math.round(numeric)}H`;
+  }
+
+  function formatTimestamp(value) {
+    const date = new Date(value || '');
+    if (!Number.isFinite(date.getTime())) return '—';
+    return date.toLocaleString('en-US', {
+      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC'
+    }).toUpperCase();
+  }
+
+  function coverageState(pool) {
+    if (pool?.oracleSymbol && pool?.binanceSymbol) return 'both';
+    if (pool?.oracleSymbol || pool?.binanceSymbol) return 'partial';
+    return 'tc';
+  }
+
+  function toggleHaltedChains() {
+    excludeHaltedChains = !excludeHaltedChains;
+    const nextDashboard = filterPoolDislocationDashboardByTrading(
+      buildPoolDislocationDashboard(summary, threshold),
+      excludeHaltedChains
+    );
+    if (!nextDashboard.pools.some((pool) => pool.asset === selectedAsset)) {
+      const nextAsset = nextDashboard.currentLeader?.asset || nextDashboard.pools[0]?.asset;
+      if (nextAsset) selectPool(nextAsset);
+    }
+  }
+
+  function sparkPath(pool) {
+    const values = (pool?.sparkline || []).map(maxAbsoluteDislocation).filter((value) => value !== null);
+    if (values.length === 0) return '';
+    const width = 92;
+    const height = 26;
+    const max = Math.max(0.5, ...values);
+    return values.map((value, index) => {
+      const x = (index / Math.max(1, values.length - 1)) * width;
+      const y = height - ((value / max) * (height - 3)) - 1.5;
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    }).join(' ');
+  }
+</script>
+
+<svelte:head>
+  <meta name="description" content="Track THORChain pool price dislocation against oracle and Binance references at exact five-minute intervals." />
+</svelte:head>
+
+<div class="dashboard-shell">
+  <header class="command-head">
+    <div class="command"><span>$</span> monitor pool-dislocation <em>--window 7d --refs oracle,binance</em></div>
+    <div class:degraded={liveState !== 'LIVE'} class="command-state"><span class="preview-dot"></span> {liveState}</div>
+  </header>
+
+  <div class="title-row">
+    <div>
+      <h1><span>&gt;</span> POOL DISLOCATION<span class="cursor">_</span></h1>
+      <p>Track where THORChain pool prices separate from network oracle and Binance spot references.</p>
+    </div>
+    <div class="window-stamp"><span>WINDOW</span><strong>7D / EXACT 5M</strong></div>
+  </div>
+
+  <section class="metric-grid" aria-label="Pool dislocation overview">
+    <div class="metric-cell">
+      <span class="metric-index">01</span>
+      <span class="metric-label">REFERENCE COVERAGE</span>
+      <strong>{dashboard.coveredPools}/{dashboard.totalPools}</strong>
+      <small>{dashboard.mappedPools} mapped · latest aligned</small>
+    </div>
+    <div class="metric-cell">
+      <span class="metric-index">02</span>
+      <span class="metric-label">MOST DISLOCATED NOW</span>
+      <strong class={dislocationState(dashboard.currentLeader?.currentAbsolute, threshold)}>{formatPercent(dashboard.currentLeader?.currentAbsolute, { signed: false })}</strong>
+      <small>{dashboard.currentLeader?.symbol || '—'} · max reference gap</small>
+    </div>
+    <div class="metric-cell">
+      <span class="metric-index">03</span>
+      <span class="metric-label">7D PEAK</span>
+      <strong class={dislocationState(dashboard.peakLeader?.peakAbsolute, threshold)}>{formatPercent(dashboard.peakLeader?.peakAbsolute, { signed: false })}</strong>
+      <small>{dashboard.peakLeader?.symbol || '—'} · absolute deviation</small>
+    </div>
+    <div class="metric-cell">
+      <span class="metric-index">04</span>
+      <span class="metric-label">OUTSIDE THRESHOLD</span>
+      <strong>{dashboard.outsideThreshold}</strong>
+      <small>pools ≥ {threshold.toFixed(1)}% now</small>
+    </div>
+  </section>
+
+  {#if loading}
+    <div class="preview-alert syncing" role="status"><span>SYNC</span> Loading the durable pool-dislocation read model.</div>
+  {:else if summaryError}
+    <div class="preview-alert error" role="alert"><span>ERR</span> {summaryError}</div>
+  {:else if summary?.stale || (summary?.warnings || []).length}
+    <div class="preview-alert" role="note"><span>WRN</span> {[...(summary?.warnings || []), ...(summary?.stale ? ['Snapshot is stale.'] : [])].join(' ')}</div>
+  {:else}
+    <div class="source-line" role="status">
+      <span>AS OF {formatTimestamp(summary?.as_of)} UTC</span>
+      <span>TC {summary?.sources?.pool?.status || '—'}</span>
+      <span>ORACLE {summary?.sources?.oracle?.status || '—'}</span>
+      <span>BINANCE {summary?.sources?.binance?.status || '—'}</span>
+      <span>TRADING {summary?.sources?.trading?.status || '—'}</span>
+    </div>
+  {/if}
+
+  <section class="block focus-block" aria-labelledby="focus-title">
+    <div class="block-head">
+      <div class="block-title"><span>▌</span><h2 id="focus-title">{selectedPool?.symbol || 'POOL'} DISLOCATION / 7 DAYS</h2></div>
+      <div class="control-row">
+        <span class="control-label">REF</span>
+        {#each sourceModes as mode}
+          <button class:active={sourceMode === mode.id} on:click={() => sourceMode = mode.id}><i>[{mode.label}]</i> {mode.text}</button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="focus-grid">
+      <div class="chart-wrap">
+        <div class="chart-legend">
+          {#if sourceMode !== 'binance'}<span class="oracle-key"><i></i>TC / ORACLE</span>{/if}
+          {#if sourceMode !== 'oracle'}<span class="binance-key"><i></i>TC / BINANCE</span>{/if}
+          <span class="band-key"><i></i>±{threshold.toFixed(1)}% WATCH BAND</span>
+        </div>
+        <svg viewBox={`0 0 ${CHART.width} ${CHART.height}`} role="img" aria-label={`${selectedPool?.symbol} seven-day pool price deviation chart`}>
+          <rect class="watch-zone top" x={CHART.left} y={CHART.top} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, chartY(threshold) - CHART.top)} />
+          <rect class="watch-zone bottom" x={CHART.left} y={chartY(-threshold)} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, CHART.bottom - chartY(-threshold))} />
+          {#each yTicks as tick}
+            <line class:zero={tick === 0} class="grid-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(tick)} y2={chartY(tick)} />
+            <text class="axis-label y" x={CHART.left - 12} y={chartY(tick) + 4}>{formatAxisPercent(tick)}</text>
+          {/each}
+          <line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(threshold)} y2={chartY(threshold)} />
+          <line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(-threshold)} y2={chartY(-threshold)} />
+          {#each xTicks as tick}
+            <line class="x-tick" x1={chartX(tick.observedAt)} x2={chartX(tick.observedAt)} y1={CHART.bottom} y2={CHART.bottom + 5} />
+            <text class="axis-label x" x={chartX(tick.observedAt)} y={CHART.bottom + 24}>{formatDay(tick.observedAt, tick.index)}</text>
+          {/each}
+          {#if sourceMode !== 'binance'}<path class="series oracle" d={oraclePath} />{/if}
+          {#if sourceMode !== 'oracle'}<path class="series binance" d={binancePath} />{/if}
+          {#each selectedPoints as point, index}
+            {#if index % pointMarkerStep === 0 || index === selectedPoints.length - 1}
+              {#if sourceMode !== 'binance' && Number.isFinite(point.oracleDislocation)}<circle class="point oracle" cx={chartX(point)} cy={chartY(point.oracleDislocation)} r={index === selectedPoints.length - 1 ? 4 : 2.25} />{/if}
+              {#if sourceMode !== 'oracle' && Number.isFinite(point.binanceDislocation)}<circle class="point binance" cx={chartX(point)} cy={chartY(point.binanceDislocation)} r={index === selectedPoints.length - 1 ? 4 : 2.25} />{/if}
+            {/if}
+          {/each}
+        </svg>
+        {#if seriesLoading}
+          <div class="chart-status">SYNCING EXACT FIVE-MINUTE POINTS…</div>
+        {:else if seriesError}
+          <div class="chart-status error">{seriesError}</div>
+        {:else if selectedPoints.length === 0}
+          <div class="chart-status">NO OBSERVATIONS COLLECTED FOR THIS POOL YET</div>
+        {/if}
+      </div>
+
+      <aside class="reading-panel" aria-label={`${selectedPool?.symbol} latest reading`}>
+        <div class="reading-head"><span>LATEST 5M FRAME</span><strong>{selectedPoints.length}/{selectedSeries?.expected_samples || summary?.expected_samples || 2017}</strong></div>
+        <div class="price-stack">
+          <div><span>TC POOL</span><strong>{formatPrice(selectedPool?.current?.poolPrice)}</strong></div>
+          <div><span>TC ORACLE</span><strong>{formatPrice(selectedPool?.current?.oraclePrice)}</strong></div>
+          <div><span>BINANCE</span><strong>{formatPrice(selectedPool?.current?.binancePrice)}</strong></div>
+        </div>
+        <div class="delta-stack">
+          <div>
+            <span>VS ORACLE</span>
+            <strong class={dislocationState(selectedPool?.current?.oracleDislocation, threshold)}>{formatPercent(selectedPool?.current?.oracleDislocation)}</strong>
+          </div>
+          <div>
+            <span>VS BINANCE</span>
+            <strong class={dislocationState(selectedPool?.current?.binanceDislocation, threshold)}>{formatPercent(selectedPool?.current?.binanceDislocation)}</strong>
+          </div>
+        </div>
+        <div class="reading-foot">
+          {#each DISLOCATION_WINDOWS as window}
+            <div><span>{window.label} AVG ABS</span><strong>{formatPercent(selectedPool?.averageAbsoluteByWindow?.[window.id], { signed: false })}</strong></div>
+          {/each}
+          <div><span>7D PEAK ABS</span><strong>{formatPercent(selectedPool?.peakAbsolute, { signed: false })}</strong></div>
+          <div><span>TIME OUTSIDE</span><strong>{formatHours(selectedPool?.hoursOutsideThreshold)}</strong></div>
+          <div><span>OBSERVED</span><strong>{formatTimestamp(selectedPool?.current?.observedAt)}</strong></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="block watchlist-block" aria-labelledby="watchlist-title">
+    <div class="block-head">
+      <div class="block-title"><span>▌</span><h2 id="watchlist-title">POOL WATCHLIST</h2></div>
+      <div class="watchlist-controls">
+        <label class="pool-search"><span>FIND</span><input bind:value={search} aria-label="Search pools" placeholder="ASSET / CHAIN" /></label>
+        <div class="control-row trading-controls">
+          <span class="control-label">TRADING</span>
+          <button
+            class:active={excludeHaltedChains}
+            aria-pressed={excludeHaltedChains}
+            title={dashboard.haltedChains.length ? `Halted: ${dashboard.haltedChains.join(', ')}` : 'No trading-halted chains reported'}
+            on:click={toggleHaltedChains}
+          ><i>[{excludeHaltedChains ? 'ON' : 'OFF'}]</i> HIDE HALTED</button>
+        </div>
+        <div class="control-row">
+          <span class="control-label">COVERAGE</span>
+          {#each coverageModes as mode}
+            <button class:active={coverageMode === mode.id} on:click={() => coverageMode = mode.id}><i>[{mode.label}]</i></button>
+          {/each}
+        </div>
+        <div class="control-row threshold-controls">
+          <span class="control-label">THRESHOLD</span>
+          {#each thresholds as value}
+            <button class:active={threshold === value} on:click={() => threshold = value}><i>[{value.toFixed(1)}%]</i></button>
+          {/each}
+        </div>
+      </div>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>POOL</th>
+            <th>TC PRICE</th>
+            <th>VS ORACLE</th>
+            <th>VS BINANCE</th>
+            {#each DISLOCATION_WINDOWS as window}
+              <th>{window.label} ABS</th>
+            {/each}
+            <th>7D PEAK</th>
+            <th>TIME &gt; LIMIT</th>
+            <th>TREND / ABS</th>
+            <th>STATE</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each filteredPools as pool, index}
+            {@const state = dislocationState(pool.currentAbsolute, threshold)}
+            <tr class:selected={pool.asset === selectedAsset}>
+              <td>
+                <button class="pool-select" on:click={() => selectPool(pool.asset)} aria-label={`Show ${pool.asset} chart`}>
+                  <span class="row-index">{String(index + 1).padStart(2, '0')}</span>
+                  <span class="asset-symbol">{pool.symbol}</span>
+                  <small>{pool.asset}</small>
+                </button>
+              </td>
+              <td class="number">{formatPrice(pool.current?.poolPrice)}</td>
+              <td class={`number ${dislocationState(pool.current?.oracleDislocation, threshold)}`}>{formatPercent(pool.current?.oracleDislocation)}</td>
+              <td class={`number ${dislocationState(pool.current?.binanceDislocation, threshold)}`}>{formatPercent(pool.current?.binanceDislocation)}</td>
+              {#each DISLOCATION_WINDOWS as window}
+                <td class="number muted">{formatPercent(pool.averageAbsoluteByWindow?.[window.id], { signed: false })}</td>
+              {/each}
+              <td class="number">{formatPercent(pool.peakAbsolute, { signed: false })}</td>
+              <td class="number muted">{formatHours(pool.hoursOutsideThreshold)}</td>
+              <td class="spark-cell"><svg viewBox="0 0 92 26" aria-hidden="true"><line x1="0" x2="92" y1="25" y2="25"></line><path class={state} d={sparkPath(pool)} /></svg></td>
+              <td><span class={`state-pill ${state}`}><i></i>{state}</span></td>
+            </tr>
+          {/each}
+          {#if !loading && filteredPools.length === 0}
+            <tr><td class="empty-row" colspan="13">NO POOLS MATCH THE CURRENT TRADING, SEARCH, AND COVERAGE FILTERS</td></tr>
+          {/if}
+        </tbody>
+      </table>
+    </div>
+    <div class="table-foot"><span>{filteredPools.length}/{dashboard.totalPools} VISIBLE POOLS</span><span>{dashboard.hiddenHaltedPools} HALTED POOLS HIDDEN · {dashboard.haltedChains.length} CHAINS</span><span>ALL TIMES UTC</span></div>
+  </section>
+
+  <footer class="method-line">
+    <span>FORMULA</span>
+    <code>100 × (TC_POOL / REFERENCE − 1)</code>
+    <span>WINDOW ABS = MEAN MAX SOURCE GAP</span>
+    <span>GAPS ARE NOT INTERPOLATED</span>
+    <span>POSITIVE = TC PREMIUM</span>
+    <span>NEGATIVE = TC DISCOUNT</span>
+  </footer>
+</div>
+
+<style>
+  :global(body) { background: var(--term-bg, #080808); }
+
+  .dashboard-shell {
+    width: min(1240px, calc(100% - 40px));
+    margin: 0 auto;
+    padding: 24px 0 56px;
+    color: var(--term-text-body, #c8c8c8);
+  }
+
+  .command-head,
+  .title-row,
+  .block-head,
+  .control-row,
+  .chart-legend,
+  .table-foot,
+  .method-line {
+    display: flex;
+    align-items: center;
+  }
+
+  .command-head {
+    justify-content: space-between;
+    min-height: 34px;
+    padding-bottom: 11px;
+    border-bottom: 1px solid var(--term-border, #1a1a1a);
+    font-family: var(--term-font-mono, 'JetBrains Mono', monospace);
+    font-size: 10px;
+    color: var(--term-text-3, #666);
+  }
+
+  .command,
+  .command span,
+  .command em { font-family: inherit; }
+  .command span { color: var(--term-accent, #00cc66); font-weight: 800; margin-right: 7px; }
+  .command em { color: var(--term-text-5, #444); font-style: normal; }
+
+  .command-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 3px 8px;
+    border: 1px solid rgba(0, 204, 102, 0.35);
+    border-radius: 999px;
+    color: var(--term-accent, #00cc66);
+    font-family: inherit;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+  }
+
+  .command-state.degraded { border-color: var(--term-amber-edge, rgba(212, 160, 23, 0.4)); color: var(--term-amber, #d4a017); }
+  .preview-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  .title-row { justify-content: space-between; gap: 24px; padding: 27px 0 25px; }
+  h1, h2, strong, code, button, .metric-label, .metric-index, .window-stamp, .preview-alert, th, td, .reading-panel, .method-line { font-family: var(--term-font-mono, 'JetBrains Mono', monospace); }
+  h1 { margin: 0; color: var(--term-text, #e8e8e8); font-size: clamp(23px, 3vw, 30px); line-height: 1.1; letter-spacing: 0.06em; }
+  h1 > span:first-child { color: var(--term-accent, #00cc66); margin-right: 10px; }
+  .cursor { color: var(--term-accent, #00cc66); animation: cursor-blink 1s steps(1) infinite; }
+  @keyframes cursor-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  .title-row p { margin: 9px 0 0; max-width: 660px; color: var(--term-text-3, #666); font-size: 13px; }
+  .window-stamp { min-width: 132px; text-align: right; }
+  .window-stamp span { display: block; color: var(--term-text-6, #333); font-size: 8px; letter-spacing: 0.18em; }
+  .window-stamp strong { display: block; margin-top: 5px; color: var(--term-text-2, #888); font-size: 10px; }
+
+  .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--term-border, #1a1a1a); background: var(--term-surface, #0a0a0a); }
+  .metric-cell { position: relative; min-height: 116px; padding: 16px 18px; border-right: 1px solid var(--term-border, #1a1a1a); }
+  .metric-cell:last-child { border-right: none; }
+  .metric-index { position: absolute; top: 14px; right: 15px; color: var(--term-accent, #00cc66); font-size: 8px; font-weight: 700; }
+  .metric-label { display: block; color: var(--term-text-3, #666); font-size: 9px; font-weight: 700; letter-spacing: 0.12em; }
+  .metric-cell strong { display: block; margin-top: 22px; color: var(--term-text, #e8e8e8); font-size: 24px; line-height: 1; }
+  .metric-cell small { display: block; margin-top: 8px; color: var(--term-text-6, #333); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; text-transform: uppercase; }
+
+  .preview-alert { margin: 12px 0 18px; padding: 8px 11px; border-left: 2px solid var(--term-amber, #d4a017); background: var(--term-surface-deep, #050505); color: var(--term-text-3, #666); font-size: 10px; }
+  .preview-alert span { margin-right: 9px; color: var(--term-amber, #d4a017); font-weight: 800; }
+  .preview-alert.syncing { border-left-color: var(--term-info, #5588cc); }
+  .preview-alert.syncing span { color: var(--term-info, #5588cc); }
+  .preview-alert.error { border-left-color: var(--term-error, #dc3545); }
+  .preview-alert.error span { color: var(--term-error, #dc3545); }
+  .source-line { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 12px 0 18px; padding: 7px 10px; border-left: 2px solid var(--term-accent, #00cc66); background: var(--term-surface-deep, #050505); color: var(--term-text-5, #444); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; letter-spacing: 0.06em; }
+  .source-line span:first-child { margin-right: auto; color: var(--term-text-3, #666); }
+
+  .block { margin-top: 16px; border: 1px solid var(--term-border, #1a1a1a); background: var(--term-surface, #0a0a0a); }
+  .block-head { justify-content: space-between; gap: 20px; min-height: 48px; padding: 10px 14px 10px 18px; border-bottom: 1px solid var(--term-border-faint, #111); }
+  .block-title { display: flex; align-items: center; gap: 9px; }
+  .block-title > span { color: var(--term-accent, #00cc66); }
+  h2 { margin: 0; color: var(--term-text, #e8e8e8); font-size: 11px; letter-spacing: 0.1em; }
+
+  .control-row { gap: 5px; }
+  .control-label { margin-right: 3px; color: var(--term-text-6, #333); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; letter-spacing: 0.14em; }
+  .control-row button { padding: 4px 7px; border: 1px solid transparent; background: none; color: var(--term-text-4, #555); font-size: 9px; cursor: pointer; }
+  .control-row button i { color: var(--term-text-6, #333); font-family: inherit; font-style: normal; }
+  .control-row button:hover,
+  .control-row button.active { border-color: var(--term-border, #1a1a1a); color: var(--term-accent, #00cc66); }
+  .control-row button.active i { color: var(--term-accent, #00cc66); }
+
+  .focus-grid { display: grid; grid-template-columns: minmax(0, 1fr) 242px; min-height: 390px; }
+  .chart-wrap { position: relative; min-width: 0; padding: 15px 17px 10px; border-right: 1px solid var(--term-border-faint, #111); overflow: hidden; }
+  .chart-legend { justify-content: flex-end; gap: 17px; min-height: 22px; padding-right: 7px; color: var(--term-text-5, #444); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; letter-spacing: 0.06em; }
+  .chart-legend span { display: inline-flex; align-items: center; gap: 6px; font-family: inherit; }
+  .chart-legend i { display: inline-block; width: 16px; height: 2px; background: var(--term-accent, #00cc66); }
+  .chart-legend .binance-key i { background: var(--term-info, #5588cc); }
+  .chart-legend .band-key i { height: 5px; border: 1px solid rgba(212, 160, 23, 0.28); background: var(--term-amber-soft, rgba(212, 160, 23, 0.06)); }
+  .chart-wrap svg { display: block; width: 100%; height: auto; min-height: 300px; }
+  .watch-zone { fill: rgba(212, 160, 23, 0.035); }
+  .grid-line { stroke: var(--term-border-faint, #111); stroke-width: 1; }
+  .grid-line.zero { stroke: var(--term-text-5, #444); stroke-dasharray: 4 5; }
+  .threshold-line { stroke: rgba(212, 160, 23, 0.34); stroke-width: 1; stroke-dasharray: 3 5; }
+  .x-tick { stroke: var(--term-border, #1a1a1a); }
+  .axis-label { fill: var(--term-text-5, #444); font: 10px 'JetBrains Mono', monospace; }
+  .axis-label.y { text-anchor: end; }
+  .axis-label.x { text-anchor: middle; }
+  .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .series.oracle { stroke: var(--term-accent, #00cc66); }
+  .series.binance { stroke: var(--term-info, #5588cc); }
+  .point { stroke: var(--term-bg, #080808); stroke-width: 1.5; }
+  .point.oracle { fill: var(--term-accent, #00cc66); }
+  .point.binance { fill: var(--term-info, #5588cc); }
+  .chart-status { position: absolute; inset: 54px 17px 35px; display: grid; place-items: center; background: rgba(5, 5, 5, 0.74); color: var(--term-text-4, #555); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 9px; letter-spacing: 0.08em; text-align: center; }
+  .chart-status.error { color: var(--term-error, #dc3545); }
+
+  .reading-panel { padding: 17px 16px; background: var(--term-surface-deep, #050505); }
+  .reading-head { display: flex; justify-content: space-between; color: var(--term-text-6, #333); font-size: 8px; letter-spacing: 0.14em; }
+  .reading-head strong { color: var(--term-amber, #d4a017); font-size: 8px; }
+  .price-stack { margin-top: 18px; }
+  .price-stack > div { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--term-border-faint, #111); }
+  .price-stack span,
+  .delta-stack span,
+  .reading-foot span { color: var(--term-text-5, #444); font-family: inherit; font-size: 8px; letter-spacing: 0.08em; }
+  .price-stack strong { color: var(--term-text-2, #888); font-size: 10px; }
+  .delta-stack { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 18px -16px 0; border-top: 1px solid var(--term-border-faint, #111); border-bottom: 1px solid var(--term-border-faint, #111); background: var(--term-border-faint, #111); }
+  .delta-stack > div { padding: 13px 10px; background: var(--term-surface, #0a0a0a); }
+  .delta-stack span,
+  .delta-stack strong { display: block; }
+  .delta-stack strong { margin-top: 8px; color: var(--term-text, #e8e8e8); font-size: 15px; }
+  .reading-foot { padding-top: 13px; }
+  .reading-foot > div { display: flex; justify-content: space-between; padding: 6px 0; }
+  .reading-foot strong { color: var(--term-text-2, #888); font-size: 9px; }
+
+  .table-scroll { overflow-x: auto; }
+  .watchlist-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px 12px; }
+  .pool-search { display: inline-flex; align-items: center; gap: 6px; font-family: var(--term-font-mono, 'JetBrains Mono', monospace); }
+  .pool-search span { color: var(--term-text-6, #333); font-size: 8px; letter-spacing: 0.14em; }
+  .pool-search input { width: 118px; padding: 5px 7px; border: 1px solid var(--term-border, #1a1a1a); border-radius: 0; outline: none; background: var(--term-surface-deep, #050505); color: var(--term-text-2, #888); font-family: inherit; font-size: 8px; text-transform: uppercase; }
+  .pool-search input:focus { border-color: rgba(0, 204, 102, 0.45); }
+  table { width: 100%; min-width: 1320px; border-collapse: collapse; }
+  th { position: sticky; top: 0; z-index: 1; padding: 10px 12px; border-bottom: 1px solid var(--term-border, #1a1a1a); background: var(--term-surface, #0a0a0a); color: var(--term-text-5, #444); font-size: 8px; text-align: right; letter-spacing: 0.08em; white-space: nowrap; }
+  th:first-child { text-align: left; padding-left: 18px; }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--term-border-faint, #111); color: var(--term-text-2, #888); font-size: 9px; text-align: right; white-space: nowrap; }
+  tbody tr { transition: background var(--term-transition, 0.15s ease); }
+  tbody tr:hover,
+  tbody tr.selected { background: var(--term-surface-hover, #0d0d0d); }
+  tbody tr.selected td:first-child { box-shadow: inset 2px 0 0 var(--term-accent, #00cc66); }
+  tbody tr:last-child td { border-bottom: none; }
+  td:first-child { padding-left: 10px; text-align: left; }
+  .pool-select { display: grid; grid-template-columns: 22px 44px auto; align-items: center; width: 100%; padding: 0 7px; border: 0; background: none; cursor: pointer; text-align: left; }
+  .pool-select:hover .asset-symbol { color: var(--term-accent, #00cc66); }
+  .row-index { color: var(--term-text-7, #222); font-size: 8px; }
+  .asset-symbol { color: var(--term-text, #e8e8e8); font-weight: 800; }
+  .pool-select small { color: var(--term-text-6, #333); font-family: inherit; font-size: 7px; }
+  .number { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--term-text-5, #444); }
+  .normal { color: var(--term-accent, #00cc66) !important; }
+  .watch { color: var(--term-amber, #d4a017) !important; }
+  .critical { color: var(--term-error, #dc3545) !important; }
+  .missing { color: var(--term-text-6, #333) !important; }
+  .spark-cell { width: 112px; }
+  .spark-cell svg { display: block; width: 92px; height: 26px; margin-left: auto; }
+  .spark-cell line { stroke: var(--term-border-faint, #111); }
+  .spark-cell path { fill: none; stroke: var(--term-accent, #00cc66); stroke-width: 1.3; }
+  .spark-cell path.watch { stroke: var(--term-amber, #d4a017); }
+  .spark-cell path.critical { stroke: var(--term-error, #dc3545); }
+  .state-pill { display: inline-flex; align-items: center; gap: 6px; min-width: 68px; padding: 3px 7px; border: 1px solid var(--term-border, #1a1a1a); border-radius: 999px; color: var(--term-text-4, #555); font-family: inherit; font-size: 7px; text-transform: uppercase; }
+  .state-pill i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .empty-row { height: 80px; color: var(--term-text-5, #444); text-align: center !important; letter-spacing: 0.08em; }
+  .table-foot { justify-content: space-between; gap: 16px; min-height: 35px; padding: 0 17px; border-top: 1px solid var(--term-border-faint, #111); color: var(--term-text-6, #333); font-size: 7px; letter-spacing: 0.09em; }
+
+  .method-line { flex-wrap: wrap; gap: 14px; margin-top: 14px; padding: 9px 0; border-top: 1px solid var(--term-border-faint, #111); color: var(--term-text-6, #333); font-size: 8px; }
+  .method-line > span:first-child { color: var(--term-accent, #00cc66); font-weight: 800; }
+  .method-line code { padding: 2px 5px; border: 1px solid var(--term-border, #1a1a1a); background: var(--term-surface, #0a0a0a); color: var(--term-text-3, #666); font-size: 8px; }
+
+  @media (max-width: 980px) {
+    .metric-grid { grid-template-columns: repeat(2, 1fr); }
+    .metric-cell:nth-child(2) { border-right: none; }
+    .metric-cell:nth-child(-n + 2) { border-bottom: 1px solid var(--term-border, #1a1a1a); }
+    .focus-grid { grid-template-columns: 1fr; }
+    .chart-wrap { border-right: 0; border-bottom: 1px solid var(--term-border-faint, #111); }
+    .reading-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; }
+    .reading-head { grid-column: 1 / -1; }
+    .price-stack { margin-top: 0; }
+    .delta-stack { margin: 0; }
+    .reading-foot { grid-column: 1 / -1; }
+  }
+
+  @media (max-width: 640px) {
+    .dashboard-shell { width: min(100% - 24px, 1240px); padding-top: 16px; }
+    .command-head { align-items: flex-start; gap: 10px; }
+    .command em { display: none; }
+    .title-row { align-items: flex-end; padding: 22px 0 20px; }
+    .title-row p { font-size: 12px; }
+    .window-stamp { min-width: auto; }
+    .metric-grid { grid-template-columns: 1fr; }
+    .metric-cell,
+    .metric-cell:nth-child(2) { min-height: 102px; border-right: none; border-bottom: 1px solid var(--term-border, #1a1a1a); }
+    .metric-cell:last-child { border-bottom: 0; }
+    .block-head { align-items: flex-start; flex-direction: column; gap: 10px; }
+    .watchlist-controls { justify-content: flex-start; }
+    .chart-wrap { padding-left: 4px; padding-right: 4px; }
+    .chart-legend { justify-content: center; gap: 10px; }
+    .chart-wrap svg { min-height: 250px; }
+    .reading-panel { display: block; }
+    .price-stack { margin-top: 16px; }
+    .delta-stack { margin: 16px -16px 0; }
+    .table-foot { justify-content: flex-start; }
+    .table-foot span:nth-child(2) { display: none; }
+  }
+</style>

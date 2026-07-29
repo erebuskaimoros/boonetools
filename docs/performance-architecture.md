@@ -40,6 +40,7 @@ presentation-only field.
 | `/app-layer-base-fees` | `app-layer-base-fees:v1` | `boonetools-analytics-read-models` | 1m / 330s |
 | `/app-layer-reserve-payments` | `app-layer-reserve-payments:v1` | `boonetools-analytics-read-models` | 1m / 330s |
 | `/tc-fee-dash` | `tc-fee-dash:v1` | `boonetools-analytics-read-models` | 1m / 15m |
+| `/pool-dislocation` | `pool-dislocation-summary:v1` | `boonetools-pool-dislocation` | exact 5m UTC / 15m |
 
 The core publisher is the sole scheduled owner of reusable current THORNode
 state. It refreshes `lastblock` every 15 seconds; inbound addresses, Mimir, and
@@ -107,6 +108,7 @@ cold request ceilings:
 | Node Votes summary | 1s | 150KB |
 | Rapid summary/history | 1s | 150KB each |
 | TC Fee | 1s | 250KB |
+| Pool dislocation summary | 1s | 750KB |
 
 The deploy also sends 50 concurrent Status requests. The route-level cached
 concurrency caps and single-flight row cache are intended to absorb that burst

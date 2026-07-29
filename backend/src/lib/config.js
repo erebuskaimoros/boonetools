@@ -44,6 +44,7 @@ const rpcRestUrl = optional(process.env.RPC_REST_URL) || 'https://gateway.liquif
 const rpcFallbackRestUrl = optional(process.env.RPC_FALLBACK_REST_URL) || 'https://rpc.thorchain.network';
 const rpcArchiveRestUrl = optional(process.env.RPC_ARCHIVE_REST_URL) || 'https://rpc.thorchain.liquify.com';
 const duneApiBaseUrl = optional(process.env.DUNE_API_BASE_URL) || 'https://api.dune.com';
+const binanceApiBaseUrl = optional(process.env.BINANCE_API_BASE_URL) || 'https://data-api.binance.vision';
 const cmcApiKey = optional(process.env.CMC_API_KEY || process.env.CMC_PRO_API_KEY);
 const providerCooldownEnabled = readBool(
   'PROVIDER_COOLDOWN_ENABLED',
@@ -166,6 +167,8 @@ export const config = Object.freeze({
   nodeVotesWsIngestionEnabled: readBool('NODE_VOTES_WS_INGESTION_ENABLED', true),
   duneApiKey: optional(process.env.DUNE_API_KEY),
   duneApiBaseUrl,
+  binanceApiBaseUrl,
+  binanceApiBaseUrls: readList('BINANCE_API_BASE_URLS', [binanceApiBaseUrl]),
   dunePerformance: optional(process.env.DUNE_PERFORMANCE) || 'small',
   duneExecutionPollMs: readInt('DUNE_EXECUTION_POLL_MS', 5000),
   duneExecutionTimeoutMs: readInt('DUNE_EXECUTION_TIMEOUT_MS', 10 * 60 * 1000),

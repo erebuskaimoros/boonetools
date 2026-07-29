@@ -1,0 +1,315 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+
+import {
+  POOL_DISLOCATION_MODEL_KEY,
+  binanceSymbolsForPools,
+  buildObservationRows,
+  buildPoolDislocationSeries,
+  buildPoolDislocationSummary,
+  floorToFiveMinuteBucket,
+  normalizeBinanceBookTickers,
+  normalizeChainTradingStatus,
+  normalizeOraclePrices,
+  referenceMappingForAsset
+} from '../src/shared/pool-dislocation.js';
+import {
+  collectPoolDislocationSnapshot,
+  loadPoolTradingStatus,
+  runPoolDislocationScheduler
+} from '../src/jobs/pool-dislocation-scheduler.js';
+import {
+  handlePoolDislocation,
+  handlePoolDislocationSeries
+} from '../src/handlers/pool-dislocation.js';
+
+const AVAILABLE_POOLS = [
+  {
+    asset: 'BTC.BTC',
+    status: 'Available',
+    asset_tor_price: '10100000000',
+    balance_asset: '100',
+    balance_rune: '200'
+  },
+  {
+    asset: 'ETH.UNKNOWN-0XABC',
+    status: 'Available',
+    asset_tor_price: '500000000',
+    balance_asset: '300',
+    balance_rune: '400'
+  },
+  {
+    asset: 'ETH.ETH',
+    status: 'Staged',
+    asset_tor_price: '200000000000'
+  }
+];
+
+test('five-minute buckets and reference mappings are exact and auditable', () => {
+  assert.equal(floorToFiveMinuteBucket('2026-07-29T12:07:59.999Z'), '2026-07-29T12:05:00.000Z');
+  assert.deepEqual(referenceMappingForAsset('btc.btc'), { oracle: 'BTC', binance: 'BTCUSDT' });
+  assert.deepEqual(referenceMappingForAsset('ETH.UNKNOWN-0XABC'), { oracle: null, binance: null });
+  assert.deepEqual(binanceSymbolsForPools(AVAILABLE_POOLS), ['BTCUSDT', 'ETHUSDT']);
+});
+
+test('provider payload normalization rejects unusable prices and spreads', () => {
+  const oracle = normalizeOraclePrices({ prices: [
+    { symbol: 'BTC', price: '100' },
+    { symbol: 'BAD', price: '0' }
+  ] });
+  const binance = normalizeBinanceBookTickers([
+    { symbol: 'BTCUSDT', bidPrice: '99', askPrice: '101' },
+    { symbol: 'BADUSDT', bidPrice: '3', askPrice: '2' }
+  ]);
+  assert.equal(oracle.get('BTC'), 100);
+  assert.equal(oracle.has('BAD'), false);
+  assert.deepEqual(binance.get('BTCUSDT'), { bid: 99, ask: 101, mid: 100 });
+  assert.equal(binance.has('BADUSDT'), false);
+});
+
+test('chain trading status treats halt, chain pause, and global pause as trading halts', () => {
+  const status = normalizeChainTradingStatus([
+    { chain: 'BTC', halted: false, global_trading_paused: false, chain_trading_paused: false },
+    { chain: 'SOL', halted: true, global_trading_paused: false, chain_trading_paused: true },
+    { chain: 'ETH', halted: 'false', global_trading_paused: 'false', chain_trading_paused: 'false' }
+  ]);
+  assert.deepEqual(status.known_chains, ['BTC', 'ETH', 'SOL']);
+  assert.deepEqual(status.halted_chains, ['SOL']);
+  assert.equal(status.chains.BTC.trading_halted, false);
+  assert.equal(status.chains.SOL.trading_halted, true);
+
+  const global = normalizeChainTradingStatus([
+    { chain: 'BTC', global_trading_paused: true },
+    { chain: 'ETH', global_trading_paused: false }
+  ]);
+  assert.deepEqual(global.halted_chains, ['BTC', 'ETH']);
+});
+
+test('chain trading status is sourced from the canonical durable THORNode snapshot', async () => {
+  const inboundAddresses = [{ chain: 'BTC', chain_trading_paused: false }];
+  const coreModel = {
+    stale: false,
+    payload: {
+      inbound_addresses: inboundAddresses,
+      field_meta: { inbound_addresses: { status: 'fresh' } }
+    }
+  };
+  assert.equal(await loadPoolTradingStatus({
+    client: { name: 'client' },
+    getThorNodeCoreSnapshot: async (options) => {
+      assert.equal(options.cache, false);
+      assert.equal(options.allowStale, true);
+      return coreModel;
+    }
+  }), inboundAddresses);
+  await assert.rejects(
+    loadPoolTradingStatus({
+      getThorNodeCoreSnapshot: async () => ({ ...coreModel, stale: true })
+    }),
+    /unavailable or stale/
+  );
+});
+
+test('observation rows retain every Available pool and null unaligned references', () => {
+  const aligned = buildObservationRows({
+    pools: AVAILABLE_POOLS,
+    oraclePrices: new Map([['BTC', 100]]),
+    binanceTickers: new Map([['BTCUSDT', { bid: 99, ask: 101, mid: 100 }]]),
+    observedAt: '2026-07-29T12:07:00Z',
+    poolObservedAt: '2026-07-29T12:07:01Z',
+    oracleObservedAt: '2026-07-29T12:07:02Z',
+    binanceObservedAt: '2026-07-29T12:07:03Z'
+  });
+  assert.equal(aligned.length, 2);
+  assert.equal(aligned[0].observedAt, '2026-07-29T12:05:00.000Z');
+  assert.equal(aligned[0].poolPriceUsd, 101);
+  assert.equal(aligned[0].oraclePriceUsd, 100);
+  assert.equal(aligned[0].binancePriceUsd, 100);
+  assert.equal(aligned[0].sourceSkewMs, 2000);
+  assert.equal(aligned[1].oraclePriceUsd, null);
+
+  const skewed = buildObservationRows({
+    pools: AVAILABLE_POOLS.slice(0, 1),
+    oraclePrices: new Map([['BTC', 100]]),
+    binanceTickers: new Map([['BTCUSDT', { bid: 99, ask: 101, mid: 100 }]]),
+    observedAt: '2026-07-29T12:05:00Z',
+    poolObservedAt: '2026-07-29T12:05:00Z',
+    oracleObservedAt: '2026-07-29T12:06:00Z',
+    binanceObservedAt: '2026-07-29T12:05:02Z'
+  });
+  assert.equal(skewed[0].sourceSkewMs, 60_000);
+  assert.equal(skewed[0].oraclePriceUsd, null);
+  assert.equal(skewed[0].binancePriceUsd, 100);
+});
+
+test('summary uses every five-minute sample for windows and hourly peak-preserving sparklines', () => {
+  const rows = [
+    ['2026-07-29T08:00:00Z', 100],
+    ['2026-07-29T11:05:00Z', 101],
+    ['2026-07-29T11:55:00Z', 104],
+    ['2026-07-29T12:00:00Z', 102]
+  ].map(([observed_at, pool_price_usd]) => ({
+    observed_at,
+    asset: 'BTC.BTC',
+    symbol: 'BTC',
+    chain: 'BTC',
+    pool_status: 'Available',
+    pool_price_usd,
+    oracle_symbol: 'BTC',
+    oracle_price_usd: 100,
+    binance_symbol: 'BTCUSDT',
+    binance_price_usd: 100
+  }));
+  const summary = buildPoolDislocationSummary(rows, {
+    asOf: '2026-07-29T12:00:00Z',
+    chainTrading: normalizeChainTradingStatus([
+      { chain: 'BTC', chain_trading_paused: true }
+    ])
+  });
+  const pool = summary.pools[0];
+  assert.equal(summary.expected_samples, 2017);
+  assert.ok(Math.abs(pool.average_abs['1h'] - (7 / 3)) < 1e-9);
+  assert.ok(Math.abs(pool.average_abs['4h'] - 1.75) < 1e-9);
+  assert.ok(Math.abs(pool.peak_abs_7d - 4) < 1e-9);
+  assert.ok(Math.abs(pool.time_outside_hours['1'] - (15 / 60)) < 1e-9);
+  assert.equal(pool.sparkline.length, 3);
+  assert.ok(Math.abs(pool.sparkline[1].max_abs - 4) < 1e-9);
+  assert.equal(pool.trading_halted, true);
+  assert.equal(pool.trading_status_known, true);
+});
+
+test('selected series returns exact ordered points without interpolation', () => {
+  const rows = [{
+    observed_at: '2026-07-29T12:00:00Z',
+    asset: 'BTC.BTC',
+    symbol: 'BTC',
+    chain: 'BTC',
+    pool_price_usd: 101,
+    oracle_symbol: 'BTC',
+    oracle_price_usd: null,
+    binance_symbol: 'BTCUSDT',
+    binance_price_usd: 100
+  }];
+  const series = buildPoolDislocationSeries(rows, { asset: 'BTC.BTC' });
+  assert.equal(series.points.length, 1);
+  assert.equal(series.points[0].oracle_dislocation, null);
+  assert.ok(Math.abs(series.points[0].binance_dislocation - 1) < 1e-9);
+});
+
+test('collector degrades a failed reference source while preserving pool observations', async () => {
+  const times = [
+    new Date('2026-07-29T12:07:01Z'),
+    new Date('2026-07-29T12:07:02Z'),
+    new Date('2026-07-29T12:07:03Z'),
+    new Date('2026-07-29T12:07:04Z')
+  ];
+  const snapshot = await collectPoolDislocationSnapshot({
+    now: () => times.shift() || new Date('2026-07-29T12:07:04Z'),
+    fetchPools: async () => AVAILABLE_POOLS,
+    fetchOracle: async () => { throw new Error('oracle offline'); },
+    fetchBinance: async () => [{ symbol: 'BTCUSDT', bidPrice: '99', askPrice: '101' }],
+    fetchInboundAddresses: async () => [
+      { chain: 'BTC', halted: false, global_trading_paused: false, chain_trading_paused: false }
+    ]
+  });
+  assert.equal(snapshot.observedAt, '2026-07-29T12:05:00.000Z');
+  assert.equal(snapshot.sources.oracle.status, 'error');
+  assert.equal(snapshot.rows[0].oraclePriceUsd, null);
+  assert.equal(snapshot.rows[0].binancePriceUsd, 100);
+  assert.equal(snapshot.sources.trading.status, 'fresh');
+  assert.equal(snapshot.sources.trading.provider, 'thornode-core-snapshot');
+  assert.deepEqual(snapshot.chainTrading.halted_chains, []);
+  assert.match(snapshot.warnings[0], /oracle offline/);
+});
+
+test('scheduler owns one isolated lock and publishes the resulting read model', async () => {
+  let lockKey = '';
+  let publishOptions;
+  const result = await runPoolDislocationScheduler({
+    lockRunner: async (key, callback) => {
+      lockKey = key;
+      return callback({ name: 'client' });
+    },
+    publish: async (options) => {
+      publishOptions = options;
+      const built = await options.build();
+      return { ok: true, runId: '4', model: { key: options.modelKey, ...built } };
+    },
+    collect: async () => ({
+      observedAt: '2026-07-29T12:05:00Z',
+      rows: [{ asset: 'BTC.BTC' }],
+      sources: {},
+      warnings: []
+    }),
+    persist: async () => {},
+    loadWindow: async () => []
+  });
+  assert.equal(lockKey, 'boonetools:pool-dislocation');
+  assert.equal(publishOptions.modelKey, POOL_DISLOCATION_MODEL_KEY);
+  assert.equal(result.ok, true);
+});
+
+test('public handlers are provider-free and the series query is bounded', async () => {
+  const model = {
+    key: POOL_DISLOCATION_MODEL_KEY,
+    payload: {
+      as_of: '2026-07-29T12:05:00Z',
+      pools: [{ asset: 'BTC.BTC' }],
+      warnings: []
+    },
+    etag: '"summary"',
+    generatedAt: '2026-07-29T12:05:00Z',
+    sourceUpdatedAt: '2026-07-29T12:05:00Z',
+    freshUntil: '2026-07-29T12:20:00Z',
+    ageSeconds: 3,
+    stale: false
+  };
+  const summaryResponse = await handlePoolDislocation({ headers: {} }, null, {
+    getReadModel: async () => model
+  });
+  assert.equal(summaryResponse.status, 200);
+  assert.equal(summaryResponse.body.as_of, model.payload.as_of);
+
+  let sql = '';
+  let params;
+  const seriesResponse = await handlePoolDislocationSeries(
+    { headers: {} },
+    new URL('http://localhost/pool-dislocation-series?asset=btc.btc'),
+    {
+      getReadModel: async () => model,
+      query: async (statement, values) => {
+        sql = statement;
+        params = values;
+        return { rows: [] };
+      }
+    }
+  );
+  assert.equal(seriesResponse.status, 200);
+  assert.match(sql, /interval '7 days'/);
+  assert.match(sql, /limit 2017/i);
+  assert.deepEqual(params, ['BTC.BTC', model.payload.as_of]);
+
+  const missing = await handlePoolDislocationSeries(
+    { headers: {} },
+    new URL('http://localhost/pool-dislocation-series?asset=ETH.ETH'),
+    { getReadModel: async () => model, query: async () => assert.fail('must not query') }
+  );
+  assert.equal(missing.status, 404);
+});
+
+test('migration, job registry, timer, and deploy encode the production contract', async () => {
+  const [migration, registry, service, timer, deploy] = await Promise.all([
+    readFile(new URL('../migrations/031_pool_dislocation.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-pool-dislocation.service', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-pool-dislocation.timer', import.meta.url), 'utf8'),
+    readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8')
+  ]);
+  assert.match(migration, /primary key \(observed_at, asset\)/i);
+  assert.match(registry, /'pool-dislocation-scheduler': runPoolDislocationScheduler/);
+  assert.match(service, /pool-dislocation-scheduler/);
+  assert.match(service, /After=.*boonetools-thornode-core-snapshot\.service/);
+  assert.match(timer, /OnCalendar=\*-\*-\* \*:0\/5:00 UTC/);
+  assert.match(deploy, /prime_read_models[\s\S]*boonetools-pool-dislocation\.service/);
+});

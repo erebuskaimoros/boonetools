@@ -53,6 +53,14 @@
     description: "Track TC fee capture against global exchange volume"
   };
 
+  const poolDislocationApp = {
+    name: "Pool Dislocation",
+    component: () => import("./lib/PoolDislocation.svelte"),
+    icon: "±",
+    path: "pool-dislocation",
+    description: "Track seven-day THORChain pool price deviation from oracle and Binance references"
+  };
+
   const bondTrackerApp = {
     name: "Bond Tracker",
     component: () => import("./lib/BondTrackerV2.svelte"),
@@ -121,6 +129,7 @@
     statusApp,
     rapidSwapsApp,
     tcFeeDashApp,
+    poolDislocationApp,
     bondTrackerApp,
     vaultExplorerApp,
     treasuryTrackerApp,

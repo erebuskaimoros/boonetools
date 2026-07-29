@@ -124,6 +124,8 @@ PROVIDER_RATE_LIMIT_COOLDOWN_SECONDS=3600
 THORNODE_PRIMARY_URL=https://gateway.liquify.com/chain/thorchain_api
 THORNODE_FALLBACK_URL=https://thornode.thorchain.network
 THORNODE_URLS=
+BINANCE_API_BASE_URL=https://data-api.binance.vision
+BINANCE_API_BASE_URLS=https://data-api.binance.vision
 MIDGARD_URL=https://gateway.liquify.com/chain/thorchain_midgard/v2
 MIDGARD_FALLBACK_URL=https://midgard.thorchain.network/v2
 MIDGARD_URLS=
@@ -145,7 +147,8 @@ APP_LAYER_STATIC_STATE_TTL_SECONDS=900
 APP_LAYER_ROUTE_CONCURRENCY=4
 ```
 
-`THORNODE_URLS` and `MIDGARD_URLS` are optional comma-separated ordered lists.
+`THORNODE_URLS`, `MIDGARD_URLS`, and `BINANCE_API_BASE_URLS` are optional
+comma-separated ordered lists.
 Use them to put a dedicated node or paid provider ahead of the public defaults
 without changing application code. The older primary/fallback variables remain
 the defaults when the list variables are empty.
