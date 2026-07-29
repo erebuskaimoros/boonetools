@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildWasmArbOracleTrackingRows,
+  deriveFinExecutionPriceUsd,
+  normalizeCollectorBlockSearchCandidates,
+  normalizeCollectorTxSearchCandidates,
   normalizeCollectorTransferCandidates,
   normalizeWasmArbAction,
   normalizeWasmArbNetworkBucket,
@@ -58,6 +62,30 @@ test('normalizes authoritative Wasm swap actions with executed-leg volume', () =
   assert.equal(action.liquidity_fee_rune, 1.25);
   assert.equal(action.swap_slip_bps, 3);
   assert.equal(action.tx_id, 'ABC');
+  assert.match(action.action_key, /^wasm-arb-action:v2:/);
+});
+
+test('collapses identical duplicate outbound records before executed-leg valuation', () => {
+  const outbound = {
+    txID: 'def',
+    address: WASM_ARB_CONTRACT,
+    coins: [{ asset: 'ETH.ETH', amount: '200000000' }]
+  };
+  const action = normalizeWasmArbAction({
+    height: '27190000',
+    date: '1785231600000000000',
+    type: 'swap',
+    status: 'success',
+    in: [{
+      txID: 'abc',
+      address: WASM_ARB_CONTRACT,
+      coins: [{ asset: 'BTC.BTC', amount: '100000000' }]
+    }],
+    out: [outbound, structuredClone(outbound)],
+    metadata: { swap: { inPriceUSD: '10', outPriceUSD: '6' } }
+  });
+
+  assert.equal(action.executed_leg_volume_usd, 22);
 });
 
 test('network buckets convert Midgard USD cents and base RUNE exactly once', () => {
@@ -111,8 +139,45 @@ test('fee parser includes all FIN transfers, treats range as a subset, and links
   });
 
   assert.deepEqual(rows.map((row) => row.fee_kind), ['fin_range', 'fin', 'amm']);
+  assert.ok(rows.every((row) => row.event_key.startsWith('wasm-arb-rujira-fee:v2:')));
   assert.ok(rows.every((row) => row.wasm_linked));
   assert.equal(rows.reduce((sum, row) => sum + Number(row.amount_base), 0), 125);
+});
+
+test('fee parser retains a same-context FIN execution rate for unsupported denoms', () => {
+  const [row] = parseWasmArbRujiraFeeEvents({
+    height: 27190000,
+    blockTime: '2026-07-28T09:40:00Z',
+    origin: 'tx_0',
+    events: [
+      event('wasm-rujira-fin/trade', {
+        _contract_address: FIN,
+        side: 'quote',
+        offer: '200000000',
+        bid: '100000000'
+      }),
+      event('transfer', {
+        sender: FIN,
+        recipient: RUJIRA_TRADE_COLLECTOR,
+        amount: '10000000x/brune'
+      })
+    ],
+    finContracts: [{ address: FIN, denoms: ['x/brune', 'rune'] }]
+  });
+
+  assert.deepEqual(row.raw_event.finExecutionPrice, {
+    baseDenom: 'x/brune',
+    quoteDenom: 'rune',
+    quotePerBase: 0.5
+  });
+  assert.deepEqual(deriveFinExecutionPriceUsd({
+    denom: 'x/brune',
+    hint: row.raw_event.finExecutionPrice,
+    quotePriceUsd: 0.4
+  }), {
+    priceUsd: 0.2,
+    counterDenom: 'rune'
+  });
 });
 
 test('fee parser does not count arbitrary senders or unrelated recipients', () => {
@@ -136,6 +201,32 @@ test('fee parser does not count arbitrary senders or unrelated recipients', () =
   });
 
   assert.deepEqual(rows, []);
+});
+
+test('finalize-block FIN fees are broad only without transaction-local linkage', () => {
+  const rows = parseWasmArbRujiraFeeEvents({
+    height: 27190000,
+    blockTime: '2026-07-28T09:40:00Z',
+    origin: 'finalize_block',
+    events: [
+      event('wasm-rujira-thorchain-swap/swap', {
+        _contract_address: WASM_ARB_CONTRACT
+      }),
+      event('transfer', {
+        sender: FIN,
+        recipient: RUJIRA_TRADE_COLLECTOR,
+        amount: '10rune'
+      }),
+      event('transfer', {
+        sender: WASM_ARB_CONTRACT,
+        recipient: RUJIRA_TRADE_COLLECTOR,
+        amount: '5rune'
+      })
+    ],
+    finContracts: [FIN]
+  });
+
+  assert.deepEqual(rows.map((row) => row.wasm_linked), [false, true]);
 });
 
 test('fee parser preserves every indexed transfer when one event contains parallel attributes', () => {
@@ -205,4 +296,48 @@ test('collector transaction discovery filters failed, old, and unrelated indexed
     blockTime: '2026-07-28T09:42:00.000Z',
     source: 'trade-collector-tx'
   }]);
+});
+
+test('Tendermint tx and block search candidates preserve both discovery lanes', () => {
+  assert.deepEqual(normalizeCollectorTxSearchCandidates([{
+    height: '27190010',
+    tx_result: { code: 0 }
+  }, {
+    height: '27190011',
+    tx_result: { code: 4 }
+  }], 27190000), [{
+    height: 27190010,
+    blockTime: null,
+    source: 'trade-collector-tx-search'
+  }]);
+
+  assert.deepEqual(normalizeCollectorBlockSearchCandidates([{
+    block: { header: { height: '27190012', time: '2026-07-28T09:42:12Z' } }
+  }], 27190000), [{
+    height: 27190012,
+    blockTime: '2026-07-28T09:42:12.000Z',
+    source: 'trade-collector-block-search'
+  }]);
+});
+
+test('builds same-height pool and oracle tracking rows on the report price basis', () => {
+  const [row] = buildWasmArbOracleTrackingRows({
+    height: 27190012,
+    blockTime: '2026-07-28T09:42:12Z',
+    pools: [{
+      asset: 'BTC.BTC',
+      status: 'Available',
+      balance_rune: '10000000000',
+      balance_asset: '100000000'
+    }],
+    oraclePrices: [
+      { symbol: 'RUNE', price: '2' },
+      { symbol: 'BTC', price: '205' }
+    ]
+  });
+
+  assert.equal(row.pool_price_usd, 200);
+  assert.equal(row.oracle_price_usd, 205);
+  assert.equal(Number(row.signed_deviation_bps.toFixed(6)), -243.902439);
+  assert.equal(Number(row.rune_depth_usd.toFixed(2)), 200);
 });

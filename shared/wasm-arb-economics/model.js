@@ -26,6 +26,10 @@ function sum(rows, field) {
   return rows.reduce((total, row) => total + finiteNumber(row?.[field]), 0);
 }
 
+function max(rows, field) {
+  return rows.reduce((highest, row) => Math.max(highest, finiteNumber(row?.[field])), 0);
+}
+
 function normalizeHistogram(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   /** @type {Record<string, number>} */
@@ -146,6 +150,50 @@ export function normalizeWasmArbEconomicsBucket(row = {}) {
     unpricedRujiraFeeEventCount: finiteNumber(
       row.unpricedRujiraFeeEventCount ?? row.unpriced_rujira_fee_event_count
     ),
+    oracleObservationCount: finiteNumber(
+      row.oracleObservationCount ?? row.oracle_observation_count
+    ),
+    oracleAbsDeviationSumBps: finiteNumber(
+      row.oracleAbsDeviationSumBps ?? row.oracle_abs_deviation_sum_bps
+    ),
+    oracleSignedDeviationSumBps: finiteNumber(
+      row.oracleSignedDeviationSumBps ?? row.oracle_signed_deviation_sum_bps
+    ),
+    oracleWeightedAbsNumerator: finiteNumber(
+      row.oracleWeightedAbsNumerator ?? row.oracle_weighted_abs_numerator
+    ),
+    oracleDepthWeightUsd: finiteNumber(
+      row.oracleDepthWeightUsd ?? row.oracle_depth_weight_usd
+    ),
+    oracleWithin10Count: finiteNumber(row.oracleWithin10Count ?? row.oracle_within_10_count),
+    oracleWithin25Count: finiteNumber(row.oracleWithin25Count ?? row.oracle_within_25_count),
+    oracleMaxAbsDeviationBps: finiteNumber(
+      row.oracleMaxAbsDeviationBps ?? row.oracle_max_abs_deviation_bps
+    ),
+    oracleExLtcObservationCount: finiteNumber(
+      row.oracleExLtcObservationCount ?? row.oracle_ex_ltc_observation_count
+    ),
+    oracleExLtcAbsDeviationSumBps: finiteNumber(
+      row.oracleExLtcAbsDeviationSumBps ?? row.oracle_ex_ltc_abs_deviation_sum_bps
+    ),
+    oracleExLtcSignedDeviationSumBps: finiteNumber(
+      row.oracleExLtcSignedDeviationSumBps ?? row.oracle_ex_ltc_signed_deviation_sum_bps
+    ),
+    oracleExLtcWeightedAbsNumerator: finiteNumber(
+      row.oracleExLtcWeightedAbsNumerator ?? row.oracle_ex_ltc_weighted_abs_numerator
+    ),
+    oracleExLtcDepthWeightUsd: finiteNumber(
+      row.oracleExLtcDepthWeightUsd ?? row.oracle_ex_ltc_depth_weight_usd
+    ),
+    oracleExLtcWithin10Count: finiteNumber(
+      row.oracleExLtcWithin10Count ?? row.oracle_ex_ltc_within_10_count
+    ),
+    oracleExLtcWithin25Count: finiteNumber(
+      row.oracleExLtcWithin25Count ?? row.oracle_ex_ltc_within_25_count
+    ),
+    oracleExLtcMaxAbsDeviationBps: finiteNumber(
+      row.oracleExLtcMaxAbsDeviationBps ?? row.oracle_ex_ltc_max_abs_deviation_bps
+    ),
     tcShare: Math.max(0, Math.min(1, finiteNumber(row.tcShare ?? row.tc_share, 0.5))),
     mimirValue: finiteNumber(row.mimirValue ?? row.mimir_value),
     referenceMimirValue: finiteNumber(
@@ -154,7 +202,8 @@ export function normalizeWasmArbEconomicsBucket(row = {}) {
     ),
     networkComplete: row.networkComplete ?? row.network_complete ?? true,
     actionsComplete: row.actionsComplete ?? row.actions_complete ?? true,
-    feesComplete: row.feesComplete ?? row.fees_complete ?? true
+    feesComplete: row.feesComplete ?? row.fees_complete ?? true,
+    oracleComplete: row.oracleComplete ?? row.oracle_complete ?? false
   };
 }
 
@@ -163,6 +212,33 @@ export function normalizeWasmArbEconomicsBuckets(rows = []) {
     .map(normalizeWasmArbEconomicsBucket)
     .filter((row) => row.startSeconds > 0)
     .sort((left, right) => left.startSeconds - right.startSeconds);
+}
+
+function summarizePriceTracking(rows, prefix = 'oracle') {
+  const field = (suffix) => `${prefix}${suffix}`;
+  const observations = sum(rows, field('ObservationCount'));
+  const depthWeightUsd = sum(rows, field('DepthWeightUsd'));
+  return {
+    observations,
+    depthWeightedAbsoluteDeviationBps: positiveRatio(
+      sum(rows, field('WeightedAbsNumerator')),
+      depthWeightUsd
+    ),
+    meanAbsoluteDeviationBps: positiveRatio(
+      sum(rows, field('AbsDeviationSumBps')),
+      observations
+    ),
+    meanSignedDeviationBps: positiveRatio(
+      sum(rows, field('SignedDeviationSumBps')),
+      observations
+    ),
+    within10Share: positiveRatio(sum(rows, field('Within10Count')), observations),
+    within25Share: positiveRatio(sum(rows, field('Within25Count')), observations),
+    maxAbsoluteDeviationBps: observations > 0
+      ? max(rows, field('MaxAbsDeviationBps'))
+      : null,
+    depthWeightUsd
+  };
 }
 
 export function summarizeWasmArbWindow(rows = []) {
@@ -193,6 +269,8 @@ export function summarizeWasmArbWindow(rows = []) {
   const averageTcShare = totalWeight > 0
     ? normalized.reduce((total, row) => total + row.tcShare * row.bucketSeconds, 0) / totalWeight
     : 0.5;
+  const priceTracking = summarizePriceTracking(normalized);
+  const priceTrackingExcludingLtc = summarizePriceTracking(normalized, 'oracleExLtc');
 
   return {
     bucketCount: normalized.length,
@@ -239,6 +317,13 @@ export function summarizeWasmArbWindow(rows = []) {
     pricingCoverage: rujiraFeeEventCount > 0
       ? Math.max(0, 1 - unpricedRujiraFeeEventCount / rujiraFeeEventCount)
       : 1,
+    priceTracking,
+    priceTrackingExcludingLtc,
+    oracleCoverageComplete: normalized.length > 0
+      && normalized.every((row) => row.oracleComplete),
+    oracleBucketCoverage: normalized.length
+      ? normalized.filter((row) => row.oracleObservationCount > 0).length / normalized.length
+      : 0,
     networkBucketCoverage: normalized.length
       ? normalized.filter((row) => row.networkComplete).length / normalized.length
       : 0,
@@ -265,6 +350,17 @@ export function summarizeWasmArbWindow(rows = []) {
     wasmLegFeeBps: positiveRatio(wasmLiquidityFeeUsd, wasmLegVolumeUsd, BASIS_POINTS),
     tcPerActionUsd: positiveRatio(tcLinkedValueUsd, wasmActionCount),
     tcPerMillionNetworkVolumeUsd: positiveRatio(tcLinkedValueUsd, networkVolumeUsd, MILLION),
+    tcBroadPerMillionNetworkVolumeUsd: positiveRatio(
+      tcBroadValueUsd,
+      networkVolumeUsd,
+      MILLION
+    ),
+    tcPerMillionWasmVolumeUsd: positiveRatio(tcLinkedValueUsd, wasmLegVolumeUsd, MILLION),
+    tcBroadPerMillionWasmVolumeUsd: positiveRatio(
+      tcBroadValueUsd,
+      wasmLegVolumeUsd,
+      MILLION
+    ),
     tcBpsPerWasmInput: positiveRatio(tcLinkedValueUsd, wasmInputVolumeUsd, BASIS_POINTS),
     tcBpsPerWasmLegVolume: positiveRatio(tcLinkedValueUsd, wasmLegVolumeUsd, BASIS_POINTS),
     tcCaptureShare: positiveRatio(tcLinkedValueUsd, wasmLiquidityFeeUsd + linkedRujiraFeeUsd)
@@ -358,7 +454,11 @@ export function compareWasmArbEqualWindows(rows = [], options = {}) {
   const reserveDelta = delta(before.linkedTcReserveUsd, after.linkedTcReserveUsd);
   const tcLinkedDelta = delta(before.tcLinkedValueUsd, after.tcLinkedValueUsd);
   const lpFeeLossUsd = Math.max(0, -finiteNumber(lpFeeDelta.absolute));
-  const tcShare = after.averageTcShare || before.averageTcShare || 0.5;
+  const tcShare = after.bucketCount > 0
+    ? after.averageTcShare
+    : before.bucketCount > 0
+      ? before.averageTcShare
+      : 0.5;
   const breakEvenRujiraIncreaseUsd = tcShare > 0 ? lpFeeLossUsd / tcShare : null;
   const actualRujiraIncreaseUsd = finiteNumber(linkedRujiraDelta.absolute);
   const breakEvenCoverage = lpFeeLossUsd > 0
@@ -369,6 +469,11 @@ export function compareWasmArbEqualWindows(rows = [], options = {}) {
       && window.actionBucketCoverage >= minimumCoverage
       && window.feeBucketCoverage >= minimumCoverage
       && window.pricingCoverage >= minimumCoverage
+  ));
+  const priceDataComplete = [before, after].every((window) => (
+    window.oracleCoverageComplete
+      && window.oracleBucketCoverage >= minimumCoverage
+      && window.priceTracking.observations > 0
   ));
   const netDelta = finiteNumber(tcLinkedDelta.absolute);
   const verdict = !dataComplete
@@ -402,6 +507,9 @@ export function compareWasmArbEqualWindows(rows = [], options = {}) {
     'wasmLegFeeBps',
     'tcPerActionUsd',
     'tcPerMillionNetworkVolumeUsd',
+    'tcBroadPerMillionNetworkVolumeUsd',
+    'tcPerMillionWasmVolumeUsd',
+    'tcBroadPerMillionWasmVolumeUsd',
     'tcBpsPerWasmInput',
     'tcBpsPerWasmLegVolume',
     'tcCaptureShare'
@@ -410,6 +518,7 @@ export function compareWasmArbEqualWindows(rows = [], options = {}) {
   return {
     ready: true,
     dataComplete,
+    priceDataComplete,
     verdict,
     requestedSeconds,
     windowSeconds,

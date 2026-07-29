@@ -72,13 +72,17 @@ boundary for the RUJI Trade collector:
 
 - Eligible FIN senders are enumerable from live Rujira contract metadata
   (all contracts using FIN code ID 180), and the Wasm AMM sender is fixed.
-- Indexed transfers to the collector discover candidate blocks, while
-  `block_results` transfer events are the canonical amounts and identities.
-  Midgard action-address filtering is not sufficient because it does not
-  enumerate every internal FIN transfer.
+- Tendermint `tx_search` and `block_search` independently discover transaction
+  and finalize-block candidate heights, while `block_results` transfer events
+  are the canonical amounts and identities. Midgard action-address filtering
+  is not sufficient because it does not enumerate every internal FIN transfer.
 - A fee is Wasm-linked only when the fee transfer and target Wasm contract
   execution occur in the same transaction. FIN range fees are a labeled
   subset of FIN fees, never an additional total.
+- FIN contract config supplies each market's denoms. When a received fee asset
+  has no direct historical pool price, a same-transaction FIN execution rate
+  may price it through the other side of that market; otherwise it remains an
+  explicit unpriced event and withholds the cash-flow verdict.
 
 This event lane is for attribution, not a replacement for the collector-wide
 balance identity. See [wasm-arb-economics.md](./wasm-arb-economics.md).
