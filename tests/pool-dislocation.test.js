@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  POOL_DISLOCATION_CHART_WINDOWS,
+  buildPoolDislocationChartViewport,
   buildPoolDislocationDashboard,
   buildPoolDislocationPreview,
   computeDislocationPercent,
@@ -9,9 +11,62 @@ import {
   filterPoolDislocationDashboardByTrading,
   normalizePoolDislocationSeries,
   normalizePoolDislocationSummary,
+  projectPoolDislocationChartSelection,
   summarizePool,
   summarizePoolDislocation
 } from '../src/lib/pool-dislocation/model.js';
+
+test('chart viewport switches between exact trailing windows and preserves gaps', () => {
+  const points = [
+    '2026-07-28T12:00:00Z',
+    '2026-07-29T10:55:00Z',
+    '2026-07-29T11:00:00Z',
+    '2026-07-29T12:00:00Z'
+  ].map((observedAt) => ({ observedAt }));
+  const oneHour = POOL_DISLOCATION_CHART_WINDOWS.find((window) => window.id === '1h');
+  const viewport = buildPoolDislocationChartViewport(points, {
+    endAt: '2026-07-29T12:00:00Z',
+    durationMs: oneHour.durationMs
+  });
+  assert.equal(new Date(viewport.startMs).toISOString(), '2026-07-29T11:00:00.000Z');
+  assert.equal(viewport.expectedSamples, 13);
+  assert.deepEqual(viewport.points.map((point) => point.observedAt), [
+    '2026-07-29T11:00:00Z',
+    '2026-07-29T12:00:00Z'
+  ]);
+});
+
+test('drag selection projects either direction into a bounded chart zoom', () => {
+  const forward = projectPoolDislocationChartSelection({
+    plotLeft: 50,
+    plotRight: 950,
+    startX: 275,
+    endX: 725,
+    viewportStartMs: 0,
+    viewportEndMs: 24 * 60 * 60 * 1000
+  });
+  const reverse = projectPoolDislocationChartSelection({
+    plotLeft: 50,
+    plotRight: 950,
+    startX: 725,
+    endX: 275,
+    viewportStartMs: 0,
+    viewportEndMs: 24 * 60 * 60 * 1000
+  });
+  assert.deepEqual(reverse, forward);
+  assert.deepEqual(forward, {
+    startMs: 6 * 60 * 60 * 1000,
+    endMs: 18 * 60 * 60 * 1000
+  });
+  assert.equal(projectPoolDislocationChartSelection({
+    plotLeft: 50,
+    plotRight: 950,
+    startX: 100,
+    endX: 104,
+    viewportStartMs: 0,
+    viewportEndMs: 24 * 60 * 60 * 1000
+  }), null);
+});
 
 test('pool dislocation is signed relative to the reference market', () => {
   assert.ok(Math.abs(computeDislocationPercent(101, 100) - 1) < Number.EPSILON * 10);

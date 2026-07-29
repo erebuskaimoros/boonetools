@@ -135,9 +135,10 @@ The mockup establishes these production interactions:
 
 - four top metrics for coverage, largest current gap, seven-day peak, and pool
   count beyond the selected threshold
-- one selected-pool chart with a zero line, symmetric threshold band, and
-  independent oracle/Binance series toggles, plotting every exact five-minute
-  observation in the seven-day window
+- one selected-pool chart with trailing 1h, 1d, and 7d controls, horizontal
+  highlight-to-zoom with an explicit reset, a zero line, symmetric threshold
+  band, and independent oracle/Binance series toggles; every visible point is
+  an exact five-minute observation and gaps are not interpolated
 - threshold controls at 0.5%, 1%, and 2%
 - a default-on `HIDE HALTED` toggle backed by current THORChain inbound-address
   trading flags; enabling it also excludes those pools from leaders, coverage,

@@ -2,17 +2,19 @@
   import { onDestroy, onMount } from 'svelte';
   import { fetchPoolDislocation, fetchPoolDislocationSeries } from './pool-dislocation/api.js';
   import {
+    POOL_DISLOCATION_CHART_WINDOWS,
+    buildPoolDislocationChartViewport,
     buildPoolDislocationDashboard,
     DISLOCATION_WINDOWS,
     dislocationState,
     filterPoolDislocationDashboardByTrading,
     maxAbsoluteDislocation,
     normalizePoolDislocationSeries,
-    normalizePoolDislocationSummary
+    normalizePoolDislocationSummary,
+    projectPoolDislocationChartSelection
   } from './pool-dislocation/model.js';
 
   const CHART = Object.freeze({ width: 1000, height: 330, left: 72, right: 24, top: 30, bottom: 276 });
-  const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
   const MAX_CONTIGUOUS_GAP_MS = 7.5 * 60 * 1000;
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   const thresholds = [0.5, 1, 2];
@@ -33,6 +35,11 @@
   let selectedAsset = '';
   let threshold = 1;
   let sourceMode = 'both';
+  let chartWindow = '7d';
+  let chartZoom = null;
+  let chartSelectionStartX = null;
+  let chartSelectionCurrentX = null;
+  let chartSvg;
   let coverageMode = 'all';
   let excludeHaltedChains = true;
   let search = '';
@@ -58,22 +65,33 @@
   $: scheduledSamples = selectedSeries?.asset === selectedAsset
     ? selectedSeries?.provenance?.scheduledSamples || 0
     : 0;
-  $: visibleValues = selectedPoints.flatMap((point) => {
+  $: chartWindowConfig = POOL_DISLOCATION_CHART_WINDOWS.find((window) => window.id === chartWindow)
+    || POOL_DISLOCATION_CHART_WINDOWS.at(-1);
+  $: chartViewport = buildPoolDislocationChartViewport(selectedPoints, {
+    endAt: summary?.as_of,
+    durationMs: chartWindowConfig.durationMs,
+    zoomStartMs: chartZoom?.startMs,
+    zoomEndMs: chartZoom?.endMs
+  });
+  $: chartPoints = chartViewport.points;
+  $: chartStartMs = chartViewport.startMs;
+  $: chartEndMs = chartViewport.endMs;
+  $: chartDurationMs = chartViewport.durationMs;
+  $: chartRangeLabel = chartViewport.zoomed ? `${formatChartDuration(chartDurationMs)} ZOOM` : chartWindowConfig.label;
+  $: visibleValues = chartPoints.flatMap((point) => {
     if (sourceMode === 'oracle') return [point.oracleDislocation];
     if (sourceMode === 'binance') return [point.binanceDislocation];
     return [point.oracleDislocation, point.binanceDislocation];
   }).filter((value) => Number.isFinite(Number(value)));
   $: yMax = Math.max(2, Math.ceil(Math.max(threshold * 1.4, 0, ...visibleValues.map((value) => Math.abs(value))) * 2) / 2);
   $: yTicks = [yMax, yMax / 2, 0, -yMax / 2, -yMax];
-  $: chartEndMs = Date.parse(summary?.as_of || '') || Date.now();
-  $: chartStartMs = chartEndMs - SEVEN_DAYS_MS;
-  $: oraclePath = makeLinePath(selectedPoints, 'oracleDislocation', yMax);
-  $: binancePath = makeLinePath(selectedPoints, 'binanceDislocation', yMax);
+  $: oraclePath = makeLinePath(chartPoints, 'oracleDislocation', yMax);
+  $: binancePath = makeLinePath(chartPoints, 'binanceDislocation', yMax);
   $: xTicks = Array.from({ length: 5 }, (_, index) => ({
-    observedAt: new Date(chartStartMs + ((index / 4) * SEVEN_DAYS_MS)).toISOString(),
+    observedAt: new Date(chartStartMs + ((index / 4) * chartDurationMs)).toISOString(),
     index
   }));
-  $: pointMarkerStep = Math.max(1, Math.floor(selectedPoints.length / 8));
+  $: pointMarkerStep = Math.max(1, Math.floor(chartPoints.length / 8));
   $: filteredPools = dashboard.pools.filter((pool) => {
     const query = search.trim().toUpperCase();
     const matchesSearch = !query || `${pool.asset} ${pool.symbol} ${pool.chain}`.includes(query);
@@ -133,6 +151,7 @@
   async function selectPool(asset, options = {}) {
     const nextAsset = String(asset || '');
     if (!nextAsset) return;
+    if (nextAsset !== selectedAsset) resetChartZoom();
     selectedAsset = nextAsset;
     seriesError = '';
     seriesLoading = true;
@@ -159,7 +178,7 @@
     const plotWidth = CHART.width - CHART.left - CHART.right;
     const timestamp = Date.parse(point?.observedAt || point || '');
     const ratio = Number.isFinite(timestamp)
-      ? Math.min(1, Math.max(0, (timestamp - chartStartMs) / SEVEN_DAYS_MS))
+      ? Math.min(1, Math.max(0, (timestamp - chartStartMs) / chartDurationMs))
       : 0;
     return CHART.left + (ratio * plotWidth);
   }
@@ -214,13 +233,88 @@
     return `${value > 0 ? '+' : ''}${value.toFixed(1)}%`;
   }
 
-  function formatDay(observedAt, index) {
+  function formatChartTick(observedAt, index) {
     if (index === 4) return 'NOW';
-    return new Intl.DateTimeFormat('en-US', {
+    const date = new Date(observedAt);
+    const day = new Intl.DateTimeFormat('en-US', {
       month: 'short',
       day: 'numeric',
       timeZone: 'UTC'
-    }).format(new Date(observedAt)).toUpperCase();
+    }).format(date).toUpperCase();
+    if (chartDurationMs > 2 * 24 * 60 * 60 * 1000) return day;
+    const time = new Intl.DateTimeFormat('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+      timeZone: 'UTC'
+    }).format(date).toUpperCase();
+    return chartDurationMs <= 6 * 60 * 60 * 1000 ? time : `${day} ${time}`;
+  }
+
+  function formatChartDuration(durationMs) {
+    const minutes = Math.max(5, Math.round(Number(durationMs || 0) / 60000));
+    if (minutes < 60) return `${minutes}M`;
+    const hours = minutes / 60;
+    if (hours < 24) return `${hours < 10 && !Number.isInteger(hours) ? hours.toFixed(1) : Math.round(hours)}H`;
+    const days = hours / 24;
+    return `${days < 10 && !Number.isInteger(days) ? days.toFixed(1) : Math.round(days)}D`;
+  }
+
+  function selectChartWindow(windowId) {
+    chartWindow = windowId;
+    resetChartZoom();
+  }
+
+  function resetChartZoom() {
+    chartZoom = null;
+    chartSelectionStartX = null;
+    chartSelectionCurrentX = null;
+  }
+
+  function chartPointerX(event) {
+    const bounds = chartSvg?.getBoundingClientRect();
+    if (!bounds?.width) return null;
+    return Math.min(
+      CHART.width - CHART.right,
+      Math.max(CHART.left, ((event.clientX - bounds.left) / bounds.width) * CHART.width)
+    );
+  }
+
+  function startChartSelection(event) {
+    if (event.button !== 0) return;
+    const pointerX = chartPointerX(event);
+    if (!Number.isFinite(pointerX)) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    chartSelectionStartX = pointerX;
+    chartSelectionCurrentX = pointerX;
+  }
+
+  function updateChartSelection(event) {
+    if (!Number.isFinite(chartSelectionStartX)) return;
+    const pointerX = chartPointerX(event);
+    if (Number.isFinite(pointerX)) chartSelectionCurrentX = pointerX;
+  }
+
+  function finishChartSelection(event) {
+    if (!Number.isFinite(chartSelectionStartX)) return;
+    updateChartSelection(event);
+    const nextZoom = projectPoolDislocationChartSelection({
+      plotLeft: CHART.left,
+      plotRight: CHART.width - CHART.right,
+      startX: chartSelectionStartX,
+      endX: chartSelectionCurrentX,
+      viewportStartMs: chartStartMs,
+      viewportEndMs: chartEndMs
+    });
+    chartSelectionStartX = null;
+    chartSelectionCurrentX = null;
+    if (nextZoom) chartZoom = nextZoom;
+  }
+
+  function cancelChartSelection() {
+    chartSelectionStartX = null;
+    chartSelectionCurrentX = null;
   }
 
   function formatHours(value) {
@@ -277,7 +371,7 @@
 
 <div class="dashboard-shell">
   <header class="command-head">
-    <div class="command"><span>$</span> monitor pool-dislocation <em>--window 7d --refs oracle,binance</em></div>
+    <div class="command"><span>$</span> monitor pool-dislocation <em>--history 7d --chart {chartRangeLabel.toLowerCase()} --refs oracle,binance</em></div>
     <div class:degraded={liveState !== 'LIVE'} class="command-state"><span class="preview-dot"></span> {liveState}</div>
   </header>
 
@@ -286,7 +380,7 @@
       <h1><span>&gt;</span> POOL DISLOCATION<span class="cursor">_</span></h1>
       <p>Track where THORChain pool prices separate from network oracle and Binance spot references.</p>
     </div>
-    <div class="window-stamp"><span>WINDOW</span><strong>7D / EXACT 5M</strong></div>
+    <div class="window-stamp"><span>HISTORY</span><strong>7D / EXACT 5M</strong></div>
   </div>
 
   <section class="metric-grid" aria-label="Pool dislocation overview">
@@ -341,23 +435,44 @@
 
   <section class="block focus-block" aria-labelledby="focus-title">
     <div class="block-head">
-      <div class="block-title"><span>▌</span><h2 id="focus-title">{selectedPool?.symbol || 'POOL'} DISLOCATION / 7 DAYS</h2></div>
-      <div class="control-row">
-        <span class="control-label">REF</span>
-        {#each sourceModes as mode}
-          <button class:active={sourceMode === mode.id} on:click={() => sourceMode = mode.id}><i>[{mode.label}]</i> {mode.text}</button>
-        {/each}
+      <div class="block-title"><span>▌</span><h2 id="focus-title">{selectedPool?.symbol || 'POOL'} DISLOCATION / {chartRangeLabel}</h2></div>
+      <div class="focus-controls">
+        <div class="control-row">
+          <span class="control-label">WINDOW</span>
+          {#each POOL_DISLOCATION_CHART_WINDOWS as window}
+            <button
+              class:active={!chartViewport.zoomed && chartWindow === window.id}
+              aria-pressed={!chartViewport.zoomed && chartWindow === window.id}
+              on:click={() => selectChartWindow(window.id)}
+            ><i>[{window.label}]</i></button>
+          {/each}
+          {#if chartViewport.zoomed}
+            <button class="zoom-reset active" on:click={resetChartZoom}><i>[RESET ZOOM]</i></button>
+          {/if}
+        </div>
+        <div class="control-row">
+          <span class="control-label">REF</span>
+          {#each sourceModes as mode}
+            <button class:active={sourceMode === mode.id} on:click={() => sourceMode = mode.id}><i>[{mode.label}]</i> {mode.text}</button>
+          {/each}
+        </div>
       </div>
     </div>
 
     <div class="focus-grid">
       <div class="chart-wrap">
         <div class="chart-legend">
+          <span class="zoom-hint">{chartViewport.zoomed ? 'ZOOM ACTIVE · DRAG AGAIN OR RESET' : 'DRAG TO HIGHLIGHT + ZOOM'}</span>
           {#if sourceMode !== 'binance'}<span class="oracle-key"><i></i>TC / ORACLE</span>{/if}
           {#if sourceMode !== 'oracle'}<span class="binance-key"><i></i>TC / BINANCE</span>{/if}
           <span class="band-key"><i></i>±{threshold.toFixed(1)}% WATCH BAND</span>
         </div>
-        <svg viewBox={`0 0 ${CHART.width} ${CHART.height}`} role="img" aria-label={`${selectedPool?.symbol} seven-day pool price deviation chart`}>
+        <svg
+          bind:this={chartSvg}
+          viewBox={`0 0 ${CHART.width} ${CHART.height}`}
+          role="img"
+          aria-label={`${selectedPool?.symbol} ${chartRangeLabel} pool price deviation chart. Drag horizontally to zoom; double click to reset.`}
+        >
           <rect class="watch-zone top" x={CHART.left} y={CHART.top} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, chartY(threshold) - CHART.top)} />
           <rect class="watch-zone bottom" x={CHART.left} y={chartY(-threshold)} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, CHART.bottom - chartY(-threshold))} />
           {#each yTicks as tick}
@@ -368,28 +483,50 @@
           <line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(-threshold)} y2={chartY(-threshold)} />
           {#each xTicks as tick}
             <line class="x-tick" x1={chartX(tick.observedAt)} x2={chartX(tick.observedAt)} y1={CHART.bottom} y2={CHART.bottom + 5} />
-            <text class="axis-label x" x={chartX(tick.observedAt)} y={CHART.bottom + 24}>{formatDay(tick.observedAt, tick.index)}</text>
+            <text class="axis-label x" x={chartX(tick.observedAt)} y={CHART.bottom + 24}>{formatChartTick(tick.observedAt, tick.index)}</text>
           {/each}
           {#if sourceMode !== 'binance'}<path class="series oracle" d={oraclePath} />{/if}
           {#if sourceMode !== 'oracle'}<path class="series binance" d={binancePath} />{/if}
-          {#each selectedPoints as point, index}
-            {#if index % pointMarkerStep === 0 || index === selectedPoints.length - 1}
-              {#if sourceMode !== 'binance' && Number.isFinite(point.oracleDislocation)}<circle class="point oracle" cx={chartX(point)} cy={chartY(point.oracleDislocation)} r={index === selectedPoints.length - 1 ? 4 : 2.25} />{/if}
-              {#if sourceMode !== 'oracle' && Number.isFinite(point.binanceDislocation)}<circle class="point binance" cx={chartX(point)} cy={chartY(point.binanceDislocation)} r={index === selectedPoints.length - 1 ? 4 : 2.25} />{/if}
+          {#each chartPoints as point, index}
+            {#if index % pointMarkerStep === 0 || index === chartPoints.length - 1}
+              {#if sourceMode !== 'binance' && Number.isFinite(point.oracleDislocation)}<circle class="point oracle" cx={chartX(point)} cy={chartY(point.oracleDislocation)} r={index === chartPoints.length - 1 ? 4 : 2.25} />{/if}
+              {#if sourceMode !== 'oracle' && Number.isFinite(point.binanceDislocation)}<circle class="point binance" cx={chartX(point)} cy={chartY(point.binanceDislocation)} r={index === chartPoints.length - 1 ? 4 : 2.25} />{/if}
             {/if}
           {/each}
+          {#if Number.isFinite(chartSelectionStartX) && Number.isFinite(chartSelectionCurrentX)}
+            <rect
+              class="zoom-selection"
+              x={Math.min(chartSelectionStartX, chartSelectionCurrentX)}
+              y={CHART.top}
+              width={Math.abs(chartSelectionCurrentX - chartSelectionStartX)}
+              height={CHART.bottom - CHART.top}
+            />
+          {/if}
+          <rect
+            class="chart-hitbox"
+            role="presentation"
+            x={CHART.left}
+            y={CHART.top}
+            width={CHART.width - CHART.left - CHART.right}
+            height={CHART.bottom - CHART.top}
+            on:pointerdown={startChartSelection}
+            on:pointermove={updateChartSelection}
+            on:pointerup={finishChartSelection}
+            on:pointercancel={cancelChartSelection}
+            on:dblclick={resetChartZoom}
+          />
         </svg>
         {#if seriesLoading}
           <div class="chart-status">SYNCING EXACT FIVE-MINUTE POINTS…</div>
         {:else if seriesError}
           <div class="chart-status error">{seriesError}</div>
-        {:else if selectedPoints.length === 0}
-          <div class="chart-status">NO OBSERVATIONS COLLECTED FOR THIS POOL YET</div>
+        {:else if chartPoints.length === 0}
+          <div class="chart-status">NO OBSERVATIONS IN THE SELECTED CHART RANGE</div>
         {/if}
       </div>
 
       <aside class="reading-panel" aria-label={`${selectedPool?.symbol} latest reading`}>
-        <div class="reading-head"><span>LATEST 5M FRAME</span><strong>{selectedPoints.length}/{selectedSeries?.expected_samples || summary?.expected_samples || 2017}</strong></div>
+        <div class="reading-head"><span>VISIBLE 5M POINTS</span><strong>{chartPoints.length}/{chartViewport.expectedSamples}</strong></div>
         <div class="price-stack">
           <div><span>TC POOL</span><strong>{formatPrice(selectedPool?.current?.poolPrice)}</strong></div>
           <div><span>TC ORACLE</span><strong>{formatPrice(selectedPool?.current?.oraclePrice)}</strong></div>
@@ -595,6 +732,7 @@
   .block-title > span { color: var(--term-accent, #00cc66); }
   h2 { margin: 0; color: var(--term-text, #e8e8e8); font-size: 11px; letter-spacing: 0.1em; }
 
+  .focus-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 14px; }
   .control-row { gap: 5px; }
   .control-label { margin-right: 3px; color: var(--term-text-6, #333); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; letter-spacing: 0.14em; }
   .control-row button { padding: 4px 7px; border: 1px solid transparent; background: none; color: var(--term-text-4, #555); font-size: 9px; cursor: pointer; }
@@ -602,11 +740,14 @@
   .control-row button:hover,
   .control-row button.active { border-color: var(--term-border, #1a1a1a); color: var(--term-accent, #00cc66); }
   .control-row button.active i { color: var(--term-accent, #00cc66); }
+  .control-row button.zoom-reset { border-color: rgba(85, 136, 204, 0.35); color: var(--term-info, #5588cc); }
+  .control-row button.zoom-reset i { color: inherit; }
 
   .focus-grid { display: grid; grid-template-columns: minmax(0, 1fr) 242px; min-height: 390px; }
   .chart-wrap { position: relative; min-width: 0; padding: 15px 17px 10px; border-right: 1px solid var(--term-border-faint, #111); overflow: hidden; }
   .chart-legend { justify-content: flex-end; gap: 17px; min-height: 22px; padding-right: 7px; color: var(--term-text-5, #444); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; letter-spacing: 0.06em; }
   .chart-legend span { display: inline-flex; align-items: center; gap: 6px; font-family: inherit; }
+  .chart-legend .zoom-hint { margin-right: auto; color: var(--term-text-6, #333); }
   .chart-legend i { display: inline-block; width: 16px; height: 2px; background: var(--term-accent, #00cc66); }
   .chart-legend .binance-key i { background: var(--term-info, #5588cc); }
   .chart-legend .band-key i { height: 5px; border: 1px solid rgba(212, 160, 23, 0.28); background: var(--term-amber-soft, rgba(212, 160, 23, 0.06)); }
@@ -625,6 +766,8 @@
   .point { stroke: var(--term-bg, #080808); stroke-width: 1.5; }
   .point.oracle { fill: var(--term-accent, #00cc66); }
   .point.binance { fill: var(--term-info, #5588cc); }
+  .zoom-selection { fill: rgba(85, 136, 204, 0.14); stroke: rgba(85, 136, 204, 0.85); stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
+  .chart-hitbox { fill: transparent; cursor: crosshair; touch-action: pan-y; }
   .chart-status { position: absolute; inset: 54px 17px 35px; display: grid; place-items: center; background: rgba(5, 5, 5, 0.74); color: var(--term-text-4, #555); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 9px; letter-spacing: 0.08em; text-align: center; }
   .chart-status.error { color: var(--term-error, #dc3545); }
 
@@ -713,6 +856,7 @@
     .metric-cell:nth-child(2) { min-height: 102px; border-right: none; border-bottom: 1px solid var(--term-border, #1a1a1a); }
     .metric-cell:last-child { border-bottom: 0; }
     .block-head { align-items: flex-start; flex-direction: column; gap: 10px; }
+    .focus-controls { justify-content: flex-start; }
     .watchlist-controls { justify-content: flex-start; }
     .chart-wrap { padding-left: 4px; padding-right: 4px; }
     .chart-legend { justify-content: center; gap: 10px; }

@@ -4,6 +4,12 @@ const SAMPLE_MINUTES = 5;
 const SAMPLE_COUNT = (7 * 24 * 60 / SAMPLE_MINUTES) + 1;
 const PREVIEW_END_MS = Date.UTC(2026, 6, 29, 12, 0, 0);
 
+export const POOL_DISLOCATION_CHART_WINDOWS = Object.freeze([
+  { id: '1h', label: '1H', durationMs: HOUR_MS },
+  { id: '1d', label: '1D', durationMs: 24 * HOUR_MS },
+  { id: '7d', label: '7D', durationMs: 7 * 24 * HOUR_MS }
+]);
+
 export const DISLOCATION_WINDOWS = Object.freeze([
   { id: '1h', label: '1H', durationMs: HOUR_MS },
   { id: '4h', label: '4H', durationMs: 4 * HOUR_MS },
@@ -82,6 +88,70 @@ export function maxAbsoluteDislocation(point) {
     .map(finiteNumber)
     .filter((value) => value !== null);
   return values.length ? Math.max(...values.map(Math.abs)) : null;
+}
+
+export function buildPoolDislocationChartViewport(points = [], options = {}) {
+  const orderedPoints = [...(Array.isArray(points) ? points : [])]
+    .filter((point) => Number.isFinite(Date.parse(point?.observedAt || '')))
+    .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt));
+  const requestedDurationMs = Math.max(
+    SAMPLE_MINUTES * MINUTE_MS,
+    finiteNumber(options.durationMs) ?? POOL_DISLOCATION_CHART_WINDOWS.at(-1).durationMs
+  );
+  const requestedEndMs = Date.parse(options.endAt || '');
+  const fallbackEndMs = Date.parse(orderedPoints.at(-1)?.observedAt || '');
+  const baseEndMs = Number.isFinite(requestedEndMs)
+    ? requestedEndMs
+    : Number.isFinite(fallbackEndMs) ? fallbackEndMs : Date.now();
+  const baseStartMs = baseEndMs - requestedDurationMs;
+  const requestedZoomStartMs = finiteNumber(options.zoomStartMs);
+  const requestedZoomEndMs = finiteNumber(options.zoomEndMs);
+  const hasZoom = requestedZoomStartMs !== null
+    && requestedZoomEndMs !== null
+    && requestedZoomEndMs - requestedZoomStartMs >= SAMPLE_MINUTES * MINUTE_MS;
+  const startMs = hasZoom
+    ? Math.max(baseStartMs, Math.min(requestedZoomStartMs, baseEndMs - SAMPLE_MINUTES * MINUTE_MS))
+    : baseStartMs;
+  const endMs = hasZoom
+    ? Math.min(baseEndMs, Math.max(requestedZoomEndMs, startMs + SAMPLE_MINUTES * MINUTE_MS))
+    : baseEndMs;
+  const visiblePoints = orderedPoints.filter((point) => {
+    const observedMs = Date.parse(point.observedAt);
+    return observedMs >= startMs && observedMs <= endMs;
+  });
+
+  return {
+    startMs,
+    endMs,
+    durationMs: endMs - startMs,
+    expectedSamples: Math.floor((endMs - startMs) / (SAMPLE_MINUTES * MINUTE_MS)) + 1,
+    zoomed: hasZoom,
+    points: visiblePoints
+  };
+}
+
+export function projectPoolDislocationChartSelection(options = {}) {
+  const plotLeft = finiteNumber(options.plotLeft);
+  const plotRight = finiteNumber(options.plotRight);
+  const startX = finiteNumber(options.startX);
+  const endX = finiteNumber(options.endX);
+  const viewportStartMs = finiteNumber(options.viewportStartMs);
+  const viewportEndMs = finiteNumber(options.viewportEndMs);
+  const minimumPixels = Math.max(1, finiteNumber(options.minimumPixels) ?? 8);
+  if ([plotLeft, plotRight, startX, endX, viewportStartMs, viewportEndMs].some((value) => value === null)) {
+    return null;
+  }
+  if (plotRight <= plotLeft || viewportEndMs <= viewportStartMs || Math.abs(endX - startX) < minimumPixels) {
+    return null;
+  }
+  const clampX = (value) => Math.min(plotRight, Math.max(plotLeft, value));
+  const leftX = Math.min(clampX(startX), clampX(endX));
+  const rightX = Math.max(clampX(startX), clampX(endX));
+  const durationMs = viewportEndMs - viewportStartMs;
+  const projectedStartMs = viewportStartMs + (((leftX - plotLeft) / (plotRight - plotLeft)) * durationMs);
+  const projectedEndMs = viewportStartMs + (((rightX - plotLeft) / (plotRight - plotLeft)) * durationMs);
+  if (projectedEndMs - projectedStartMs < SAMPLE_MINUTES * MINUTE_MS) return null;
+  return { startMs: projectedStartMs, endMs: projectedEndMs };
 }
 
 export function summarizePool(pool, threshold = 1) {
