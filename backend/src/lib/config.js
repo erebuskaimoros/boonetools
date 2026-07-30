@@ -178,6 +178,10 @@ export const config = Object.freeze({
   poolDislocationSnapshotRetryAttempts: readInt('POOL_DISLOCATION_SNAPSHOT_RETRY_ATTEMPTS', 3),
   poolDislocationSnapshotRetryBaseDelayMs: readInt('POOL_DISLOCATION_SNAPSHOT_RETRY_BASE_DELAY_MS', 1000),
   poolDislocationCoreFallbackMaxAgeMs: readInt('POOL_DISLOCATION_CORE_FALLBACK_MAX_AGE_SECONDS', 180) * 1000,
+  poolDislocationTradingFallbackMaxAgeMs: readInt(
+    'POOL_DISLOCATION_TRADING_FALLBACK_MAX_AGE_SECONDS',
+    15 * 60
+  ) * 1000,
   poolDislocationRepairLookbackHours: readInt('POOL_DISLOCATION_REPAIR_LOOKBACK_HOURS', 7 * 24),
   poolDislocationRepairMaxBuckets: readInt('POOL_DISLOCATION_REPAIR_MAX_BUCKETS', 24),
   poolDislocationRepairRetryAttempts: readInt('POOL_DISLOCATION_REPAIR_RETRY_ATTEMPTS', 4),

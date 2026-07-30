@@ -135,6 +135,7 @@ POOL_DISLOCATION_THORNODE_URLS=https://gateway.liquify.com/chain/thorchain_api
 POOL_DISLOCATION_SNAPSHOT_RETRY_ATTEMPTS=3
 POOL_DISLOCATION_SNAPSHOT_RETRY_BASE_DELAY_MS=1000
 POOL_DISLOCATION_CORE_FALLBACK_MAX_AGE_SECONDS=180
+POOL_DISLOCATION_TRADING_FALLBACK_MAX_AGE_SECONDS=900
 POOL_DISLOCATION_REPAIR_LOOKBACK_HOURS=168
 POOL_DISLOCATION_REPAIR_MAX_BUCKETS=24
 POOL_DISLOCATION_REPAIR_RETRY_ATTEMPTS=4
@@ -174,9 +175,13 @@ sampler retries transient pool failures inside the same exact five-minute
 bucket, then may use the independently persisted `thornode-core:v1` pool field
 for up to three minutes. Those degraded rows retain
 `pool_price_method=thornode-core-snapshot` and are automatically replaced by
-same-block historical reconstruction. The repair timer scans the trailing
-seven days every fifteen minutes and processes at most 24 missing, degraded,
-or source-wide incomplete buckets per run. A reconstructed source that is
+same-block historical reconstruction. Oracle and Binance requests use the
+same bounded retry policy and bypass a stale shared provider cooldown after
+their first transient failure. Recent last-known inbound-address state remains
+usable for up to fifteen minutes, so a brief provider outage cannot re-expose
+pools on halted chains; older or missing state still fails open. The repair
+timer scans the trailing seven days every fifteen minutes and processes at
+most 24 missing, degraded, or source-wide incomplete buckets per run. A reconstructed source that is
 genuinely absent at its exact block or market interval is labelled
 `thornode-oracle-unavailable` or `kline-close-unavailable`, so the repair is
 idempotent without hiding the null reference. A source value that exists but

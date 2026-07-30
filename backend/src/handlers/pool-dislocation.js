@@ -1,3 +1,4 @@
+import { config } from '../lib/config.js';
 import { error, json } from '../lib/http.js';
 import {
   POOL_DISLOCATION_MODEL_KEY,
@@ -44,6 +45,23 @@ function coreFieldObservedAt(coreModel, field) {
     || null;
 }
 
+function currentTimeMs(options = {}) {
+  const value = typeof options.now === 'function' ? options.now() : new Date();
+  const parsed = value instanceof Date ? value.getTime() : Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function recentCoreFieldAgeMs(coreModel, field, options = {}) {
+  const observedAt = coreFieldObservedAt(coreModel, field);
+  const observedMs = Date.parse(String(observedAt || ''));
+  const ageMs = currentTimeMs(options) - observedMs;
+  const maxAgeMs = Math.max(0, Number(
+    options.tradingFallbackMaxAgeMs ?? config.poolDislocationTradingFallbackMaxAgeMs
+  ) || 0);
+  if (!Number.isFinite(observedMs) || ageMs < -30_000 || ageMs > maxAgeMs) return null;
+  return { observedAt, ageMs: Math.max(0, ageMs) };
+}
+
 function currentMimirNumber(coreModel, key) {
   const mimir = coreSnapshotValue(coreModel, 'mimir', {});
   const entry = Object.entries(mimir || {})
@@ -57,13 +75,22 @@ async function loadCurrentCoreOverlay(options = {}) {
     const coreModel = await (options.getThorNodeCoreSnapshot || getThorNodeCoreSnapshot)({
       allowStale: true
     });
-    if (!coreModel || isThorNodeCoreSnapshotStale(coreModel, ['inbound_addresses'])) {
-      throw new Error('Current THORNode inbound-address state is unavailable or stale');
-    }
     const inboundAddresses = coreSnapshotValue(coreModel, 'inbound_addresses');
     if (!Array.isArray(inboundAddresses)) {
       throw new Error('Current THORNode inbound-address state is invalid');
     }
+    const tradingStale = isThorNodeCoreSnapshotStale(coreModel, ['inbound_addresses']);
+    const tradingFallback = tradingStale
+      ? recentCoreFieldAgeMs(coreModel, 'inbound_addresses', options)
+      : null;
+    if (tradingStale && !tradingFallback) {
+      throw new Error('Current THORNode inbound-address state is unavailable or stale');
+    }
+    const tradingObservedAt = tradingFallback?.observedAt
+      || coreFieldObservedAt(coreModel, 'inbound_addresses');
+    const tradingError = tradingFallback
+      ? `Current THORNode inbound-address refresh failed; retaining last known trading state from ${tradingObservedAt}`
+      : null;
     const mimirStale = isThorNodeCoreSnapshotStale(coreModel, ['mimir']);
     const l1SlipMinBps = mimirStale ? null : currentMimirNumber(coreModel, 'L1SLIPMINBPS');
     const mimirError = l1SlipMinBps === null
@@ -73,10 +100,11 @@ async function loadCurrentCoreOverlay(options = {}) {
       chainTrading: normalizeChainTradingStatus(inboundAddresses),
       l1SlipMinBps,
       source: {
-        error: null,
-        status: 'fresh',
+        error: tradingError,
+        status: tradingFallback ? 'cached' : 'fresh',
         provider: 'thornode-core-snapshot',
-        observed_at: coreFieldObservedAt(coreModel, 'inbound_addresses')
+        observed_at: tradingObservedAt,
+        ...(tradingFallback ? { age_ms: tradingFallback.ageMs } : {})
       },
       mimirSource: {
         error: mimirError,
@@ -84,7 +112,7 @@ async function loadCurrentCoreOverlay(options = {}) {
         provider: 'thornode-core-snapshot',
         observed_at: mimirError ? null : coreFieldObservedAt(coreModel, 'mimir')
       },
-      degraded: Boolean(mimirError)
+      degraded: Boolean(tradingFallback || mimirError)
     };
   } catch (error) {
     const message = error?.message || 'Current THORNode inbound-address state is unavailable';

@@ -52,6 +52,15 @@ async function timedResult(operation, now) {
   }
 }
 
+async function retriedTimedResult(operation, options, now) {
+  return timedResult(() => retryPoolDislocationSnapshotOperation(operation, {
+    attempts: options.snapshotRetryAttempts,
+    baseDelayMs: options.snapshotRetryBaseDelayMs,
+    sleep: options.snapshotRetrySleep,
+    onRetry: options.onSnapshotRetry
+  }), now);
+}
+
 function sleep(delayMs) {
   return delayMs > 0 ? new Promise((resolve) => setTimeout(resolve, delayMs)) : Promise.resolve();
 }
@@ -199,22 +208,22 @@ export async function loadPoolTradingStatus(options = {}) {
 export async function collectPoolDislocationSnapshot(options = {}) {
   const now = options.now || (() => new Date());
   const startedAt = now();
-  const fetchOracle = options.fetchOracle || (() => fetchThorchain('/thorchain/oracle/prices', {
+  const fetchOracle = options.fetchOracle || ((context = {}) => fetchThorchain('/thorchain/oracle/prices', {
     bases: config.poolDislocationThornodeUrls,
-    sharedCooldown: true,
+    sharedCooldown: !context.bypassSharedCooldown,
     validateResponse: (payload) => Array.isArray(payload?.prices) ? null : 'Invalid THORChain oracle response'
   }));
   const fetchInboundAddresses = options.fetchInboundAddresses
     || (() => loadPoolTradingStatus(options));
-  const fetchBinance = options.fetchBinance || (() => fetchBinanceBookTickers(
+  const fetchBinance = options.fetchBinance || ((context = {}) => fetchBinanceBookTickers(
     allConfiguredBinanceSymbols(),
-    { sharedCooldown: true }
+    { sharedCooldown: !context.bypassSharedCooldown }
   ));
 
   const [poolResult, oracleResult, binanceResult, inboundResult] = await Promise.all([
     collectRequiredPoolResult({ ...options, now }, startedAt),
-    timedResult(fetchOracle, now),
-    timedResult(fetchBinance, now),
+    retriedTimedResult(fetchOracle, options, now),
+    retriedTimedResult(fetchBinance, options, now),
     timedResult(fetchInboundAddresses, now)
   ]);
   if (poolResult.status === 'rejected') {

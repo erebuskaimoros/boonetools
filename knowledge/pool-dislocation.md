@@ -71,10 +71,13 @@ minutes:
   provider read.
 - THORChain oracle: `/thorchain/oracle/prices`, keyed by the exact configured
   oracle symbol. Normalize the live `price` field as a decimal USD value.
+  Retry bounded transient failures inside the same exact five-minute run and
+  bypass a stale shared provider cooldown after the first attempt.
 - Binance: one backend `bookTicker` request for the configured spot markets;
   use `(best bid + best ask) / 2` and store the bid, ask, and symbol. Do not make
   browser-side Binance calls. Local requests may be region-blocked, so the job
-  must degrade per source and preserve the last good BooneTools read model.
+  must retry transient failures, then degrade per source and preserve the last
+  good BooneTools read model.
 - Trading availability: reuse the canonical `thornode-core:v1`
   `inbound_addresses` field (itself populated from
   `/thorchain/inbound_addresses`) and treat `halted`,
@@ -82,10 +85,11 @@ minutes:
   The public summary overlays this state from the latest durable core model at
   request time instead of freezing it into the five-minute price sample. A
   recovered core snapshot therefore takes effect immediately without waiting
-  for the next price observation. A missing or stale current core field
-  degrades to unknown, uses a short response cache, and never hides a pool. The
-  UI defaults to hiding pools on known halted chains and lets the user include
-  them with one toggle.
+  for the next price observation. A failed refresh retains last-known state for
+  up to fifteen minutes and uses a short response cache, so a transient provider
+  outage cannot re-expose pools on halted chains. Missing or older state
+  degrades to unknown and never hides a pool. The UI defaults to hiding pools on
+  known halted chains and lets the user include them with one toggle.
 - Main minimum fee: the summary also overlays the current `L1SlipMinBps` from
   the durable core Mimir field. The chart renders that value as a symmetric
   corridor around zero (for example, `10` renders at `±10 BPS`) and omits the

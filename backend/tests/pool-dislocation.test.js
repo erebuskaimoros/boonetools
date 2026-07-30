@@ -282,6 +282,36 @@ test('collector degrades a failed reference source while preserving pool observa
   assert.match(snapshot.warnings[0], /oracle offline/);
 });
 
+test('reference snapshots retry transient failures outside a shared cooldown', async () => {
+  const oracleContexts = [];
+  const binanceContexts = [];
+  const snapshot = await collectPoolDislocationSnapshot({
+    now: () => new Date('2026-07-29T12:05:02Z'),
+    snapshotRetryAttempts: 2,
+    snapshotRetryBaseDelayMs: 0,
+    snapshotRetrySleep: async () => {},
+    fetchPools: async () => AVAILABLE_POOLS,
+    fetchOracle: async (context) => {
+      oracleContexts.push(context);
+      if (!context.bypassSharedCooldown) throw new TypeError('fetch failed');
+      return { prices: [{ symbol: 'BTC', price: '100' }] };
+    },
+    fetchBinance: async (context) => {
+      binanceContexts.push(context);
+      if (!context.bypassSharedCooldown) throw new TypeError('fetch failed');
+      return [{ symbol: 'BTCUSDT', bidPrice: '99', askPrice: '101' }];
+    },
+    fetchInboundAddresses: async () => []
+  });
+
+  assert.deepEqual(oracleContexts.map(({ bypassSharedCooldown }) => bypassSharedCooldown), [false, true]);
+  assert.deepEqual(binanceContexts.map(({ bypassSharedCooldown }) => bypassSharedCooldown), [false, true]);
+  assert.equal(snapshot.sources.oracle.status, 'fresh');
+  assert.equal(snapshot.sources.binance.status, 'fresh');
+  assert.equal(snapshot.rows[0].oraclePriceUsd, 100);
+  assert.equal(snapshot.rows[0].binancePriceUsd, 100);
+});
+
 test('required pool snapshots retry transient failures outside a shared cooldown', async () => {
   const contexts = [];
   const delays = [];
@@ -471,7 +501,7 @@ test('public handlers are provider-free and the series query is bounded', async 
   assert.equal(missing.status, 404);
 });
 
-test('summary fails open only when current durable trading state is unavailable', async () => {
+test('summary retains recent trading state through a failed refresh and expires it safely', async () => {
   const model = {
     key: POOL_DISLOCATION_MODEL_KEY,
     payload: {
@@ -493,26 +523,45 @@ test('summary fails open only when current durable trading state is unavailable'
     ageSeconds: 3,
     stale: false
   };
+  const staleCore = {
+    stale: true,
+    payload: {
+      inbound_addresses: [{ chain: 'SOL', chain_trading_paused: true }],
+      field_meta: {
+        inbound_addresses: {
+          status: 'reused',
+          fetched_at: '2026-07-29T12:05:30Z'
+        }
+      }
+    }
+  };
   const response = await handlePoolDislocation({ headers: {} }, null, {
     getReadModel: async () => model,
-    getThorNodeCoreSnapshot: async () => ({
-      stale: true,
-      payload: {
-        inbound_addresses: [{ chain: 'SOL', chain_trading_paused: true }],
-        field_meta: { inbound_addresses: { status: 'reused' } }
-      }
-    })
+    getThorNodeCoreSnapshot: async () => staleCore,
+    now: () => new Date('2026-07-29T12:06:00Z')
   });
 
   assert.equal(response.status, 200);
-  assert.equal(response.body.pools[0].trading_halted, false);
-  assert.equal(response.body.pools[0].trading_status_known, false);
-  assert.equal(response.body.sources.trading.status, 'error');
-  assert.match(response.body.warnings[0], /Current THORNode inbound-address state is unavailable or stale/);
+  assert.equal(response.body.pools[0].trading_halted, true);
+  assert.equal(response.body.pools[0].trading_status_known, true);
+  assert.equal(response.body.sources.trading.status, 'cached');
+  assert.equal(response.body.sources.trading.observed_at, '2026-07-29T12:05:30Z');
+  assert.equal(response.body.sources.trading.age_ms, 30_000);
+  assert.match(response.body.warnings[0], /retaining last known trading state/);
   assert.equal(response.body.l1_slip_min_bps, null);
   assert.equal(response.body.sources.mimir.status, 'error');
   assert.match(response.body.warnings[1], /Current THORNode L1SlipMinBps state is unavailable or stale/);
   assert.match(response.headers['Cache-Control'], /max-age=15/);
+
+  const expired = await handlePoolDislocation({ headers: {} }, null, {
+    getReadModel: async () => model,
+    getThorNodeCoreSnapshot: async () => staleCore,
+    now: () => new Date('2026-07-29T12:21:00Z')
+  });
+  assert.equal(expired.body.pools[0].trading_halted, false);
+  assert.equal(expired.body.pools[0].trading_status_known, false);
+  assert.equal(expired.body.sources.trading.status, 'error');
+  assert.match(expired.body.warnings[0], /unavailable or stale/);
 });
 
 test('migration, job registry, timer, and deploy encode the production contract', async () => {
