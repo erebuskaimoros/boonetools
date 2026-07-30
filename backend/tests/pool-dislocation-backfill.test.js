@@ -142,6 +142,25 @@ test('historical rows retain same-height THORChain and labelled Binance close pr
   assert.equal(rows[0].binancePriceMethod, 'kline-close');
 });
 
+test('historical rows label confirmed reference absence for idempotent repair', () => {
+  const rows = buildHistoricalPoolDislocationRows({
+    observedAt: '2026-07-22T12:05:00.000Z',
+    height: 123,
+    blockTime: '2026-07-22T12:04:57.000Z'
+  }, {
+    pools: [{
+      asset: 'BTC.BTC',
+      status: 'Available',
+      asset_tor_price: '10100000000'
+    }],
+    oracle: { prices: [] }
+  });
+  assert.equal(rows[0].oraclePriceUsd, null);
+  assert.equal(rows[0].oraclePriceMethod, 'thornode-oracle-unavailable');
+  assert.equal(rows[0].binancePriceUsd, null);
+  assert.equal(rows[0].binancePriceMethod, 'kline-close-unavailable');
+});
+
 test('an empty historical oracle remains an explicit source gap', async () => {
   const responses = [[{
     asset: 'BTC.BTC',
@@ -161,7 +180,7 @@ test('an empty historical oracle remains an explicit source gap', async () => {
   assert.equal(rows[0].poolPriceUsd, 101);
   assert.equal(rows[0].oraclePriceUsd, null);
   assert.equal(rows[0].binancePriceUsd, 100.5);
-  assert.equal(rows[0].oraclePriceMethod, null);
+  assert.equal(rows[0].oraclePriceMethod, 'thornode-oracle-unavailable');
 });
 
 test('backfill planning resumes missing buckets without touching scheduled history', async () => {
@@ -218,9 +237,10 @@ test('recent repair planning floors bounds and replaces degraded or missing buck
   assert.equal(plan.existingBuckets, 1);
   assert.equal(plan.discoveredPendingBuckets, 2);
   assert.equal(plan.deferredBuckets, 0);
-  assert.match(sql, /bool_or\(sample_origin = 'historical_backfill'\)/);
   assert.match(sql, /bool_or\(oracle_price_usd is not null\)/);
   assert.match(sql, /bool_or\(binance_price_usd is not null\)/);
+  assert.match(sql, /thornode-oracle-unavailable/);
+  assert.match(sql, /kline-close-unavailable/);
 });
 
 test('bulk upsert gives scheduled observations precedence over historical rows', async () => {

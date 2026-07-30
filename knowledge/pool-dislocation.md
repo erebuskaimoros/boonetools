@@ -154,9 +154,12 @@ legitimately lacks a reference. It reconstructs at most 24 of the oldest
 pending buckets per run using the finalized block and the same provenance rules
 as the operator backfill. Historical rows may replace only explicitly degraded
 pool legs or mapped reference legs that are null; an ordinary complete
-scheduled observation still wins every primary-key conflict. The repair job
-shares the operator backfill advisory lock so the two historical readers cannot
-overlap.
+scheduled observation still wins every primary-key conflict. If the exact
+historical oracle response or Binance interval genuinely has no value, the null
+leg is retained with `thornode-oracle-unavailable` or
+`kline-close-unavailable` provenance. That confirmed absence makes later repair
+scans idempotent while keeping the chart gap honest. The repair job shares the
+operator backfill advisory lock so the two historical readers cannot overlap.
 
 ## Interface Scope
 

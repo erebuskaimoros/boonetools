@@ -22,8 +22,10 @@ function databaseRow(row = {}) {
     sample_origin: row.sampleOrigin || 'scheduled',
     thorchain_height: row.thorchainHeight || null,
     pool_price_method: row.poolPriceMethod || 'thornode-asset-tor',
-    oracle_price_method: row.oraclePriceUsd == null ? null : row.oraclePriceMethod || 'thornode-oracle',
-    binance_price_method: row.binancePriceUsd == null ? null : row.binancePriceMethod || 'book-ticker-mid'
+    oracle_price_method: row.oraclePriceMethod
+      || (row.oraclePriceUsd == null ? null : 'thornode-oracle'),
+    binance_price_method: row.binancePriceMethod
+      || (row.binancePriceUsd == null ? null : 'book-ticker-mid')
   };
 }
 

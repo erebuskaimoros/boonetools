@@ -321,7 +321,15 @@ export function buildHistoricalPoolDislocationRows(anchor, state, binanceHistory
     poolPriceMethod: 'thornode-asset-tor',
     oraclePriceMethod: 'thornode-oracle',
     binancePriceMethod: 'kline-close'
-  });
+  }).map((row) => ({
+    ...row,
+    oraclePriceMethod: row.oracleSymbol && row.oraclePriceUsd == null
+      ? 'thornode-oracle-unavailable'
+      : row.oraclePriceMethod,
+    binancePriceMethod: row.binanceSymbol && row.binancePriceUsd == null
+      ? 'kline-close-unavailable'
+      : row.binancePriceMethod
+  }));
 }
 
 export async function loadPoolDislocationBackfillPlan(client, options = {}) {
@@ -379,17 +387,16 @@ export async function loadPoolDislocationRecentGapRepairPlan(client, options = {
   }
   const existing = await client.query(
     `select observed_at,
-            bool_or(sample_origin = 'historical_backfill')
-            or (
-              bool_and(coalesce(pool_price_method, 'thornode-asset-tor') <> 'thornode-core-snapshot')
-              and (
-                not bool_or(oracle_symbol is not null)
-                or bool_or(oracle_price_usd is not null)
-              )
-              and (
-                not bool_or(binance_symbol is not null)
-                or bool_or(binance_price_usd is not null)
-              )
+            bool_and(coalesce(pool_price_method, 'thornode-asset-tor') <> 'thornode-core-snapshot')
+            and (
+              not bool_or(oracle_symbol is not null)
+              or bool_or(oracle_price_usd is not null)
+              or bool_or(oracle_price_method = 'thornode-oracle-unavailable')
+            )
+            and (
+              not bool_or(binance_symbol is not null)
+              or bool_or(binance_price_usd is not null)
+              or bool_or(binance_price_method = 'kline-close-unavailable')
             ) as authoritative
      from pool_dislocation_observations
      where observed_at >= $1::timestamptz
