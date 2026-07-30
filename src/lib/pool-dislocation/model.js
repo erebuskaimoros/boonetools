@@ -10,6 +10,12 @@ export const POOL_DISLOCATION_CHART_WINDOWS = Object.freeze([
   { id: '7d', label: '7D', durationMs: 7 * 24 * HOUR_MS }
 ]);
 
+export const POOL_DISLOCATION_ROLLING_WINDOWS = Object.freeze([
+  { id: '1h', label: '1H', durationMs: HOUR_MS },
+  { id: '6h', label: '6H', durationMs: 6 * HOUR_MS },
+  { id: '1d', label: '1D', durationMs: 24 * HOUR_MS }
+]);
+
 export const DISLOCATION_WINDOWS = Object.freeze([
   { id: '1h', label: '1H', durationMs: HOUR_MS },
   { id: '4h', label: '4H', durationMs: 4 * HOUR_MS },
@@ -144,6 +150,47 @@ export function buildPoolDislocationChartViewport(points = [], options = {}) {
     zoomed: hasZoom,
     points: visiblePoints
   };
+}
+
+export function buildPoolDislocationRollingAverage(points = [], field, options = {}) {
+  const sampleIntervalMs = Math.max(
+    MINUTE_MS,
+    finiteNumber(options.sampleIntervalMs) ?? SAMPLE_MINUTES * MINUTE_MS
+  );
+  const durationMs = Math.max(
+    sampleIntervalMs,
+    finiteNumber(options.durationMs) ?? HOUR_MS
+  );
+  const expectedSamples = Math.floor(durationMs / sampleIntervalMs) + 1;
+  const orderedPoints = [...(Array.isArray(points) ? points : [])]
+    .filter((point) => Number.isFinite(Date.parse(point?.observedAt || '')))
+    .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt));
+
+  return orderedPoints.map((point, index) => {
+    const windowPoints = orderedPoints.slice(Math.max(0, index - expectedSamples + 1), index + 1);
+    const windowStartMs = Date.parse(point.observedAt) - durationMs;
+    let total = 0;
+    let complete = windowPoints.length === expectedSamples
+      && Date.parse(windowPoints[0]?.observedAt || '') === windowStartMs;
+
+    for (let windowIndex = 0; complete && windowIndex < windowPoints.length; windowIndex += 1) {
+      const value = finiteNumber(windowPoints[windowIndex]?.[field]);
+      const timestamp = Date.parse(windowPoints[windowIndex]?.observedAt || '');
+      const previousTimestamp = windowIndex > 0
+        ? Date.parse(windowPoints[windowIndex - 1]?.observedAt || '')
+        : null;
+      if (value === null || (previousTimestamp !== null && timestamp - previousTimestamp !== sampleIntervalMs)) {
+        complete = false;
+      } else {
+        total += value;
+      }
+    }
+
+    return {
+      observedAt: point.observedAt,
+      rollingAverage: complete ? total / expectedSamples : null
+    };
+  });
 }
 
 export function buildPoolDislocationLinePath(points = [], field, options = {}) {

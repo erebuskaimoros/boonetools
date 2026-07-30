@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 
 import {
   POOL_DISLOCATION_CHART_WINDOWS,
+  POOL_DISLOCATION_ROLLING_WINDOWS,
   POOL_DISLOCATION_TABLE_COLUMNS,
   buildPoolDislocationLinePath,
+  buildPoolDislocationRollingAverage,
   buildPoolDislocationChartScale,
   buildPoolDislocationChartViewport,
   buildPoolDislocationDashboard,
@@ -19,6 +21,50 @@ import {
   summarizePool,
   summarizePoolDislocation
 } from '../src/lib/pool-dislocation/model.js';
+
+test('chart rolling averages require complete exact five-minute windows', () => {
+  const oneHour = POOL_DISLOCATION_ROLLING_WINDOWS.find((window) => window.id === '1h');
+  const startMs = Date.parse('2026-07-29T10:00:00Z');
+  const points = Array.from({ length: 20 }, (_, index) => ({
+    observedAt: new Date(startMs + (index * 5 * 60 * 1000)).toISOString(),
+    oracleDislocation: index,
+    binanceDislocation: 0
+  }));
+  const regular = buildPoolDislocationRollingAverage(points, 'oracleDislocation', {
+    durationMs: oneHour.durationMs
+  });
+  const zeroes = buildPoolDislocationRollingAverage(points, 'binanceDislocation', {
+    durationMs: oneHour.durationMs
+  });
+
+  assert.deepEqual(POOL_DISLOCATION_ROLLING_WINDOWS.map(({ id, label }) => ({ id, label })), [
+    { id: '1h', label: '1H' },
+    { id: '6h', label: '6H' },
+    { id: '1d', label: '1D' }
+  ]);
+  assert.equal(regular[11].rollingAverage, null);
+  assert.equal(regular[12].rollingAverage, 6);
+  assert.equal(regular[13].rollingAverage, 7);
+  assert.equal(zeroes[12].rollingAverage, 0);
+
+  const missing = buildPoolDislocationRollingAverage(
+    points.map((point, index) => index === 6 ? { ...point, oracleDislocation: null } : point),
+    'oracleDislocation',
+    { durationMs: oneHour.durationMs }
+  );
+  assert.equal(missing[12].rollingAverage, null);
+  assert.equal(missing[18].rollingAverage, null);
+  assert.equal(missing[19].rollingAverage, 13);
+
+  const irregular = buildPoolDislocationRollingAverage(
+    points.map((point, index) => index === 8
+      ? { ...point, observedAt: new Date(Date.parse(point.observedAt) + 60 * 1000).toISOString() }
+      : point),
+    'oracleDislocation',
+    { durationMs: oneHour.durationMs }
+  );
+  assert.equal(irregular[12].rollingAverage, null);
+});
 
 test('chart paths preserve missing reference values as gaps instead of zeroes', () => {
   const points = [

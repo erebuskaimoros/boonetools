@@ -28,6 +28,10 @@ binance dislocation % = 100 × (THORChain pool USD price / Binance USD price - 1
   trailing five-minute observations inside each labeled window.
 - `time > limit` counts aligned sample intervals at or beyond the selected
   absolute threshold.
+- Optional chart overlays expose signed 1h, 6h, and 1d trailing arithmetic
+  means for each selected reference. A rolling value appears only after a full
+  window of contiguous exact five-minute observations; missing source values
+  or cadence gaps break that source's average until the gap leaves the window.
 
 ## Pool and Reference Coverage
 
@@ -146,7 +150,9 @@ The mockup establishes these production interactions:
   only the currently visible points and selected references with four-percent
   edge padding, while hover resolves the
   nearest exact five-minute point and shows all three prices plus both signed
-  deviations. All displayed deviations use basis points. Missing reference
+  deviations. Independently selectable 1h, 6h, and 1d rolling-average overlays
+  use distinct dash patterns and add their signed values to the hover tooltip.
+  All displayed deviations use basis points. Missing reference
   values break the corresponding chart path instead of rendering as zero;
   source controls and legends only expose references mapped for the selected
   pool. Gaps are not interpolated.

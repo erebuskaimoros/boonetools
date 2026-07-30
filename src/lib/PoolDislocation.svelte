@@ -3,8 +3,10 @@
   import { fetchPoolDislocation, fetchPoolDislocationSeries } from './pool-dislocation/api.js';
   import {
     POOL_DISLOCATION_CHART_WINDOWS,
+    POOL_DISLOCATION_ROLLING_WINDOWS,
     POOL_DISLOCATION_TABLE_COLUMNS,
     buildPoolDislocationLinePath,
+    buildPoolDislocationRollingAverage,
     buildPoolDislocationChartScale,
     buildPoolDislocationChartViewport,
     buildPoolDislocationDashboard,
@@ -40,6 +42,7 @@
   let threshold = 1;
   let sourceMode = 'both';
   let chartWindow = '7d';
+  let selectedRollingAverageIds = [];
   let chartZoom = null;
   let chartSelectionStartX = null;
   let chartSelectionCurrentX = null;
@@ -93,7 +96,38 @@
   $: chartEndMs = chartViewport.endMs;
   $: chartDurationMs = chartViewport.durationMs;
   $: chartRangeLabel = chartViewport.zoomed ? `${formatChartDuration(chartDurationMs)} ZOOM` : chartWindowConfig.label;
-  $: chartScale = buildPoolDislocationChartScale(chartPoints, { sourceMode, threshold });
+  $: rollingAverageSeries = POOL_DISLOCATION_ROLLING_WINDOWS.map((window) => ({
+    ...window,
+    oraclePoints: buildPoolDislocationRollingAverage(selectedPoints, 'oracleDislocation', window),
+    binancePoints: buildPoolDislocationRollingAverage(selectedPoints, 'binanceDislocation', window)
+  }));
+  $: activeRollingAverageSeries = rollingAverageSeries
+    .filter((series) => selectedRollingAverageIds.includes(series.id))
+    .map((series) => ({
+      ...series,
+      oraclePoints: series.oraclePoints.filter((point) => {
+        const timestamp = Date.parse(point.observedAt);
+        return timestamp >= chartStartMs && timestamp <= chartEndMs;
+      }),
+      binancePoints: series.binancePoints.filter((point) => {
+        const timestamp = Date.parse(point.observedAt);
+        return timestamp >= chartStartMs && timestamp <= chartEndMs;
+      })
+    }));
+  $: rollingAverageScalePoints = activeRollingAverageSeries.flatMap((series) => [
+    ...series.oraclePoints.map((point) => ({
+      oracleDislocation: selectedPool?.oracleSymbol ? point.rollingAverage : null,
+      binanceDislocation: null
+    })),
+    ...series.binancePoints.map((point) => ({
+      oracleDislocation: null,
+      binanceDislocation: selectedPool?.binanceSymbol ? point.rollingAverage : null
+    }))
+  ]);
+  $: chartScale = buildPoolDislocationChartScale(
+    [...chartPoints, ...rollingAverageScalePoints],
+    { sourceMode, threshold }
+  );
   $: yMin = chartScale.min;
   $: yMax = chartScale.max;
   $: yTicks = chartScale.ticks;
@@ -101,7 +135,17 @@
   $: negativeThresholdVisible = -threshold >= yMin && -threshold <= yMax;
   $: oraclePath = makeLinePath(chartPoints, 'oracleDislocation', yMin, yMax);
   $: binancePath = makeLinePath(chartPoints, 'binanceDislocation', yMin, yMax);
+  $: rollingAveragePaths = activeRollingAverageSeries.map((series) => ({
+    ...series,
+    oraclePath: makeLinePath(series.oraclePoints, 'rollingAverage', yMin, yMax),
+    binancePath: makeLinePath(series.binancePoints, 'rollingAverage', yMin, yMax)
+  }));
   $: hoverPoint = chartPoints.find((point) => point.observedAt === chartHoverPoint?.observedAt) || null;
+  $: hoverRollingAverages = activeRollingAverageSeries.map((series) => ({
+    ...series,
+    oracleAverage: series.oraclePoints.find((point) => point.observedAt === hoverPoint?.observedAt)?.rollingAverage ?? null,
+    binanceAverage: series.binancePoints.find((point) => point.observedAt === hoverPoint?.observedAt)?.rollingAverage ?? null
+  }));
   $: xTicks = Array.from({ length: 5 }, (_, index) => ({
     observedAt: new Date(chartStartMs + ((index / 4) * chartDurationMs)).toISOString(),
     index
@@ -213,6 +257,12 @@
       projectY: (value) => chartY(value, min, max),
       maximumGapMs: MAX_CONTIGUOUS_GAP_MS
     });
+  }
+
+  function toggleRollingAverage(id) {
+    selectedRollingAverageIds = selectedRollingAverageIds.includes(id)
+      ? selectedRollingAverageIds.filter((selectedId) => selectedId !== id)
+      : [...selectedRollingAverageIds, id];
   }
 
   function formatBasisPoints(value, { signed = true } = {}) {
@@ -506,6 +556,17 @@
             <span class="source-unavailable">[—] NO EXTERNAL REFERENCE</span>
           {/if}
         </div>
+        <div class="control-row">
+          <span class="control-label">AVG</span>
+          {#each POOL_DISLOCATION_ROLLING_WINDOWS as window}
+            <button
+              class:active={selectedRollingAverageIds.includes(window.id)}
+              aria-pressed={selectedRollingAverageIds.includes(window.id)}
+              title={`Toggle ${window.label} signed trailing average`}
+              on:click={() => toggleRollingAverage(window.id)}
+            ><i>[{window.label}]</i></button>
+          {/each}
+        </div>
       </div>
     </div>
 
@@ -515,6 +576,9 @@
           <span class="zoom-hint">{chartViewport.zoomed ? 'ZOOM ACTIVE · DRAG AGAIN OR RESET' : 'DRAG TO HIGHLIGHT + ZOOM'}</span>
           {#if selectedPool?.oracleSymbol && sourceMode !== 'binance'}<span class="oracle-key"><i></i>TC / ORACLE</span>{/if}
           {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle'}<span class="binance-key"><i></i>TC / BINANCE</span>{/if}
+          {#each POOL_DISLOCATION_ROLLING_WINDOWS.filter((window) => selectedRollingAverageIds.includes(window.id)) as window}
+            <span class={`average-key avg-${window.id}`}><i></i>{window.label} AVG</span>
+          {/each}
           <span class="band-key"><i></i>±{formatBasisPoints(threshold, { signed: false })} WATCH BAND</span>
         </div>
         <svg
@@ -541,6 +605,14 @@
           {/each}
           {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && oraclePath}<path class="series oracle" d={oraclePath} />{/if}
           {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && binancePath}<path class="series binance" d={binancePath} />{/if}
+          {#each rollingAveragePaths as series}
+            {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && series.oraclePath}
+              <path class={`series rolling-average oracle avg-${series.id}`} d={series.oraclePath} />
+            {/if}
+            {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && series.binancePath}
+              <path class={`series rolling-average binance avg-${series.id}`} d={series.binancePath} />
+            {/if}
+          {/each}
           {#each chartPoints as point, index}
             {#if index % pointMarkerStep === 0 || index === chartPoints.length - 1}
               {#if sourceMode !== 'binance' && Number.isFinite(point.oracleDislocation)}<circle class="point oracle" cx={chartX(point)} cy={chartY(point.oracleDislocation)} r={index === chartPoints.length - 1 ? 4 : 2.25} />{/if}
@@ -593,6 +665,14 @@
             <div><span>BINANCE</span><b>{formatPrice(hoverPoint.binancePrice)}</b></div>
             <div><span>VS ORACLE</span><b class={dislocationState(hoverPoint.oracleDislocation, threshold)}>{formatBasisPoints(hoverPoint.oracleDislocation)}</b></div>
             <div><span>VS BINANCE</span><b class={dislocationState(hoverPoint.binanceDislocation, threshold)}>{formatBasisPoints(hoverPoint.binanceDislocation)}</b></div>
+            {#each hoverRollingAverages as average}
+              {#if selectedPool?.oracleSymbol && sourceMode !== 'binance'}
+                <div><span>{average.label} ORACLE AVG</span><b>{formatBasisPoints(average.oracleAverage)}</b></div>
+              {/if}
+              {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle'}
+                <div><span>{average.label} BINANCE AVG</span><b>{formatBasisPoints(average.binanceAverage)}</b></div>
+              {/if}
+            {/each}
           </div>
         {/if}
         {#if seriesLoading}
@@ -827,11 +907,14 @@
 
   .focus-grid { display: grid; grid-template-columns: minmax(0, 1fr) 242px; min-height: 560px; }
   .chart-wrap { position: relative; min-width: 0; padding: 15px 17px 10px; border-right: 1px solid var(--term-border-faint, #111); overflow: hidden; }
-  .chart-legend { justify-content: flex-end; gap: 17px; min-height: 22px; padding-right: 7px; color: var(--term-text-5, #444); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; letter-spacing: 0.06em; }
+  .chart-legend { flex-wrap: wrap; justify-content: flex-end; gap: 7px 17px; min-height: 22px; padding-right: 7px; color: var(--term-text-5, #444); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; letter-spacing: 0.06em; }
   .chart-legend span { display: inline-flex; align-items: center; gap: 6px; font-family: inherit; }
   .chart-legend .zoom-hint { margin-right: auto; color: var(--term-text-6, #333); }
   .chart-legend i { display: inline-block; width: 16px; height: 2px; background: var(--term-accent, #00cc66); }
   .chart-legend .binance-key i { background: var(--term-info, #5588cc); }
+  .chart-legend .average-key i { background: repeating-linear-gradient(90deg, var(--term-text-3, #666) 0 7px, transparent 7px 10px); }
+  .chart-legend .average-key.avg-6h i { background: repeating-linear-gradient(90deg, var(--term-text-3, #666) 0 4px, transparent 4px 8px); }
+  .chart-legend .average-key.avg-1d i { background: repeating-linear-gradient(90deg, var(--term-text-3, #666) 0 2px, transparent 2px 6px); }
   .chart-legend .band-key i { height: 5px; border: 1px solid rgba(212, 160, 23, 0.28); background: var(--term-amber-soft, rgba(212, 160, 23, 0.06)); }
   .chart-wrap svg { display: block; width: 100%; height: auto; min-height: 450px; }
   .watch-zone { fill: rgba(212, 160, 23, 0.035); }
@@ -845,6 +928,10 @@
   .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
   .series.oracle { stroke: var(--term-accent, #00cc66); }
   .series.binance { stroke: var(--term-info, #5588cc); }
+  .series.rolling-average { stroke-width: 2.25; opacity: 0.9; pointer-events: none; }
+  .series.rolling-average.avg-1h { stroke-dasharray: 8 3; }
+  .series.rolling-average.avg-6h { stroke-dasharray: 4 4; }
+  .series.rolling-average.avg-1d { stroke-dasharray: 2 5; }
   .point { stroke: var(--term-bg, #080808); stroke-width: 1.5; }
   .point.oracle { fill: var(--term-accent, #00cc66); }
   .point.binance { fill: var(--term-info, #5588cc); }
@@ -854,7 +941,7 @@
   .hover-point.binance { fill: var(--term-info, #5588cc); }
   .zoom-selection { fill: rgba(85, 136, 204, 0.14); stroke: rgba(85, 136, 204, 0.85); stroke-width: 1; stroke-dasharray: 4 3; pointer-events: none; }
   .chart-hitbox { fill: transparent; cursor: crosshair; touch-action: pan-y; }
-  .chart-tooltip { position: absolute; z-index: 3; top: 52px; width: 190px; padding: 10px 11px; border: 1px solid var(--term-border, #1a1a1a); background: rgba(5, 5, 5, 0.96); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); color: var(--term-text-2, #888); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; pointer-events: none; transform: translateX(10px); }
+  .chart-tooltip { position: absolute; z-index: 3; top: 52px; width: 224px; padding: 10px 11px; border: 1px solid var(--term-border, #1a1a1a); background: rgba(5, 5, 5, 0.96); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45); color: var(--term-text-2, #888); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 8px; pointer-events: none; transform: translateX(10px); }
   .chart-tooltip.right { transform: translateX(calc(-100% - 10px)); }
   .chart-tooltip > strong { display: block; margin-bottom: 7px; padding-bottom: 7px; border-bottom: 1px solid var(--term-border-faint, #111); color: var(--term-text, #e8e8e8); font-size: 9px; letter-spacing: 0.04em; }
   .chart-tooltip > div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
