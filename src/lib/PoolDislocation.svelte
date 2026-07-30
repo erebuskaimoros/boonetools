@@ -136,8 +136,6 @@
   $: yMin = chartScale.min;
   $: yMax = chartScale.max;
   $: yTicks = chartScale.ticks;
-  $: positiveThresholdVisible = threshold >= yMin && threshold <= yMax;
-  $: negativeThresholdVisible = -threshold >= yMin && -threshold <= yMax;
   $: l1SlipMinBps = Number.isFinite(summary?.l1SlipMinBps) && summary.l1SlipMinBps > 0
     ? summary.l1SlipMinBps
     : null;
@@ -145,8 +143,6 @@
   $: l1SlipMinBandVisible = l1SlipMinPercent > 0
     && l1SlipMinPercent <= yMax
     && -l1SlipMinPercent >= yMin;
-  $: positiveThresholdY = chartY(threshold, yMin, yMax);
-  $: negativeThresholdY = chartY(-threshold, yMin, yMax);
   $: l1SlipMinPositiveY = l1SlipMinBandVisible
     ? chartY(l1SlipMinPercent, yMin, yMax)
     : null;
@@ -633,7 +629,6 @@
             <span class={`average-key avg-${window.id}`}><i></i>{window.label} SIGNED AVG · ≥{Math.round(POOL_DISLOCATION_ROLLING_MIN_COVERAGE * 100)}%</span>
           {/each}
           {#if l1SlipMinBandVisible}<span class="minbps-key"><i></i>±{formatBasisPoints(l1SlipMinPercent, { signed: false })} L1 MIN</span>{/if}
-          <span class="band-key"><i></i>±{formatBasisPoints(threshold, { signed: false })} WATCH BAND</span>
         </div>
         <svg
           bind:this={chartSvg}
@@ -641,12 +636,6 @@
           role="img"
           aria-label={`${selectedPool?.symbol} ${chartRangeLabel} pool price deviation chart${l1SlipMinBandVisible ? ` with current L1 minimum corridor at plus or minus ${l1SlipMinBps} basis points` : ''}. Drag horizontally to zoom; double click to reset.`}
         >
-          {#if positiveThresholdVisible}
-            <rect class="watch-zone top" x={CHART.left} y={CHART.top} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, positiveThresholdY - CHART.top)} />
-          {/if}
-          {#if negativeThresholdVisible}
-            <rect class="watch-zone bottom" x={CHART.left} y={negativeThresholdY} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, CHART.bottom - negativeThresholdY)} />
-          {/if}
           {#if l1SlipMinBandVisible}
             <rect
               class="minbps-zone"
@@ -662,8 +651,6 @@
               <text class="axis-label y" x={CHART.left - 12} y={chartY(tick) + 4}>{formatAxisBasisPoints(tick)}</text>
             {/if}
           {/each}
-          {#if positiveThresholdVisible}<line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={positiveThresholdY} y2={positiveThresholdY} />{/if}
-          {#if negativeThresholdVisible}<line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={negativeThresholdY} y2={negativeThresholdY} />{/if}
           {#if l1SlipMinBandVisible}
             <line class="minbps-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={l1SlipMinPositiveY} y2={l1SlipMinPositiveY} />
             <line class="minbps-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={l1SlipMinNegativeY} y2={l1SlipMinNegativeY} />
@@ -997,13 +984,10 @@
   .chart-legend .average-key.avg-6h i { background: repeating-linear-gradient(90deg, var(--term-text-3, #666) 0 4px, transparent 4px 8px); }
   .chart-legend .average-key.avg-1d i { background: repeating-linear-gradient(90deg, var(--term-text-3, #666) 0 2px, transparent 2px 6px); }
   .chart-legend .minbps-key i { height: 5px; border: 1px solid rgba(232, 232, 232, 0.42); background: rgba(232, 232, 232, 0.07); }
-  .chart-legend .band-key i { height: 5px; border: 1px solid rgba(212, 160, 23, 0.28); background: var(--term-amber-soft, rgba(212, 160, 23, 0.06)); }
   .chart-wrap svg { display: block; width: 100%; height: auto; min-height: 450px; }
-  .watch-zone { fill: rgba(212, 160, 23, 0.035); }
   .minbps-zone { fill: rgba(232, 232, 232, 0.035); pointer-events: none; }
   .grid-line { stroke: var(--term-border-faint, #111); stroke-width: 1; }
   .grid-line.zero { stroke: var(--term-text-5, #444); stroke-dasharray: 4 5; }
-  .threshold-line { stroke: rgba(212, 160, 23, 0.34); stroke-width: 1; stroke-dasharray: 3 5; }
   .minbps-line { stroke: rgba(232, 232, 232, 0.48); stroke-width: 1; stroke-dasharray: 1 4; pointer-events: none; }
   .minbps-axis-label { fill: var(--term-text-3, #bcbcbc); text-anchor: end; font: 11px 'JetBrains Mono', monospace; letter-spacing: 0.02em; pointer-events: none; }
   .x-tick { stroke: var(--term-border, #1a1a1a); }
