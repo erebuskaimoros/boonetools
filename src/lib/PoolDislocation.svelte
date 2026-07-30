@@ -23,7 +23,8 @@
   } from './pool-dislocation/model.js';
 
   const CHART = Object.freeze({ width: 1000, height: 520, left: 84, right: 24, top: 30, bottom: 456 });
-  const Y_AXIS_LABEL_CLEARANCE_PX = 13;
+  const Y_AXIS_LABEL_CLEARANCE = 18;
+  const MIN_BAND_LABEL_SEPARATION = 20;
   const MAX_CONTIGUOUS_GAP_MS = 7.5 * 60 * 1000;
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   const thresholds = [0.5, 1, 2];
@@ -150,6 +151,11 @@
     : null;
   $: l1SlipMinNegativeY = l1SlipMinBandVisible
     ? chartY(-l1SlipMinPercent, yMin, yMax)
+    : null;
+  $: l1SlipMinLabelsCollapsed = l1SlipMinBandVisible
+    && Math.abs(l1SlipMinNegativeY - l1SlipMinPositiveY) < MIN_BAND_LABEL_SEPARATION;
+  $: l1SlipMinAxisLabelY = l1SlipMinLabelsCollapsed
+    ? (l1SlipMinPositiveY + l1SlipMinNegativeY) / 2
     : null;
   $: oraclePath = makeLinePath(chartPoints, 'oracleDislocation', yMin, yMax);
   $: binancePath = makeLinePath(chartPoints, 'binanceDislocation', yMin, yMax);
@@ -281,8 +287,10 @@
   function showYAxisTickLabel(tick) {
     if (!l1SlipMinBandVisible) return true;
     const tickY = chartY(tick);
-    return Math.abs(tickY - l1SlipMinPositiveY) >= Y_AXIS_LABEL_CLEARANCE_PX
-      && Math.abs(tickY - l1SlipMinNegativeY) >= Y_AXIS_LABEL_CLEARANCE_PX;
+    const labelYs = l1SlipMinLabelsCollapsed
+      ? [l1SlipMinAxisLabelY]
+      : [l1SlipMinPositiveY, l1SlipMinNegativeY];
+    return labelYs.every((labelY) => Math.abs(tickY - labelY) >= Y_AXIS_LABEL_CLEARANCE);
   }
 
   function makeLinePath(points, field, min, max) {
@@ -657,8 +665,12 @@
           {#if l1SlipMinBandVisible}
             <line class="minbps-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={l1SlipMinPositiveY} y2={l1SlipMinPositiveY} />
             <line class="minbps-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={l1SlipMinNegativeY} y2={l1SlipMinNegativeY} />
-            <text class="minbps-axis-label" x={CHART.left - 12} y={l1SlipMinPositiveY + 4}>{formatBasisPoints(l1SlipMinPercent)} MIN</text>
-            <text class="minbps-axis-label" x={CHART.left - 12} y={l1SlipMinNegativeY + 4}>{formatBasisPoints(-l1SlipMinPercent)} MIN</text>
+            {#if l1SlipMinLabelsCollapsed}
+              <text class="minbps-axis-label" x={CHART.left - 12} y={l1SlipMinAxisLabelY + 4}>±{formatBasisPoints(l1SlipMinPercent, { signed: false })} MIN</text>
+            {:else}
+              <text class="minbps-axis-label" x={CHART.left - 12} y={l1SlipMinPositiveY + 4}>{formatBasisPoints(l1SlipMinPercent)} MIN</text>
+              <text class="minbps-axis-label" x={CHART.left - 12} y={l1SlipMinNegativeY + 4}>{formatBasisPoints(-l1SlipMinPercent)} MIN</text>
+            {/if}
           {/if}
           {#each xTicks as tick}
             <line class="x-tick" x1={chartX(tick.observedAt)} x2={chartX(tick.observedAt)} y1={CHART.bottom} y2={CHART.bottom + 5} />
