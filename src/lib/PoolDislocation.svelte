@@ -23,6 +23,7 @@
   } from './pool-dislocation/model.js';
 
   const CHART = Object.freeze({ width: 1000, height: 520, left: 84, right: 24, top: 30, bottom: 456 });
+  const Y_AXIS_LABEL_CLEARANCE_PX = 13;
   const MAX_CONTIGUOUS_GAP_MS = 7.5 * 60 * 1000;
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   const thresholds = [0.5, 1, 2];
@@ -275,6 +276,13 @@
       top: CHART.top,
       bottom: CHART.bottom
     });
+  }
+
+  function showYAxisTickLabel(tick) {
+    if (!l1SlipMinBandVisible) return true;
+    const tickY = chartY(tick);
+    return Math.abs(tickY - l1SlipMinPositiveY) >= Y_AXIS_LABEL_CLEARANCE_PX
+      && Math.abs(tickY - l1SlipMinNegativeY) >= Y_AXIS_LABEL_CLEARANCE_PX;
   }
 
   function makeLinePath(points, field, min, max) {
@@ -640,15 +648,17 @@
           {/if}
           {#each yTicks as tick}
             <line class:zero={tick === 0} class="grid-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(tick)} y2={chartY(tick)} />
-            <text class="axis-label y" x={CHART.left - 12} y={chartY(tick) + 4}>{formatAxisBasisPoints(tick)}</text>
+            {#if showYAxisTickLabel(tick)}
+              <text class="axis-label y" x={CHART.left - 12} y={chartY(tick) + 4}>{formatAxisBasisPoints(tick)}</text>
+            {/if}
           {/each}
           {#if positiveThresholdVisible}<line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={positiveThresholdY} y2={positiveThresholdY} />{/if}
           {#if negativeThresholdVisible}<line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={negativeThresholdY} y2={negativeThresholdY} />{/if}
           {#if l1SlipMinBandVisible}
             <line class="minbps-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={l1SlipMinPositiveY} y2={l1SlipMinPositiveY} />
             <line class="minbps-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={l1SlipMinNegativeY} y2={l1SlipMinNegativeY} />
-            <text class="minbps-axis-label" x={CHART.width - CHART.right - 8} y={l1SlipMinPositiveY}>{formatBasisPoints(l1SlipMinPercent)} MIN</text>
-            <text class="minbps-axis-label" x={CHART.width - CHART.right - 8} y={l1SlipMinNegativeY}>{formatBasisPoints(-l1SlipMinPercent)} MIN</text>
+            <text class="minbps-axis-label" x={CHART.left - 12} y={l1SlipMinPositiveY + 4}>{formatBasisPoints(l1SlipMinPercent)} MIN</text>
+            <text class="minbps-axis-label" x={CHART.left - 12} y={l1SlipMinNegativeY + 4}>{formatBasisPoints(-l1SlipMinPercent)} MIN</text>
           {/if}
           {#each xTicks as tick}
             <line class="x-tick" x1={chartX(tick.observedAt)} x2={chartX(tick.observedAt)} y1={CHART.bottom} y2={CHART.bottom + 5} />
@@ -981,7 +991,7 @@
   .grid-line.zero { stroke: var(--term-text-5, #444); stroke-dasharray: 4 5; }
   .threshold-line { stroke: rgba(212, 160, 23, 0.34); stroke-width: 1; stroke-dasharray: 3 5; }
   .minbps-line { stroke: rgba(232, 232, 232, 0.48); stroke-width: 1; stroke-dasharray: 1 4; pointer-events: none; }
-  .minbps-axis-label { fill: var(--term-text-3, #bcbcbc); stroke: var(--term-bg, #050505); stroke-width: 4px; paint-order: stroke; text-anchor: end; dominant-baseline: central; font: 10px 'JetBrains Mono', monospace; letter-spacing: 0.04em; pointer-events: none; }
+  .minbps-axis-label { fill: var(--term-text-3, #bcbcbc); text-anchor: end; font: 11px 'JetBrains Mono', monospace; letter-spacing: 0.02em; pointer-events: none; }
   .x-tick { stroke: var(--term-border, #1a1a1a); }
   .axis-label { fill: var(--term-text-5, #444); font: 11px 'JetBrains Mono', monospace; }
   .axis-label.y { text-anchor: end; }
