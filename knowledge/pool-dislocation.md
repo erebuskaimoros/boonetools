@@ -161,7 +161,9 @@ checked against the current reviewed asset mapping, and each mapped leg must
 contain either a value or explicit unavailable/unaligned provenance. This lets
 the repair loop replace a changed mapping such as WBTC's move from `BTCUSDT` to
 `WBTCUSDT` without treating unrelated Binance values in the same bucket as
-proof that the bucket is complete. It reconstructs at most 24 of the oldest
+proof that the bucket is complete. Unresolved SQL predicates are explicitly
+treated as incomplete rather than being ignored by aggregate boolean logic. It
+reconstructs at most 24 of the oldest
 pending buckets per run using the finalized block and the same provenance rules
 as the operator backfill. Historical rows may replace only explicitly degraded
 pool legs or mapped reference legs that are null; an ordinary complete

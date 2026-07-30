@@ -268,6 +268,7 @@ test('recent repair planning floors bounds and replaces degraded or missing buck
   assert.match(sql, /oracle_symbol is not distinct from expected\.oracle_symbol/);
   assert.match(sql, /binance_symbol is not distinct from expected\.binance_symbol/);
   assert.match(sql, /expected\.binance_symbol is null[\s\S]*observation\.binance_price_usd is null/);
+  assert.match(sql, /bool_and\(\s*coalesce\([\s\S]*false\s*\)\s*\) as authoritative/);
   assert.match(sql, /thornode-oracle-unavailable/);
   assert.match(sql, /thornode-oracle-unaligned/);
   assert.match(sql, /kline-close-unavailable/);

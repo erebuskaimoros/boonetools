@@ -413,38 +413,41 @@ export async function loadPoolDislocationRecentGapRepairPlan(client, options = {
                 <> 'thornode-core-snapshot'
             )
             and bool_and(
-              observation.oracle_symbol is not distinct from expected.oracle_symbol
-              and (
-                (expected.oracle_symbol is null and observation.oracle_price_usd is null)
-                or (
-                  expected.oracle_symbol is not null
-                  and (
-                    observation.oracle_price_usd is not null
-                    or observation.oracle_price_method in (
-                      'thornode-oracle-unavailable',
-                      'thornode-oracle-unaligned'
+              coalesce(
+                observation.oracle_symbol is not distinct from expected.oracle_symbol
+                and (
+                  (expected.oracle_symbol is null and observation.oracle_price_usd is null)
+                  or (
+                    expected.oracle_symbol is not null
+                    and (
+                      observation.oracle_price_usd is not null
+                      or observation.oracle_price_method in (
+                        'thornode-oracle-unavailable',
+                        'thornode-oracle-unaligned'
+                      )
                     )
                   )
                 )
-              )
-              and observation.binance_symbol is not distinct from expected.binance_symbol
-              and (
-                (
-                  expected.binance_symbol is null
-                  and observation.binance_bid_usd is null
-                  and observation.binance_ask_usd is null
-                  and observation.binance_price_usd is null
-                )
-                or (
-                  expected.binance_symbol is not null
-                  and (
-                    observation.binance_price_usd is not null
-                    or observation.binance_price_method in (
-                      'kline-close-unavailable',
-                      'kline-close-unaligned'
+                and observation.binance_symbol is not distinct from expected.binance_symbol
+                and (
+                  (
+                    expected.binance_symbol is null
+                    and observation.binance_bid_usd is null
+                    and observation.binance_ask_usd is null
+                    and observation.binance_price_usd is null
+                  )
+                  or (
+                    expected.binance_symbol is not null
+                    and (
+                      observation.binance_price_usd is not null
+                      or observation.binance_price_method in (
+                        'kline-close-unavailable',
+                        'kline-close-unaligned'
+                      )
                     )
                   )
-                )
+                ),
+                false
               )
             ) as authoritative
      from pool_dislocation_observations observation
