@@ -108,6 +108,27 @@ export function normalizeChainTradingStatus(inboundAddresses = []) {
   };
 }
 
+export function applyPoolDislocationTradingStatus(summary = {}, chainTrading = null) {
+  const currentTrading = chainTrading?.chains
+    ? chainTrading
+    : normalizeChainTradingStatus();
+  const pools = Array.isArray(summary?.pools) ? summary.pools : [];
+
+  return {
+    ...summary,
+    chain_trading: currentTrading,
+    pools: pools.map((pool) => {
+      const chain = String(pool?.chain || '').trim().toUpperCase();
+      const trading = currentTrading.chains?.[chain];
+      return {
+        ...pool,
+        trading_halted: Boolean(trading?.trading_halted),
+        trading_status_known: Boolean(trading)
+      };
+    })
+  };
+}
+
 export function referenceMappingForAsset(asset) {
   const key = String(asset || '').trim().toUpperCase();
   const mapping = POOL_REFERENCE_MAPPINGS[key];
@@ -358,18 +379,10 @@ export function buildPoolDislocationSummary(rows = [], options = {}) {
     ? options.chainTrading
     : normalizeChainTradingStatus();
   const pools = [...grouped.values()]
-    .map((group) => {
-      const pool = summarizeRows(group, asOf);
-      const trading = chainTrading.chains?.[pool.chain];
-      return {
-        ...pool,
-        trading_halted: Boolean(trading?.trading_halted),
-        trading_status_known: Boolean(trading)
-      };
-    })
+    .map((group) => summarizeRows(group, asOf))
     .sort((left, right) => left.asset.localeCompare(right.asset));
 
-  return {
+  return applyPoolDislocationTradingStatus({
     schema_version: POOL_DISLOCATION_SCHEMA_VERSION,
     as_of: asOf,
     window: '7d',
@@ -397,7 +410,7 @@ export function buildPoolDislocationSummary(rows = [], options = {}) {
     },
     pools,
     warnings: options.warnings || []
-  };
+  }, chainTrading);
 }
 
 export function buildPoolDislocationSeries(rows = [], options = {}) {

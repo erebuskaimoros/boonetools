@@ -79,9 +79,13 @@ minutes:
   `inbound_addresses` field (itself populated from
   `/thorchain/inbound_addresses`) and treat `halted`,
   `global_trading_paused`, or `chain_trading_paused` as a chain trading halt.
-  A missing or stale core field degrades to unknown and never hides a pool.
-  The UI defaults to hiding pools on known halted chains and lets the user
-  include them with one toggle.
+  The public summary overlays this state from the latest durable core model at
+  request time instead of freezing it into the five-minute price sample. A
+  recovered core snapshot therefore takes effect immediately without waiting
+  for the next price observation. A missing or stale current core field
+  degrades to unknown, uses a short response cache, and never hides a pool. The
+  UI defaults to hiding pools on known halted chains and lets the user include
+  them with one toggle.
 
 An observation is aligned only when source timestamps are within 30 seconds.
 References older than two five-minute intervals are stale and excluded from

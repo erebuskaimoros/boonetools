@@ -1,19 +1,27 @@
 import { error, json } from '../lib/http.js';
 import {
   POOL_DISLOCATION_MODEL_KEY,
+  applyPoolDislocationTradingStatus,
+  normalizeChainTradingStatus,
   buildPoolDislocationSeries
 } from '../shared/pool-dislocation.js';
 import { createReadModelEtag, getReadModel } from '../shared/read-models.js';
+import {
+  coreSnapshotValue,
+  getThorNodeCoreSnapshot,
+  isThorNodeCoreSnapshotStale
+} from '../shared/thornode-core-snapshot.js';
 
 async function defaultQuery(...args) {
   const { query } = await import('../db/pool.js');
   return query(...args);
 }
 
-function headersForModel(model, etag = model?.etag) {
+function headersForModel(model, etag = model?.etag, options = {}) {
   const stale = Boolean(model?.stale);
+  const degraded = Boolean(options.degraded);
   return {
-    'Cache-Control': stale
+    'Cache-Control': stale || degraded
       ? 'public, max-age=15, stale-if-error=900'
       : 'public, max-age=60, stale-while-revalidate=240, stale-if-error=900',
     ...(etag ? { ETag: etag } : {}),
@@ -21,6 +29,56 @@ function headersForModel(model, etag = model?.etag) {
     'X-Boone-Age': String(model?.ageSeconds ?? 0),
     'X-Boone-Read-Model-Stale': stale ? '1' : '0'
   };
+}
+
+function withoutSampledTradingWarnings(warnings = []) {
+  return (Array.isArray(warnings) ? warnings : [])
+    .filter((warning) => !/^trading\s*:/i.test(String(warning || '').trim()));
+}
+
+function tradingSourceObservedAt(coreModel) {
+  return coreModel?.payload?.field_meta?.inbound_addresses?.fetched_at
+    || coreModel?.payload?.source_updated_at
+    || coreModel?.sourceUpdatedAt
+    || coreModel?.generatedAt
+    || null;
+}
+
+async function loadCurrentTradingOverlay(options = {}) {
+  try {
+    const coreModel = await (options.getThorNodeCoreSnapshot || getThorNodeCoreSnapshot)({
+      allowStale: true
+    });
+    if (!coreModel || isThorNodeCoreSnapshotStale(coreModel, ['inbound_addresses'])) {
+      throw new Error('Current THORNode inbound-address state is unavailable or stale');
+    }
+    const inboundAddresses = coreSnapshotValue(coreModel, 'inbound_addresses');
+    if (!Array.isArray(inboundAddresses)) {
+      throw new Error('Current THORNode inbound-address state is invalid');
+    }
+    return {
+      chainTrading: normalizeChainTradingStatus(inboundAddresses),
+      source: {
+        error: null,
+        status: 'fresh',
+        provider: 'thornode-core-snapshot',
+        observed_at: tradingSourceObservedAt(coreModel)
+      },
+      degraded: false
+    };
+  } catch (error) {
+    const message = error?.message || 'Current THORNode inbound-address state is unavailable';
+    return {
+      chainTrading: normalizeChainTradingStatus(),
+      source: {
+        error: message,
+        status: 'error',
+        provider: 'thornode-core-snapshot',
+        observed_at: null
+      },
+      degraded: true
+    };
+  }
 }
 
 export async function handlePoolDislocation(_request, _url, options = {}) {
@@ -32,11 +90,19 @@ export async function handlePoolDislocation(_request, _url, options = {}) {
     });
   }
   const stale = Boolean(model.stale);
-  return json({
-    ...model.payload,
+  const trading = await loadCurrentTradingOverlay(options);
+  const payload = applyPoolDislocationTradingStatus(model.payload, trading.chainTrading);
+  const warnings = withoutSampledTradingWarnings(model.payload?.warnings);
+  if (trading.source.error) warnings.push(`trading: ${trading.source.error}`);
+  const body = {
+    ...payload,
+    sources: {
+      ...(payload.sources || {}),
+      trading: trading.source
+    },
     stale,
     warnings: [...new Set([
-      ...(model.payload?.warnings || []),
+      ...warnings,
       ...(stale ? ['Serving the last successful pool-dislocation snapshot'] : [])
     ])],
     read_model: {
@@ -46,7 +112,14 @@ export async function handlePoolDislocation(_request, _url, options = {}) {
       fresh_until: model.freshUntil,
       stale
     }
-  }, 200, headersForModel(model));
+  };
+  const etag = createReadModelEtag({
+    summary: model.etag,
+    chain_trading: body.chain_trading,
+    trading_source: body.sources.trading,
+    stale
+  });
+  return json(body, 200, headersForModel(model, etag, { degraded: trading.degraded }));
 }
 
 export async function handlePoolDislocationSeries(_request, url, options = {}) {

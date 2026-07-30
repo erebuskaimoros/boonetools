@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 import {
   POOL_DISLOCATION_MODEL_KEY,
+  applyPoolDislocationTradingStatus,
   binanceSymbolsForPools,
   buildObservationRows,
   buildPoolDislocationSeries,
@@ -103,6 +104,25 @@ test('chain trading status treats halt, chain pause, and global pause as trading
     { chain: 'ETH', global_trading_paused: false }
   ]);
   assert.deepEqual(global.halted_chains, ['BTC', 'ETH']);
+});
+
+test('current chain trading status replaces sampled pool flags without mutating price data', () => {
+  const summary = {
+    pools: [
+      { asset: 'BTC.BTC', chain: 'BTC', latest: { pool_price_usd: 100 }, trading_halted: true },
+      { asset: 'SOL.SOL', chain: 'SOL', latest: { pool_price_usd: 50 }, trading_halted: false }
+    ]
+  };
+  const overlaid = applyPoolDislocationTradingStatus(summary, normalizeChainTradingStatus([
+    { chain: 'BTC', chain_trading_paused: false },
+    { chain: 'SOL', chain_trading_paused: true }
+  ]));
+
+  assert.equal(overlaid.pools[0].latest.pool_price_usd, 100);
+  assert.equal(overlaid.pools[0].trading_halted, false);
+  assert.equal(overlaid.pools[0].trading_status_known, true);
+  assert.equal(overlaid.pools[1].trading_halted, true);
+  assert.equal(summary.pools[0].trading_halted, true);
 });
 
 test('chain trading status is sourced from the canonical durable THORNode snapshot', async () => {
@@ -367,8 +387,14 @@ test('public handlers are provider-free and the series query is bounded', async 
     key: POOL_DISLOCATION_MODEL_KEY,
     payload: {
       as_of: '2026-07-29T12:05:00Z',
-      pools: [{ asset: 'BTC.BTC' }],
-      warnings: []
+      pools: [
+        { asset: 'BTC.BTC', chain: 'BTC', trading_halted: true, trading_status_known: true },
+        { asset: 'SOL.SOL', chain: 'SOL', trading_halted: false, trading_status_known: false }
+      ],
+      sources: {
+        trading: { status: 'error', error: 'sampled trading state failed' }
+      },
+      warnings: ['oracle: unavailable', 'trading: sampled trading state failed']
     },
     etag: '"summary"',
     generatedAt: '2026-07-29T12:05:00Z',
@@ -378,10 +404,37 @@ test('public handlers are provider-free and the series query is bounded', async 
     stale: false
   };
   const summaryResponse = await handlePoolDislocation({ headers: {} }, null, {
-    getReadModel: async () => model
+    getReadModel: async () => model,
+    getThorNodeCoreSnapshot: async (options) => {
+      assert.equal(options.allowStale, true);
+      return {
+        stale: false,
+        etag: '"core"',
+        payload: {
+          inbound_addresses: [
+            { chain: 'BTC', chain_trading_paused: false },
+            { chain: 'SOL', chain_trading_paused: true }
+          ],
+          field_meta: {
+            inbound_addresses: {
+              status: 'fresh',
+              fetched_at: '2026-07-29T12:06:00Z'
+            }
+          }
+        }
+      };
+    }
   });
   assert.equal(summaryResponse.status, 200);
   assert.equal(summaryResponse.body.as_of, model.payload.as_of);
+  assert.deepEqual(summaryResponse.body.chain_trading.halted_chains, ['SOL']);
+  assert.equal(summaryResponse.body.pools[0].trading_halted, false);
+  assert.equal(summaryResponse.body.pools[0].trading_status_known, true);
+  assert.equal(summaryResponse.body.pools[1].trading_halted, true);
+  assert.equal(summaryResponse.body.sources.trading.status, 'fresh');
+  assert.equal(summaryResponse.body.sources.trading.observed_at, '2026-07-29T12:06:00Z');
+  assert.deepEqual(summaryResponse.body.warnings, ['oracle: unavailable']);
+  assert.notEqual(summaryResponse.headers.ETag, model.etag);
 
   let sql = '';
   let params;
@@ -408,6 +461,47 @@ test('public handlers are provider-free and the series query is bounded', async 
     { getReadModel: async () => model, query: async () => assert.fail('must not query') }
   );
   assert.equal(missing.status, 404);
+});
+
+test('summary fails open only when current durable trading state is unavailable', async () => {
+  const model = {
+    key: POOL_DISLOCATION_MODEL_KEY,
+    payload: {
+      as_of: '2026-07-29T12:05:00Z',
+      pools: [{
+        asset: 'SOL.SOL',
+        chain: 'SOL',
+        trading_halted: true,
+        trading_status_known: true
+      }],
+      chain_trading: normalizeChainTradingStatus([{ chain: 'SOL', chain_trading_paused: true }]),
+      sources: { trading: { status: 'fresh' } },
+      warnings: []
+    },
+    etag: '"summary"',
+    generatedAt: '2026-07-29T12:05:00Z',
+    sourceUpdatedAt: '2026-07-29T12:05:00Z',
+    freshUntil: '2026-07-29T12:20:00Z',
+    ageSeconds: 3,
+    stale: false
+  };
+  const response = await handlePoolDislocation({ headers: {} }, null, {
+    getReadModel: async () => model,
+    getThorNodeCoreSnapshot: async () => ({
+      stale: true,
+      payload: {
+        inbound_addresses: [{ chain: 'SOL', chain_trading_paused: true }],
+        field_meta: { inbound_addresses: { status: 'reused' } }
+      }
+    })
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.pools[0].trading_halted, false);
+  assert.equal(response.body.pools[0].trading_status_known, false);
+  assert.equal(response.body.sources.trading.status, 'error');
+  assert.match(response.body.warnings[0], /Current THORNode inbound-address state is unavailable or stale/);
+  assert.match(response.headers['Cache-Control'], /max-age=15/);
 });
 
 test('migration, job registry, timer, and deploy encode the production contract', async () => {
