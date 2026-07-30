@@ -15,6 +15,7 @@ import {
   computeDislocationPercent,
   dislocationState,
   filterPoolDislocationDashboardByTrading,
+  isPoolDislocationTickInsideMinimumBand,
   normalizePoolDislocationSeries,
   normalizePoolDislocationSummary,
   projectPoolDislocationChartY,
@@ -163,6 +164,15 @@ test('chart guide projection stays pegged to its value when the dynamic scale ch
   assert.notEqual(positiveTight, positiveWide);
   assert.equal(projectPoolDislocationChartY(0.12, { ...chart, min: -0.3, max: 0.12 }), chart.top);
   assert.equal(projectPoolDislocationChartY(-0.3, { ...chart, min: -0.3, max: 0.12 }), chart.bottom);
+});
+
+test('minimum band axis keeps zero as its only interior tick label', () => {
+  assert.equal(isPoolDislocationTickInsideMinimumBand(0, 0.1), false);
+  assert.equal(isPoolDislocationTickInsideMinimumBand(0.004, 0.1), true);
+  assert.equal(isPoolDislocationTickInsideMinimumBand(-0.099, 0.1), true);
+  assert.equal(isPoolDislocationTickInsideMinimumBand(0.1, 0.1), false);
+  assert.equal(isPoolDislocationTickInsideMinimumBand(-0.1, 0.1), false);
+  assert.equal(isPoolDislocationTickInsideMinimumBand(0.2, 0.1), false);
 });
 
 test('chart viewport switches between exact trailing windows and preserves gaps', () => {

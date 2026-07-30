@@ -63,6 +63,12 @@ function finiteNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+export function isPoolDislocationTickInsideMinimumBand(tick, minimumBand) {
+  const value = finiteNumber(tick);
+  const band = finiteNumber(minimumBand);
+  return value !== null && value !== 0 && band !== null && band > 0 && Math.abs(value) < band;
+}
+
 export function computeDislocationPercent(poolPrice, referencePrice) {
   const pool = finiteNumber(poolPrice);
   const reference = finiteNumber(referencePrice);

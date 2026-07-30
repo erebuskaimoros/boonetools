@@ -14,6 +14,7 @@
     DISLOCATION_WINDOWS,
     dislocationState,
     filterPoolDislocationDashboardByTrading,
+    isPoolDislocationTickInsideMinimumBand,
     maxAbsoluteDislocation,
     normalizePoolDislocationSeries,
     normalizePoolDislocationSummary,
@@ -24,7 +25,7 @@
 
   const CHART = Object.freeze({ width: 1000, height: 520, left: 84, right: 24, top: 30, bottom: 456 });
   const Y_AXIS_LABEL_CLEARANCE = 18;
-  const MIN_BAND_LABEL_SEPARATION = 20;
+  const MIN_BAND_LABEL_SEPARATION = Y_AXIS_LABEL_CLEARANCE * 2;
   const MAX_CONTIGUOUS_GAP_MS = 7.5 * 60 * 1000;
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
   const thresholds = [0.5, 1, 2];
@@ -286,6 +287,7 @@
 
   function showYAxisTickLabel(tick) {
     if (!l1SlipMinBandVisible) return true;
+    if (isPoolDislocationTickInsideMinimumBand(tick, l1SlipMinPercent)) return false;
     const tickY = chartY(tick);
     const labelYs = l1SlipMinLabelsCollapsed
       ? [l1SlipMinAxisLabelY]
