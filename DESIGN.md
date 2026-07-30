@@ -12,14 +12,14 @@ colors:
   border-default: "#1a1a1a"
   border-strong: "#2a2a2a"
   ink: "#080808"
-  text-primary: "#ededed"
+  text-primary: "#f5f5f5"
   text-strong: "#ffffff"
-  text-body: "#d2d2d2"
-  text-secondary: "#b8b8b8"
-  text-muted: "#a3a3a3"
-  text-dim: "#949494"
-  text-dimmer: "#858585"
-  text-dimmest: "#7a7a7a"
+  text-body: "#e8e8e8"
+  text-secondary: "#d8d8d8"
+  text-muted: "#c8c8c8"
+  text-dim: "#bcbcbc"
+  text-dimmer: "#b2b2b2"
+  text-dimmest: "#a0a0a0"
   accent: "#00cc66"
   accent-soft: "rgba(0, 204, 102, 0.07)"
   accent-edge: "rgba(0, 204, 102, 0.4)"
@@ -233,8 +233,8 @@ The palette is intentionally narrow:
   `#060606`/`#050505` (inset). No gradients on surfaces.
 - **Borders:** `#1a1a1a` is the default rule. `#111` for very faint internal
   separators. Use dashed `#1a1a1a` for "this is a soft divider" cues.
-- **Text:** `#ededed` for primary, `#d2d2d2` for body, `#b8b8b8` for
-  secondary, then a restrained ramp (`#a3a3a3` → `#7a7a7a`) for labels,
+- **Text:** `#f5f5f5` for primary, `#e8e8e8` for body, `#d8d8d8` for
+  secondary, then a high-contrast grey ramp (`#c8c8c8` → `#a0a0a0`) for labels,
   indices, bracket characters, and incidental metadata. Structural rules may
   be faint; user-facing content must remain readable.
 - **Accent (Terminal Green):** `#00cc66`. Reserve this for: status dots, the

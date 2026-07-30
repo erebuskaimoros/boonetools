@@ -32,8 +32,8 @@
     rolling90: '#b08adf',
     rolling180: '#e06c75',
     grid: '#1a1a1a',
-    text: '#a3a3a3',
-    legend: '#d2d2d2'
+    text: '#c8c8c8',
+    legend: '#e8e8e8'
   };
   const RPC_WS_URLS = [
     'wss://gateway.liquify.com/chain/thorchain_rpc/websocket',
@@ -608,7 +608,7 @@
           tooltip: {
             backgroundColor: '#1a1a1a',
             titleColor: '#fff',
-            bodyColor: '#ededed',
+            bodyColor: '#f5f5f5',
             borderColor: '#333',
             borderWidth: 1,
             titleFont: { family: 'JetBrains Mono', size: 12, weight: 700 },
@@ -850,7 +850,7 @@
           tooltip: {
             backgroundColor: '#1a1a1a',
             titleColor: '#fff',
-            bodyColor: '#ededed',
+            bodyColor: '#f5f5f5',
             borderColor: '#333',
             borderWidth: 1,
             titleFont: { family: 'JetBrains Mono', size: 12, weight: 700 },
@@ -1890,7 +1890,7 @@
   }
 
   .cmd {
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
     font-weight: 600;
   }
 
@@ -1904,7 +1904,7 @@
     gap: 6px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
   }
 
   .socket-status {
@@ -1942,7 +1942,7 @@
     background: transparent;
     border: 1px solid #1a1a1a;
     padding: 5px 10px;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     cursor: pointer;
@@ -1964,7 +1964,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 30px;
     font-weight: 800;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     letter-spacing: 0.06em;
     line-height: 1.1;
   }
@@ -2095,7 +2095,7 @@
 
   .panel-value {
     font-family: 'JetBrains Mono', monospace;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-size: 18px;
     font-weight: 800;
     margin: 8px 0;
@@ -2269,7 +2269,7 @@
 
   .affiliate-metric strong {
     display: block;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-family: 'JetBrains Mono', monospace;
     font-size: 20px;
     margin: 10px 0 4px;
@@ -2439,7 +2439,7 @@
     margin-top: 4px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
     overflow-wrap: anywhere;
   }
 
@@ -2635,7 +2635,7 @@
   }
 
   .transaction-route strong {
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
     font-family: 'JetBrains Mono', monospace;
     font-size: var(--term-type-label);
     font-weight: 600;
@@ -2748,7 +2748,7 @@
   .decision-head strong,
   .decision-body strong {
     font-family: 'JetBrains Mono', monospace;
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
     font-size: 12px;
     text-align: right;
   }
@@ -2783,7 +2783,7 @@
   }
 
   .hold {
-    color: #888 !important;
+    color: var(--term-text-4, #bcbcbc) !important;
   }
 
   .table-controls {
@@ -2804,7 +2804,7 @@
   .table-controls input {
     background: #050505;
     border: 1px solid #1a1a1a;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
   }
@@ -2867,16 +2867,16 @@
   }
 
   td {
-    color: #b8b8b8;
+    color: var(--term-text-2, #d8d8d8);
   }
 
   td.strong {
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
     font-weight: 700;
   }
 
   td.mono {
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
   }
 
   tbody tr:hover,

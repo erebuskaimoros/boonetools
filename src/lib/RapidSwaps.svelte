@@ -968,7 +968,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 26px;
     font-weight: 700;
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
     letter-spacing: -0.02em;
     line-height: 1;
     margin-bottom: 8px;
@@ -1039,7 +1039,7 @@
     font-size: 11px;
     background: #1a1a1a;
     border: 1px solid #333;
-    color: #aaa;
+    color: var(--term-text-3, #c8c8c8);
     padding: 4px 8px;
     border-radius: 4px;
   }
@@ -1070,7 +1070,7 @@
   }
 
   .tab-btn:hover {
-    color: #999;
+    color: var(--term-text-4, #bcbcbc);
   }
 
   .tab-active {
@@ -1138,7 +1138,7 @@
     padding: 6px 10px;
     background: #111;
     border: 1px solid #222;
-    color: #ccc;
+    color: var(--term-text-2, #d8d8d8);
     border-radius: 3px;
     outline: none;
     transition: border-color 0.15s;
@@ -1172,7 +1172,7 @@
 
   .filter-clear:hover {
     background: #222;
-    color: #ccc;
+    color: var(--term-text-2, #d8d8d8);
   }
 
   /* ---- DATA SECTIONS ---- */
@@ -1251,7 +1251,7 @@
     padding: 10px 16px;
     font-size: 13px;
     border-bottom: 1px solid #111;
-    color: #aaa;
+    color: var(--term-text-3, #c8c8c8);
     vertical-align: middle;
   }
 
@@ -1321,7 +1321,7 @@
 
   .page-btn:hover:not(:disabled) {
     background: #1a1a1a;
-    color: #ccc;
+    color: var(--term-text-2, #d8d8d8);
     border-color: #333;
   }
 

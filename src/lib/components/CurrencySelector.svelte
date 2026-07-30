@@ -66,7 +66,7 @@
   }
 
   .selector-btn:hover {
-    color: #ccc;
+    color: var(--term-text-2, #d8d8d8);
     border-color: #333;
     background: #1a1a1a;
   }
@@ -118,7 +118,7 @@
 
   .selector-option:hover {
     background: #1a1a1a;
-    color: #ccc;
+    color: var(--term-text-2, #d8d8d8);
   }
 
   .selector-option.active {

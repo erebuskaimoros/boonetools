@@ -560,7 +560,7 @@
     width: min(1080px, calc(100% - 32px));
     margin: 0 auto;
     padding: 24px 0 56px;
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
   }
 
   .terminal-header {
@@ -632,7 +632,7 @@
 
   h1 {
     margin: 0 0 7px;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font: 800 30px/1.1 'JetBrains Mono', monospace;
     letter-spacing: .06em;
   }
@@ -696,7 +696,7 @@
   }
   .network-state { min-width: 168px; gap: 12px; }
   .network-state small { display: block; margin-bottom: 3px; color: var(--term-text-4); font: 700 11px/1.4 'JetBrains Mono', monospace; letter-spacing: .14em; }
-  .network-state strong { color: #e8e8e8; font: 800 16px/1.2 'JetBrains Mono', monospace; text-transform: uppercase; }
+  .network-state strong { color: var(--term-text, #f5f5f5); font: 800 16px/1.2 'JetBrains Mono', monospace; text-transform: uppercase; }
 
   .network-notes {
     flex: 1;
@@ -733,7 +733,7 @@
   .churn-card.paused .churn-dot { background: #d4a017; box-shadow: none; animation: none; }
   .churn-head small,
   .churn-meta span { display: block; color: var(--term-text-4); font: 700 11px/1.4 'JetBrains Mono', monospace; letter-spacing: .12em; }
-  .churn-head strong { color: #e8e8e8; font: 800 14px/1.2 'JetBrains Mono', monospace; }
+  .churn-head strong { color: var(--term-text, #f5f5f5); font: 800 14px/1.2 'JetBrains Mono', monospace; }
   .churn-meta { min-width: 0; padding-left: 14px; border-left: 1px solid #1a1a1a; }
   .churn-meta strong { display: block; margin: 3px 0 2px; color: var(--term-text-body); font: 700 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
   .churn-meta small { color: var(--term-text-4); font: 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
@@ -756,7 +756,7 @@
   .metric:last-child { border-right: 0; }
   .metric-index { position: absolute; top: 13px; right: 14px; color: #00cc66; font: 600 10px/1.3 'JetBrains Mono', monospace; }
   .metric-label { display: block; color: var(--term-text-3); font: 700 11px/1.4 'JetBrains Mono', monospace; letter-spacing: .12em; text-transform: uppercase; }
-  .metric strong { display: block; margin: 20px 0 4px; color: #e8e8e8; font: 800 23px/1 'JetBrains Mono', monospace; }
+  .metric strong { display: block; margin: 20px 0 4px; color: var(--term-text, #f5f5f5); font: 800 23px/1 'JetBrains Mono', monospace; }
   .metric small { color: var(--term-text-4); font: 11px/1.4 'JetBrains Mono', monospace; }
 
   .block {

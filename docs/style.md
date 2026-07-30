@@ -74,14 +74,14 @@ The palette is intentionally narrow.
 | Token | Hex | Use |
 | --- | --- | --- |
 | `--term-text-strong` | `#ffffff` | Almost never — reserved for hot states. |
-| `--term-text` | `#ededed` | Display titles, primary metric values. |
-| `--term-text-body` | `#d2d2d2` | Body text, default table cells. |
-| `--term-text-2` | `#b8b8b8` | Secondary text, status text, table mono content. |
-| `--term-text-3` | `#a3a3a3` | Labels, chart ticks, descriptive prose. |
-| `--term-text-4` | `#949494` | Sub-labels and nonessential metadata. |
-| `--term-text-5` | `#858585` | Inactive affordances and decorative labels. |
-| `--term-text-6` | `#7d7d7d` | Bracket characters and decorative indices. |
-| `--term-text-7` | `#7a7a7a` | The dimmest permitted UI ink; decorative use only. |
+| `--term-text` | `#f5f5f5` | Display titles, primary metric values. |
+| `--term-text-body` | `#e8e8e8` | Body text, default table cells. |
+| `--term-text-2` | `#d8d8d8` | Secondary text, status text, table mono content. |
+| `--term-text-3` | `#c8c8c8` | Labels, chart ticks, descriptive prose. |
+| `--term-text-4` | `#bcbcbc` | Sub-labels and nonessential metadata. |
+| `--term-text-5` | `#b2b2b2` | Inactive affordances and decorative labels. |
+| `--term-text-6` | `#a8a8a8` | Bracket characters and decorative indices. |
+| `--term-text-7` | `#a0a0a0` | The dimmest permitted UI ink; decorative use only. |
 
 Create hierarchy with weight, spacing, and position before reducing contrast.
 Structural rules may be faint, but text must remain readable. Use the dimmest
@@ -375,13 +375,13 @@ example. Quick recipe:
 
 ```js
 {
-  legend: { labels: { color: '#d2d2d2', font: { family: "'JetBrains Mono', monospace", size: 11, weight: 600 } } },
+  legend: { labels: { color: '#e8e8e8', font: { family: "'JetBrains Mono', monospace", size: 11, weight: 600 } } },
   tooltip: {
     backgroundColor: '#0a0a0a',
     borderColor: '#1a1a1a',
     borderWidth: 1,
     titleColor: '#ffffff',
-    bodyColor: '#ededed',
+    bodyColor: '#f5f5f5',
     titleFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 700 },
     bodyFont: { family: "'JetBrains Mono', monospace", size: 12 }
   },
@@ -389,7 +389,7 @@ example. Quick recipe:
     x: {
       grid: { color: '#111', drawBorder: false },
       border: { color: '#1a1a1a' },
-      ticks: { color: '#a3a3a3', font: { family: "'JetBrains Mono', monospace", size: 11 } }
+      ticks: { color: '#c8c8c8', font: { family: "'JetBrains Mono', monospace", size: 11 } }
     },
     y: {
       grid: { color: '#111' },

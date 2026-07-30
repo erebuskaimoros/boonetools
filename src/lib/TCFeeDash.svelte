@@ -741,7 +741,7 @@
 
   .title {
     margin: 0 0 10px;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-family: 'JetBrains Mono', monospace;
     font-size: 30px;
     font-weight: 800;
@@ -833,7 +833,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 24px;
     font-weight: 800;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     letter-spacing: -0.01em;
     line-height: 1.1;
     margin-top: auto;
@@ -1047,7 +1047,7 @@
   }
 
   .rolling-toggle.active {
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
   }
 
   .rolling-toggle.active .tog-bracket {
@@ -1077,7 +1077,7 @@
   }
 
   .window-label {
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
     font-size: 11px;
     min-width: 0;
     overflow: hidden;

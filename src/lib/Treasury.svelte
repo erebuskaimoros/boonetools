@@ -685,7 +685,7 @@
     flex-direction: column;
     gap: 0;
     font-family: 'DM Sans', -apple-system, sans-serif;
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
   }
 
   .loading-wrap {
@@ -723,7 +723,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 26px;
     font-weight: 700;
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
     letter-spacing: -0.02em;
     line-height: 1;
     margin-bottom: 8px;
@@ -792,7 +792,7 @@
     color: var(--term-text-4);
   }
 
-  .head-stats strong { color: #ccc; }
+  .head-stats strong { color: var(--term-text-2, #d8d8d8); }
   .sep { color: var(--term-text-7); margin: 0 2px; }
   .accent { color: #00cc66; }
 
@@ -840,7 +840,7 @@
 
   .asset-name {
     font-size: 13px;
-    color: #ccc;
+    color: var(--term-text-2, #d8d8d8);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -855,7 +855,7 @@
     display: block;
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
-    color: #ccc;
+    color: var(--term-text-2, #d8d8d8);
   }
 
   .asset-right .dim {
@@ -921,7 +921,7 @@
   }
 
   .lp-top strong {
-    color: #ccc;
+    color: var(--term-text-2, #d8d8d8);
     font-size: 12px;
   }
 
@@ -999,7 +999,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
     font-weight: 700;
-    color: #ccc;
+    color: var(--term-text-2, #d8d8d8);
     letter-spacing: 0.03em;
   }
 
@@ -1035,7 +1035,7 @@
     flex-shrink: 0;
   }
 
-  .entry-summary strong { color: #ccc; }
+  .entry-summary strong { color: var(--term-text-2, #d8d8d8); }
 
   .entry-err {
     padding: 10px 16px;

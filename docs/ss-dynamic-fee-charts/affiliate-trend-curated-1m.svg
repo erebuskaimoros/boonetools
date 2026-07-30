@@ -3,9 +3,9 @@
   <desc id="chart-desc">CURATED daily executed-leg volume bars, historical liquidity-fee bars, fees-per-volume line, and trailing 30- and 90-day average-volume lines from 2026-06-27 through 2026-07-26. Both rolling averages remove full halt days from numerator and denominator and are blank on those days.</desc>
   <style>
     text { font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace; font-size: 14px; font-variant-numeric: tabular-nums; }
-    .heading { fill: #ededed; font-size: 16px; font-weight: 600; letter-spacing: 1.2px; }
-    .meta { fill: #a3a3a3; font-size: 13px; letter-spacing: 1px; }
-    .tick { fill: #a3a3a3; }
+    .heading { fill: #f5f5f5; font-size: 16px; font-weight: 600; letter-spacing: 1.2px; }
+    .meta { fill: #c8c8c8; font-size: 13px; letter-spacing: 1px; }
+    .tick { fill: #c8c8c8; }
     .fee-tick { fill: #d4a017; }
     .rate-tick { fill: #5588cc; }
     .grid { stroke: #1a1a1a; stroke-width: 1; shape-rendering: crispEdges; }

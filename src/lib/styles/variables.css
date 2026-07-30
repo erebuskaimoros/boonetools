@@ -43,14 +43,14 @@
    * Structural rules may stay faint; content should not.
    */
   --term-text-strong: #ffffff;
-  --term-text: #ededed;
-  --term-text-body: #d2d2d2;
-  --term-text-2: #b8b8b8;
-  --term-text-3: #a3a3a3;
-  --term-text-4: #949494;
-  --term-text-5: #858585;
-  --term-text-6: #7d7d7d;
-  --term-text-7: #7a7a7a;
+  --term-text: #f5f5f5;
+  --term-text-body: #e8e8e8;
+  --term-text-2: #d8d8d8;
+  --term-text-3: #c8c8c8;
+  --term-text-4: #bcbcbc;
+  --term-text-5: #b2b2b2;
+  --term-text-6: #a8a8a8;
+  --term-text-7: #a0a0a0;
 
   /* Accents */
   --term-accent: #00cc66;
@@ -98,10 +98,10 @@
      COLORS - Text
      ======================================== */
   --text-primary: #ffffff;
-  --text-secondary: #d2d2d2;
-  --text-muted: #b8b8b8;
-  --text-dimmed: #a3a3a3;
-  --text-placeholder: #949494;
+  --text-secondary: #e8e8e8;
+  --text-muted: #d8d8d8;
+  --text-dimmed: #c8c8c8;
+  --text-placeholder: #bcbcbc;
 
   /* ========================================
      COLORS - Accent (Primary)

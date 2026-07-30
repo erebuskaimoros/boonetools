@@ -31,7 +31,7 @@ export const rapidSwapBaseChartOptions = Object.freeze({
     tooltip: {
       backgroundColor: '#1a1a1a',
       titleColor: '#fff',
-      bodyColor: '#ededed',
+      bodyColor: '#f5f5f5',
       borderColor: '#333',
       borderWidth: 1,
       titleFont: { family: 'JetBrains Mono', size: 12, weight: 700 },
@@ -601,7 +601,7 @@ export function createRapidSwapChartRenderer() {
             titleFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 700 },
             bodyFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 500 },
             titleColor: '#fff',
-            bodyColor: '#ededed',
+            bodyColor: '#f5f5f5',
             padding: 10,
             callbacks: {
               label: (context) => {

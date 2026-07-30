@@ -140,7 +140,7 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
         legend: {
           display: stackedBars,
           labels: {
-            color: '#d2d2d2',
+            color: '#e8e8e8',
             boxWidth: 8,
             boxHeight: 8,
             padding: 14,
@@ -152,7 +152,7 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
           borderColor: '#1a1a1a',
           borderWidth: 1,
           titleColor: '#ffffff',
-          bodyColor: '#ededed',
+          bodyColor: '#f5f5f5',
           titleFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 700 },
           bodyFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 500 },
           callbacks: {
@@ -185,7 +185,7 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
           stacked: stackedBars,
           grid: { color: '#111', drawBorder: false },
           border: { color: '#1a1a1a' },
-          ticks: { color: '#a3a3a3', font: { family: "'JetBrains Mono', monospace", size: 11 } }
+          ticks: { color: '#c8c8c8', font: { family: "'JetBrains Mono', monospace", size: 11 } }
         },
         y: {
           stacked: stackedBars,

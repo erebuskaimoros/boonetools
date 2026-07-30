@@ -279,7 +279,7 @@
     width: min(1080px, calc(100% - 48px));
     margin: 0 auto;
     padding: 28px 0 64px;
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
   }
 
   .index-page {
@@ -311,7 +311,7 @@
   .command-line {
     font-size: 12px;
     font-weight: 600;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
   }
 
   .prompt,
@@ -327,7 +327,7 @@
   }
 
   .cmd {
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
   }
 
   .arg {
@@ -337,7 +337,7 @@
 
   h1 {
     margin: 14px 0 10px;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-family: 'JetBrains Mono', monospace;
     font-size: clamp(23px, 4vw, 30px);
     font-weight: 800;
@@ -359,19 +359,19 @@
   .lede {
     max-width: 800px;
     margin: 0;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
     font-size: 13px;
     line-height: 1.65;
   }
 
   .report-head .lede {
-    color: #aaa;
+    color: var(--term-text-3, #c8c8c8);
     font-size: 14px;
   }
 
   .lede strong,
   .findings strong {
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-weight: 600;
   }
 
@@ -420,7 +420,7 @@
 
   .block-title h2 {
     margin: 0;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
     font-weight: 700;
@@ -474,7 +474,7 @@
   }
 
   .row-copy strong {
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
     letter-spacing: 0.02em;
@@ -589,7 +589,7 @@
   .metric strong {
     display: block;
     overflow: hidden;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-size: clamp(17px, 2vw, 23px);
     font-weight: 800;
     line-height: 1.1;
@@ -627,7 +627,7 @@
     width: 100%;
     min-width: 660px;
     border-collapse: collapse;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
     font-size: 11px;
   }
 
@@ -669,7 +669,7 @@
 
   tbody tr.total td,
   tbody tr.highlight td {
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-weight: 700;
   }
 
@@ -722,7 +722,7 @@
 
   .findings p {
     margin: 0;
-    color: #aaa;
+    color: var(--term-text-3, #c8c8c8);
     font-size: 13px;
     line-height: 1.6;
   }
@@ -730,7 +730,7 @@
   .methodology ul {
     margin: 14px 0 0;
     padding-left: 20px;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
     font-size: 12px;
     line-height: 1.65;
   }
@@ -746,7 +746,7 @@
   .back-link {
     display: inline-block;
     margin-top: 24px;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
     font-size: 11px;
     font-weight: 600;
     text-decoration: none;
@@ -766,7 +766,7 @@
     padding: 16px;
     border: 1px solid rgba(220, 53, 69, 0.4);
     background: rgba(220, 53, 69, 0.06);
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
     font-size: 12px;
   }
 
@@ -828,7 +828,7 @@
   .report-page .metric > span:last-child,
   .report-page th,
   .report-page figcaption {
-    color: #d2d2d2;
+    color: var(--term-text-body, #e8e8e8);
   }
 
   .report-page .command-line {

@@ -287,7 +287,7 @@ export function createTcFeeChart(canvas, { series, rollingSeries }) {
           borderColor: '#1a1a1a',
           borderWidth: 1,
           titleColor: '#ffffff',
-          bodyColor: '#ededed',
+          bodyColor: '#f5f5f5',
           titleFont: { family: 'JetBrains Mono', size: 12, weight: 700 },
           bodyFont: { family: 'JetBrains Mono', size: 12, weight: 500 },
           displayColors: false,
@@ -330,7 +330,7 @@ export function createTcFeeChart(canvas, { series, rollingSeries }) {
         x: {
           grid: { color: '#111111' },
           ticks: {
-            color: '#a3a3a3',
+            color: '#c8c8c8',
             maxTicksLimit: isNarrowChart ? 5 : 7,
             maxRotation: 0,
             autoSkip: !isNarrowChart,
@@ -347,7 +347,7 @@ export function createTcFeeChart(canvas, { series, rollingSeries }) {
           beginAtZero: false,
           grid: { color: '#111111' },
           ticks: {
-            color: '#a3a3a3',
+            color: '#c8c8c8',
             font: { family: 'JetBrains Mono', size: 11 },
             callback(value) {
               return `$${formatNumber(Number(value), { maximumFractionDigits: 0 })}`;
@@ -411,7 +411,7 @@ export function createTcFeeIncomeVolumeChart(canvas, { series, rollingSeries }) 
           borderColor: '#1a1a1a',
           borderWidth: 1,
           titleColor: '#ffffff',
-          bodyColor: '#ededed',
+          bodyColor: '#f5f5f5',
           titleFont: { family: 'JetBrains Mono', size: 12, weight: 700 },
           bodyFont: { family: 'JetBrains Mono', size: 12, weight: 500 },
           displayColors: false,
@@ -446,7 +446,7 @@ export function createTcFeeIncomeVolumeChart(canvas, { series, rollingSeries }) 
         x: {
           grid: { color: '#111111' },
           ticks: {
-            color: '#a3a3a3',
+            color: '#c8c8c8',
             maxTicksLimit: isNarrowChart ? 5 : 7,
             maxRotation: 0,
             autoSkip: !isNarrowChart,
@@ -463,7 +463,7 @@ export function createTcFeeIncomeVolumeChart(canvas, { series, rollingSeries }) 
           beginAtZero: true,
           grid: { color: '#111111' },
           ticks: {
-            color: '#a3a3a3',
+            color: '#c8c8c8',
             font: { family: 'JetBrains Mono', size: 11 },
             callback(value) {
               return formatTcFeeBps(value);

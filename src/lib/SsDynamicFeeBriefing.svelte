@@ -189,7 +189,7 @@
     width: min(1080px, calc(100% - 48px));
     margin: 0 auto;
     padding: 28px 0 64px;
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
   }
 
   .breadcrumbs,
@@ -241,7 +241,7 @@
   }
 
   .cmd {
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
     font-weight: 700;
   }
 
@@ -276,7 +276,7 @@
 
   :global(.markdown-report h1) {
     margin: 28px 0 14px;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-family: 'JetBrains Mono', monospace;
     font-size: clamp(24px, 4vw, 34px);
     font-weight: 800;
@@ -290,7 +290,7 @@
     border: 1px solid #1a1a1a;
     border-left: 3px solid #00cc66;
     background: #0a0a0a;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-family: 'JetBrains Mono', monospace;
     font-size: 15px;
     font-weight: 700;
@@ -319,7 +319,7 @@
   }
 
   :global(.markdown-report strong) {
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-weight: 700;
   }
 
@@ -361,7 +361,7 @@
     padding: 0;
     border: 0;
     background: transparent;
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
     line-height: 1.7;
   }
 
@@ -423,7 +423,7 @@
   .back-link {
     display: inline-block;
     margin-top: 28px;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
     font-size: 12px;
     font-weight: 600;
     text-decoration: none;

@@ -373,7 +373,7 @@
 
   h2 {
     margin: 0;
-    color: #d2d2d2;
+    color: var(--term-text-body, #e8e8e8);
     font: 700 12px/1.3 'JetBrains Mono', monospace;
     letter-spacing: .08em;
     text-transform: uppercase;
@@ -382,7 +382,7 @@
   h2 span { color: #00cc66; }
 
   .window-label {
-    color: #a3a3a3;
+    color: var(--term-text-3, #c8c8c8);
     font: 600 11px/1.3 'JetBrains Mono', monospace;
     letter-spacing: .08em;
   }
@@ -393,7 +393,7 @@
     padding: 4px 7px;
     border: 1px solid #1a1a1a;
     background: transparent;
-    color: #b8b8b8;
+    color: var(--term-text-2, #d8d8d8);
     font: 600 11px/1.3 'JetBrains Mono', monospace;
     text-transform: uppercase;
     cursor: pointer;
@@ -415,9 +415,9 @@
   }
 
   .chart-summary > div:last-child { border-right: 0; }
-  .chart-summary span { display: block; color: #a3a3a3; font: 700 11px/1.3 'JetBrains Mono', monospace; letter-spacing: .08em; }
-  .chart-summary strong { display: inline-block; margin-top: 7px; color: #e8e8e8; font: 800 15px/1 'JetBrains Mono', monospace; }
-  .chart-summary small { margin-left: 5px; color: #a3a3a3; font: 11px/1.2 'JetBrains Mono', monospace; }
+  .chart-summary span { display: block; color: var(--term-text-3, #c8c8c8); font: 700 11px/1.3 'JetBrains Mono', monospace; letter-spacing: .08em; }
+  .chart-summary strong { display: inline-block; margin-top: 7px; color: var(--term-text, #f5f5f5); font: 800 15px/1 'JetBrains Mono', monospace; }
+  .chart-summary small { margin-left: 5px; color: var(--term-text-3, #c8c8c8); font: 11px/1.2 'JetBrains Mono', monospace; }
 
   .chart-scroll {
     overflow-x: auto;
@@ -449,23 +449,23 @@
   .point-hit { fill: transparent; stroke: none; }
   .point-target:hover .series-point,
   .point-target:focus .series-point,
-  .point-target.active .series-point { fill: #00cc66; stroke: #e8e8e8; stroke-width: 1.5; }
+  .point-target.active .series-point { fill: #00cc66; stroke: #f5f5f5; stroke-width: 1.5; }
   .tooltip-guide { stroke: #333; stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; pointer-events: none; }
-  .tooltip-anchor { fill: #00cc66; stroke: #e8e8e8; stroke-width: 1.25; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .tooltip-anchor { fill: #00cc66; stroke: #f5f5f5; stroke-width: 1.25; vector-effect: non-scaling-stroke; pointer-events: none; }
   .chart-tooltip { pointer-events: none; }
   .chart-tooltip rect { fill: #060606; stroke: #2a2a2a; stroke-width: 1; vector-effect: non-scaling-stroke; }
   .chart-tooltip line { stroke: #1a1a1a; stroke-width: 1; vector-effect: non-scaling-stroke; }
-  .tooltip-time { fill: #ededed; font: 600 12px 'JetBrains Mono', monospace; }
-  .tooltip-key { fill: #b8b8b8; font: 700 11px 'JetBrains Mono', monospace; letter-spacing: .04em; }
+  .tooltip-time { fill: #f5f5f5; font: 600 12px 'JetBrains Mono', monospace; }
+  .tooltip-key { fill: #d8d8d8; font: 700 11px 'JetBrains Mono', monospace; letter-spacing: .04em; }
   .tooltip-value { fill: #ffffff; font: 700 12px 'JetBrains Mono', monospace; }
   .tooltip-value.accent { fill: #00cc66; }
-  .axis-label { fill: #a3a3a3; font: 11px 'JetBrains Mono', monospace; }
+  .axis-label { fill: #c8c8c8; font: 11px 'JetBrains Mono', monospace; }
   .y-label { text-anchor: end; }
   .x-label { font-size: 11px; text-anchor: middle; }
 
   .empty-chart {
     padding: 34px 16px;
-    color: #a3a3a3;
+    color: var(--term-text-3, #c8c8c8);
     font: 11px/1.5 'JetBrains Mono', monospace;
   }
 
@@ -477,18 +477,18 @@
     gap: 12px;
     padding: 8px 16px 10px;
     border-top: 1px solid #111;
-    color: #949494;
+    color: var(--term-text-4, #bcbcbc);
     font: 11px/1.5 'JetBrains Mono', monospace;
   }
 
-  .chart-source span { color: #b8b8b8; }
+  .chart-source span { color: var(--term-text-2, #d8d8d8); }
   .chart-source em { font-style: normal; }
 
   .chart-warning {
     margin: 0 16px 12px;
     padding: 9px 10px;
     border: 1px solid #1a1a1a;
-    color: #b8b8b8;
+    color: var(--term-text-2, #d8d8d8);
     font: 11px/1.5 'JetBrains Mono', monospace;
   }
 

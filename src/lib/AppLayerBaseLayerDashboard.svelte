@@ -1650,7 +1650,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 30px;
     font-weight: 800;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     letter-spacing: 0.06em;
     line-height: 1.1;
     margin-bottom: 10px;
@@ -1832,7 +1832,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
     font-weight: 700;
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
   }
 
   .fnode-fig {
@@ -1856,7 +1856,7 @@
   }
 
   .fnode-fig.neutral {
-    color: #b8b8b8;
+    color: var(--term-text-2, #d8d8d8);
     font-size: 15px;
   }
 
@@ -2172,7 +2172,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 24px;
     font-weight: 800;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     letter-spacing: -0.01em;
     line-height: 1.1;
     overflow-wrap: anywhere;
@@ -2293,7 +2293,7 @@
   }
 
   .mode-toggle button:hover {
-    color: #999;
+    color: var(--term-text-4, #bcbcbc);
   }
 
   .amber-t button.active {
@@ -2332,7 +2332,7 @@
   }
 
   .zoom-reset:hover:not(:disabled) {
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
   }
 
   .zoom-reset:disabled {
@@ -2374,7 +2374,7 @@
   }
 
   .reserve-price-basis strong {
-    color: #b8b8b8;
+    color: var(--term-text-2, #d8d8d8);
     font-size: 11px;
     font-weight: 600;
     overflow-wrap: anywhere;
@@ -2437,7 +2437,7 @@
     display: block;
     font-family: 'JetBrains Mono', monospace;
     font-size: 18px;
-    color: #e8e8e8;
+    color: var(--term-text, #f5f5f5);
     font-weight: 800;
     line-height: 1.1;
     overflow-wrap: anywhere;
@@ -2544,7 +2544,7 @@
   }
 
   .fold summary:hover {
-    color: #b8b8b8;
+    color: var(--term-text-2, #d8d8d8);
     border-color: #2a2a2a;
   }
 
@@ -2585,7 +2585,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     font-weight: 700;
-    color: #999;
+    color: var(--term-text-4, #bcbcbc);
     text-transform: uppercase;
     letter-spacing: 0.1em;
     margin-bottom: 10px;
@@ -2641,7 +2641,7 @@
   }
 
   td {
-    color: #b8b8b8;
+    color: var(--term-text-2, #d8d8d8);
   }
 
   td.mono {
@@ -2667,7 +2667,7 @@
   }
 
   .table-link {
-    color: #b8b8b8;
+    color: var(--term-text-2, #d8d8d8);
     border-bottom: 1px dotted #2a2a2a;
     text-decoration: none;
     transition: color 0.15s;
@@ -2776,7 +2776,7 @@
   .t-collector {
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
     font-weight: 700;
   }
 

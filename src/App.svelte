@@ -497,7 +497,7 @@
   :root {
     --background-color: #080808;
     --text-color: var(--term-text-body);
-    --text-muted: #b8b8b8;
+    --text-muted: var(--term-text-2);
     --sidebar-width: 232px;
     --sidebar-width-collapsed: 56px;
     --topbar-height: 40px;
@@ -541,7 +541,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
     font-weight: 700;
-    color: #e8e8e8;
+    color: var(--term-text);
     letter-spacing: 0.08em;
   }
 

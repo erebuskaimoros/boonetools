@@ -693,7 +693,7 @@
         scales: {
           x: {
             grid: { color: 'rgba(255, 255, 255, 0.04)', lineWidth: 0.5 },
-            ticks: { color: '#a3a3a3', font: { family: "'JetBrains Mono', monospace", size: 11 } },
+            ticks: { color: '#c8c8c8', font: { family: "'JetBrains Mono', monospace", size: 11 } },
             border: { color: '#1a1a1a' }
           },
           y: {
@@ -722,7 +722,7 @@
         plugins: {
           legend: {
             labels: {
-              color: '#d2d2d2',
+              color: '#e8e8e8',
               font: { family: "'JetBrains Mono', monospace", size: 11, weight: 600 },
               boxWidth: 12,
               boxHeight: 2,
@@ -736,7 +736,7 @@
             titleFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 700 },
             bodyFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 500 },
             titleColor: '#fff',
-            bodyColor: '#ededed',
+            bodyColor: '#f5f5f5',
             padding: 10,
             callbacks: {
               label: (context) => {
@@ -1211,7 +1211,7 @@
     flex: 1;
     background: #0d0d0d;
     border: 1px solid #1a1a1a;
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
     padding: 12px 14px;
@@ -1287,7 +1287,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 22px;
     font-weight: 700;
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
     letter-spacing: -0.02em;
     line-height: 1;
     margin-bottom: 6px;
@@ -1344,7 +1344,7 @@
     padding: 0.4rem 0.6rem;
     border-radius: 4px;
     text-decoration: none;
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.7rem;
     transition: background 0.1s;
@@ -1424,7 +1424,7 @@
 
   .page-btn:hover:not(:disabled) {
     background: #1a1a1a;
-    color: #ccc;
+    color: var(--term-text-2, #d8d8d8);
     border-color: #333;
   }
 
@@ -1458,14 +1458,14 @@
     font-size: var(--term-type-label);
     font-weight: 600;
     letter-spacing: 0.1em;
-    color: #999;
+    color: var(--term-text-4, #bcbcbc);
     text-transform: uppercase;
   }
 
   .metric-sub {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
     margin-top: 4px;
   }
 
@@ -1493,7 +1493,7 @@
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.1em;
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
   }
 
   .section-sub {
@@ -1524,7 +1524,7 @@
     margin-right: 4px;
   }
   .hist-toggle:hover {
-    color: #888;
+    color: var(--term-text-4, #bcbcbc);
     border-color: #444;
   }
   .hist-toggle.active {
@@ -1646,7 +1646,7 @@
     padding: 9px 16px;
     font-size: 13px;
     border-bottom: 1px solid #111;
-    color: #aaa;
+    color: var(--term-text-3, #c8c8c8);
     vertical-align: middle;
   }
 

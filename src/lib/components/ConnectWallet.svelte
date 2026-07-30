@@ -1244,7 +1244,7 @@
     background: transparent;
     border: none;
     border-left: 3px solid transparent;
-    color: #e0e0e0;
+    color: var(--term-text-body, #e8e8e8);
     cursor: pointer;
     transition: all 0.12s;
     text-align: left;
@@ -1428,7 +1428,7 @@
     border-radius: 999px;
     background: #171717;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    color: #c8c8c8;
+    color: var(--term-text-body, #e8e8e8);
     cursor: pointer;
   }
 
@@ -1582,7 +1582,7 @@
     flex-direction: column;
     gap: 0.4rem;
     margin-bottom: 0.75rem;
-    color: #b8b8b8;
+    color: var(--term-text-2, #d8d8d8);
     font-size: 0.74rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -1670,7 +1670,7 @@
   }
 
   .cw-wallet-item.unavailable {
-    color: #9e9e9e;
+    color: var(--term-text-4, #bcbcbc);
   }
 
   .cw-wallet-item.connected {
@@ -1709,7 +1709,7 @@
     gap: 0.8rem;
     align-items: center;
     margin-bottom: 0.75rem;
-    color: #d0d0d0;
+    color: var(--term-text-body, #e8e8e8);
     font-size: 0.82rem;
     font-weight: 700;
   }

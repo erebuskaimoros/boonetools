@@ -286,7 +286,7 @@
             borderColor: 'rgba(148, 163, 184, 0.16)'
           },
           text: {
-            color: '#ededed',
+            color: '#f5f5f5',
             size: 12,
             family: 'JetBrains Mono, monospace',
             weight: 500
@@ -294,13 +294,13 @@
         },
         priceMark: {
           high: {
-            color: '#d2d2d2',
+            color: '#e8e8e8',
             textSize: 11,
             textFamily: 'JetBrains Mono, monospace',
             textWeight: '600'
           },
           low: {
-            color: '#d2d2d2',
+            color: '#e8e8e8',
             textSize: 11,
             textFamily: 'JetBrains Mono, monospace',
             textWeight: '600'
@@ -332,7 +332,7 @@
       indicator: {
         tooltip: {
           text: {
-            color: '#ededed',
+            color: '#f5f5f5',
             size: 12,
             family: 'JetBrains Mono, monospace',
             weight: 500
@@ -343,7 +343,7 @@
         axisLine: { color: 'rgba(148, 163, 184, 0.18)' },
         tickLine: { color: 'rgba(148, 163, 184, 0.18)' },
         tickText: {
-          color: '#b8b8b8',
+          color: '#d8d8d8',
           size: 11,
           family: 'JetBrains Mono, monospace',
           weight: 500
@@ -353,7 +353,7 @@
         axisLine: { color: 'rgba(148, 163, 184, 0.18)' },
         tickLine: { color: 'rgba(148, 163, 184, 0.18)' },
         tickText: {
-          color: '#b8b8b8',
+          color: '#d8d8d8',
           size: 11,
           family: 'JetBrains Mono, monospace',
           weight: 500
