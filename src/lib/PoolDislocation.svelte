@@ -3,6 +3,7 @@
   import { fetchPoolDislocation, fetchPoolDislocationSeries } from './pool-dislocation/api.js';
   import {
     POOL_DISLOCATION_CHART_WINDOWS,
+    POOL_DISLOCATION_ROLLING_MIN_COVERAGE,
     POOL_DISLOCATION_ROLLING_WINDOWS,
     POOL_DISLOCATION_TABLE_COLUMNS,
     buildPoolDislocationLinePath,
@@ -141,11 +142,17 @@
     binancePath: makeLinePath(series.binancePoints, 'rollingAverage', yMin, yMax)
   }));
   $: hoverPoint = chartPoints.find((point) => point.observedAt === chartHoverPoint?.observedAt) || null;
-  $: hoverRollingAverages = activeRollingAverageSeries.map((series) => ({
-    ...series,
-    oracleAverage: series.oraclePoints.find((point) => point.observedAt === hoverPoint?.observedAt)?.rollingAverage ?? null,
-    binanceAverage: series.binancePoints.find((point) => point.observedAt === hoverPoint?.observedAt)?.rollingAverage ?? null
-  }));
+  $: hoverRollingAverages = activeRollingAverageSeries.map((series) => {
+    const oraclePoint = series.oraclePoints.find((point) => point.observedAt === hoverPoint?.observedAt) || null;
+    const binancePoint = series.binancePoints.find((point) => point.observedAt === hoverPoint?.observedAt) || null;
+    return {
+      ...series,
+      oraclePoint,
+      binancePoint,
+      oracleAverage: oraclePoint?.rollingAverage ?? null,
+      binanceAverage: binancePoint?.rollingAverage ?? null
+    };
+  });
   $: xTicks = Array.from({ length: 5 }, (_, index) => ({
     observedAt: new Date(chartStartMs + ((index / 4) * chartDurationMs)).toISOString(),
     index
@@ -274,6 +281,15 @@
     const maximumFractionDigits = absolute >= 100 ? 0 : absolute >= 10 ? 1 : 2;
     const sign = signed && basisPoints > 0 ? '+' : '';
     return `${sign}${new Intl.NumberFormat('en-US', { maximumFractionDigits }).format(basisPoints)} BPS`;
+  }
+
+  function formatRollingCoverage(point) {
+    const observedSamples = Number(point?.observedSamples);
+    const expectedSamples = Number(point?.expectedSamples);
+    const coverage = Number(point?.coverage);
+    if (!Number.isFinite(observedSamples) || !Number.isFinite(expectedSamples) || !Number.isFinite(coverage)) return '—';
+    const percent = coverage >= 0.9995 ? '100' : (coverage * 100).toFixed(1);
+    return `${percent}% · ${observedSamples}/${expectedSamples}`;
   }
 
   function formatPrice(value) {
@@ -562,7 +578,7 @@
             <button
               class:active={selectedRollingAverageIds.includes(window.id)}
               aria-pressed={selectedRollingAverageIds.includes(window.id)}
-              title={`Toggle ${window.label} signed trailing average`}
+              title={`Toggle ${window.label} signed trailing average (minimum ${Math.round(POOL_DISLOCATION_ROLLING_MIN_COVERAGE * 100)}% exact-point coverage)`}
               on:click={() => toggleRollingAverage(window.id)}
             ><i>[{window.label}]</i></button>
           {/each}
@@ -577,7 +593,7 @@
           {#if selectedPool?.oracleSymbol && sourceMode !== 'binance'}<span class="oracle-key"><i></i>TC / ORACLE</span>{/if}
           {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle'}<span class="binance-key"><i></i>TC / BINANCE</span>{/if}
           {#each POOL_DISLOCATION_ROLLING_WINDOWS.filter((window) => selectedRollingAverageIds.includes(window.id)) as window}
-            <span class={`average-key avg-${window.id}`}><i></i>{window.label} AVG</span>
+            <span class={`average-key avg-${window.id}`}><i></i>{window.label} SIGNED AVG · ≥{Math.round(POOL_DISLOCATION_ROLLING_MIN_COVERAGE * 100)}%</span>
           {/each}
           <span class="band-key"><i></i>±{formatBasisPoints(threshold, { signed: false })} WATCH BAND</span>
         </div>
@@ -667,10 +683,16 @@
             <div><span>VS BINANCE</span><b class={dislocationState(hoverPoint.binanceDislocation, threshold)}>{formatBasisPoints(hoverPoint.binanceDislocation)}</b></div>
             {#each hoverRollingAverages as average}
               {#if selectedPool?.oracleSymbol && sourceMode !== 'binance'}
-                <div><span>{average.label} ORACLE AVG</span><b>{formatBasisPoints(average.oracleAverage)}</b></div>
+                <div>
+                  <span>{average.label} ORACLE AVG <small class:partial={average.oraclePoint?.coverage < 1}>{formatRollingCoverage(average.oraclePoint)}</small></span>
+                  <b>{formatBasisPoints(average.oracleAverage)}</b>
+                </div>
               {/if}
               {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle'}
-                <div><span>{average.label} BINANCE AVG</span><b>{formatBasisPoints(average.binanceAverage)}</b></div>
+                <div>
+                  <span>{average.label} BINANCE AVG <small class:partial={average.binancePoint?.coverage < 1}>{formatRollingCoverage(average.binancePoint)}</small></span>
+                  <b>{formatBasisPoints(average.binanceAverage)}</b>
+                </div>
               {/if}
             {/each}
           </div>
@@ -946,6 +968,8 @@
   .chart-tooltip > strong { display: block; margin-bottom: 7px; padding-bottom: 7px; border-bottom: 1px solid var(--term-border-faint, #111); color: var(--term-text, #e8e8e8); font-size: 9px; letter-spacing: 0.04em; }
   .chart-tooltip > div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; }
   .chart-tooltip span { color: var(--term-text-5, #444); letter-spacing: 0.06em; }
+  .chart-tooltip span small { display: block; margin-top: 2px; color: var(--term-text-6, #333); font: inherit; letter-spacing: 0.03em; }
+  .chart-tooltip span small.partial { color: var(--term-amber, #d4a017); }
   .chart-tooltip b { color: var(--term-text-2, #888); font-weight: 700; }
   .chart-status { position: absolute; inset: 54px 17px 35px; display: grid; place-items: center; background: rgba(5, 5, 5, 0.74); color: var(--term-text-4, #555); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 9px; letter-spacing: 0.08em; text-align: center; }
   .chart-status.error { color: var(--term-error, #dc3545); }

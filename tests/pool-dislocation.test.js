@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   POOL_DISLOCATION_CHART_WINDOWS,
+  POOL_DISLOCATION_ROLLING_MIN_COVERAGE,
   POOL_DISLOCATION_ROLLING_WINDOWS,
   POOL_DISLOCATION_TABLE_COLUMNS,
   buildPoolDislocationLinePath,
@@ -22,7 +23,7 @@ import {
   summarizePoolDislocation
 } from '../src/lib/pool-dislocation/model.js';
 
-test('chart rolling averages require complete exact five-minute windows', () => {
+test('chart rolling averages require elapsed windows and minimum exact-point coverage', () => {
   const oneHour = POOL_DISLOCATION_ROLLING_WINDOWS.find((window) => window.id === '1h');
   const startMs = Date.parse('2026-07-29T10:00:00Z');
   const points = Array.from({ length: 20 }, (_, index) => ({
@@ -44,6 +45,9 @@ test('chart rolling averages require complete exact five-minute windows', () => 
   ]);
   assert.equal(regular[11].rollingAverage, null);
   assert.equal(regular[12].rollingAverage, 6);
+  assert.equal(regular[12].observedSamples, 13);
+  assert.equal(regular[12].expectedSamples, 13);
+  assert.equal(regular[12].coverage, 1);
   assert.equal(regular[13].rollingAverage, 7);
   assert.equal(zeroes[12].rollingAverage, 0);
 
@@ -64,6 +68,24 @@ test('chart rolling averages require complete exact five-minute windows', () => 
     { durationMs: oneHour.durationMs }
   );
   assert.equal(irregular[12].rollingAverage, null);
+
+  const oneDay = POOL_DISLOCATION_ROLLING_WINDOWS.find((window) => window.id === '1d');
+  const oneDayPoints = Array.from({ length: 300 }, (_, index) => ({
+    observedAt: new Date(startMs + (index * 5 * 60 * 1000)).toISOString(),
+    oracleDislocation: index === 120 || index === 180 ? null : 10,
+    binanceDislocation: index < 15 ? null : 4
+  }));
+  const sparseOracle = buildPoolDislocationRollingAverage(oneDayPoints, 'oracleDislocation', oneDay);
+  const lowCoverageBinance = buildPoolDislocationRollingAverage(oneDayPoints, 'binanceDislocation', oneDay);
+
+  assert.equal(POOL_DISLOCATION_ROLLING_MIN_COVERAGE, 0.95);
+  assert.equal(sparseOracle[288].observedSamples, 287);
+  assert.equal(sparseOracle[288].expectedSamples, 289);
+  assert.equal(sparseOracle[288].rollingAverage, 10);
+  assert.equal(lowCoverageBinance[288].observedSamples, 274);
+  assert.equal(lowCoverageBinance[288].rollingAverage, null);
+  assert.equal(lowCoverageBinance[299].observedSamples, 285);
+  assert.equal(lowCoverageBinance[299].rollingAverage, 4);
 });
 
 test('chart paths preserve missing reference values as gaps instead of zeroes', () => {

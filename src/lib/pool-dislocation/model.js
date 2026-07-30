@@ -16,6 +16,8 @@ export const POOL_DISLOCATION_ROLLING_WINDOWS = Object.freeze([
   { id: '1d', label: '1D', durationMs: 24 * HOUR_MS }
 ]);
 
+export const POOL_DISLOCATION_ROLLING_MIN_COVERAGE = 0.95;
+
 export const DISLOCATION_WINDOWS = Object.freeze([
   { id: '1h', label: '1H', durationMs: HOUR_MS },
   { id: '4h', label: '4H', durationMs: 4 * HOUR_MS },
@@ -161,34 +163,51 @@ export function buildPoolDislocationRollingAverage(points = [], field, options =
     sampleIntervalMs,
     finiteNumber(options.durationMs) ?? HOUR_MS
   );
+  const minimumCoverage = Math.min(
+    1,
+    Math.max(0, finiteNumber(options.minimumCoverage) ?? POOL_DISLOCATION_ROLLING_MIN_COVERAGE)
+  );
   const expectedSamples = Math.floor(durationMs / sampleIntervalMs) + 1;
+  const requiredSamples = Math.ceil(expectedSamples * minimumCoverage);
   const orderedPoints = [...(Array.isArray(points) ? points : [])]
     .filter((point) => Number.isFinite(Date.parse(point?.observedAt || '')))
     .sort((left, right) => Date.parse(left.observedAt) - Date.parse(right.observedAt));
+  const firstObservedMs = Date.parse(orderedPoints[0]?.observedAt || '');
 
   return orderedPoints.map((point, index) => {
-    const windowPoints = orderedPoints.slice(Math.max(0, index - expectedSamples + 1), index + 1);
-    const windowStartMs = Date.parse(point.observedAt) - durationMs;
+    const observedMs = Date.parse(point.observedAt);
+    const windowStartMs = observedMs - durationMs;
+    const occupiedSlots = new Set();
+    let observedSamples = 0;
     let total = 0;
-    let complete = windowPoints.length === expectedSamples
-      && Date.parse(windowPoints[0]?.observedAt || '') === windowStartMs;
 
-    for (let windowIndex = 0; complete && windowIndex < windowPoints.length; windowIndex += 1) {
-      const value = finiteNumber(windowPoints[windowIndex]?.[field]);
-      const timestamp = Date.parse(windowPoints[windowIndex]?.observedAt || '');
-      const previousTimestamp = windowIndex > 0
-        ? Date.parse(windowPoints[windowIndex - 1]?.observedAt || '')
-        : null;
-      if (value === null || (previousTimestamp !== null && timestamp - previousTimestamp !== sampleIntervalMs)) {
-        complete = false;
-      } else {
-        total += value;
-      }
+    for (let windowIndex = index; windowIndex >= 0; windowIndex -= 1) {
+      const windowPoint = orderedPoints[windowIndex];
+      const timestamp = Date.parse(windowPoint?.observedAt || '');
+      if (timestamp < windowStartMs) break;
+      const slotOffsetMs = timestamp - windowStartMs;
+      if (slotOffsetMs < 0 || slotOffsetMs > durationMs || slotOffsetMs % sampleIntervalMs !== 0) continue;
+      const slotIndex = slotOffsetMs / sampleIntervalMs;
+      if (occupiedSlots.has(slotIndex)) continue;
+      occupiedSlots.add(slotIndex);
+      const value = finiteNumber(windowPoint?.[field]);
+      if (value === null) continue;
+      observedSamples += 1;
+      total += value;
     }
+
+    const windowReady = Number.isFinite(firstObservedMs) && firstObservedMs <= windowStartMs;
+    const coverage = observedSamples / expectedSamples;
+    const available = windowReady && observedSamples >= requiredSamples;
 
     return {
       observedAt: point.observedAt,
-      rollingAverage: complete ? total / expectedSamples : null
+      rollingAverage: available && observedSamples > 0 ? total / observedSamples : null,
+      observedSamples,
+      expectedSamples,
+      coverage,
+      minimumCoverage,
+      windowReady
     };
   });
 }
