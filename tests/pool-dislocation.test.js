@@ -132,17 +132,29 @@ test('chart scale follows the visible points and selected reference source', () 
 
   assert.ok(quiet.min < -0.2 && quiet.max > 0.5);
   assert.ok((quiet.max - 0.5) / (quiet.max - quiet.min) < 0.05);
-  assert.equal(quiet.min, -quiet.max);
-  assert.ok(volatile.min < -8.2 && volatile.max > 8.2);
-  assert.equal(volatile.min, -volatile.max);
+  assert.notEqual(quiet.min, -quiet.max);
+  assert.ok(volatile.min < -8.2 && volatile.max > 0);
+  assert.ok(volatile.max < Math.abs(volatile.min) * 0.1);
   assert.ok(binanceOnly.max > 0.5);
   assert.ok(binanceOnly.max - binanceOnly.min < volatile.max - volatile.min);
   assert.deepEqual(differentThreshold, quiet);
   assert.ok(withMinimumBand.min < -0.1 && withMinimumBand.max > 0.1);
-  assert.equal(volatile.ticks.length, 7);
-  assert.equal(volatile.ticks[3], 0);
-  assert.deepEqual(volatile.ticks.slice(0, 3), volatile.ticks.slice(4).reverse().map((tick) => -tick));
+  assert.ok(volatile.ticks.includes(0));
   assert.ok(volatile.ticks.every((tick, index) => index === 0 || tick < volatile.ticks[index - 1]));
+});
+
+test('chart scale preserves equal pixels per BPS without centering zero', () => {
+  const scale = buildPoolDislocationChartScale([
+    { oracleDislocation: -0.9, binanceDislocation: 0.1 },
+    { oracleDislocation: 3.1, binanceDislocation: 0.2 }
+  ], { sourceMode: 'oracle', threshold: 1, minimumBand: 0.1 });
+  const chart = { top: 30, bottom: 456, min: scale.min, max: scale.max };
+  const positiveTwentyBps = projectPoolDislocationChartY(0.2, chart);
+  const zero = projectPoolDislocationChartY(0, chart);
+  const negativeTwentyBps = projectPoolDislocationChartY(-0.2, chart);
+
+  assert.ok(zero > (chart.top + chart.bottom) / 2);
+  assert.ok(Math.abs((zero - positiveTwentyBps) - (negativeTwentyBps - zero)) < 1e-9);
 });
 
 test('chart guide projection stays pegged to its value when the dynamic scale changes', () => {

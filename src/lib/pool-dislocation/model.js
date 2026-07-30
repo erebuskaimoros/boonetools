@@ -278,15 +278,26 @@ export function buildPoolDislocationChartScale(points = [], options = {}) {
   if (values.length === 0) values.push(-threshold, threshold);
   else values.push(0);
   if (minimumBand > 0) values.push(-minimumBand, minimumBand);
-  const dataMagnitude = Math.max(0.05, ...values.map((value) => Math.abs(value)));
-  const padding = Math.max(dataMagnitude * 0.04, 0.0025);
-  const max = dataMagnitude + padding;
-  const min = -max;
+  let dataMin = Math.min(...values);
+  let dataMax = Math.max(...values);
+  if (dataMax === dataMin) {
+    const minimumSpan = Math.max(0.1, Math.abs(dataMax) * 0.08);
+    const midpoint = (dataMin + dataMax) / 2;
+    dataMin = midpoint - (minimumSpan / 2);
+    dataMax = midpoint + (minimumSpan / 2);
+  }
+  const padding = Math.max((dataMax - dataMin) * 0.04, 0.0025);
+  const min = dataMin - padding;
+  const max = dataMax + padding;
   const step = (max - min) / 6;
   const ticks = Array.from({ length: 7 }, (_, index) => {
     const value = max - (step * index);
     return Math.abs(value) < step / 1_000_000 ? 0 : Number(value.toPrecision(12));
   });
+  if (min < 0 && max > 0 && !ticks.some((value) => value === 0)) {
+    ticks.push(0);
+    ticks.sort((left, right) => right - left);
+  }
 
   return { min, max, step, ticks };
 }
