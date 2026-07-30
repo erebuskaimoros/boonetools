@@ -24,6 +24,7 @@
     inventoryDisplay,
     normalizeReserveEvent as normalizeReservePayment,
     parseCsv,
+    pickAccruedValueRows,
     pickAggRows,
     pickPaidRows,
     staticArtifactLabel,
@@ -206,6 +207,8 @@
 
   let collectedCanvas;
   let collectedChart;
+  let accruedValueCanvas;
+  let accruedValueChart;
   let paymentCanvas;
   let paymentChart;
   let generatedFeesCanvas;
@@ -214,9 +217,9 @@
   // Two independent per-chart toggles: bucket size (daily default, weekly
   // option) and view (per-bucket bars vs cumulative line). The visible time
   // range is set directly on the chart by dragging or scrolling to zoom.
-  let granularity = { collected: 'daily', paid: 'daily', generated: 'daily' };
-  let view = { collected: 'bars', paid: 'bars', generated: 'bars' };
-  let zoomed = { collected: false, paid: false, generated: false };
+  let granularity = { accrued: 'daily', collected: 'daily', paid: 'daily', generated: 'daily' };
+  let view = { accrued: 'bars', collected: 'bars', paid: 'bars', generated: 'bars' };
+  let zoomed = { accrued: false, collected: false, paid: false, generated: false };
 
   function setGranularity(key, value) {
     granularity = { ...granularity, [key]: value };
@@ -229,6 +232,7 @@
   }
 
   const chartByKey = () => ({
+    accrued: accruedValueChart,
     collected: collectedChart,
     paid: paymentChart,
     generated: generatedFeesChart
@@ -315,6 +319,10 @@
   $: inflowOpeningUsd = Number(inflowMeta?.baselineInventoryUsd || 0);
   $: inflowNetNewUsd = Number(inflowMeta?.netNewInflowUsd || 0);
   $: inflowDayCount = Number(inflowMeta?.dayCount || 0);
+  $: totalAccruedValueUsd = totalInflowUsd + totalGeneratedFeeUsd;
+  $: accruedValueLoading =
+    (inflowsLoading && !inflowRows.length) ||
+    (generatedFeesLoading && !generatedFeeRows.length);
 
   $: collectorInventories = Object.fromEntries(
     collectors.map((collector) => [
@@ -375,6 +383,24 @@
     .slice(0, 8);
   $: baseRuneRatePerSecond = targetRatePerSecond(configs.base, 'rune');
 
+  function renderAccruedValueChart(pick, chartView) {
+    accruedValueChart = renderSeriesChart(accruedValueCanvas, accruedValueChart, {
+      zoomKey: 'accrued',
+      rows: pick.rows,
+      grain: pick.grain,
+      view: chartView,
+      colors: APP_LAYER_SERIES.accrued,
+      valueField: 'accrued_value_usd',
+      cumulativeField: 'cumulative_usd',
+      barLabel: 'Accrued TC value (01 + 03)',
+      cumulativeLabel: 'Cumulative accrued TC value (01 + 03)',
+      afterBody: (row) => [
+        `01 this bucket: ${usd2.format(row.inflow_usd || 0)}`,
+        `03 this bucket: ${usd2.format(row.liquidity_fee_usd || 0)}`
+      ]
+    });
+  }
+
   function renderCollectedChart(pick, chartView) {
     collectedChart = renderSeriesChart(collectedCanvas, collectedChart, {
       zoomKey: 'collected',
@@ -429,10 +455,13 @@
     });
   }
 
+  $: accruedValuePick = pickAccruedValueRows(inflows, generatedFees, granularity.accrued);
   $: collectedPick = pickAggRows(inflows, granularity.collected);
   $: paidPick = pickPaidRows(reserveEvents, weeklyRows, granularity.paid, reserveDailyRows);
   $: generatedPick = pickAggRows(generatedFees, granularity.generated);
 
+  $: if (accruedValueCanvas && accruedValuePick.rows.length)
+    renderAccruedValueChart(accruedValuePick, view.accrued);
   $: if (collectedCanvas && collectedPick.rows.length) renderCollectedChart(collectedPick, view.collected);
   $: if (paymentCanvas && paidPick.rows.length) renderPaymentChart(paidPick, view.paid);
   $: if (generatedFeesCanvas && generatedPick.rows.length)
@@ -470,6 +499,7 @@
     return () => {
       mounted = false;
       if (refreshTimer) window.clearInterval(refreshTimer);
+      accruedValueChart?.destroy();
       collectedChart?.destroy();
       paymentChart?.destroy();
       generatedFeesChart?.destroy();
@@ -933,6 +963,53 @@
       <small class="metric-foot">{usd2.format(upstreamBaseBoundUsd)} upstream · {usd2.format(baseRoutableInventoryUsd)} in Base collector</small>
     </article>
   </div>
+
+  <!-- ============ ACCRUED TC VALUE ============ -->
+  <section class="block" id="chart-accrued-value">
+    <div class="block-head">
+      <div class="block-title">
+        <span class="title-marker">▌</span>
+        <h2>accrued tc value · 01 + 03</h2>
+      </div>
+      <div class="chart-controls green-t">
+        <div class="mode-toggle">
+          <button class:active={granularity.accrued === 'daily'} on:click={() => setGranularity('accrued', 'daily')}>[daily]</button>
+          <button class:active={granularity.accrued === 'weekly'} on:click={() => setGranularity('accrued', 'weekly')}>[weekly]</button>
+        </div>
+        <span class="ctrl-div">·</span>
+        <div class="mode-toggle">
+          <button class:active={view.accrued === 'bars'} on:click={() => setView('accrued', 'bars')}>[bars]</button>
+          <button class:active={view.accrued === 'cumulative'} on:click={() => setView('accrued', 'cumulative')}>[cumul]</button>
+        </div>
+        <span class="ctrl-div">·</span>
+        <span class="zoom-hint">drag to zoom</span>
+        <button class="zoom-reset" on:click={() => resetZoom('accrued')} disabled={!zoomed.accrued}>[reset]</button>
+      </div>
+    </div>
+    <p class="block-lede">
+      Each bar combines newly accrued Base Layer earnings from <b class="k-collected">01</b>
+      with non-overlapping TC liquidity fees from <b class="k-generated">03</b> in the same UTC
+      bucket. Current cumulative accrued value: {accruedValueLoading ? '—' : usd2.format(totalAccruedValueUsd)}.
+      This is the accrual-basis companion to Σ realized benefit (02 + 03); 02 is not added here
+      because it is the later payment of value already counted in 01. Cumulative 01 includes its
+      opening base-layer-bound inventory.
+    </p>
+    <div class="chart-frame">
+      {#if accruedValueLoading}
+        <div class="loading-block">
+          <span class="loading-marker">▓░░░░</span>
+          <span>loading accrued TC value sources</span>
+        </div>
+      {:else if !accruedValuePick.rows.length}
+        <div class="loading-block">
+          <span class="loading-marker">░░░░░</span>
+          <span>no aligned 01 + 03 rows available</span>
+        </div>
+      {:else}
+        <canvas bind:this={accruedValueCanvas} aria-label="Daily, weekly, and cumulative accrued THORChain value from 01 plus 03"></canvas>
+      {/if}
+    </div>
+  </section>
 
   <!-- ============ 01 COLLECTED ============ -->
   <section class="block" id="chart-collected">
@@ -2868,6 +2945,10 @@
 
     .block-head {
       flex-wrap: wrap;
+    }
+
+    .chart-controls {
+      width: 100%;
     }
 
     .chart-frame {

@@ -6,6 +6,7 @@ import {
   fillBucketGaps,
   getTargetsForConfig,
   parseCsv,
+  pickAccruedValueRows,
   pickPaidRows,
   summarizeCollectorInventory
 } from '../src/lib/app-layer/model.js';
@@ -65,6 +66,57 @@ test('app-layer chart model keeps scheduler gaps visible', () => {
     { bucket_start: '2026-01-02', payment_usd: 0, cumulative_usd: 5 },
     { bucket_start: '2026-01-03', payment_usd: 2, cumulative_usd: 7 }
   ]);
+});
+
+test('accrued TC value aligns 01 and 03 without double-counting 02', () => {
+  const inflows = {
+    daily: [
+      { day_start: '2026-04-30', inflow_usd: 10, cumulative_usd: 110 },
+      { day_start: '2026-05-02', inflow_usd: 5, cumulative_usd: 115 }
+    ]
+  };
+  const generatedFees = {
+    daily: [
+      { day_start: '2026-04-29', liquidity_fee_usd: 1, cumulative_usd: 1 },
+      { day_start: '2026-04-30', liquidity_fee_usd: 2, cumulative_usd: 3 },
+      { day_start: '2026-05-01', liquidity_fee_usd: 3, cumulative_usd: 6 },
+      { day_start: '2026-05-02', liquidity_fee_usd: 4, cumulative_usd: 10 }
+    ]
+  };
+
+  assert.deepEqual(pickAccruedValueRows(inflows, generatedFees, 'daily'), {
+    grain: 'daily',
+    rows: [
+      {
+        bucket_start: '2026-04-29',
+        accrued_value_usd: 1,
+        cumulative_usd: 1,
+        inflow_usd: 0,
+        liquidity_fee_usd: 1
+      },
+      {
+        bucket_start: '2026-04-30',
+        accrued_value_usd: 12,
+        cumulative_usd: 113,
+        inflow_usd: 10,
+        liquidity_fee_usd: 2
+      },
+      {
+        bucket_start: '2026-05-01',
+        accrued_value_usd: 3,
+        cumulative_usd: 116,
+        inflow_usd: 0,
+        liquidity_fee_usd: 3
+      },
+      {
+        bucket_start: '2026-05-02',
+        accrued_value_usd: 9,
+        cumulative_usd: 125,
+        inflow_usd: 5,
+        liquidity_fee_usd: 4
+      }
+    ]
+  });
 });
 
 test('app-layer inventory classification uses one pricing and route model', () => {

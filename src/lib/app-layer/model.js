@@ -68,6 +68,56 @@ export function pickAggRows(source, grain) {
   return { rows: normalizeBuckets(weekly, 'weekly'), grain: 'weekly' };
 }
 
+export function pickAccruedValueRows(inflows, generatedFees, grain) {
+  const availableFor = (source, candidate) => source?.[candidate]?.length;
+  let selectedGrain = grain;
+
+  if (!availableFor(inflows, selectedGrain) || !availableFor(generatedFees, selectedGrain)) {
+    selectedGrain = availableFor(inflows, 'daily') && availableFor(generatedFees, 'daily')
+      ? 'daily'
+      : 'weekly';
+  }
+
+  if (!availableFor(inflows, selectedGrain) || !availableFor(generatedFees, selectedGrain)) {
+    return { rows: [], grain: selectedGrain };
+  }
+
+  const inflowRows = normalizeBuckets(inflows[selectedGrain], selectedGrain);
+  const generatedFeeRows = normalizeBuckets(generatedFees[selectedGrain], selectedGrain);
+  const inflowsByBucket = new Map(inflowRows.map((row) => [row.bucket_start, row]));
+  const generatedFeesByBucket = new Map(generatedFeeRows.map((row) => [row.bucket_start, row]));
+  const bucketStarts = [...new Set([
+    ...inflowsByBucket.keys(),
+    ...generatedFeesByBucket.keys()
+  ])].sort();
+  let inflowCumulativeUsd = 0;
+  let generatedFeeCumulativeUsd = 0;
+
+  const rows = bucketStarts.map((bucketStart) => {
+    const inflow = inflowsByBucket.get(bucketStart);
+    const generatedFee = generatedFeesByBucket.get(bucketStart);
+    const inflowUsd = Number(inflow?.inflow_usd) || 0;
+    const generatedFeeUsd = Number(generatedFee?.liquidity_fee_usd) || 0;
+    const nextInflowCumulativeUsd = Number(inflow?.cumulative_usd);
+    const nextGeneratedFeeCumulativeUsd = Number(generatedFee?.cumulative_usd);
+
+    if (Number.isFinite(nextInflowCumulativeUsd)) inflowCumulativeUsd = nextInflowCumulativeUsd;
+    if (Number.isFinite(nextGeneratedFeeCumulativeUsd)) {
+      generatedFeeCumulativeUsd = nextGeneratedFeeCumulativeUsd;
+    }
+
+    return {
+      bucket_start: bucketStart,
+      accrued_value_usd: inflowUsd + generatedFeeUsd,
+      cumulative_usd: inflowCumulativeUsd + generatedFeeCumulativeUsd,
+      inflow_usd: inflowUsd,
+      liquidity_fee_usd: generatedFeeUsd
+    };
+  });
+
+  return { rows, grain: selectedGrain };
+}
+
 export function bucketReserveEvents(events, grain) {
   const startOf = grain === 'weekly'
     ? (date) => startOfUtcWeek(date)

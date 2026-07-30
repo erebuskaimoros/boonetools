@@ -28,6 +28,12 @@ const signedNumber4 = new Intl.NumberFormat('en-US', {
 });
 
 export const APP_LAYER_SERIES = Object.freeze({
+  accrued: {
+    mark: '#00cc66',
+    fill: 'rgba(0, 204, 102, 0.5)',
+    faint: 'rgba(0, 204, 102, 0.09)',
+    chrome: TERMINAL_CHART_PALETTE.accent
+  },
   collected: {
     mark: '#b8860b',
     fill: 'rgba(184, 134, 11, 0.5)',
