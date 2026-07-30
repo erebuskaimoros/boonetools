@@ -9,7 +9,7 @@ Completed a site-wide readability overhaul across every routed BooneTools page,
 including both briefing reports and the development-only Limit Orders surface.
 The shared design system, page-scoped styles, canvas charts, SVG charts, and
 mobile layouts now use brighter text and explicit size floors while preserving
-the terminal aesthetic.
+the terminal aesthetic. The verified frontend release is live on BooneTools.
 
 ## Work Done
 
@@ -34,6 +34,10 @@ the terminal aesthetic.
   indices and glyphs rather than essential content.
 - Verified 165/165 frontend tests, zero project-check errors, a clean production
   build, and a clean whitespace diff.
+- Deployed frontend release
+  `3032b363ea4d3b3bb9df10e687c7ad17b130ea7b` through the guarded atomic release
+  workflow and verified the homepage, Status, TC Fee, Pool Dislocation, App
+  Layer, and Rapid Swaps routes in production.
 
 ## Discoveries
 
@@ -77,14 +81,13 @@ the terminal aesthetic.
 
 ## In Progress
 
-Production frontend deployment is pending the required clean, CI-green `main`
-revision. The implementation and local verification are complete.
+None - the readability release is deployed and verified in production.
 
 ## Next Steps
 
-- [ ] Push the validated session revision and wait for GitHub verification.
-- [ ] Deploy the exact green revision with the guarded frontend release script.
-- [ ] Verify the production homepage, Status, TC Fee, Pool Dislocation, and App
+- [x] Push the validated session revision and wait for GitHub verification.
+- [x] Deploy the exact green revision with the guarded frontend release script.
+- [x] Verify the production homepage, Status, TC Fee, Pool Dislocation, and App
       Layer routes serve the new hashed assets and readable styles.
 - [ ] Monitor user feedback for any dense data surface that would benefit from a
       user-selectable compact/comfortable density control.
