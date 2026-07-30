@@ -51,6 +51,23 @@ const AVAILABLE_POOLS = [
 test('five-minute buckets and reference mappings are exact and auditable', () => {
   assert.equal(floorToFiveMinuteBucket('2026-07-29T12:07:59.999Z'), '2026-07-29T12:05:00.000Z');
   assert.deepEqual(referenceMappingForAsset('btc.btc'), { oracle: 'BTC', binance: 'BTCUSDT' });
+  assert.deepEqual(
+    referenceMappingForAsset('ETH.WBTC-0X2260FAC5E5542A773AA44FBCFEDF7C193BC2C599'),
+    { oracle: 'BTC', binance: 'WBTCUSDT' }
+  );
+  for (const asset of [
+    'AVAX.SOL-0XFE6B19286885A4F7F55ADAD09C3CD1F906D2478F',
+    'BSC.BTCB-0X7130D2A12B9BCBFAE4F2634D864A1EE1CE3EAD9C',
+    'BSC.ETH-0X2170ED0880AC9A755FD29B2688956BD959F933F8',
+    'BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D'
+  ]) {
+    assert.equal(referenceMappingForAsset(asset).binance, null);
+  }
+  assert.deepEqual(binanceSymbolsForPools([
+    { asset: 'ETH.WBTC-0X2260FAC5E5542A773AA44FBCFEDF7C193BC2C599' },
+    { asset: 'BSC.BTCB-0X7130D2A12B9BCBFAE4F2634D864A1EE1CE3EAD9C' },
+    { asset: 'AVAX.SOL-0XFE6B19286885A4F7F55ADAD09C3CD1F906D2478F' }
+  ]), ['WBTCUSDT']);
   assert.deepEqual(referenceMappingForAsset('ETH.UNKNOWN-0XABC'), { oracle: null, binance: null });
   assert.deepEqual(binanceSymbolsForPools(AVAILABLE_POOLS), ['BTCUSDT', 'ETHUSDT']);
 });
@@ -397,6 +414,7 @@ test('migration, job registry, timer, and deploy encode the production contract'
   const [
     migration,
     provenanceMigration,
+    referenceCorrectionMigration,
     registry,
     service,
     backfillService,
@@ -407,6 +425,7 @@ test('migration, job registry, timer, and deploy encode the production contract'
   ] = await Promise.all([
     readFile(new URL('../migrations/031_pool_dislocation.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/033_pool_dislocation_provenance.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/034_pool_dislocation_exact_binance_markets.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-dislocation.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-dislocation-backfill.service', import.meta.url), 'utf8'),
@@ -418,6 +437,9 @@ test('migration, job registry, timer, and deploy encode the production contract'
   assert.match(migration, /primary key \(observed_at, asset\)/i);
   assert.match(provenanceMigration, /historical_backfill/);
   assert.match(provenanceMigration, /kline-close/);
+  assert.match(referenceCorrectionMigration, /WBTCUSDT/);
+  assert.match(referenceCorrectionMigration, /BSC\.BTCB/);
+  assert.match(referenceCorrectionMigration, /binance_price_usd = null/);
   assert.match(registry, /'pool-dislocation-backfill': runPoolDislocationBackfill/);
   assert.match(registry, /'pool-dislocation-repair': runPoolDislocationRepair/);
   assert.match(registry, /'pool-dislocation-scheduler': runPoolDislocationScheduler/);

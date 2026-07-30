@@ -1,5 +1,5 @@
 export const POOL_DISLOCATION_MODEL_KEY = 'pool-dislocation-summary:v1';
-export const POOL_DISLOCATION_SCHEMA_VERSION = 2;
+export const POOL_DISLOCATION_SCHEMA_VERSION = 3;
 export const POOL_DISLOCATION_TTL_MS = 15 * 60 * 1000;
 export const POOL_DISLOCATION_SAMPLE_MINUTES = 5;
 export const POOL_DISLOCATION_WINDOW_DAYS = 7;
@@ -18,21 +18,23 @@ const WINDOWS = Object.freeze([
 ]);
 
 // Cross-chain and contract assets are deliberately mapped by exact asset id.
+// Binance references must be directly traded spot assets; do not substitute an
+// underlying asset for a wrapped or pegged pool asset.
 // A new THORChain pool still appears in the dashboard, but has null references
 // until this table is reviewed and extended.
 export const POOL_REFERENCE_MAPPINGS = Object.freeze({
   'AVAX.AVAX': { oracle: 'AVAX', binance: 'AVAXUSDT' },
-  'AVAX.SOL-0XFE6B19286885A4F7F55ADAD09C3CD1F906D2478F': { oracle: 'SOL', binance: 'SOLUSDT' },
+  'AVAX.SOL-0XFE6B19286885A4F7F55ADAD09C3CD1F906D2478F': { oracle: 'SOL', binance: null },
   'AVAX.USDC-0XB97EF9EF8734C71904D8002F8B6BC66DD9C48A6E': { oracle: 'USDC', binance: 'USDCUSDT' },
   'AVAX.USDT-0X9702230A8EA53601F5CD2DC00FDBC13D4DF4A8C7': { oracle: 'USDT', binance: null },
   'BASE.ETH': { oracle: 'ETH', binance: 'ETHUSDT' },
   'BASE.USDC-0X833589FCD6EDB6E08F4C7C32D4F71B54BDA02913': { oracle: 'USDC', binance: 'USDCUSDT' },
   'BCH.BCH': { oracle: 'BCH', binance: 'BCHUSDT' },
   'BSC.BNB': { oracle: 'BNB', binance: 'BNBUSDT' },
-  'BSC.BTCB-0X7130D2A12B9BCBFAE4F2634D864A1EE1CE3EAD9C': { oracle: 'BTC', binance: 'BTCUSDT' },
-  'BSC.ETH-0X2170ED0880AC9A755FD29B2688956BD959F933F8': { oracle: 'ETH', binance: 'ETHUSDT' },
+  'BSC.BTCB-0X7130D2A12B9BCBFAE4F2634D864A1EE1CE3EAD9C': { oracle: 'BTC', binance: null },
+  'BSC.ETH-0X2170ED0880AC9A755FD29B2688956BD959F933F8': { oracle: 'ETH', binance: null },
   'BSC.TWT-0X4B0F1812E5DF2A09796481FF14017E6005508003': { oracle: null, binance: 'TWTUSDT' },
-  'BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D': { oracle: 'USDC', binance: 'USDCUSDT' },
+  'BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D': { oracle: 'USDC', binance: null },
   'BSC.USDT-0X55D398326F99059FF775485246999027B3197955': { oracle: 'USDT', binance: null },
   'BTC.BTC': { oracle: 'BTC', binance: 'BTCUSDT' },
   'DOGE.DOGE': { oracle: 'DOGE', binance: 'DOGEUSDT' },
@@ -41,7 +43,7 @@ export const POOL_REFERENCE_MAPPINGS = Object.freeze({
   'ETH.LINK-0X514910771AF9CA656AF840DFF83E8264ECF986CA': { oracle: null, binance: 'LINKUSDT' },
   'ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48': { oracle: 'USDC', binance: 'USDCUSDT' },
   'ETH.USDT-0XDAC17F958D2EE523A2206206994597C13D831EC7': { oracle: 'USDT', binance: null },
-  'ETH.WBTC-0X2260FAC5E5542A773AA44FBCFEDF7C193BC2C599': { oracle: 'BTC', binance: 'BTCUSDT' },
+  'ETH.WBTC-0X2260FAC5E5542A773AA44FBCFEDF7C193BC2C599': { oracle: 'BTC', binance: 'WBTCUSDT' },
   'ETH.YFI-0X0BC529C00C6401AEF6D220BE8C6EA1667F6AD93E': { oracle: null, binance: 'YFIUSDT' },
   'GAIA.ATOM': { oracle: 'ATOM', binance: 'ATOMUSDT' },
   'LTC.LTC': { oracle: 'LTC', binance: 'LTCUSDT' },

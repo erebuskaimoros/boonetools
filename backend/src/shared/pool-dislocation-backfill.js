@@ -94,6 +94,14 @@ function configuredBinanceSymbols() {
     .filter(Boolean))].sort();
 }
 
+function configuredReferenceMappings() {
+  return Object.entries(POOL_REFERENCE_MAPPINGS).map(([asset, mapping]) => ({
+    asset,
+    oracle_symbol: mapping.oracle,
+    binance_symbol: mapping.binance
+  }));
+}
+
 export function buildPoolDislocationBackfillBuckets(startAt, endAt) {
   const startMs = Date.parse(timestamp(startAt));
   const endMs = Date.parse(timestamp(endAt));
@@ -391,30 +399,61 @@ export async function loadPoolDislocationRecentGapRepairPlan(client, options = {
     };
   }
   const existing = await client.query(
-    `select observed_at,
-            bool_and(coalesce(pool_price_method, 'thornode-asset-tor') <> 'thornode-core-snapshot')
-            and (
-              not bool_or(oracle_symbol is not null)
-              or bool_or(oracle_price_usd is not null)
-              or bool_or(oracle_price_method in (
-                'thornode-oracle-unavailable',
-                'thornode-oracle-unaligned'
-              ))
+    `with expected_references as (
+       select asset, oracle_symbol, binance_symbol
+       from jsonb_to_recordset($3::jsonb) as mapping (
+         asset text,
+         oracle_symbol text,
+         binance_symbol text
+       )
+     )
+     select observation.observed_at,
+            bool_and(
+              coalesce(observation.pool_price_method, 'thornode-asset-tor')
+                <> 'thornode-core-snapshot'
             )
-            and (
-              not bool_or(binance_symbol is not null)
-              or bool_or(binance_price_usd is not null)
-              or bool_or(binance_price_method in (
-                'kline-close-unavailable',
-                'kline-close-unaligned'
-              ))
+            and bool_and(
+              observation.oracle_symbol is not distinct from expected.oracle_symbol
+              and (
+                (expected.oracle_symbol is null and observation.oracle_price_usd is null)
+                or (
+                  expected.oracle_symbol is not null
+                  and (
+                    observation.oracle_price_usd is not null
+                    or observation.oracle_price_method in (
+                      'thornode-oracle-unavailable',
+                      'thornode-oracle-unaligned'
+                    )
+                  )
+                )
+              )
+              and observation.binance_symbol is not distinct from expected.binance_symbol
+              and (
+                (
+                  expected.binance_symbol is null
+                  and observation.binance_bid_usd is null
+                  and observation.binance_ask_usd is null
+                  and observation.binance_price_usd is null
+                )
+                or (
+                  expected.binance_symbol is not null
+                  and (
+                    observation.binance_price_usd is not null
+                    or observation.binance_price_method in (
+                      'kline-close-unavailable',
+                      'kline-close-unaligned'
+                    )
+                  )
+                )
+              )
             ) as authoritative
-     from pool_dislocation_observations
-     where observed_at >= $1::timestamptz
-       and observed_at < $2::timestamptz
-     group by observed_at
-     order by observed_at`,
-    [startAt, endAt]
+     from pool_dislocation_observations observation
+     left join expected_references expected on expected.asset = observation.asset
+     where observation.observed_at >= $1::timestamptz
+       and observation.observed_at < $2::timestamptz
+     group by observation.observed_at
+     order by observation.observed_at`,
+    [startAt, endAt, JSON.stringify(configuredReferenceMappings())]
   );
   const authoritativeBuckets = new Set(existing.rows
     .filter((row) => row.authoritative)

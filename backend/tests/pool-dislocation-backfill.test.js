@@ -245,10 +245,19 @@ test('recent repair planning floors bounds and replaces degraded or missing buck
     endAt: '2026-07-29T12:17:42Z',
     maxBuckets: 2
   });
-  assert.deepEqual(params, [
+  assert.deepEqual(params.slice(0, 2), [
     '2026-07-29T12:00:00.000Z',
     '2026-07-29T12:15:00.000Z'
   ]);
+  const expectedReferences = JSON.parse(params[2]);
+  assert.deepEqual(
+    expectedReferences.find(({ asset }) => asset.startsWith('ETH.WBTC-')),
+    {
+      asset: 'ETH.WBTC-0X2260FAC5E5542A773AA44FBCFEDF7C193BC2C599',
+      oracle_symbol: 'BTC',
+      binance_symbol: 'WBTCUSDT'
+    }
+  );
   assert.deepEqual(plan.pendingBuckets, [
     '2026-07-29T12:05:00.000Z',
     '2026-07-29T12:10:00.000Z'
@@ -256,8 +265,9 @@ test('recent repair planning floors bounds and replaces degraded or missing buck
   assert.equal(plan.existingBuckets, 1);
   assert.equal(plan.discoveredPendingBuckets, 2);
   assert.equal(plan.deferredBuckets, 0);
-  assert.match(sql, /bool_or\(oracle_price_usd is not null\)/);
-  assert.match(sql, /bool_or\(binance_price_usd is not null\)/);
+  assert.match(sql, /oracle_symbol is not distinct from expected\.oracle_symbol/);
+  assert.match(sql, /binance_symbol is not distinct from expected\.binance_symbol/);
+  assert.match(sql, /expected\.binance_symbol is null[\s\S]*observation\.binance_price_usd is null/);
   assert.match(sql, /thornode-oracle-unavailable/);
   assert.match(sql, /thornode-oracle-unaligned/);
   assert.match(sql, /kline-close-unavailable/);

@@ -47,8 +47,12 @@ references. Each row carries independent coverage for:
 
 Canonical native pools and stablecoin pools can ship first. Contract assets
 require an explicit, reviewed mapping because tickers are not unique across
-chains. A missing or stale reference remains visible as `N/A`; it does not
-remove the THORChain pool from the dashboard.
+chains. A Binance mapping is valid only when Binance directly trades that pool
+asset; an underlying spot market is never substituted for a wrapped or pegged
+asset. WBTC therefore uses `WBTCUSDT`, while Avalanche Wrapped SOL, BSC BTCB,
+BSC pegged ETH, and BSC pegged USDC have no Binance leg. A missing or stale
+reference remains visible as `N/A`; it does not remove the THORChain pool from
+the dashboard.
 
 ## Production Data Path
 
@@ -87,7 +91,10 @@ dislocation calculations, while their last timestamp remains visible.
 
 Migration `031_pool_dislocation.sql` creates
 `pool_dislocation_observations`. Migration
-`033_pool_dislocation_provenance.sql` adds reconstruction provenance.
+`033_pool_dislocation_provenance.sql` adds reconstruction provenance. Migration
+`034_pool_dislocation_exact_binance_markets.sql` invalidates historical proxy
+legs, assigns WBTC to `WBTCUSDT`, and clears the materialized summary before it
+is rebuilt.
 
 ```text
 observed_at, asset, pool_status,
@@ -149,10 +156,12 @@ source gap; it does not substitute a neighboring price or omit the bucket.
 `boonetools-pool-dislocation-repair.timer` provides the live continuity loop.
 Every fifteen minutes it scans exact five-minute boundaries across the trailing
 seven days and selects both missing buckets and scheduled buckets whose pool
-leg came from `thornode-core-snapshot`. A scheduled bucket is also selected
-when every mapped oracle leg or every mapped Binance leg is absent, which
-distinguishes a source-wide collection failure from an individual asset that
-legitimately lacks a reference. It reconstructs at most 24 of the oldest
+leg came from `thornode-core-snapshot`. Every persisted reference symbol is
+checked against the current reviewed asset mapping, and each mapped leg must
+contain either a value or explicit unavailable/unaligned provenance. This lets
+the repair loop replace a changed mapping such as WBTC's move from `BTCUSDT` to
+`WBTCUSDT` without treating unrelated Binance values in the same bucket as
+proof that the bucket is complete. It reconstructs at most 24 of the oldest
 pending buckets per run using the finalized block and the same provenance rules
 as the operator backfill. Historical rows may replace only explicitly degraded
 pool legs or mapped reference legs that are null; an ordinary complete
