@@ -132,13 +132,16 @@ test('chart scale follows the visible points and selected reference source', () 
 
   assert.ok(quiet.min < -0.2 && quiet.max > 0.5);
   assert.ok((quiet.max - 0.5) / (quiet.max - quiet.min) < 0.05);
-  assert.ok((-0.2 - quiet.min) / (quiet.max - quiet.min) < 0.05);
-  assert.ok(volatile.min < -8.2 && volatile.max === 0);
+  assert.equal(quiet.min, -quiet.max);
+  assert.ok(volatile.min < -8.2 && volatile.max > 8.2);
+  assert.equal(volatile.min, -volatile.max);
   assert.ok(binanceOnly.max > 0.5);
   assert.ok(binanceOnly.max - binanceOnly.min < volatile.max - volatile.min);
   assert.deepEqual(differentThreshold, quiet);
   assert.ok(withMinimumBand.min < -0.1 && withMinimumBand.max > 0.1);
   assert.equal(volatile.ticks.length, 7);
+  assert.equal(volatile.ticks[3], 0);
+  assert.deepEqual(volatile.ticks.slice(0, 3), volatile.ticks.slice(4).reverse().map((tick) => -tick));
   assert.ok(volatile.ticks.every((tick, index) => index === 0 || tick < volatile.ticks[index - 1]));
 });
 
