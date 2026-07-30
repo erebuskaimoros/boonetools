@@ -11,9 +11,9 @@ const THORNODE_REQUEST_TIMEOUT_MS = 4000;
 
 export async function fetchThorchain(endpoint, options = {}) {
   const responseType = options.responseType || 'json';
-  const configuredBases = options.historical
+  const configuredBases = options.bases || (options.historical
     ? [config.thornodeUrls[0], THORNODE_ARCHIVE, ...config.thornodeUrls.slice(1)]
-    : config.thornodeUrls;
+    : config.thornodeUrls);
   const bases = [...new Set(configuredBases.filter(Boolean))];
   const timeoutMs = Number.isFinite(Number(options.timeoutMs)) && Number(options.timeoutMs) > 0
     ? Number(options.timeoutMs)

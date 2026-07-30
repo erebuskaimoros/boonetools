@@ -56,7 +56,13 @@ minutes:
 
 - THORChain pool: `/thorchain/pools`, using `asset_tor_price / 1e8` as the
   pool's USD/TOR price. Preserve the raw depths and status with the observation
-  for auditability.
+  for auditability. Retry bounded transient failures inside the same exact
+  five-minute run, bypassing a shared provider cooldown after the first
+  attempt. If all live attempts fail, accept only a pool field from the
+  independently persisted `thornode-core:v1` snapshot that is no more than
+  three minutes old. Label that observation
+  `pool_price_method=thornode-core-snapshot`; never present it as a fresh live
+  provider read.
 - THORChain oracle: `/thorchain/oracle/prices`, keyed by the exact configured
   oracle symbol. Normalize the live `price` field as a decimal USD value.
 - Binance: one backend `bookTicker` request for the configured spot markets;
@@ -137,6 +143,20 @@ a dropped THORNode request does not force another block-anchor reconstruction.
 If THORNode returns a valid but empty historical oracle list at a height, the
 job writes that exact five-minute bucket with a null oracle leg and reports a
 source gap; it does not substitute a neighboring price or omit the bucket.
+
+`boonetools-pool-dislocation-repair.timer` provides the live continuity loop.
+Every fifteen minutes it scans exact five-minute boundaries across the trailing
+seven days and selects both missing buckets and scheduled buckets whose pool
+leg came from `thornode-core-snapshot`. A scheduled bucket is also selected
+when every mapped oracle leg or every mapped Binance leg is absent, which
+distinguishes a source-wide collection failure from an individual asset that
+legitimately lacks a reference. It reconstructs at most 24 of the oldest
+pending buckets per run using the finalized block and the same provenance rules
+as the operator backfill. Historical rows may replace only explicitly degraded
+pool legs or mapped reference legs that are null; an ordinary complete
+scheduled observation still wins every primary-key conflict. The repair job
+shares the operator backfill advisory lock so the two historical readers cannot
+overlap.
 
 ## Interface Scope
 

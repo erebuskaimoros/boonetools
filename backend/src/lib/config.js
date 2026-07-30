@@ -29,7 +29,7 @@ function readList(name, fallback = []) {
   const raw = optional(process.env[name]);
   const values = raw
     ? raw.split(',').map((value) => value.trim()).filter(Boolean)
-    : fallback;
+    : fallback.map((value) => optional(value)).filter(Boolean);
 
   return [...new Set(values)];
 }
@@ -174,6 +174,15 @@ export const config = Object.freeze({
   poolDislocationBackfillRetryAttempts: readInt('POOL_DISLOCATION_BACKFILL_RETRY_ATTEMPTS', 8),
   poolDislocationBackfillRetryBaseDelayMs: readInt('POOL_DISLOCATION_BACKFILL_RETRY_BASE_DELAY_MS', 1000),
   poolDislocationBackfillRetryMaxDelayMs: readInt('POOL_DISLOCATION_BACKFILL_RETRY_MAX_DELAY_MS', 60_000),
+  poolDislocationThornodeUrls: readList('POOL_DISLOCATION_THORNODE_URLS', [thornodePrimaryUrl]),
+  poolDislocationSnapshotRetryAttempts: readInt('POOL_DISLOCATION_SNAPSHOT_RETRY_ATTEMPTS', 3),
+  poolDislocationSnapshotRetryBaseDelayMs: readInt('POOL_DISLOCATION_SNAPSHOT_RETRY_BASE_DELAY_MS', 1000),
+  poolDislocationCoreFallbackMaxAgeMs: readInt('POOL_DISLOCATION_CORE_FALLBACK_MAX_AGE_SECONDS', 180) * 1000,
+  poolDislocationRepairLookbackHours: readInt('POOL_DISLOCATION_REPAIR_LOOKBACK_HOURS', 7 * 24),
+  poolDislocationRepairMaxBuckets: readInt('POOL_DISLOCATION_REPAIR_MAX_BUCKETS', 24),
+  poolDislocationRepairRetryAttempts: readInt('POOL_DISLOCATION_REPAIR_RETRY_ATTEMPTS', 4),
+  poolDislocationRepairRetryBaseDelayMs: readInt('POOL_DISLOCATION_REPAIR_RETRY_BASE_DELAY_MS', 500),
+  poolDislocationRepairRetryMaxDelayMs: readInt('POOL_DISLOCATION_REPAIR_RETRY_MAX_DELAY_MS', 10_000),
   dunePerformance: optional(process.env.DUNE_PERFORMANCE) || 'small',
   duneExecutionPollMs: readInt('DUNE_EXECUTION_POLL_MS', 5000),
   duneExecutionTimeoutMs: readInt('DUNE_EXECUTION_TIMEOUT_MS', 10 * 60 * 1000),

@@ -9,6 +9,7 @@ import {
   getThorNodeCoreSnapshot,
   isThorNodeCoreSnapshotStale
 } from '../shared/thornode-core-snapshot.js';
+import { isTransientPoolDislocationBackfillError } from '../shared/pool-dislocation-backfill.js';
 import {
   POOL_DISLOCATION_MODEL_KEY,
   POOL_DISLOCATION_RETENTION_DAYS,
@@ -30,6 +31,7 @@ import {
 
 const LOCK_KEY = 'boonetools:pool-dislocation';
 const BINANCE_TIMEOUT_MS = 6_000;
+const CLOCK_SKEW_TOLERANCE_MS = 30_000;
 
 function errorMessage(error) {
   return error?.message || String(error || 'unknown provider error');
@@ -47,6 +49,113 @@ async function timedResult(operation, now) {
     return { status: 'fulfilled', value, observedAt: now().toISOString() };
   } catch (reason) {
     return { status: 'rejected', reason, observedAt: now().toISOString() };
+  }
+}
+
+function sleep(delayMs) {
+  return delayMs > 0 ? new Promise((resolve) => setTimeout(resolve, delayMs)) : Promise.resolve();
+}
+
+export async function retryPoolDislocationSnapshotOperation(operation, options = {}) {
+  const attempts = Math.max(1, Math.trunc(Number(
+    options.attempts ?? config.poolDislocationSnapshotRetryAttempts
+  )) || 1);
+  const baseDelayMs = Math.max(0, Math.trunc(Number(
+    options.baseDelayMs ?? config.poolDislocationSnapshotRetryBaseDelayMs
+  )) || 0);
+  const sleepFor = options.sleep || sleep;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation({
+        attempt,
+        bypassSharedCooldown: attempt > 1
+      });
+    } catch (error) {
+      if (attempt >= attempts || !isTransientPoolDislocationBackfillError(error)) throw error;
+      const delayMs = baseDelayMs * (2 ** (attempt - 1));
+      await options.onRetry?.({
+        attempt,
+        nextAttempt: attempt + 1,
+        attempts,
+        delayMs,
+        error
+      });
+      await sleepFor(delayMs);
+    }
+  }
+  throw new Error('Pool-dislocation snapshot retry loop exhausted unexpectedly');
+}
+
+export function resolvePoolDislocationCorePoolFallback(snapshot, options = {}) {
+  const payload = snapshot?.payload && typeof snapshot.payload === 'object'
+    ? snapshot.payload
+    : snapshot;
+  const pools = coreSnapshotValue(payload, 'pools');
+  const observedAt = payload?.field_meta?.pools?.fetched_at;
+  const observedMs = Date.parse(String(observedAt || ''));
+  const requestedMs = Date.parse(String(options.observedAt || ''));
+  const maxAgeMs = Math.max(0, Number(
+    options.maxAgeMs ?? config.poolDislocationCoreFallbackMaxAgeMs
+  ) || 0);
+  const ageMs = requestedMs - observedMs;
+  if (!Array.isArray(pools)
+    || pools.length === 0
+    || !Number.isFinite(observedMs)
+    || !Number.isFinite(requestedMs)
+    || ageMs < -CLOCK_SKEW_TOLERANCE_MS
+    || ageMs > maxAgeMs) {
+    return null;
+  }
+  return { pools, observedAt: new Date(observedMs).toISOString(), ageMs: Math.max(0, ageMs) };
+}
+
+async function collectRequiredPoolResult(options, startedAt) {
+  const fetchPools = options.fetchPools || ((context = {}) => fetchThorchain('/thorchain/pools', {
+    bases: config.poolDislocationThornodeUrls,
+    sharedCooldown: !context.bypassSharedCooldown,
+    validateResponse: (payload) => Array.isArray(payload) ? null : 'Invalid THORNode pools response'
+  }));
+  try {
+    const value = await retryPoolDislocationSnapshotOperation(fetchPools, {
+      attempts: options.snapshotRetryAttempts,
+      baseDelayMs: options.snapshotRetryBaseDelayMs,
+      sleep: options.snapshotRetrySleep,
+      onRetry: options.onSnapshotRetry
+    });
+    return {
+      status: 'fulfilled',
+      value,
+      observedAt: (options.now || (() => new Date()))().toISOString(),
+      poolPriceMethod: 'thornode-asset-tor',
+      fallback: false
+    };
+  } catch (reason) {
+    try {
+      const snapshot = await (options.getThorNodeCoreSnapshot || getThorNodeCoreSnapshot)({
+        client: options.client,
+        allowStale: true,
+        cache: false
+      });
+      const fallback = resolvePoolDislocationCorePoolFallback(snapshot, {
+        observedAt: startedAt,
+        maxAgeMs: options.coreFallbackMaxAgeMs
+      });
+      if (fallback) {
+        return {
+          status: 'fulfilled',
+          value: fallback.pools,
+          observedAt: fallback.observedAt,
+          poolPriceMethod: 'thornode-core-snapshot',
+          fallback: true,
+          fallbackAgeMs: fallback.ageMs,
+          reason
+        };
+      }
+    } catch {
+      // Preserve the authoritative live-provider error below.
+    }
+    return { status: 'rejected', reason, observedAt: startedAt };
   }
 }
 
@@ -90,11 +199,8 @@ export async function loadPoolTradingStatus(options = {}) {
 export async function collectPoolDislocationSnapshot(options = {}) {
   const now = options.now || (() => new Date());
   const startedAt = now();
-  const fetchPools = options.fetchPools || (() => fetchThorchain('/thorchain/pools', {
-    sharedCooldown: true,
-    validateResponse: (payload) => Array.isArray(payload) ? null : 'Invalid THORNode pools response'
-  }));
   const fetchOracle = options.fetchOracle || (() => fetchThorchain('/thorchain/oracle/prices', {
+    bases: config.poolDislocationThornodeUrls,
     sharedCooldown: true,
     validateResponse: (payload) => Array.isArray(payload?.prices) ? null : 'Invalid THORChain oracle response'
   }));
@@ -106,7 +212,7 @@ export async function collectPoolDislocationSnapshot(options = {}) {
   ));
 
   const [poolResult, oracleResult, binanceResult, inboundResult] = await Promise.all([
-    timedResult(fetchPools, now),
+    collectRequiredPoolResult({ ...options, now }, startedAt),
     timedResult(fetchOracle, now),
     timedResult(fetchBinance, now),
     timedResult(fetchInboundAddresses, now)
@@ -125,7 +231,15 @@ export async function collectPoolDislocationSnapshot(options = {}) {
     ? normalizeOraclePrices(oracleResult.value)
     : new Map();
   const sources = {
-    pool: sourceResult(poolResult),
+    pool: poolResult.fallback
+      ? {
+        status: 'cached',
+        observed_at: poolResult.observedAt,
+        provider: 'thornode-core-snapshot',
+        age_ms: poolResult.fallbackAgeMs,
+        error: errorMessage(poolResult.reason)
+      }
+      : sourceResult(poolResult),
     oracle: sourceResult(oracleResult),
     binance: sourceResult(binanceResult),
     trading: {
@@ -134,7 +248,7 @@ export async function collectPoolDislocationSnapshot(options = {}) {
     }
   };
   const warnings = Object.entries(sources)
-    .filter(([, source]) => source.status === 'error')
+    .filter(([, source]) => source.status !== 'fresh' && source.error)
     .map(([name, source]) => `${name}: ${source.error}`);
   const observedAt = floorToFiveMinuteBucket(startedAt);
   const rows = buildObservationRows({
@@ -142,9 +256,10 @@ export async function collectPoolDislocationSnapshot(options = {}) {
     oraclePrices,
     binanceTickers,
     observedAt,
-    poolObservedAt: sources.pool.observed_at,
+    poolObservedAt: poolResult.observedAt,
     oracleObservedAt: sources.oracle.observed_at,
-    binanceObservedAt: sources.binance.observed_at
+    binanceObservedAt: sources.binance.observed_at,
+    poolPriceMethod: poolResult.poolPriceMethod
   });
   if (rows.length === 0) throw new Error('THORChain returned no Available pools');
 

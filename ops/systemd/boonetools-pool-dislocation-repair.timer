@@ -1,0 +1,11 @@
+[Unit]
+Description=Repair recent pool-dislocation gaps every fifteen minutes
+
+[Timer]
+OnCalendar=*-*-* *:2/15:00 UTC
+AccuracySec=1s
+Persistent=true
+Unit=boonetools-pool-dislocation-repair.service
+
+[Install]
+WantedBy=timers.target

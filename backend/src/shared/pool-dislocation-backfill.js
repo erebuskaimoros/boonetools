@@ -5,6 +5,7 @@ import {
   POOL_DISLOCATION_WINDOW_DAYS,
   POOL_REFERENCE_MAPPINGS,
   buildObservationRows,
+  floorToFiveMinuteBucket,
   normalizeOraclePrices
 } from './pool-dislocation.js';
 import { persistPoolDislocationRows } from './pool-dislocation-store.js';
@@ -283,7 +284,13 @@ export async function loadBinanceBackfillHistory(bucketTimes, options = {}) {
 
 export async function fetchHistoricalPoolDislocationState(height, options = {}) {
   const fetchHistorical = options.fetchHistorical || ((path) => fetchThorchain(path, {
+    bases: [
+      config.poolDislocationThornodeUrls[0],
+      config.thornodeArchiveUrl,
+      ...config.poolDislocationThornodeUrls.slice(1)
+    ].filter(Boolean),
     historical: true,
+    sharedCooldown: false,
     timeoutMs: options.thornodeTimeoutMs || 12_000
   }));
   const [pools, oracle] = await Promise.all([
@@ -347,6 +354,66 @@ export async function loadPoolDislocationBackfillPlan(client, options = {}) {
     allBuckets,
     pendingBuckets: allBuckets.filter((bucket) => !existingBuckets.has(bucket)),
     existingBuckets: existingBuckets.size
+  };
+}
+
+export async function loadPoolDislocationRecentGapRepairPlan(client, options = {}) {
+  const endAt = floorToFiveMinuteBucket(options.endAt || new Date());
+  const lookbackHours = Math.max(1, finiteInteger(
+    options.lookbackHours ?? config.poolDislocationRepairLookbackHours
+  ));
+  const startAt = floorToFiveMinuteBucket(
+    options.startAt || new Date(Date.parse(endAt) - (lookbackHours * 60 * 60 * 1000))
+  );
+  const windowBuckets = buildPoolDislocationBackfillBuckets(startAt, endAt);
+  if (!windowBuckets.length) {
+    return {
+      startAt,
+      endAt,
+      allBuckets: [],
+      pendingBuckets: [],
+      existingBuckets: 0,
+      discoveredPendingBuckets: 0,
+      deferredBuckets: 0
+    };
+  }
+  const existing = await client.query(
+    `select observed_at,
+            bool_or(sample_origin = 'historical_backfill')
+            or (
+              bool_and(coalesce(pool_price_method, 'thornode-asset-tor') <> 'thornode-core-snapshot')
+              and (
+                not bool_or(oracle_symbol is not null)
+                or bool_or(oracle_price_usd is not null)
+              )
+              and (
+                not bool_or(binance_symbol is not null)
+                or bool_or(binance_price_usd is not null)
+              )
+            ) as authoritative
+     from pool_dislocation_observations
+     where observed_at >= $1::timestamptz
+       and observed_at < $2::timestamptz
+     group by observed_at
+     order by observed_at`,
+    [startAt, endAt]
+  );
+  const authoritativeBuckets = new Set(existing.rows
+    .filter((row) => row.authoritative)
+    .map((row) => timestamp(row.observed_at)));
+  const pending = windowBuckets.filter((bucket) => !authoritativeBuckets.has(bucket));
+  const maxBuckets = Math.max(1, finiteInteger(
+    options.maxBuckets ?? config.poolDislocationRepairMaxBuckets
+  ));
+  const selected = pending.slice(0, maxBuckets);
+  return {
+    startAt,
+    endAt,
+    allBuckets: selected,
+    pendingBuckets: selected,
+    existingBuckets: authoritativeBuckets.size,
+    discoveredPendingBuckets: pending.length,
+    deferredBuckets: Math.max(0, pending.length - selected.length)
   };
 }
 
@@ -431,10 +498,8 @@ export async function runPoolDislocationHistoricalBackfill(client, options = {})
             min(observed_at) as first_observed_at,
             max(observed_at) as last_observed_at
      from pool_dislocation_observations
-     where sample_origin = 'historical_backfill'
-       and observed_at >= $1::timestamptz
-       and observed_at < $2::timestamptz`,
-    [plan.startAt, plan.endAt]
+     where observed_at = any($1::timestamptz[])`,
+    [plan.allBuckets]
   );
   const verified = verification.rows[0] || {};
   if (Number(verified.buckets) !== plan.allBuckets.length) {

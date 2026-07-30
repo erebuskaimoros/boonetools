@@ -17,6 +17,8 @@ import {
 import {
   collectPoolDislocationSnapshot,
   loadPoolTradingStatus,
+  resolvePoolDislocationCorePoolFallback,
+  retryPoolDislocationSnapshotOperation,
   runPoolDislocationScheduler
 } from '../src/jobs/pool-dislocation-scheduler.js';
 import {
@@ -243,6 +245,79 @@ test('collector degrades a failed reference source while preserving pool observa
   assert.match(snapshot.warnings[0], /oracle offline/);
 });
 
+test('required pool snapshots retry transient failures outside a shared cooldown', async () => {
+  const contexts = [];
+  const delays = [];
+  const result = await retryPoolDislocationSnapshotOperation(async (context) => {
+    contexts.push(context);
+    if (context.attempt < 3) throw new TypeError('fetch failed');
+    return AVAILABLE_POOLS;
+  }, {
+    attempts: 3,
+    baseDelayMs: 25,
+    sleep: async (delayMs) => delays.push(delayMs)
+  });
+  assert.equal(result, AVAILABLE_POOLS);
+  assert.deepEqual(contexts, [
+    { attempt: 1, bypassSharedCooldown: false },
+    { attempt: 2, bypassSharedCooldown: true },
+    { attempt: 3, bypassSharedCooldown: true }
+  ]);
+  assert.deepEqual(delays, [25, 50]);
+});
+
+test('core pool fallback accepts only fresh independently persisted snapshots', () => {
+  const snapshot = {
+    payload: {
+      pools: AVAILABLE_POOLS,
+      field_meta: { pools: { fetched_at: '2026-07-29T12:04:00Z' } }
+    }
+  };
+  assert.deepEqual(resolvePoolDislocationCorePoolFallback(snapshot, {
+    observedAt: '2026-07-29T12:05:00Z',
+    maxAgeMs: 90_000
+  }), {
+    pools: AVAILABLE_POOLS,
+    observedAt: '2026-07-29T12:04:00.000Z',
+    ageMs: 60_000
+  });
+  assert.equal(resolvePoolDislocationCorePoolFallback(snapshot, {
+    observedAt: '2026-07-29T12:05:31Z',
+    maxAgeMs: 90_000
+  }), null);
+});
+
+test('collector writes a provenance-labelled bucket from the durable core fallback', async () => {
+  const attempts = [];
+  const snapshot = await collectPoolDislocationSnapshot({
+    now: () => new Date('2026-07-29T12:05:02Z'),
+    snapshotRetryAttempts: 2,
+    snapshotRetryBaseDelayMs: 0,
+    snapshotRetrySleep: async () => {},
+    fetchPools: async (context) => {
+      attempts.push(context);
+      throw new TypeError('fetch failed');
+    },
+    getThorNodeCoreSnapshot: async () => ({
+      payload: {
+        pools: AVAILABLE_POOLS,
+        field_meta: { pools: { fetched_at: '2026-07-29T12:04:50Z' } }
+      }
+    }),
+    fetchOracle: async () => ({ prices: [{ symbol: 'BTC', price: '100' }] }),
+    fetchBinance: async () => [{ symbol: 'BTCUSDT', bidPrice: '99', askPrice: '101' }],
+    fetchInboundAddresses: async () => []
+  });
+  assert.deepEqual(attempts.map(({ bypassSharedCooldown }) => bypassSharedCooldown), [false, true]);
+  assert.equal(snapshot.sources.pool.status, 'cached');
+  assert.equal(snapshot.sources.pool.provider, 'thornode-core-snapshot');
+  assert.equal(snapshot.sources.pool.age_ms, 12_000);
+  assert.equal(snapshot.rows[0].poolPriceMethod, 'thornode-core-snapshot');
+  assert.equal(snapshot.rows[0].oraclePriceUsd, 100);
+  assert.equal(snapshot.rows[0].binancePriceUsd, 100);
+  assert.match(snapshot.warnings[0], /pool: fetch failed/);
+});
+
 test('scheduler owns one isolated lock and publishes the resulting read model', async () => {
   let lockKey = '';
   let publishOptions;
@@ -319,24 +394,41 @@ test('public handlers are provider-free and the series query is bounded', async 
 });
 
 test('migration, job registry, timer, and deploy encode the production contract', async () => {
-  const [migration, provenanceMigration, registry, service, backfillService, timer, deploy] = await Promise.all([
+  const [
+    migration,
+    provenanceMigration,
+    registry,
+    service,
+    backfillService,
+    repairService,
+    timer,
+    repairTimer,
+    deploy
+  ] = await Promise.all([
     readFile(new URL('../migrations/031_pool_dislocation.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/033_pool_dislocation_provenance.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-dislocation.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-dislocation-backfill.service', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-pool-dislocation-repair.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-dislocation.timer', import.meta.url), 'utf8'),
+    readFile(new URL('../../ops/systemd/boonetools-pool-dislocation-repair.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8')
   ]);
   assert.match(migration, /primary key \(observed_at, asset\)/i);
   assert.match(provenanceMigration, /historical_backfill/);
   assert.match(provenanceMigration, /kline-close/);
   assert.match(registry, /'pool-dislocation-backfill': runPoolDislocationBackfill/);
+  assert.match(registry, /'pool-dislocation-repair': runPoolDislocationRepair/);
   assert.match(registry, /'pool-dislocation-scheduler': runPoolDislocationScheduler/);
   assert.match(service, /pool-dislocation-scheduler/);
   assert.match(service, /After=.*boonetools-thornode-core-snapshot\.service/);
   assert.match(backfillService, /pool-dislocation-backfill/);
   assert.match(backfillService, /TimeoutStartSec=2h/);
+  assert.match(repairService, /pool-dislocation-repair/);
+  assert.match(repairService, /TimeoutStartSec=10m/);
   assert.match(timer, /OnCalendar=\*-\*-\* \*:0\/5:00 UTC/);
+  assert.match(repairTimer, /OnCalendar=\*-\*-\* \*:2\/15:00 UTC/);
+  assert.match(deploy, /prime_read_models[\s\S]*boonetools-pool-dislocation-repair\.service/);
   assert.match(deploy, /prime_read_models[\s\S]*boonetools-pool-dislocation\.service/);
 });

@@ -81,7 +81,15 @@ export async function upsertPoolDislocationRows(client, rows = []) {
        binance_price_method = excluded.binance_price_method,
        updated_at = now()
      where current.sample_origin <> 'scheduled'
-        or excluded.sample_origin = 'scheduled'`,
+        or excluded.sample_origin = 'scheduled'
+        or (
+          excluded.sample_origin = 'historical_backfill'
+          and (
+            current.pool_price_method = 'thornode-core-snapshot'
+            or (current.oracle_symbol is not null and current.oracle_price_usd is null)
+            or (current.binance_symbol is not null and current.binance_price_usd is null)
+          )
+        )`,
     [JSON.stringify(payload)]
   );
 }

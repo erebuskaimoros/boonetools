@@ -2,12 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { runPoolDislocationBackfill } from '../src/jobs/pool-dislocation-backfill.js';
+import { runPoolDislocationRepair } from '../src/jobs/pool-dislocation-repair.js';
 import {
   buildHistoricalPoolDislocationRows,
   buildPoolDislocationBackfillBuckets,
   fetchHistoricalPoolDislocationState,
   isTransientPoolDislocationBackfillError,
   loadPoolDislocationBackfillPlan,
+  loadPoolDislocationRecentGapRepairPlan,
   normalizeBinanceKlineCloses,
   retryPoolDislocationBackfillOperation,
   resolvePoolDislocationBlockAnchors
@@ -187,6 +189,40 @@ test('backfill planning resumes missing buckets without touching scheduled histo
   ]);
 });
 
+test('recent repair planning floors bounds and replaces degraded or missing buckets', async () => {
+  let params;
+  let sql = '';
+  const client = {
+    query: async (statement, values) => {
+      sql = statement;
+      params = values;
+      return { rows: [
+        { observed_at: '2026-07-29T12:00:00Z', authoritative: true },
+        { observed_at: '2026-07-29T12:05:00Z', authoritative: false }
+      ] };
+    }
+  };
+  const plan = await loadPoolDislocationRecentGapRepairPlan(client, {
+    startAt: '2026-07-29T12:00:48Z',
+    endAt: '2026-07-29T12:17:42Z',
+    maxBuckets: 2
+  });
+  assert.deepEqual(params, [
+    '2026-07-29T12:00:00.000Z',
+    '2026-07-29T12:15:00.000Z'
+  ]);
+  assert.deepEqual(plan.pendingBuckets, [
+    '2026-07-29T12:05:00.000Z',
+    '2026-07-29T12:10:00.000Z'
+  ]);
+  assert.equal(plan.existingBuckets, 1);
+  assert.equal(plan.discoveredPendingBuckets, 2);
+  assert.equal(plan.deferredBuckets, 0);
+  assert.match(sql, /bool_or\(sample_origin = 'historical_backfill'\)/);
+  assert.match(sql, /bool_or\(oracle_price_usd is not null\)/);
+  assert.match(sql, /bool_or\(binance_price_usd is not null\)/);
+});
+
 test('bulk upsert gives scheduled observations precedence over historical rows', async () => {
   let sql = '';
   let payload;
@@ -211,6 +247,10 @@ test('bulk upsert gives scheduled observations precedence over historical rows',
   }]);
   assert.match(sql, /current\.sample_origin <> 'scheduled'/);
   assert.match(sql, /excluded\.sample_origin = 'scheduled'/);
+  assert.match(sql, /current\.pool_price_method = 'thornode-core-snapshot'/);
+  assert.match(sql, /current\.oracle_price_usd is null/);
+  assert.match(sql, /current\.binance_price_usd is null/);
+  assert.match(sql, /excluded\.sample_origin = 'historical_backfill'/);
   assert.equal(payload[0].sample_origin, 'historical_backfill');
   assert.equal(payload[0].binance_price_method, 'kline-close');
 });
@@ -231,6 +271,27 @@ test('backfill runner owns an isolated lock and refreshes the live read model', 
   });
   assert.equal(lockKey, 'boonetools:pool-dislocation-backfill');
   assert.equal(refreshed, 1);
+  assert.equal(result.ok, true);
+  assert.equal(result.bucketsWritten, 2);
+});
+
+test('repair runner shares the operator backfill lock and applies bounded defaults', async () => {
+  let lockKey = '';
+  let repairOptions;
+  const result = await runPoolDislocationRepair({
+    lockRunner: async (key, callback) => {
+      lockKey = key;
+      return callback({ name: 'client' });
+    },
+    maxBuckets: 3,
+    repair: async (_client, options) => {
+      repairOptions = options;
+      return { bucketsWritten: 2, observationsWritten: 80 };
+    }
+  });
+  assert.equal(lockKey, 'boonetools:pool-dislocation-backfill');
+  assert.equal(repairOptions.loadPlan, loadPoolDislocationRecentGapRepairPlan);
+  assert.equal(repairOptions.maxBuckets, 3);
   assert.equal(result.ok, true);
   assert.equal(result.bucketsWritten, 2);
 });
