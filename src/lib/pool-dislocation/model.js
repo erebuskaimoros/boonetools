@@ -296,6 +296,25 @@ export function buildPoolDislocationChartScale(points = [], options = {}) {
   return { min, max, step, ticks };
 }
 
+export function projectPoolDislocationChartY(value, options = {}) {
+  const numeric = finiteNumber(value);
+  const min = finiteNumber(options.min);
+  const max = finiteNumber(options.max);
+  const top = finiteNumber(options.top);
+  const bottom = finiteNumber(options.bottom);
+  if (
+    numeric === null
+    || min === null
+    || max === null
+    || top === null
+    || bottom === null
+    || max <= min
+    || bottom <= top
+  ) return null;
+
+  return top + (((max - numeric) / (max - min)) * (bottom - top));
+}
+
 export function projectPoolDislocationChartSelection(options = {}) {
   const plotLeft = finiteNumber(options.plotLeft);
   const plotRight = finiteNumber(options.plotRight);

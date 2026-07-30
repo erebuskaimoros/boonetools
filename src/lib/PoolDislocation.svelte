@@ -17,6 +17,7 @@
     maxAbsoluteDislocation,
     normalizePoolDislocationSeries,
     normalizePoolDislocationSummary,
+    projectPoolDislocationChartY,
     projectPoolDislocationChartSelection,
     sortPoolDislocationPools
   } from './pool-dislocation/model.js';
@@ -141,6 +142,14 @@
   $: l1SlipMinBandVisible = l1SlipMinPercent > 0
     && l1SlipMinPercent <= yMax
     && -l1SlipMinPercent >= yMin;
+  $: positiveThresholdY = chartY(threshold, yMin, yMax);
+  $: negativeThresholdY = chartY(-threshold, yMin, yMax);
+  $: l1SlipMinPositiveY = l1SlipMinBandVisible
+    ? chartY(l1SlipMinPercent, yMin, yMax)
+    : null;
+  $: l1SlipMinNegativeY = l1SlipMinBandVisible
+    ? chartY(-l1SlipMinPercent, yMin, yMax)
+    : null;
   $: oraclePath = makeLinePath(chartPoints, 'oracleDislocation', yMin, yMax);
   $: binancePath = makeLinePath(chartPoints, 'binanceDislocation', yMin, yMax);
   $: rollingAveragePaths = activeRollingAverageSeries.map((series) => ({
@@ -260,9 +269,12 @@
   }
 
   function chartY(value, min = yMin, max = yMax) {
-    const plotHeight = CHART.bottom - CHART.top;
-    const span = max - min;
-    return CHART.top + (((max - Number(value || 0)) / span) * plotHeight);
+    return projectPoolDislocationChartY(value, {
+      min,
+      max,
+      top: CHART.top,
+      bottom: CHART.bottom
+    });
   }
 
   function makeLinePath(points, field, min, max) {
@@ -612,29 +624,31 @@
           aria-label={`${selectedPool?.symbol} ${chartRangeLabel} pool price deviation chart${l1SlipMinBandVisible ? ` with current L1 minimum corridor at plus or minus ${l1SlipMinBps} basis points` : ''}. Drag horizontally to zoom; double click to reset.`}
         >
           {#if positiveThresholdVisible}
-            <rect class="watch-zone top" x={CHART.left} y={CHART.top} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, chartY(threshold) - CHART.top)} />
+            <rect class="watch-zone top" x={CHART.left} y={CHART.top} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, positiveThresholdY - CHART.top)} />
           {/if}
           {#if negativeThresholdVisible}
-            <rect class="watch-zone bottom" x={CHART.left} y={chartY(-threshold)} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, CHART.bottom - chartY(-threshold))} />
+            <rect class="watch-zone bottom" x={CHART.left} y={negativeThresholdY} width={CHART.width - CHART.left - CHART.right} height={Math.max(0, CHART.bottom - negativeThresholdY)} />
           {/if}
           {#if l1SlipMinBandVisible}
             <rect
               class="minbps-zone"
               x={CHART.left}
-              y={chartY(l1SlipMinPercent)}
+              y={l1SlipMinPositiveY}
               width={CHART.width - CHART.left - CHART.right}
-              height={Math.max(0, chartY(-l1SlipMinPercent) - chartY(l1SlipMinPercent))}
+              height={Math.max(0, l1SlipMinNegativeY - l1SlipMinPositiveY)}
             />
           {/if}
           {#each yTicks as tick}
             <line class:zero={tick === 0} class="grid-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(tick)} y2={chartY(tick)} />
             <text class="axis-label y" x={CHART.left - 12} y={chartY(tick) + 4}>{formatAxisBasisPoints(tick)}</text>
           {/each}
-          {#if positiveThresholdVisible}<line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(threshold)} y2={chartY(threshold)} />{/if}
-          {#if negativeThresholdVisible}<line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(-threshold)} y2={chartY(-threshold)} />{/if}
+          {#if positiveThresholdVisible}<line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={positiveThresholdY} y2={positiveThresholdY} />{/if}
+          {#if negativeThresholdVisible}<line class="threshold-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={negativeThresholdY} y2={negativeThresholdY} />{/if}
           {#if l1SlipMinBandVisible}
-            <line class="minbps-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(l1SlipMinPercent)} y2={chartY(l1SlipMinPercent)} />
-            <line class="minbps-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={chartY(-l1SlipMinPercent)} y2={chartY(-l1SlipMinPercent)} />
+            <line class="minbps-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={l1SlipMinPositiveY} y2={l1SlipMinPositiveY} />
+            <line class="minbps-line" x1={CHART.left} x2={CHART.width - CHART.right} y1={l1SlipMinNegativeY} y2={l1SlipMinNegativeY} />
+            <text class="minbps-axis-label" x={CHART.width - CHART.right - 8} y={l1SlipMinPositiveY}>{formatBasisPoints(l1SlipMinPercent)} MIN</text>
+            <text class="minbps-axis-label" x={CHART.width - CHART.right - 8} y={l1SlipMinNegativeY}>{formatBasisPoints(-l1SlipMinPercent)} MIN</text>
           {/if}
           {#each xTicks as tick}
             <line class="x-tick" x1={chartX(tick.observedAt)} x2={chartX(tick.observedAt)} y1={CHART.bottom} y2={CHART.bottom + 5} />
@@ -967,6 +981,7 @@
   .grid-line.zero { stroke: var(--term-text-5, #444); stroke-dasharray: 4 5; }
   .threshold-line { stroke: rgba(212, 160, 23, 0.34); stroke-width: 1; stroke-dasharray: 3 5; }
   .minbps-line { stroke: rgba(232, 232, 232, 0.48); stroke-width: 1; stroke-dasharray: 1 4; pointer-events: none; }
+  .minbps-axis-label { fill: var(--term-text-3, #bcbcbc); stroke: var(--term-bg, #050505); stroke-width: 4px; paint-order: stroke; text-anchor: end; dominant-baseline: central; font: 10px 'JetBrains Mono', monospace; letter-spacing: 0.04em; pointer-events: none; }
   .x-tick { stroke: var(--term-border, #1a1a1a); }
   .axis-label { fill: var(--term-text-5, #444); font: 11px 'JetBrains Mono', monospace; }
   .axis-label.y { text-anchor: end; }

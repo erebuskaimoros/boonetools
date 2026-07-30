@@ -17,6 +17,7 @@ import {
   filterPoolDislocationDashboardByTrading,
   normalizePoolDislocationSeries,
   normalizePoolDislocationSummary,
+  projectPoolDislocationChartY,
   projectPoolDislocationChartSelection,
   sortPoolDislocationPools,
   summarizePool,
@@ -138,6 +139,30 @@ test('chart scale follows the visible points and selected reference source', () 
   assert.ok(withMinimumBand.min < -0.1 && withMinimumBand.max > 0.1);
   assert.equal(volatile.ticks.length, 7);
   assert.ok(volatile.ticks.every((tick, index) => index === 0 || tick < volatile.ticks[index - 1]));
+});
+
+test('chart guide projection stays pegged to its value when the dynamic scale changes', () => {
+  const chart = { top: 30, bottom: 456 };
+  const positiveTight = projectPoolDislocationChartY(0.1, {
+    ...chart,
+    min: -0.3,
+    max: 0.12
+  });
+  const negativeTight = projectPoolDislocationChartY(-0.1, {
+    ...chart,
+    min: -0.3,
+    max: 0.12
+  });
+  const positiveWide = projectPoolDislocationChartY(0.1, {
+    ...chart,
+    min: -2,
+    max: 3
+  });
+
+  assert.ok(positiveTight < negativeTight);
+  assert.notEqual(positiveTight, positiveWide);
+  assert.equal(projectPoolDislocationChartY(0.12, { ...chart, min: -0.3, max: 0.12 }), chart.top);
+  assert.equal(projectPoolDislocationChartY(-0.3, { ...chart, min: -0.3, max: 0.12 }), chart.bottom);
 });
 
 test('chart viewport switches between exact trailing windows and preserves gaps', () => {
