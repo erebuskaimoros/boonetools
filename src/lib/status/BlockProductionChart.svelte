@@ -14,8 +14,8 @@
   const BOTTOM = 184;
   const TARGET_SECONDS = 6;
   const Y_TICK_INTERVALS = 4;
-  const TOOLTIP_WIDTH = 260;
-  const TOOLTIP_HEIGHT = 64;
+  const TOOLTIP_WIDTH = 290;
+  const TOOLTIP_HEIGHT = 72;
 
   /** @type {number | null} */
   let activePointIndex = null;
@@ -328,14 +328,14 @@
           <circle class="tooltip-anchor" cx={activePointX} cy={activePointY} r="4"></circle>
           <g class="chart-tooltip" transform={`translate(${tooltipX} ${tooltipY})`} aria-hidden="true">
             <rect width={TOOLTIP_WIDTH} height={TOOLTIP_HEIGHT}></rect>
-            <text class="tooltip-time" x="10" y="16">{formatTooltipTime(activePoint)}</text>
-            <line x1="10" x2={TOOLTIP_WIDTH - 10} y1="24" y2="24"></line>
-            <text class="tooltip-key" x="10" y="38">BLOCK TIME</text>
-            <text class="tooltip-value accent" x="10" y="54">{formatSeconds(activePoint.seconds)}</text>
-            <text class="tooltip-key" x="100" y="38">OBSERVED</text>
-            <text class="tooltip-value" x="100" y="54">{activePoint.blocks.toLocaleString('en-US')} blocks</text>
-            <text class="tooltip-key" x="180" y="38">HEIGHT</text>
-            <text class="tooltip-value" x="180" y="54">{Number(activePoint.height || 0).toLocaleString('en-US')}</text>
+            <text class="tooltip-time" x="10" y="18">{formatTooltipTime(activePoint)}</text>
+            <line x1="10" x2={TOOLTIP_WIDTH - 10} y1="28" y2="28"></line>
+            <text class="tooltip-key" x="10" y="44">BLOCK TIME</text>
+            <text class="tooltip-value accent" x="10" y="63">{formatSeconds(activePoint.seconds)}</text>
+            <text class="tooltip-key" x="108" y="44">OBSERVED</text>
+            <text class="tooltip-value" x="108" y="63">{activePoint.blocks.toLocaleString('en-US')} blocks</text>
+            <text class="tooltip-key" x="205" y="44">HEIGHT</text>
+            <text class="tooltip-value" x="205" y="63">{Number(activePoint.height || 0).toLocaleString('en-US')}</text>
           </g>
         {/if}
 
@@ -373,8 +373,8 @@
 
   h2 {
     margin: 0;
-    color: #aaa;
-    font: 700 11px/1.2 'JetBrains Mono', monospace;
+    color: #d2d2d2;
+    font: 700 12px/1.3 'JetBrains Mono', monospace;
     letter-spacing: .08em;
     text-transform: uppercase;
   }
@@ -382,8 +382,8 @@
   h2 span { color: #00cc66; }
 
   .window-label {
-    color: #555;
-    font: 600 9px/1.2 'JetBrains Mono', monospace;
+    color: #a3a3a3;
+    font: 600 11px/1.3 'JetBrains Mono', monospace;
     letter-spacing: .08em;
   }
 
@@ -393,8 +393,8 @@
     padding: 4px 7px;
     border: 1px solid #1a1a1a;
     background: transparent;
-    color: #666;
-    font: 600 8px/1.2 'JetBrains Mono', monospace;
+    color: #b8b8b8;
+    font: 600 11px/1.3 'JetBrains Mono', monospace;
     text-transform: uppercase;
     cursor: pointer;
   }
@@ -415,9 +415,9 @@
   }
 
   .chart-summary > div:last-child { border-right: 0; }
-  .chart-summary span { display: block; color: #555; font: 700 8px/1.2 'JetBrains Mono', monospace; letter-spacing: .11em; }
+  .chart-summary span { display: block; color: #a3a3a3; font: 700 11px/1.3 'JetBrains Mono', monospace; letter-spacing: .08em; }
   .chart-summary strong { display: inline-block; margin-top: 7px; color: #e8e8e8; font: 800 15px/1 'JetBrains Mono', monospace; }
-  .chart-summary small { margin-left: 5px; color: #444; font: 8px/1 'JetBrains Mono', monospace; }
+  .chart-summary small { margin-left: 5px; color: #a3a3a3; font: 11px/1.2 'JetBrains Mono', monospace; }
 
   .chart-scroll {
     overflow-x: auto;
@@ -426,8 +426,8 @@
 
   svg {
     display: block;
-    width: 100%;
-    min-width: 700px;
+    width: max(100%, 1000px);
+    min-width: 1000px;
     height: 220px;
   }
 
@@ -435,7 +435,7 @@
   .grid-line.vertical { stroke: #121212; }
   .hour-tick { stroke: #333; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
   .target-line { stroke: rgba(212, 160, 23, .6); stroke-width: 1; stroke-dasharray: 5 5; vector-effect: non-scaling-stroke; }
-  .target-label { fill: #8a6d16; font: 700 8px 'JetBrains Mono', monospace; text-anchor: end; }
+  .target-label { fill: #d4a017; font: 700 11px 'JetBrains Mono', monospace; text-anchor: end; }
   .series-area { fill: rgba(0, 204, 102, .045); }
   .series-line { fill: none; stroke: #00cc66; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .series-area, .series-line, .grid-line, .target-line, .target-label { pointer-events: none; }
@@ -443,7 +443,7 @@
   .zoom-selection { pointer-events: none; }
   .zoom-selection rect { fill: rgba(0, 204, 102, .1); stroke: rgba(0, 204, 102, .45); stroke-width: 1; vector-effect: non-scaling-stroke; }
   .zoom-selection line { stroke: #00cc66; stroke-width: 1; vector-effect: non-scaling-stroke; }
-  .zoom-selection text { fill: #00cc66; font: 700 7px 'JetBrains Mono', monospace; letter-spacing: .08em; text-anchor: middle; }
+  .zoom-selection text { fill: #00cc66; font: 700 11px 'JetBrains Mono', monospace; letter-spacing: .08em; text-anchor: middle; }
   .series-point { fill: #080808; stroke: #00cc66; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
   .point-target { cursor: crosshair; outline: none; }
   .point-hit { fill: transparent; stroke: none; }
@@ -455,18 +455,18 @@
   .chart-tooltip { pointer-events: none; }
   .chart-tooltip rect { fill: #060606; stroke: #2a2a2a; stroke-width: 1; vector-effect: non-scaling-stroke; }
   .chart-tooltip line { stroke: #1a1a1a; stroke-width: 1; vector-effect: non-scaling-stroke; }
-  .tooltip-time { fill: #888; font: 600 8px 'JetBrains Mono', monospace; }
-  .tooltip-key { fill: #555; font: 700 7px 'JetBrains Mono', monospace; letter-spacing: .08em; }
-  .tooltip-value { fill: #e8e8e8; font: 700 9px 'JetBrains Mono', monospace; }
+  .tooltip-time { fill: #ededed; font: 600 12px 'JetBrains Mono', monospace; }
+  .tooltip-key { fill: #b8b8b8; font: 700 11px 'JetBrains Mono', monospace; letter-spacing: .04em; }
+  .tooltip-value { fill: #ffffff; font: 700 12px 'JetBrains Mono', monospace; }
   .tooltip-value.accent { fill: #00cc66; }
-  .axis-label { fill: #444; font: 8px 'JetBrains Mono', monospace; }
+  .axis-label { fill: #a3a3a3; font: 11px 'JetBrains Mono', monospace; }
   .y-label { text-anchor: end; }
-  .x-label { font-size: 7px; text-anchor: middle; }
+  .x-label { font-size: 11px; text-anchor: middle; }
 
   .empty-chart {
     padding: 34px 16px;
-    color: #555;
-    font: 10px/1.4 'JetBrains Mono', monospace;
+    color: #a3a3a3;
+    font: 11px/1.5 'JetBrains Mono', monospace;
   }
 
   .empty-chart span { margin-right: 8px; color: #00cc66; animation: loader 1.2s steps(5) infinite; }
@@ -477,19 +477,19 @@
     gap: 12px;
     padding: 8px 16px 10px;
     border-top: 1px solid #111;
-    color: #444;
-    font: 8px/1.3 'JetBrains Mono', monospace;
+    color: #949494;
+    font: 11px/1.5 'JetBrains Mono', monospace;
   }
 
-  .chart-source span { color: #666; }
+  .chart-source span { color: #b8b8b8; }
   .chart-source em { font-style: normal; }
 
   .chart-warning {
     margin: 0 16px 12px;
     padding: 9px 10px;
     border: 1px solid #1a1a1a;
-    color: #666;
-    font: 9px/1.4 'JetBrains Mono', monospace;
+    color: #b8b8b8;
+    font: 11px/1.5 'JetBrains Mono', monospace;
   }
 
   .chart-warning span { margin-right: 8px; color: #d4a017; font-weight: 800; }

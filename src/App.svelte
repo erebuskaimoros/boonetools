@@ -4,6 +4,7 @@
   import Snow from './lib/Snow.svelte';
   import Banner from './lib/Banner.svelte';
   import { trackFirstPartyPageView } from './lib/page-view-analytics.js';
+  import './lib/styles/variables.css';
 
   const BASE_PATH = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
   function stripBase(pathname) {
@@ -488,10 +489,15 @@
     box-sizing: border-box;
   }
 
+  :global(html) {
+    color-scheme: dark;
+    font-size: 100%;
+  }
+
   :root {
     --background-color: #080808;
-    --text-color: #c8c8c8;
-    --text-muted: #666;
+    --text-color: var(--term-text-body);
+    --text-muted: #b8b8b8;
     --sidebar-width: 232px;
     --sidebar-width-collapsed: 56px;
     --topbar-height: 40px;
@@ -505,6 +511,8 @@
     height: 100vh;
     height: 100dvh;
     color: var(--text-color);
+    font-size: var(--term-type-body);
+    line-height: var(--term-leading-body);
     position: relative;
     overflow: hidden;
   }
@@ -524,14 +532,14 @@
 
   .brand-prompt {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     color: #00cc66;
   }
 
   .brand-name {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
     color: #e8e8e8;
     letter-spacing: 0.08em;
@@ -539,7 +547,7 @@
 
   .cursor {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     color: #00cc66;
     animation: cursor-blink 1s steps(1) infinite;
@@ -552,9 +560,10 @@
 
   .bracket-btn {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
+    line-height: var(--term-leading-compact);
     font-weight: 600;
-    color: #888;
+    color: var(--term-text-2);
     background: transparent;
     border: 1px solid #1a1a1a;
     padding: 4px 8px;
@@ -569,7 +578,7 @@
   }
 
   .bracket-btn .bk {
-    color: #444;
+    color: var(--term-text-5);
   }
 
   .status-dot {
@@ -590,18 +599,18 @@
 
   .item-index {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
-    color: #333;
+    color: var(--term-text-6);
     min-width: 18px;
     flex-shrink: 0;
   }
 
   .item-prompt {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
-    color: #444;
+    color: var(--term-text-5);
     width: 12px;
     flex-shrink: 0;
     transition: color 0.15s ease;
@@ -609,7 +618,8 @@
 
   .item-name {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+    font-size: 12px;
+    line-height: var(--term-leading-compact);
     font-weight: 600;
     letter-spacing: 0.02em;
     flex: 0 1 auto;
@@ -621,17 +631,18 @@
 
   .status-text {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: var(--term-type-label);
+    line-height: var(--term-leading-compact);
     font-weight: 600;
     letter-spacing: 0.12em;
-    color: #444;
+    color: var(--term-text-4);
     flex: 1;
   }
 
   .status-ver {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: #333;
+    font-size: var(--term-type-label);
+    color: var(--term-text-6);
   }
 
   /* ---- DESKTOP SIDEBAR ---- */
@@ -674,10 +685,10 @@
     justify-content: space-between;
     padding: 14px 14px 8px 12px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.02em;
-    color: #666;
+    color: var(--term-text-3);
     flex-shrink: 0;
   }
 
@@ -697,7 +708,7 @@
   }
 
   .side-label-count {
-    color: #333;
+    color: var(--term-text-6);
   }
 
   .side-nav {
@@ -715,7 +726,7 @@
     background: transparent;
     border: none;
     border-left: 2px solid transparent;
-    color: #888;
+    color: var(--term-text-2);
     cursor: pointer;
     text-align: left;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
@@ -723,7 +734,7 @@
 
   .side-item:hover {
     background: #0d0d0d;
-    color: #c8c8c8;
+    color: var(--term-text);
   }
 
   .side-item:hover .item-prompt {
@@ -756,7 +767,7 @@
   }
 
   .sidebar.collapsed .side-item:hover .item-index {
-    color: #c8c8c8;
+    color: var(--term-text);
   }
 
   .sidebar.collapsed .side-item.active .item-index {
@@ -803,10 +814,10 @@
 
   .topbar-app {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.02em;
-    color: #555;
+    color: var(--term-text-4);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -844,7 +855,7 @@
     border: none;
     border-left: 2px solid transparent;
     border-bottom: 1px solid #111;
-    color: #888;
+    color: var(--term-text-2);
     cursor: pointer;
     text-align: left;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
@@ -852,12 +863,12 @@
 
   .drop-item .item-name,
   .drop-item .item-prompt {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .drop-item:hover {
     background: #0d0d0d;
-    color: #c8c8c8;
+    color: var(--term-text);
   }
 
   .drop-item:hover .item-prompt {
@@ -917,9 +928,9 @@
     margin: 48px auto 0;
     padding: 0 16px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
-    color: #666;
+    color: var(--term-text-3);
   }
 
   .app-load-error {
@@ -932,14 +943,15 @@
     padding: 16px;
     border: 1px solid #1a1a1a;
     background: #0a0a0a;
-    color: #888;
+    color: var(--term-text-2);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
+    font-size: 13px;
+    line-height: var(--term-leading-body);
   }
 
   .app-load-error-tag {
     margin-right: 8px;
-    color: #dc3545;
+    color: var(--term-error);
     font-weight: 700;
   }
 

@@ -74,17 +74,19 @@ The palette is intentionally narrow.
 | Token | Hex | Use |
 | --- | --- | --- |
 | `--term-text-strong` | `#ffffff` | Almost never — reserved for hot states. |
-| `--term-text` | `#e8e8e8` | Display titles, primary metric values. |
-| `--term-text-body` | `#c8c8c8` | Body text, default table cells. |
-| `--term-text-2` | `#888888` | Secondary text, status text, table mono content. |
-| `--term-text-3` | `#666666` | Labels, chart ticks, descriptive prose. |
-| `--term-text-4` | `#555555` | Sub-labels, foot text, dim metadata. |
-| `--term-text-5` | `#444444` | Inactive icons, very dim labels. |
-| `--term-text-6` | `#333333` | Bracket characters, separators, timeline indices. |
-| `--term-text-7` | `#222222` | The dimmest UI ink (arrow placeholders, etc). |
+| `--term-text` | `#ededed` | Display titles, primary metric values. |
+| `--term-text-body` | `#d2d2d2` | Body text, default table cells. |
+| `--term-text-2` | `#b8b8b8` | Secondary text, status text, table mono content. |
+| `--term-text-3` | `#a3a3a3` | Labels, chart ticks, descriptive prose. |
+| `--term-text-4` | `#949494` | Sub-labels and nonessential metadata. |
+| `--term-text-5` | `#858585` | Inactive affordances and decorative labels. |
+| `--term-text-6` | `#7d7d7d` | Bracket characters and decorative indices. |
+| `--term-text-7` | `#7a7a7a` | The dimmest permitted UI ink; decorative use only. |
 
-Use the dim end aggressively — that ramp is what makes the screen read as a
-terminal.
+Create hierarchy with weight, spacing, and position before reducing contrast.
+Structural rules may be faint, but text must remain readable. Use the dimmest
+tokens only for decorative or inactive elements, never content, controls,
+table headers, or chart labels.
 
 ### Accents
 
@@ -96,7 +98,7 @@ terminal.
 | `--term-accent-glow` | `0 0 6px rgba(0,204,102,0.4)` | Status-dot glow only. |
 | `--term-amber` | `#d4a017` | Reserve/destination cards, event labels in timelines, currency line on charts, `WRN` tag. |
 | `--term-amber-soft` | `rgba(212,160,23,0.06)` | Reserve card vertical fade. |
-| `--term-error` | `#dc3545` | Error alert borders/labels. |
+| `--term-error` | `#e05260` | Error alert borders/labels. |
 | `--term-info` | `#5588cc` | Informational chart series only. |
 
 Do not introduce a new dominant hue for a one-off feature.
@@ -129,15 +131,20 @@ every terminal element.
 | --- | --- | --- |
 | display | 30px / 800 | Page title (e.g. `APP LAYER → BASE LAYER_`). |
 | metric | 24px / 800 | Primary metric values inside metric cards. |
-| h2 | 13px / 700 / `0.08em` upper | Block headings. |
-| body | 13px / 400 | Default body, descriptive paragraphs. |
-| body-small | 12px / 400 | Block ledes, foot prose. |
-| number | 11px / 600 | Mono numbers and addresses in cells. |
-| label | 10px / 600 / `0.12em` upper | Metric labels, foot tags. |
-| label-micro | 9px / 700 / `0.18em` upper | Column heads, queue mini-labels, status pills. |
+| h2 | 14px / 700 / `0.08em` upper | Block headings. |
+| body | 14px / 400 | Default body, descriptive paragraphs. |
+| body-small | 13px / 400 | Block ledes, foot prose. |
+| number | 12px / 600 | Mono numbers and addresses in cells. |
+| label | 11px / 600 / `0.12em` upper | Metric labels, foot tags. |
+| label-micro | 10px / 700 / `0.18em` upper | Incidental markers and compact status pills. |
 
 Display titles use `letter-spacing: 0.06em`. Uppercase mono labels typically
 sit between `0.08em` and `0.18em`. Never use negative tracking.
+
+Essential mono content—including controls, metadata, table headers, and chart
+axes—must be at least 11px. Tooltips start at 12px. Ten-pixel text is reserved
+for incidental markers and must retain strong contrast. Multi-line body copy
+starts at 13px and uses at least 1.5 line-height.
 
 ## Layout & Containers
 
@@ -249,7 +256,7 @@ hue.
 
 ### Tables
 
-Mono throughout. Sticky `surface` header. 9px label-style header cells.
+Mono throughout. Sticky `surface` header. 11px label-style header cells.
 1px `border-faint` row separators. Right-aligned numeric columns. The
 accent-colored "primary value" column uses `--term-accent`.
 
@@ -335,7 +342,7 @@ with a 1px accent border.
 <span class="node-pill amber">RESERVE memo</span>
 ```
 
-9px uppercase mono, 2px×7px, `border-default` → accent/amber on variant.
+10px uppercase mono, 2px×7px, `border-default` → accent/amber on variant.
 Status pills are the **only** place full pill rounding (`border-radius: 999px`)
 is acceptable.
 
@@ -368,26 +375,26 @@ example. Quick recipe:
 
 ```js
 {
-  legend: { labels: { color: '#888', font: { family: "'JetBrains Mono', monospace", size: 10 } } },
+  legend: { labels: { color: '#d2d2d2', font: { family: "'JetBrains Mono', monospace", size: 11, weight: 600 } } },
   tooltip: {
     backgroundColor: '#0a0a0a',
     borderColor: '#1a1a1a',
     borderWidth: 1,
-    titleColor: '#00cc66',
-    bodyColor: '#c8c8c8',
-    titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
-    bodyFont: { family: "'JetBrains Mono', monospace", size: 11 }
+    titleColor: '#ffffff',
+    bodyColor: '#ededed',
+    titleFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 700 },
+    bodyFont: { family: "'JetBrains Mono', monospace", size: 12 }
   },
   scales: {
     x: {
       grid: { color: '#111', drawBorder: false },
       border: { color: '#1a1a1a' },
-      ticks: { color: '#666', font: { family: "'JetBrains Mono', monospace", size: 10 } }
+      ticks: { color: '#a3a3a3', font: { family: "'JetBrains Mono', monospace", size: 11 } }
     },
     y: {
       grid: { color: '#111' },
       border: { color: '#1a1a1a' },
-      ticks: { color: '#00cc66', font: { family: "'JetBrains Mono', monospace", size: 10 } }
+      ticks: { color: '#00cc66', font: { family: "'JetBrains Mono', monospace", size: 11 } }
     }
   }
 }

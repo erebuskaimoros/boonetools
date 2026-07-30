@@ -617,7 +617,7 @@
     padding: 60px 20px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
-    color: #666;
+    color: var(--term-text-3);
   }
 
   /* ---- DASHBOARD HEADER ---- */
@@ -656,10 +656,10 @@
 
   .metric-key {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.12em;
-    color: #555;
+    color: var(--term-text-4);
     text-transform: uppercase;
   }
 
@@ -675,10 +675,10 @@
 
   .tab-btn {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.06em;
-    color: #555;
+    color: var(--term-text-4);
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
@@ -696,15 +696,15 @@
 
   .last-updated {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #555;
+    font-size: 11px;
+    color: var(--term-text-4);
     margin-right: 10px;
     white-space: nowrap;
   }
 
   .refresh-btn {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.08em;
     color: #00cc66;
@@ -724,7 +724,7 @@
   }
 
   .refresh-btn:disabled {
-    color: #555;
+    color: var(--term-text-4);
     border-color: #222;
     background: #111;
     cursor: wait;
@@ -773,7 +773,7 @@
 
   .pool-inactive-badge {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 8px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -787,7 +787,7 @@
   .pool-total {
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
-    color: #555;
+    color: var(--term-text-4);
     margin-left: auto;
   }
 
@@ -799,7 +799,7 @@
 
   .type-pill {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 8px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -824,10 +824,10 @@
 
   .mosaic-col-header {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.06em;
-    color: #555;
+    color: var(--term-text-4);
     text-align: center;
     padding: 6px 0;
     transition: color 0.1s;
@@ -853,8 +853,8 @@
   }
 
   .col-pct, .row-pct {
-    font-size: 10px;
-    color: #667;
+    font-size: 11px;
+    color: var(--term-text-3);
     font-weight: 500;
   }
 
@@ -873,9 +873,9 @@
 
   .mosaic-row-label {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
-    color: #555;
+    color: var(--term-text-4);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -953,14 +953,14 @@
 
   /* ---- AXIS DETAIL (hover info) ---- */
   .axis-detail {
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
     color: #ccc;
     white-space: nowrap;
   }
 
   .axis-usd {
-    font-size: 9px;
+    font-size: 11px;
     color: #00cc66;
     white-space: nowrap;
   }
@@ -999,10 +999,10 @@
 
   .asset-summary-label {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.12em;
-    color: #555;
+    color: var(--term-text-4);
   }
 
   .asset-summary-cell.pooled .asset-summary-value { color: #00cc66; }
@@ -1034,24 +1034,24 @@
   .assets-title-row h2 {
     margin: 0;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.1em;
-    color: #c8c8c8;
+    color: var(--term-text-body);
   }
 
   .assets-heading p {
     margin: 7px 0 0 12px;
     max-width: 760px;
-    font-size: 12px;
+    font-size: 13px;
     line-height: 1.5;
-    color: #666;
+    color: var(--term-text-3);
   }
 
   .assets-count {
     flex-shrink: 0;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.1em;
     color: #00cc66;
@@ -1090,8 +1090,9 @@
     z-index: 2;
     padding: 9px 14px;
     background: #0d0d0d;
-    color: #555;
-    font-size: 9px;
+    color: var(--term-text-4);
+    font-size: 11px;
+    line-height: 1.4;
     font-weight: 700;
     letter-spacing: 0.1em;
     white-space: nowrap;
@@ -1140,7 +1141,7 @@
   }
 
   .asset-name-row a {
-    color: #c8c8c8;
+    color: var(--term-text-body);
     font-size: 12px;
     font-weight: 700;
     text-decoration: none;
@@ -1153,8 +1154,8 @@
     max-width: 100%;
     margin-top: 3px;
     overflow: hidden;
-    color: #4f4f4f;
-    font-size: 9px;
+    color: var(--term-text-5);
+    font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -1176,18 +1177,18 @@
 
   .bucket-usd {
     margin-top: 3px;
-    color: #555;
-    font-size: 10px;
+    color: var(--term-text-4);
+    font-size: 11px;
   }
 
   .total-cell .bucket-amount { color: #d0d0d0; }
-  .total-cell .bucket-usd { color: #777; }
+  .total-cell .bucket-usd { color: var(--term-text-3); }
   .pooled-cell .bucket-amount { color: #00cc66; }
   .trade-cell .bucket-amount { color: #5588cc; }
   .secured-cell .bucket-amount { color: #d4a017; }
 
   .bucket-empty {
-    color: #333;
+    color: var(--term-text-6);
     font-size: 12px;
   }
 
@@ -1232,7 +1233,7 @@
 
   .vault-status-badge {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 8px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -1254,8 +1255,8 @@
 
   .pubkey-btn {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #555;
+    font-size: 11px;
+    color: var(--term-text-4);
     background: none;
     border: none;
     padding: 2px 0;
@@ -1274,10 +1275,10 @@
 
   .vault-section-title {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.12em;
-    color: #444;
+    color: var(--term-text-5);
     margin-bottom: 8px;
   }
 
@@ -1298,16 +1299,16 @@
 
   .addr-chain {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
-    color: #666;
+    color: var(--term-text-3);
     min-width: 40px;
   }
 
   .addr-val {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #555;
+    font-size: 11px;
+    color: var(--term-text-4);
     background: none;
     border: none;
     cursor: pointer;
@@ -1322,7 +1323,7 @@
   .addr-explorer {
     background: none;
     border: none;
-    color: #444;
+    color: var(--term-text-5);
     cursor: pointer;
     padding: 2px;
     display: flex;
@@ -1369,7 +1370,7 @@
 
   .vault-stat-button:hover .vault-stat-label,
   .vault-stat-button.expanded .vault-stat-label {
-    color: #666;
+    color: var(--term-text-3);
   }
 
   .vault-stat-button:hover .vault-stat-val,
@@ -1379,10 +1380,10 @@
 
   .vault-stat-label {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 8px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.1em;
-    color: #444;
+    color: var(--term-text-5);
     display: block;
     margin-bottom: 4px;
   }
@@ -1420,7 +1421,7 @@
 
   .signer-link {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     color: #aaa;
     text-decoration: none;
@@ -1439,22 +1440,22 @@
   }
 
   .signer-link-missing {
-    color: #666;
+    color: var(--term-text-3);
     cursor: default;
   }
 
   .signer-link-missing:hover {
-    color: #666;
+    color: var(--term-text-3);
     background: #111;
     border-color: #1e1e1e;
   }
 
   .expand-toggle {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.06em;
-    color: #555;
+    color: var(--term-text-4);
     background: none;
     border: none;
     cursor: pointer;
@@ -1496,7 +1497,7 @@
     gap: 6px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #888;
+    color: var(--term-text-2);
   }
 
   .asset-logo {
@@ -1509,7 +1510,7 @@
 
   .asset-source {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 8px;
+    font-size: 10px;
     font-weight: 700;
     letter-spacing: 0.08em;
     color: #00cc66;
@@ -1529,7 +1530,7 @@
   .asset-amount {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #777;
+    color: var(--term-text-3);
   }
 
   .asset-usd {
@@ -1581,7 +1582,7 @@
     }
 
     .tab-btn {
-      font-size: 10px;
+      font-size: 12px;
       padding: 8px 12px;
     }
 

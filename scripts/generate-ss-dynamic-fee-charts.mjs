@@ -23,8 +23,8 @@ const CHART = Object.freeze({
   page: '#080808',
   frame: '#111111',
   grid: '#1a1a1a',
-  text: '#777777',
-  textStrong: '#d8d8d8',
+  text: '#a3a3a3',
+  textStrong: '#ededed',
   volume: '#00cc66',
   fees: '#d4a017',
   rate: '#5588cc',
@@ -162,9 +162,9 @@ function svgDocument({ title, description, content }) {
   <title id="chart-title">${escapeXml(title)}</title>
   <desc id="chart-desc">${escapeXml(description)}</desc>
   <style>
-    text { font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace; font-size: 10px; font-variant-numeric: tabular-nums; }
-    .heading { fill: ${CHART.textStrong}; font-size: 13px; font-weight: 600; letter-spacing: 1.2px; }
-    .meta { fill: ${CHART.text}; font-size: 10px; letter-spacing: 1px; }
+    text { font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace; font-size: 14px; font-variant-numeric: tabular-nums; }
+    .heading { fill: ${CHART.textStrong}; font-size: 16px; font-weight: 600; letter-spacing: 1.2px; }
+    .meta { fill: ${CHART.text}; font-size: 13px; letter-spacing: 1px; }
     .tick { fill: ${CHART.text}; }
     .fee-tick { fill: ${CHART.fees}; }
     .rate-tick { fill: ${CHART.rate}; }

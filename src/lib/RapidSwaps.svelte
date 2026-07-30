@@ -821,7 +821,7 @@
     flex-direction: column;
     gap: 0;
     font-family: 'DM Sans', -apple-system, sans-serif;
-    color: #c8c8c8;
+    color: var(--term-text-body, #d2d2d2);
   }
 
   /* ---- STATUS BAR ---- */
@@ -833,7 +833,7 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     letter-spacing: 0.04em;
-    color: #666;
+    color: var(--term-text-3, #a3a3a3);
     border-bottom: 1px solid #1a1a1a;
     background: #0a0a0a;
   }
@@ -859,7 +859,7 @@
   }
 
   .sep {
-    color: #333;
+    color: var(--term-text-7, #787878);
     margin: 0 6px;
   }
 
@@ -868,7 +868,7 @@
   }
 
   .status-right {
-    color: #555;
+    color: var(--term-text-4, #949494);
     display: flex;
     align-items: center;
     gap: 0;
@@ -922,7 +922,7 @@
 
   .source-banner-title {
     color: #d4a017;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.12em;
     margin-bottom: 4px;
@@ -933,8 +933,8 @@
   }
 
   .source-banner-body {
-    color: #8d8366;
-    font-size: 11px;
+    color: var(--term-text-3, #a3a3a3);
+    font-size: 13px;
     line-height: 1.5;
   }
 
@@ -984,17 +984,17 @@
 
   .metric-key {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.12em;
-    color: #555;
+    color: var(--term-text-3, #a3a3a3);
     text-transform: uppercase;
   }
 
   .metric-sub {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: #444;
+    font-size: 11px;
+    color: var(--term-text-4, #949494);
     margin-top: 4px;
   }
 
@@ -1004,8 +1004,8 @@
 
   .metric-stats {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: #555;
+    font-size: 11px;
+    color: var(--term-text-3, #a3a3a3);
     margin-top: 4px;
     display: flex;
     gap: 0;
@@ -1051,7 +1051,7 @@
   }
 
   .date-sep {
-    color: #555;
+    color: var(--term-text-4, #949494);
     font-size: 11px;
   }
 
@@ -1060,7 +1060,7 @@
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.06em;
-    color: #555;
+    color: var(--term-text-4, #949494);
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
@@ -1098,10 +1098,10 @@
 
   .chart-title {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
-    color: #666;
+    color: var(--term-text-3, #a3a3a3);
     text-transform: uppercase;
     margin-bottom: 12px;
   }
@@ -1155,16 +1155,16 @@
   }
 
   .filter-input::placeholder {
-    color: #444;
+    color: var(--term-text-4, #949494);
   }
 
   .filter-clear {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     padding: 6px 12px;
     background: #1a1a1a;
     border: 1px solid #333;
-    color: #888;
+    color: var(--term-text-3, #a3a3a3);
     border-radius: 3px;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
@@ -1195,12 +1195,12 @@
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.1em;
-    color: #888;
+    color: var(--term-text-3, #a3a3a3);
   }
 
   .section-sub {
     font-size: 11px;
-    color: #444;
+    color: var(--term-text-4, #949494);
   }
 
   /* ---- TABLES ---- */
@@ -1216,11 +1216,11 @@
 
   th {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: #444;
+    color: var(--term-text-3, #a3a3a3);
     text-align: left;
     padding: 8px 16px;
     border-bottom: 1px solid #1a1a1a;
@@ -1261,7 +1261,7 @@
   }
 
   .dim {
-    color: #555;
+    color: var(--term-text-4, #949494);
   }
 
   .right {
@@ -1313,7 +1313,7 @@
     padding: 4px 10px;
     background: #111;
     border: 1px solid #222;
-    color: #888;
+    color: var(--term-text-3, #a3a3a3);
     border-radius: 3px;
     cursor: pointer;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -1344,7 +1344,7 @@
   }
 
   .page-dots {
-    color: #444;
+    color: var(--term-text-4, #949494);
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     padding: 0 4px;
@@ -1353,7 +1353,7 @@
   /* ---- EMPTY / ERROR ---- */
   .empty {
     padding: 24px 16px;
-    color: #444;
+    color: var(--term-text-3, #a3a3a3);
     font-size: 13px;
     font-family: 'JetBrains Mono', monospace;
   }
@@ -1391,7 +1391,7 @@
     }
 
     .status-bar {
-      font-size: 10px;
+      font-size: 11px;
       flex-wrap: wrap;
       gap: 4px;
     }
@@ -1402,7 +1402,7 @@
 
     .tab-btn {
       padding: 8px 10px;
-      font-size: 10px;
+      font-size: 11px;
     }
 
     .table-filters {

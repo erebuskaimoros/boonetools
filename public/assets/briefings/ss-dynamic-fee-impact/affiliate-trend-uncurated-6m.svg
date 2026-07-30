@@ -2,10 +2,10 @@
   <title id="chart-title">SS six-month affiliate trend, uncurated</title>
   <desc id="chart-desc">UNCURATED daily executed-leg volume bars, historical liquidity-fee bars, fees-per-volume line, and trailing 30- and 90-day average-volume lines from 2026-01-27 through 2026-07-26. The rolling averages divide the trailing 30 and 90 calendar buckets by 30 and 90, respectively.</desc>
   <style>
-    text { font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace; font-size: 10px; font-variant-numeric: tabular-nums; }
-    .heading { fill: #d8d8d8; font-size: 13px; font-weight: 600; letter-spacing: 1.2px; }
-    .meta { fill: #777777; font-size: 10px; letter-spacing: 1px; }
-    .tick { fill: #777777; }
+    text { font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace; font-size: 14px; font-variant-numeric: tabular-nums; }
+    .heading { fill: #ededed; font-size: 16px; font-weight: 600; letter-spacing: 1.2px; }
+    .meta { fill: #a3a3a3; font-size: 13px; letter-spacing: 1px; }
+    .tick { fill: #a3a3a3; }
     .fee-tick { fill: #d4a017; }
     .rate-tick { fill: #5588cc; }
     .grid { stroke: #1a1a1a; stroke-width: 1; shape-rendering: crispEdges; }

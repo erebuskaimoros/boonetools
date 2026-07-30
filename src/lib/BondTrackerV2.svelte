@@ -628,7 +628,7 @@
             ? formatNumber(value, { maximumFractionDigits: 0 }) + ' ᚱ'
             : sym + formatNumber(value, { maximumFractionDigits: config.decimals });
           c.save();
-          c.font = "600 10px 'JetBrains Mono', monospace";
+          c.font = "600 11px 'JetBrains Mono', monospace";
           c.fillStyle = isRune ? '#00cc66' : '#d4a017';
           c.textAlign = isRune ? 'left' : 'right';
           const xOff = isRune ? -c.measureText(text).width - 8 : 8;
@@ -693,7 +693,7 @@
         scales: {
           x: {
             grid: { color: 'rgba(255, 255, 255, 0.04)', lineWidth: 0.5 },
-            ticks: { color: '#444', font: { family: "'JetBrains Mono', monospace", size: 10 } },
+            ticks: { color: '#a3a3a3', font: { family: "'JetBrains Mono', monospace", size: 11 } },
             border: { color: '#1a1a1a' }
           },
           y: {
@@ -703,7 +703,7 @@
             border: { color: '#1a1a1a' },
             ticks: {
               color: '#00cc66',
-              font: { family: "'JetBrains Mono', monospace", size: 10 },
+              font: { family: "'JetBrains Mono', monospace", size: 11 },
               callback: (v) => simplifyNumber(Number(v)) + ' ᚱ'
             }
           },
@@ -714,7 +714,7 @@
             border: { color: '#1a1a1a' },
             ticks: {
               color: '#d4a017',
-              font: { family: "'JetBrains Mono', monospace", size: 10 },
+              font: { family: "'JetBrains Mono', monospace", size: 11 },
               callback: (v) => formatCurrencyCompact(Number(v), curr)
             }
           }
@@ -722,8 +722,8 @@
         plugins: {
           legend: {
             labels: {
-              color: '#555',
-              font: { family: "'JetBrains Mono', monospace", size: 10, weight: 600 },
+              color: '#d2d2d2',
+              font: { family: "'JetBrains Mono', monospace", size: 11, weight: 600 },
               boxWidth: 12,
               boxHeight: 2,
               padding: 16
@@ -733,10 +733,10 @@
             backgroundColor: '#1a1a1a',
             borderColor: '#333',
             borderWidth: 1,
-            titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
-            bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
-            titleColor: '#888',
-            bodyColor: '#ccc',
+            titleFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 700 },
+            bodyFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 500 },
+            titleColor: '#fff',
+            bodyColor: '#ededed',
             padding: 10,
             callbacks: {
               label: (context) => {
@@ -1182,7 +1182,7 @@
     flex-direction: column;
     gap: 0;
     font-family: 'DM Sans', -apple-system, sans-serif;
-    color: #c8c8c8;
+    color: var(--term-text-body);
   }
 
   /* ---- ENTRY FORM ---- */
@@ -1194,10 +1194,10 @@
 
   .entry-label {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: var(--term-type-label);
     font-weight: 600;
     letter-spacing: 0.12em;
-    color: #555;
+    color: var(--term-text-3);
     text-transform: uppercase;
     margin-bottom: 8px;
   }
@@ -1225,7 +1225,7 @@
   }
 
   .entry-row input::placeholder {
-    color: #333;
+    color: var(--term-text-4);
   }
 
   .entry-row button[type="submit"] {
@@ -1249,7 +1249,7 @@
   .dice-btn {
     background: #1a1a1a;
     border: 1px solid #333;
-    color: #666;
+    color: var(--term-text-3);
     padding: 12px;
     cursor: pointer;
     border-radius: 0;
@@ -1367,7 +1367,7 @@
     color: #5588cc;
     text-decoration: none;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: var(--term-type-label);
   }
 
   .node-link:hover {
@@ -1377,8 +1377,8 @@
 
   .change-btn {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: #555;
+    font-size: var(--term-type-label);
+    color: var(--term-text-4);
     background: none;
     border: none;
     cursor: pointer;
@@ -1395,7 +1395,7 @@
   /* Download buttons */
   .dl-btn {
     font-family: 'JetBrains Mono', monospace !important;
-    font-size: 10px !important;
+    font-size: var(--term-type-label) !important;
     font-weight: 600;
     letter-spacing: 0.02em;
   }
@@ -1416,7 +1416,7 @@
     padding: 4px 10px;
     background: #111;
     border: 1px solid #222;
-    color: #888;
+    color: var(--term-text-2);
     border-radius: 3px;
     cursor: pointer;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
@@ -1447,7 +1447,7 @@
   }
 
   .page-dots {
-    color: #444;
+    color: var(--term-text-5);
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     padding: 0 4px;
@@ -1455,7 +1455,7 @@
 
   .metric-key {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: var(--term-type-label);
     font-weight: 600;
     letter-spacing: 0.1em;
     color: #999;
@@ -1499,7 +1499,7 @@
   .section-sub {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #444;
+    color: var(--term-text-4);
   }
 
   .section-actions {
@@ -1511,13 +1511,13 @@
 
   .hist-toggle {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: var(--term-type-label);
     font-weight: 600;
     letter-spacing: 0.08em;
     padding: 3px 7px;
     background: none;
     border: 1px solid #333;
-    color: #555;
+    color: var(--term-text-4);
     cursor: pointer;
     border-radius: 0;
     transition: all 0.15s;
@@ -1540,7 +1540,7 @@
   .icon-btn {
     background: none;
     border: 1px solid transparent;
-    color: #555;
+    color: var(--term-text-4);
     cursor: pointer;
     padding: 4px 6px;
     display: flex;
@@ -1627,11 +1627,11 @@
 
   th {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: var(--term-type-label);
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: #444;
+    color: var(--term-text-4);
     text-align: left;
     padding: 8px 16px;
     border-bottom: 1px solid #1a1a1a;
@@ -1655,7 +1655,7 @@
     font-size: 12px;
   }
 
-  .dim { color: #555; }
+  .dim { color: var(--term-text-4); }
   .right { text-align: right; }
   .accent { color: #00cc66; }
   .blue { color: #5588cc; }
@@ -1692,7 +1692,7 @@
 
   .empty {
     padding: 24px 16px;
-    color: #444;
+    color: var(--term-text-4);
     font-size: 13px;
     font-family: 'JetBrains Mono', monospace;
   }
@@ -1700,7 +1700,7 @@
   /* ---- NODE TABLE ---- */
   .status-badge {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: var(--term-type-label);
     font-weight: 600;
     letter-spacing: 0.06em;
     padding: 2px 6px;
@@ -1719,7 +1719,7 @@
 
   .churn-tag {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: var(--term-type-label);
     color: #cc3333;
     margin-left: 8px;
     letter-spacing: 0.06em;

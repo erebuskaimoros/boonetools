@@ -1,5 +1,5 @@
 ---
-version: "terminal-2026-05"
+version: "terminal-2026-07"
 name: "BOONE Tools"
 description: "Agent-facing design contract for the boone.tools Svelte utilities."
 colors:
@@ -12,20 +12,20 @@ colors:
   border-default: "#1a1a1a"
   border-strong: "#2a2a2a"
   ink: "#080808"
-  text-primary: "#e8e8e8"
+  text-primary: "#ededed"
   text-strong: "#ffffff"
-  text-body: "#c8c8c8"
-  text-secondary: "#888888"
-  text-muted: "#666666"
-  text-dim: "#444444"
-  text-dimmer: "#333333"
-  text-dimmest: "#222222"
+  text-body: "#d2d2d2"
+  text-secondary: "#b8b8b8"
+  text-muted: "#a3a3a3"
+  text-dim: "#949494"
+  text-dimmer: "#858585"
+  text-dimmest: "#7a7a7a"
   accent: "#00cc66"
   accent-soft: "rgba(0, 204, 102, 0.07)"
   accent-edge: "rgba(0, 204, 102, 0.4)"
   amber: "#d4a017"
   amber-soft: "rgba(212, 160, 23, 0.06)"
-  error: "#dc3545"
+  error: "#e05260"
   warning: "#d4a017"
   info: "#5588cc"
   currency: "#ffc107"
@@ -39,21 +39,21 @@ typography:
     case: "uppercase"
   h2:
     fontFamily: "'JetBrains Mono', monospace"
-    fontSize: 13px
+    fontSize: 14px
     fontWeight: 700
     lineHeight: "1.2"
     letterSpacing: 0.08em
     case: "uppercase"
   label:
     fontFamily: "'JetBrains Mono', monospace"
-    fontSize: 10px
+    fontSize: 11px
     fontWeight: 600
     lineHeight: "1.2"
     letterSpacing: 0.12em
     case: "uppercase"
   label-micro:
     fontFamily: "'JetBrains Mono', monospace"
-    fontSize: 9px
+    fontSize: 10px
     fontWeight: 700
     lineHeight: "1.2"
     letterSpacing: 0.18em
@@ -66,19 +66,19 @@ typography:
     letterSpacing: "-0.01em"
   number:
     fontFamily: "'JetBrains Mono', monospace"
-    fontSize: 11px
+    fontSize: 12px
     fontWeight: 600
     lineHeight: "1.4"
   body:
     fontFamily: "'DM Sans', -apple-system, sans-serif"
-    fontSize: 13px
+    fontSize: 14px
     fontWeight: 400
-    lineHeight: "1.5"
+    lineHeight: "1.6"
   body-small:
     fontFamily: "'DM Sans', -apple-system, sans-serif"
-    fontSize: 12px
+    fontSize: 13px
     fontWeight: 400
-    lineHeight: "1.45"
+    lineHeight: "1.55"
 fonts:
   load: "https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap"
   display: "'JetBrains Mono', monospace"
@@ -105,7 +105,7 @@ components:
   command-line:
     description: "Tool header rendered as a shell prompt. Use a green `$` prompt, the verb (cmd), then arguments. Pair with a right-aligned status pill + bracketed shortcut button."
     fontFamily: "{fonts.mono}"
-    fontSize: 11px
+    fontSize: 12px
     color: "{colors.text-muted}"
   page-title:
     description: "Uppercase mono display title with green accent arrows or punctuation and a blinking green `_` cursor."
@@ -133,7 +133,7 @@ components:
   status-pill:
     description: "Compact uppercase pill with optional pulsing dot. Color reflects state (accent for ok, amber for warn, dim for inactive)."
     fontFamily: "{fonts.mono}"
-    fontSize: 9px
+    fontSize: 10px
     border: "1px solid {colors.border-default}"
     padding: "2px 7px"
   status-dot:
@@ -151,9 +151,9 @@ components:
     hoverBorder: "{colors.accent}"
     hoverColor: "{colors.accent}"
   table:
-    description: "Mono throughout, uppercase header row with 9px label-style text, 1px `border-faint` row separators, sticky `surface` header, green hover background and accent-colored numeric column."
+    description: "Mono throughout, uppercase header row with 11px label-style text, 1px `border-faint` row separators, sticky `surface` header, green hover background and accent-colored numeric column."
     fontFamily: "{fonts.mono}"
-    fontSize: 11px
+    fontSize: 12px
     headerColor: "{colors.text-muted}"
     headerBackground: "{colors.surface}"
     rowBorder: "1px solid {colors.border-faint}"
@@ -233,10 +233,10 @@ The palette is intentionally narrow:
   `#060606`/`#050505` (inset). No gradients on surfaces.
 - **Borders:** `#1a1a1a` is the default rule. `#111` for very faint internal
   separators. Use dashed `#1a1a1a` for "this is a soft divider" cues.
-- **Text:** `#e8e8e8` for primary, `#c8c8c8` for body, `#888` for secondary,
-  then a long ramp of dimmer greys (`#666` → `#222`) for labels, indices,
-  bracket characters, and footer text. Use the dim end aggressively — it is
-  what makes the screen read as a terminal.
+- **Text:** `#ededed` for primary, `#d2d2d2` for body, `#b8b8b8` for
+  secondary, then a restrained ramp (`#a3a3a3` → `#7a7a7a`) for labels,
+  indices, bracket characters, and incidental metadata. Structural rules may
+  be faint; user-facing content must remain readable.
 - **Accent (Terminal Green):** `#00cc66`. Reserve this for: status dots, the
   highlighted base layer / primary path, hover states, command-line `$`
   prompts, the blinking `_` cursor in titles, accent numeric columns, primary
@@ -244,11 +244,13 @@ The palette is intentionally narrow:
   copy.
 - **Amber:** `#d4a017`. Reserve for: destination/reserve cards, currency-like
   values on charts, event labels in timelines, the `WRN` alert tag.
-- **Reds and blues:** `#dc3545` (errors only), `#5588cc` (informational chart
+- **Reds and blues:** `#e05260` (errors only), `#5588cc` (informational chart
   series only). Do not introduce new dominant hues for one-off features.
 
-When picking a text color, default to two steps dimmer than feels comfortable.
-Terminals are quiet; loud color is for state changes.
+Use weight, spacing, and position to create hierarchy before reducing contrast.
+Normal-sized text should meet WCAG AA contrast against its actual surface.
+Reserve the dimmest tokens for decorative punctuation or inactive affordances,
+never data, axes, table headers, explanatory copy, or controls.
 
 ## Typography
 
@@ -269,9 +271,11 @@ Both fonts are loaded from Google Fonts in `App.svelte`'s `<svelte:head>`:
 ```
 
 `:global(*)` sets the default to `'DM Sans'`, so mono must be set explicitly on
-every terminal element. Use small sizes aggressively: 9px–14px is the normal
-range for mono content; 22px–30px is reserved for display titles and primary
-metric values.
+every terminal element. User-facing mono content starts at 11px; 10px is
+reserved for genuinely incidental markers and must use high contrast. Body
+copy starts at 13px, with 14px preferred. Chart axes and legends are at least
+11px, and tooltips are at least 12px. Display titles and primary metric values
+remain 22px–30px.
 
 Most uppercase mono labels carry letter-spacing between `0.08em` and `0.18em`.
 Display titles use `0.06em`. Never use negative letter-spacing.
@@ -364,11 +368,11 @@ Do:
 
 - Treat every page as a terminal session. Headers, labels, footers all read
   like shell output.
-- Default to mono and dim grey. Reach for green only to signal live data,
-  active paths, and the user's focus.
+- Default to mono and a readable neutral grey. Reach for green only to signal
+  live data, active paths, and the user's focus.
 - Keep borders thin (`1px`), corners sharp, surfaces flat.
-- Use small font sizes (9–14px) for everything except display titles and
-  primary metric values.
+- Keep essential labels, controls, tables, axes, and metadata at 11px or
+  larger; body copy starts at 13px. Use 10px only for incidental markers.
 - Mark the highlighted path in any flow with green left-border + soft green
   background.
 - Use `→` arrows, `▌` markers, `▣`/`◈` node glyphs, `[brackets]`, and `$`

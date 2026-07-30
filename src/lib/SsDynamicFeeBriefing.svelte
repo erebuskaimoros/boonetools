@@ -203,8 +203,8 @@
     display: flex;
     gap: 8px;
     margin-bottom: 20px;
-    color: #444;
-    font-size: 10px;
+    color: var(--term-text-5);
+    font-size: 12px;
   }
 
   .breadcrumbs a,
@@ -230,8 +230,8 @@
   }
 
   .command-line {
-    color: #888;
-    font-size: 11px;
+    color: var(--term-text-2);
+    font-size: 12px;
     font-weight: 600;
   }
 
@@ -246,7 +246,7 @@
   }
 
   .arg {
-    color: #666;
+    color: var(--term-text-3);
   }
 
   .status {
@@ -256,8 +256,8 @@
     padding: 3px 8px;
     border: 1px solid #1a1a1a;
     border-radius: 999px;
-    color: #666;
-    font-size: 9px;
+    color: var(--term-text-3);
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.1em;
   }
@@ -302,15 +302,15 @@
     margin: 26px 0 10px;
     color: #d8d8d8;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     letter-spacing: 0.04em;
   }
 
   :global(.markdown-report p),
   :global(.markdown-report li) {
-    color: #aaa;
-    font-size: 13px;
+    color: var(--term-text-body);
+    font-size: 15px;
     line-height: 1.72;
   }
 
@@ -324,7 +324,7 @@
   }
 
   :global(.markdown-report em) {
-    color: #777;
+    color: var(--term-text-3);
   }
 
   :global(.markdown-report ul) {
@@ -376,9 +376,9 @@
     width: 100%;
     min-width: 660px;
     border-collapse: collapse;
-    color: #888;
+    color: var(--term-text-2);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 13px;
   }
 
   :global(.markdown-report th),
@@ -395,8 +395,8 @@
   }
 
   :global(.markdown-report th) {
-    color: #666;
-    font-size: 9px;
+    color: var(--term-text-3);
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
@@ -416,7 +416,7 @@
   :global(.markdown-report figure img) {
     display: block;
     width: 100%;
-    min-width: 760px;
+    min-width: 960px;
     height: auto;
   }
 
@@ -424,7 +424,7 @@
     display: inline-block;
     margin-top: 28px;
     color: #888;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
     text-decoration: none;
   }
@@ -458,7 +458,7 @@
 
     :global(.markdown-report p),
     :global(.markdown-report li) {
-      font-size: 12px;
+      font-size: 14px;
     }
   }
 </style>

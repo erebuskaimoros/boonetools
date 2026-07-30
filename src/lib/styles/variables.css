@@ -35,16 +35,22 @@
   --term-border: #1a1a1a;
   --term-border-soft: #141414;
 
-  /* Text ramp (use the dim end aggressively) */
+  /*
+   * Text ramp
+   *
+   * Keep terminal hierarchy through weight and role, but keep every text token
+   * at roughly WCAG AA contrast or better against the canonical page surface.
+   * Structural rules may stay faint; content should not.
+   */
   --term-text-strong: #ffffff;
-  --term-text: #e8e8e8;
-  --term-text-body: #c8c8c8;
-  --term-text-2: #888888;
-  --term-text-3: #666666;
-  --term-text-4: #555555;
-  --term-text-5: #444444;
-  --term-text-6: #333333;
-  --term-text-7: #222222;
+  --term-text: #ededed;
+  --term-text-body: #d2d2d2;
+  --term-text-2: #b8b8b8;
+  --term-text-3: #a3a3a3;
+  --term-text-4: #949494;
+  --term-text-5: #858585;
+  --term-text-6: #7d7d7d;
+  --term-text-7: #7a7a7a;
 
   /* Accents */
   --term-accent: #00cc66;
@@ -56,12 +62,20 @@
   --term-amber-soft: rgba(212, 160, 23, 0.06);
   --term-amber-edge: rgba(212, 160, 23, 0.4);
 
-  --term-error: #dc3545;
+  --term-error: #e05260;
   --term-info: #5588cc;
 
   /* Fonts */
-  --term-font-mono: 'JetBrains Mono', monospace;
-  --term-font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --term-font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  --term-font-body: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  /* Readability floor for terminal surfaces. */
+  --term-type-micro: 10px;
+  --term-type-label: 11px;
+  --term-type-small: 12px;
+  --term-type-body: 14px;
+  --term-leading-compact: 1.4;
+  --term-leading-body: 1.6;
 
   /* Motion */
   --term-transition: 0.15s ease;
@@ -84,10 +98,10 @@
      COLORS - Text
      ======================================== */
   --text-primary: #ffffff;
-  --text-secondary: #c0c0c0;
-  --text-muted: #a0a0a0;
-  --text-dimmed: #888888;
-  --text-placeholder: #666666;
+  --text-secondary: #d2d2d2;
+  --text-muted: #b8b8b8;
+  --text-dimmed: #a3a3a3;
+  --text-placeholder: #949494;
 
   /* ========================================
      COLORS - Accent (Primary)
@@ -105,7 +119,7 @@
   --color-success-light: #69db7c;
   --color-warning: #ff9800;
   --color-warning-light: #ffa94d;
-  --color-error: #dc3545;
+  --color-error: #e05260;
   --color-info: #6366f1;
   --color-currency: #ffc107;
 
@@ -174,9 +188,9 @@
   /* ========================================
      TYPOGRAPHY - Font Sizes
      ======================================== */
-  --text-xs: 10px;
-  --text-sm: 12px;
-  --text-base: 14px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
   --text-md: 16px;
   --text-lg: 18px;
   --text-xl: 20px;
@@ -191,6 +205,13 @@
   --font-semibold: 600;
   --font-bold: 700;
   --font-extrabold: 800;
+
+  /* ========================================
+     TYPOGRAPHY - Line Heights
+     ======================================== */
+  --leading-tight: 1.3;
+  --leading-normal: 1.55;
+  --leading-relaxed: 1.65;
 
   /* ========================================
      TYPOGRAPHY - Letter Spacing

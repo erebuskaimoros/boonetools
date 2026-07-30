@@ -309,7 +309,7 @@
   }
 
   .command-line {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: #888;
   }
@@ -332,7 +332,7 @@
 
   .arg {
     font-family: 'JetBrains Mono', monospace;
-    color: #666;
+    color: var(--term-text-3);
   }
 
   h1 {
@@ -434,8 +434,8 @@
   }
 
   .block-meta {
-    color: #444;
-    font-size: 9px;
+    color: var(--term-text-5);
+    font-size: 11px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
@@ -481,9 +481,9 @@
   }
 
   .row-copy > span {
-    color: #666;
-    font-size: 12px;
-    line-height: 1.5;
+    color: var(--term-text-3);
+    font-size: 13px;
+    line-height: 1.6;
   }
 
   .row-meta {
@@ -491,14 +491,14 @@
     flex-direction: column;
     align-items: flex-end;
     gap: 5px;
-    color: #555;
-    font-size: 9px;
+    color: var(--term-text-4);
+    font-size: 11px;
     letter-spacing: 0.06em;
     text-transform: uppercase;
   }
 
   .row-arrow {
-    color: #444;
+    color: var(--term-text-5);
     transition: color 0.15s ease;
   }
 
@@ -510,12 +510,12 @@
     display: flex;
     gap: 8px;
     margin-bottom: 20px;
-    color: #444;
-    font-size: 10px;
+    color: var(--term-text-5);
+    font-size: 11px;
   }
 
   .breadcrumbs a {
-    color: #666;
+    color: var(--term-text-3);
   }
 
   .breadcrumbs span:last-child {
@@ -531,8 +531,8 @@
     padding: 3px 8px;
     border: 1px solid #1a1a1a;
     border-radius: 999px;
-    color: #666;
-    font-size: 9px;
+    color: var(--term-text-3);
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.1em;
   }
@@ -547,8 +547,9 @@
 
   .report-meta {
     margin: 0 0 16px;
-    color: #555;
-    font-size: 9px;
+    color: var(--term-text-4);
+    font-size: 11px;
+    line-height: 1.5;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -556,7 +557,7 @@
 
   .report-meta span {
     margin: 0 6px;
-    color: #2a2a2a;
+    color: var(--term-text-7);
   }
 
   .metric-grid {
@@ -581,7 +582,7 @@
     display: block;
     margin-bottom: 12px;
     color: #00cc66;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
   }
 
@@ -599,8 +600,8 @@
   .metric > span:last-child {
     display: block;
     margin-top: 8px;
-    color: #555;
-    font-size: 9px;
+    color: var(--term-text-4);
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -612,8 +613,8 @@
 
   .block-lede {
     margin: 14px 0 0;
-    color: #888;
-    font-size: 12px;
+    color: var(--term-text-2);
+    font-size: 13px;
     line-height: 1.6;
   }
 
@@ -646,8 +647,8 @@
   }
 
   th {
-    color: #555;
-    font-size: 9px;
+    color: var(--term-text-4);
+    font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -686,8 +687,8 @@
   figcaption {
     padding: 10px 12px;
     border-bottom: 1px solid #151515;
-    color: #666;
-    font-size: 10px;
+    color: var(--term-text-3);
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -715,7 +716,7 @@
 
   .findings > li > span {
     color: #00cc66;
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
   }
 
@@ -746,7 +747,7 @@
     display: inline-block;
     margin-top: 24px;
     color: #888;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
     text-decoration: none;
   }
@@ -771,7 +772,7 @@
 
   .not-found-message span {
     margin-right: 10px;
-    color: #dc3545;
+    color: var(--term-error);
     font-weight: 700;
   }
 

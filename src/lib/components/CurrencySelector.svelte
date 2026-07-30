@@ -53,9 +53,9 @@
     align-items: center;
     gap: 4px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
-    color: #888;
+    color: var(--term-text-3, #a3a3a3);
     background: #111;
     border: 1px solid #222;
     border-radius: 3px;
@@ -78,7 +78,7 @@
   .selector-chevron {
     display: inline-flex;
     transition: transform 0.15s;
-    color: #555;
+    color: var(--term-text-4, #949494);
   }
 
   .selector-chevron.open {
@@ -111,7 +111,7 @@
     cursor: pointer;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #888;
+    color: var(--term-text-3, #a3a3a3);
     transition: background 0.1s, color 0.1s;
     text-align: left;
   }
@@ -140,12 +140,12 @@
   }
 
   .option-label {
-    color: #555;
-    font-size: 10px;
+    color: var(--term-text-4, #949494);
+    font-size: 11px;
     font-weight: 400;
   }
 
   .selector-option.active .option-label {
-    color: #00cc6688;
+    color: #62db9e;
   }
 </style>

@@ -140,21 +140,21 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
         legend: {
           display: stackedBars,
           labels: {
-            color: '#777',
+            color: '#d2d2d2',
             boxWidth: 8,
             boxHeight: 8,
             padding: 14,
-            font: { family: "'JetBrains Mono', monospace", size: 10 }
+            font: { family: "'JetBrains Mono', monospace", size: 11, weight: 600 }
           }
         },
         tooltip: {
           backgroundColor: '#0a0a0a',
           borderColor: '#1a1a1a',
           borderWidth: 1,
-          titleColor: colors.chrome,
-          bodyColor: '#c8c8c8',
-          titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
-          bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
+          titleColor: '#ffffff',
+          bodyColor: '#ededed',
+          titleFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 700 },
+          bodyFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 500 },
           callbacks: {
             afterBody(items) {
               return afterBody ? afterBody(rows[items[0].dataIndex]) : [];
@@ -185,7 +185,7 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
           stacked: stackedBars,
           grid: { color: '#111', drawBorder: false },
           border: { color: '#1a1a1a' },
-          ticks: { color: '#666', font: { family: "'JetBrains Mono', monospace", size: 10 } }
+          ticks: { color: '#a3a3a3', font: { family: "'JetBrains Mono', monospace", size: 11 } }
         },
         y: {
           stacked: stackedBars,
@@ -193,7 +193,7 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
           border: { color: '#1a1a1a' },
           ticks: {
             color: colors.chrome,
-            font: { family: "'JetBrains Mono', monospace", size: 10 },
+            font: { family: "'JetBrains Mono', monospace", size: 11 },
             callback: (value) => value >= 1000 ? usd0.format(value) : usd2.format(value)
           }
         }

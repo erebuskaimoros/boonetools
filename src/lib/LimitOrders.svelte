@@ -1633,10 +1633,10 @@
     --bg-row-hover: #141414;
     --sell: #cc3333;
     --buy: #00cc66;
-    --text-primary: #c8c8c8;
-    --text-secondary: #aaa;
-    --text-muted: #555;
-    --text-dim: #444;
+    --text-primary: var(--term-text-body, #d2d2d2);
+    --text-secondary: var(--term-text-2, #b8b8b8);
+    --text-muted: var(--term-text-4, #949494);
+    --text-dim: var(--term-text-4, #949494);
     --accent: #00cc66;
     --amber: #d4a017;
     --border: #1a1a1a;
@@ -1686,7 +1686,7 @@
 
   .trade__error-text {
     color: var(--sell);
-    font-size: 0.8rem;
+    font-size: 0.8125rem;
   }
 
   .trade__retry {
@@ -1747,7 +1747,7 @@
   }
 
   .panel__title {
-    font-size: 0.625rem;
+    font-size: 0.6875rem;
     font-weight: 700;
     letter-spacing: 0.1em;
     color: var(--text-muted);
@@ -1773,7 +1773,7 @@
     transform: translateX(-50%);
     background: #1a1a1a;
     color: rgba(203, 213, 225, 0.85);
-    font-size: 0.68rem;
+    font-size: 0.8125rem;
     font-weight: 400;
     line-height: 1.4;
     letter-spacing: 0;
@@ -1793,7 +1793,7 @@
   }
 
   .panel__count {
-    font-size: 0.625rem;
+    font-size: 0.6875rem;
     color: var(--text-muted);
     background: rgba(255, 255, 255, 0.04);
     padding: 0.1rem 0.4rem;
@@ -1852,7 +1852,7 @@
   }
 
   .header__asset-chain {
-    font-size: 0.55rem;
+    font-size: 0.6875rem;
     color: var(--text-muted);
   }
 
@@ -1883,7 +1883,7 @@
   }
 
   .header__stat-label {
-    font-size: 0.55rem;
+    font-size: 0.6875rem;
     color: var(--text-muted);
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -2088,12 +2088,12 @@
 
   .pair-selector__item-count {
     color: var(--text-muted);
-    font-size: 0.6rem;
+    font-size: 0.6875rem;
   }
 
   .pair-selector__item-val {
     color: var(--buy);
-    font-size: 0.6rem;
+    font-size: 0.6875rem;
   }
 
   .pair-selector__empty {
@@ -2302,7 +2302,7 @@
   .book__cols {
     display: flex;
     padding: 0.25rem 0.6rem;
-    font-size: 0.55rem;
+    font-size: 0.6875rem;
     font-weight: 600;
     letter-spacing: 0.08em;
     color: var(--text-muted);
@@ -2344,7 +2344,7 @@
     margin: auto;
     padding: 0.75rem;
     text-align: center;
-    font-size: 0.68rem;
+    font-size: 0.6875rem;
     color: var(--text-muted);
     letter-spacing: 0.02em;
   }
@@ -2411,7 +2411,7 @@
     position: relative;
     z-index: 1;
     color: var(--text-muted);
-    font-size: 0.65rem;
+    font-size: 0.6875rem;
   }
 
   /* Spread */
@@ -2434,12 +2434,12 @@
   }
 
   .book__spread-usd {
-    font-size: 0.65rem;
+    font-size: 0.6875rem;
     color: var(--text-muted);
   }
 
   .book__spread-pct {
-    font-size: 0.6rem;
+    font-size: 0.6875rem;
     font-weight: 600;
     color: #d4a017;
     background: rgba(212, 160, 23, 0.1);
@@ -2579,7 +2579,7 @@
     border-radius: 0.2rem;
     color: var(--text-muted);
     font-family: var(--font-mono);
-    font-size: 0.6rem;
+    font-size: 0.6875rem;
     font-weight: 500;
     cursor: pointer;
     transition: color 0.12s;
@@ -2611,7 +2611,7 @@
 
   .submit__ttl-blocks {
     font-family: var(--font-mono);
-    font-size: 0.6rem;
+    font-size: 0.6875rem;
     color: var(--text-muted);
   }
 
@@ -2693,7 +2693,7 @@
     gap: 0.4rem;
     padding: 0.5rem 0;
     color: var(--text-muted);
-    font-size: 0.65rem;
+    font-size: 0.6875rem;
   }
 
   .submit__quote-result {
@@ -2707,7 +2707,7 @@
     display: flex;
     justify-content: space-between;
     padding: 0.2rem 0;
-    font-size: 0.65rem;
+    font-size: 0.6875rem;
     color: var(--text-muted);
   }
 
@@ -2716,7 +2716,7 @@
 
   .submit__msg {
     padding: 0.4rem 0.75rem;
-    font-size: 0.65rem;
+    font-size: 0.8125rem;
     margin: 0.3rem 0.75rem 0;
     border-radius: 0.375rem;
   }
@@ -2739,7 +2739,7 @@
     align-items: center;
     justify-content: center;
     color: var(--text-muted);
-    font-size: 0.7rem;
+    font-size: 0.8125rem;
     padding: 2rem;
     text-align: center;
   }
@@ -2795,7 +2795,7 @@
   .orders__cols {
     display: flex;
     padding: 0.35rem 1rem;
-    font-size: 0.6rem;
+    font-size: 0.6875rem;
     font-weight: 600;
     letter-spacing: 0.06em;
     color: var(--text-muted);
@@ -2866,7 +2866,7 @@
   }
 
   .orders__side-tag {
-    font-size: 0.6rem;
+    font-size: 0.6875rem;
     font-weight: 600;
     padding: 0.1rem 0.4rem;
     border-radius: 0.25rem;
@@ -2997,7 +2997,7 @@
       flex: 1;
       padding: 0.45rem;
       font-family: var(--font-mono);
-      font-size: 0.65rem;
+      font-size: 0.6875rem;
       font-weight: 600;
       color: var(--text-muted);
       background: transparent;
@@ -3045,7 +3045,7 @@
     }
 
     .header__asset-ticker {
-      font-size: 0.7rem;
+      font-size: 0.85rem;
     }
 
     .header__asset-chain {
@@ -3053,11 +3053,11 @@
     }
 
     .header__arrow {
-      font-size: 0.7rem;
+      font-size: 0.85rem;
     }
 
     .header__wallet {
-      font-size: 0.6rem;
+      font-size: 0.75rem;
       padding: 0.25rem 0.5rem;
     }
 

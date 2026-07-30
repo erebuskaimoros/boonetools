@@ -286,12 +286,25 @@
             borderColor: 'rgba(148, 163, 184, 0.16)'
           },
           text: {
-            color: '#e2e8f0'
+            color: '#ededed',
+            size: 12,
+            family: 'JetBrains Mono, monospace',
+            weight: 500
           }
         },
         priceMark: {
-          high: { color: '#94a3b8' },
-          low: { color: '#94a3b8' },
+          high: {
+            color: '#d2d2d2',
+            textSize: 11,
+            textFamily: 'JetBrains Mono, monospace',
+            textWeight: '600'
+          },
+          low: {
+            color: '#d2d2d2',
+            textSize: 11,
+            textFamily: 'JetBrains Mono, monospace',
+            textWeight: '600'
+          },
           last: {
             upColor: '#22c55e',
             downColor: '#ef4444',
@@ -300,8 +313,8 @@
             text: {
               show: true,
               color: '#f8fafc',
-              size: 11,
-              family: 'IBM Plex Sans, system-ui, sans-serif',
+              size: 12,
+              family: 'JetBrains Mono, monospace',
               weight: 600,
               paddingLeft: 6,
               paddingTop: 3,
@@ -318,18 +331,33 @@
       },
       indicator: {
         tooltip: {
-          text: { color: '#cbd5e1' }
+          text: {
+            color: '#ededed',
+            size: 12,
+            family: 'JetBrains Mono, monospace',
+            weight: 500
+          }
         }
       },
       xAxis: {
         axisLine: { color: 'rgba(148, 163, 184, 0.18)' },
         tickLine: { color: 'rgba(148, 163, 184, 0.18)' },
-        tickText: { color: 'rgba(226, 232, 240, 0.62)' }
+        tickText: {
+          color: '#b8b8b8',
+          size: 11,
+          family: 'JetBrains Mono, monospace',
+          weight: 500
+        }
       },
       yAxis: {
         axisLine: { color: 'rgba(148, 163, 184, 0.18)' },
         tickLine: { color: 'rgba(148, 163, 184, 0.18)' },
-        tickText: { color: 'rgba(226, 232, 240, 0.62)' }
+        tickText: {
+          color: '#b8b8b8',
+          size: 11,
+          family: 'JetBrains Mono, monospace',
+          weight: 500
+        }
       },
       separator: {
         color: 'rgba(148, 163, 184, 0.14)'
@@ -339,6 +367,9 @@
           line: { color: 'rgba(148, 163, 184, 0.4)' },
           text: {
             color: '#f8fafc',
+            size: 11,
+            family: 'JetBrains Mono, monospace',
+            weight: 600,
             borderColor: '#0f172a',
             backgroundColor: '#0f172a'
           }
@@ -347,6 +378,9 @@
           line: { color: 'rgba(148, 163, 184, 0.32)' },
           text: {
             color: '#f8fafc',
+            size: 11,
+            family: 'JetBrains Mono, monospace',
+            weight: 600,
             borderColor: '#0f172a',
             backgroundColor: '#0f172a'
           }

@@ -32,7 +32,8 @@
     rolling90: '#b08adf',
     rolling180: '#e06c75',
     grid: '#1a1a1a',
-    text: '#777'
+    text: '#a3a3a3',
+    legend: '#d2d2d2'
   };
   const RPC_WS_URLS = [
     'wss://gateway.liquify.com/chain/thorchain_rpc/websocket',
@@ -599,19 +600,19 @@
           legend: {
             display: true,
             labels: {
-              color: CHART.text,
+              color: CHART.legend,
               boxWidth: 12,
-              font: { family: 'JetBrains Mono', size: 10 }
+              font: { family: 'JetBrains Mono', size: 11, weight: 600 }
             }
           },
           tooltip: {
             backgroundColor: '#1a1a1a',
-            titleColor: '#d8d8d8',
-            bodyColor: '#aaa',
+            titleColor: '#fff',
+            bodyColor: '#ededed',
             borderColor: '#333',
             borderWidth: 1,
-            titleFont: { family: 'JetBrains Mono', size: 11 },
-            bodyFont: { family: 'JetBrains Mono', size: 11 },
+            titleFont: { family: 'JetBrains Mono', size: 12, weight: 700 },
+            bodyFont: { family: 'JetBrains Mono', size: 12, weight: 500 },
             callbacks: {
               label: (ctx) => {
                 if (ctx.dataset.label === 'bps') return `bps: ${formatBps(ctx.parsed.y)}`;
@@ -632,7 +633,7 @@
         scales: {
           x: {
             grid: { color: CHART.grid },
-            ticks: { color: CHART.text, font: { family: 'JetBrains Mono', size: 10 } }
+            ticks: { color: CHART.text, font: { family: 'JetBrains Mono', size: 11 } }
           },
           yVolume: {
             beginAtZero: true,
@@ -640,7 +641,7 @@
             grid: { color: CHART.grid },
             ticks: {
               color: CHART.blue,
-              font: { family: 'JetBrains Mono', size: 10 },
+              font: { family: 'JetBrains Mono', size: 11 },
               callback: (value) => formatUsdCompact(value)
             }
           },
@@ -650,7 +651,7 @@
             grid: { drawOnChartArea: false, color: CHART.grid },
             ticks: {
               color: CHART.green,
-              font: { family: 'JetBrains Mono', size: 10 },
+              font: { family: 'JetBrains Mono', size: 11 },
               callback: (value) => formatUsdCompact(value)
             }
           },
@@ -661,7 +662,7 @@
             grid: { drawOnChartArea: false, color: CHART.grid },
             ticks: {
               color: CHART.amber,
-              font: { family: 'JetBrains Mono', size: 10 },
+              font: { family: 'JetBrains Mono', size: 11 },
               callback: (value) => `${value} bps`
             }
           }
@@ -841,19 +842,19 @@
           legend: {
             display: true,
             labels: {
-              color: CHART.text,
+              color: CHART.legend,
               boxWidth: 12,
-              font: { family: 'JetBrains Mono', size: 10 }
+              font: { family: 'JetBrains Mono', size: 11, weight: 600 }
             }
           },
           tooltip: {
             backgroundColor: '#1a1a1a',
-            titleColor: '#d8d8d8',
-            bodyColor: '#aaa',
+            titleColor: '#fff',
+            bodyColor: '#ededed',
             borderColor: '#333',
             borderWidth: 1,
-            titleFont: { family: 'JetBrains Mono', size: 11 },
-            bodyFont: { family: 'JetBrains Mono', size: 11 },
+            titleFont: { family: 'JetBrains Mono', size: 12, weight: 700 },
+            bodyFont: { family: 'JetBrains Mono', size: 12, weight: 500 },
             callbacks: {
               label: (ctx) => {
                 if (ctx.dataset.label === 'fees / volume') {
@@ -891,7 +892,7 @@
               color: CHART.text,
               maxRotation: 0,
               autoSkip: true,
-              font: { family: 'JetBrains Mono', size: 10 }
+              font: { family: 'JetBrains Mono', size: 11 }
             }
           },
           yVolume: {
@@ -900,7 +901,7 @@
             grid: { color: CHART.grid },
             ticks: {
               color: CHART.text,
-              font: { family: 'JetBrains Mono', size: 10 },
+              font: { family: 'JetBrains Mono', size: 11 },
               callback: (value) => formatUsdCompact(value)
             }
           },
@@ -910,7 +911,7 @@
             grid: { drawOnChartArea: false },
             ticks: {
               color: CHART.amber,
-              font: { family: 'JetBrains Mono', size: 10 },
+              font: { family: 'JetBrains Mono', size: 11 },
               callback: (value) => formatUsdCompact(value)
             }
           },
@@ -920,7 +921,7 @@
             grid: { drawOnChartArea: false },
             ticks: {
               color: CHART.blue,
-              font: { family: 'JetBrains Mono', size: 10 },
+              font: { family: 'JetBrains Mono', size: 11 },
               callback: (value) => `${formatNumber(value, Number(value) < 10 && Number(value) !== 0 ? 2 : 0)} bps`
             }
           }
@@ -1828,10 +1829,10 @@
     width: min(1380px, calc(100% - 24px));
     margin: 0 auto;
     padding: 24px 0 56px;
-    color: #c8c8c8;
+    color: var(--term-text-body);
     font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-    font-size: 13px;
-    line-height: 1.5;
+    font-size: var(--term-type-body);
+    line-height: var(--term-leading-body);
   }
 
   .terminal h1,
@@ -1851,7 +1852,7 @@
     gap: 12px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #555;
+    color: var(--term-text-4);
     margin-bottom: 14px;
   }
 
@@ -1896,7 +1897,7 @@
   .arg,
   .sep,
   .bracket {
-    color: #333;
+    color: var(--term-text-6);
   }
 
   .status {
@@ -1910,7 +1911,7 @@
     gap: 6px;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: #666;
+    color: var(--term-text-3);
   }
 
   .dot {
@@ -2044,7 +2045,7 @@
 
   .block h2 {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 700;
     color: #d8d8d8;
     text-transform: uppercase;
@@ -2053,8 +2054,8 @@
 
   .block-meta {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #555;
+    font-size: var(--term-type-label);
+    color: var(--term-text-4);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     flex-shrink: 0;
@@ -2086,8 +2087,8 @@
   .decision-body span {
     display: block;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
-    color: #555;
+    font-size: var(--term-type-label);
+    color: var(--term-text-3);
     text-transform: uppercase;
     letter-spacing: 0.14em;
   }
@@ -2102,8 +2103,8 @@
 
   .panel-foot {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #555;
+    font-size: var(--term-type-label);
+    color: var(--term-text-3);
     margin-top: 8px;
   }
 
@@ -2148,8 +2149,8 @@
   .config-cell small {
     display: block;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #777;
+    font-size: var(--term-type-label);
+    color: var(--term-text-2);
     margin-top: 3px;
   }
 
@@ -2166,18 +2167,18 @@
     gap: 6px;
     border: 1px solid #1a1a1a;
     background: #050505;
-    color: #777;
+    color: var(--term-text-2);
     padding: 3px 7px;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: var(--term-type-label);
     text-transform: uppercase;
     letter-spacing: 0.07em;
     white-space: nowrap;
   }
 
   .pill small {
-    color: #444;
-    font-size: 9px;
+    color: var(--term-text-4);
+    font-size: var(--term-type-label);
   }
 
   .pill.active {
@@ -2191,7 +2192,7 @@
   }
 
   .pill.inactive {
-    color: #555;
+    color: var(--term-text-4);
   }
 
   .dashboard-tabs {
@@ -2210,7 +2211,7 @@
     background: transparent;
     border: none;
     border-right: 1px solid #1a1a1a;
-    color: #777;
+    color: var(--term-text-2);
     cursor: pointer;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
@@ -2230,8 +2231,8 @@
   }
 
   .dashboard-tabs small {
-    color: #444;
-    font-size: 10px;
+    color: var(--term-text-4);
+    font-size: var(--term-type-label);
   }
 
   .dashboard-tabs button.active small {
@@ -2260,8 +2261,8 @@
   .affiliate-metric small {
     display: block;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #555;
+    font-size: var(--term-type-label);
+    color: var(--term-text-3);
     letter-spacing: 0.12em;
     text-transform: uppercase;
   }
@@ -2275,7 +2276,7 @@
   }
 
   .affiliate-metric small {
-    font-size: 9px;
+    font-size: var(--term-type-label);
     letter-spacing: 0.08em;
   }
 
@@ -2307,9 +2308,9 @@
   }
 
   .chart-control-label {
-    color: #555;
+    color: var(--term-text-3);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: var(--term-type-label);
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
@@ -2324,10 +2325,10 @@
     background: transparent;
     border: none;
     border-right: 1px solid #1a1a1a;
-    color: #777;
+    color: var(--term-text-2);
     cursor: pointer;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: var(--term-type-label);
     letter-spacing: 0.1em;
     padding: 7px 10px;
     text-transform: uppercase;
@@ -2374,9 +2375,9 @@
 
   .affiliate-chart-zoom-controls span,
   .affiliate-chart-zoom-controls button {
-    color: #555;
+    color: var(--term-text-3);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: var(--term-type-label);
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
@@ -2396,7 +2397,7 @@
   }
 
   .affiliate-chart-zoom-controls button:disabled {
-    color: #333;
+    color: var(--term-text-6);
     cursor: default;
     opacity: 0.7;
   }
@@ -2462,7 +2463,7 @@
     gap: 10px;
     min-height: 180px;
     height: 100%;
-    color: #555;
+    color: var(--term-text-3);
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     text-transform: uppercase;
@@ -2498,11 +2499,11 @@
   .panel-back {
     background: transparent;
     border: 1px solid #1a1a1a;
-    color: #777;
+    color: var(--term-text-2);
     cursor: pointer;
     flex-shrink: 0;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: var(--term-type-label);
     letter-spacing: 0.08em;
     padding: 4px 7px;
     text-transform: uppercase;
@@ -2536,9 +2537,9 @@
 
   .epoch-summary span,
   .transaction-meta {
-    color: #555;
+    color: var(--term-text-3);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 8px;
+    font-size: var(--term-type-label);
     letter-spacing: 0.1em;
     text-transform: uppercase;
   }
@@ -2547,18 +2548,18 @@
     color: #d8d8d8;
     display: block;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: var(--term-type-label);
     margin-top: 4px;
     overflow-wrap: anywhere;
   }
 
   .transaction-state {
     align-items: center;
-    color: #555;
+    color: var(--term-text-3);
     display: flex;
     flex-direction: column;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: var(--term-type-label);
     gap: 8px;
     justify-content: center;
     min-height: 210px;
@@ -2603,7 +2604,7 @@
 
   .transaction-head {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
+    font-size: var(--term-type-label);
   }
 
   .transaction-head a {
@@ -2618,7 +2619,7 @@
 
   .transaction-head span {
     color: #00cc66;
-    font-size: 8px;
+    font-size: var(--term-type-micro);
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
@@ -2636,7 +2637,7 @@
   .transaction-route strong {
     color: #c8c8c8;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: var(--term-type-label);
     font-weight: 600;
     min-width: 0;
     overflow-wrap: anywhere;
@@ -2687,12 +2688,12 @@
 
   .affiliate-transaction-table td strong {
     color: #d8d8d8;
-    font-size: 10px;
+    font-size: var(--term-type-label);
   }
 
   .affiliate-transaction-table td small {
-    color: #555;
-    font-size: 8px;
+    color: var(--term-text-3);
+    font-size: var(--term-type-label);
     letter-spacing: 0.06em;
     margin-top: 3px;
     text-transform: uppercase;
@@ -2847,8 +2848,8 @@
   }
 
   th {
-    color: #555;
-    font-size: 9px;
+    color: var(--term-text-3);
+    font-size: var(--term-type-label);
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.14em;
@@ -2895,16 +2896,16 @@
   .move {
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #777;
+    color: var(--term-text-2);
   }
 
   .muted {
-    color: #555;
+    color: var(--term-text-3);
   }
 
   .empty-cell,
   .empty-line {
-    color: #555;
+    color: var(--term-text-3);
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     text-transform: uppercase;
@@ -2925,8 +2926,8 @@
     margin-top: 16px;
     border-top: 1px solid #1a1a1a;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #555;
+    font-size: var(--term-type-label);
+    color: var(--term-text-3);
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }

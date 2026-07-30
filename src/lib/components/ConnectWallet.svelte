@@ -1105,6 +1105,7 @@
     border-radius: 1rem;
     overflow: hidden;
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+    color: var(--term-text-body, #d2d2d2);
   }
 
   .cw-header {
@@ -1129,8 +1130,8 @@
 
   .cw-subtitle {
     margin: 0.35rem 0 0;
-    color: #8a8a8a;
-    font-size: 0.77rem;
+    color: var(--term-text-2, #b8b8b8);
+    font-size: 0.8125rem;
     line-height: 1.35;
   }
 
@@ -1282,7 +1283,7 @@
   }
 
   .cw-provider-row-status {
-    font-size: 0.65rem;
+    font-size: 0.6875rem;
     font-weight: 500;
   }
 
@@ -1295,7 +1296,7 @@
   }
 
   .cw-provider-row-status--hw {
-    color: #777;
+    color: var(--term-text-4, #949494);
   }
 
   .cw-chain-panel {
@@ -1315,7 +1316,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #555;
+    color: var(--term-text-4, #949494);
     font-size: 0.8rem;
   }
 
@@ -1341,7 +1342,7 @@
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    color: #8d8d8d;
+    color: var(--term-text-3, #a3a3a3);
   }
 
   .cw-owner {
@@ -1405,7 +1406,7 @@
   .cw-provider-count,
   .cw-inline-status {
     font-size: 0.72rem;
-    color: #777;
+    color: var(--term-text-4, #949494);
   }
 
   .cw-provider-disconnect {
@@ -1437,7 +1438,7 @@
   }
 
   .cw-account-network {
-    font-size: 0.68rem;
+    font-size: 0.6875rem;
     font-weight: 800;
     letter-spacing: 0.06em;
   }
@@ -1455,7 +1456,7 @@
   .cw-tab {
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: #131313;
-    color: #909090;
+    color: var(--term-text-3, #a3a3a3);
     padding: 0.65rem 0.9rem;
     border-radius: 0.7rem;
     cursor: pointer;
@@ -1495,7 +1496,7 @@
     display: flex;
     justify-content: space-between;
     gap: 0.75rem;
-    color: #8a8a8a;
+    color: var(--term-text-3, #a3a3a3);
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -1540,7 +1541,7 @@
 
   .cw-asset-id {
     font-size: 0.69rem;
-    color: #7f7f7f;
+    color: var(--term-text-4, #949494);
     word-break: break-all;
   }
 
@@ -1551,14 +1552,14 @@
   }
 
   .cw-asset-tag {
-    font-size: 0.64rem;
+    font-size: 0.6875rem;
     color: #00cc66;
     text-transform: uppercase;
     letter-spacing: 0.05em;
   }
 
   .cw-asset-tag--disabled {
-    color: #888;
+    color: var(--term-text-4, #949494);
   }
 
   .cw-action-summary {
@@ -1648,7 +1649,7 @@
 
   .cw-group-label {
     margin: 0.2rem 0 0.55rem;
-    color: #777;
+    color: var(--term-text-4, #949494);
     font-size: 0.72rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1689,8 +1690,8 @@
   }
 
   .cw-badge {
-    font-size: 0.68rem;
-    color: #8f8f8f;
+    font-size: 0.6875rem;
+    color: var(--term-text-4, #949494);
   }
 
   .connected-badge {
@@ -1755,7 +1756,7 @@
   .cw-empty-copy {
     border-radius: 0.7rem;
     padding: 0.72rem 0.8rem;
-    font-size: 0.74rem;
+    font-size: 0.8125rem;
     line-height: 1.45;
   }
 
@@ -1777,7 +1778,7 @@
     margin-top: 0.75rem;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    color: #8a8a8a;
+    color: var(--term-text-2, #b8b8b8);
   }
 
   .cw-note--connect {
@@ -1788,7 +1789,7 @@
   .cw-empty-copy {
     background: #131313;
     border: 1px dashed rgba(255, 255, 255, 0.08);
-    color: #7a7a7a;
+    color: var(--term-text-3, #a3a3a3);
   }
 
   .cw-empty-state {

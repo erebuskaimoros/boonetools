@@ -695,7 +695,7 @@
     padding: 60px 20px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 13px;
-    color: #666;
+    color: var(--term-text-3);
   }
 
   .err-text { color: #cc4444; }
@@ -733,10 +733,10 @@
 
   .metric-key {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.12em;
-    color: #555;
+    color: var(--term-text-4);
     text-transform: uppercase;
   }
 
@@ -744,7 +744,8 @@
     padding: 8px 16px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #555;
+    color: var(--term-text-4);
+    line-height: 1.5;
     background: #0a0a0a;
     border-bottom: 1px solid #1a1a1a;
   }
@@ -768,16 +769,17 @@
   .section-head h3 {
     margin: 0;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     letter-spacing: 0.1em;
-    color: #888;
+    color: var(--term-text-2);
     text-transform: uppercase;
   }
 
   .section-sub {
-    font-size: 11px;
-    color: #444;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--term-text-5);
   }
 
   .head-stats {
@@ -787,11 +789,11 @@
     gap: 6px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #555;
+    color: var(--term-text-4);
   }
 
   .head-stats strong { color: #ccc; }
-  .sep { color: #333; margin: 0 2px; }
+  .sep { color: var(--term-text-7); margin: 0 2px; }
   .accent { color: #00cc66; }
 
   .consol-grid {
@@ -807,10 +809,10 @@
 
   .col-head {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.1em;
-    color: #555;
+    color: var(--term-text-4);
     text-transform: uppercase;
     padding: 10px 14px 8px;
     border-bottom: 1px solid #141414;
@@ -859,7 +861,7 @@
   .asset-right .dim {
     display: block;
     font-size: 11px;
-    color: #555;
+    color: var(--term-text-4);
   }
 
   .logo-wrap {
@@ -930,7 +932,8 @@
     padding-left: 32px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #666;
+    color: var(--term-text-3);
+    line-height: 1.4;
   }
 
   .bond-tag {
@@ -1002,14 +1005,14 @@
 
   .chain-tag {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 8px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
     padding: 2px 6px;
     border-radius: 2px;
     background: rgba(255, 255, 255, 0.06);
-    color: #666;
+    color: var(--term-text-3);
   }
 
   .entry-addr {
@@ -1028,7 +1031,7 @@
     gap: 4px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    color: #555;
+    color: var(--term-text-4);
     flex-shrink: 0;
   }
 
@@ -1085,10 +1088,10 @@
 
   .detail-label {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 9px;
+    font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.1em;
-    color: #444;
+    color: var(--term-text-5);
     text-transform: uppercase;
     padding: 8px 14px 4px;
   }
@@ -1097,11 +1100,11 @@
     padding: 16px;
     font-family: 'JetBrains Mono', monospace;
     font-size: 12px;
-    color: #444;
+    color: var(--term-text-5);
   }
 
   .mono { font-family: 'JetBrains Mono', monospace; }
-  .dim { color: #555; }
+  .dim { color: var(--term-text-4); }
 
   @media (max-width: 900px) {
     .consol-grid { grid-template-columns: 1fr; }

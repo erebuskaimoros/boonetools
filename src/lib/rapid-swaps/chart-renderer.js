@@ -30,12 +30,12 @@ export const rapidSwapBaseChartOptions = Object.freeze({
     legend: { display: false },
     tooltip: {
       backgroundColor: '#1a1a1a',
-      titleColor: '#ccc',
-      bodyColor: '#aaa',
+      titleColor: '#fff',
+      bodyColor: '#ededed',
       borderColor: '#333',
       borderWidth: 1,
-      titleFont: { family: 'JetBrains Mono', size: 11 },
-      bodyFont: { family: 'JetBrains Mono', size: 11 },
+      titleFont: { family: 'JetBrains Mono', size: 12, weight: 700 },
+      bodyFont: { family: 'JetBrains Mono', size: 12, weight: 500 },
       padding: 8
     }
   },
@@ -44,14 +44,14 @@ export const rapidSwapBaseChartOptions = Object.freeze({
       grid: { color: RAPID_SWAP_CHART_COLORS.grid },
       ticks: {
         color: RAPID_SWAP_CHART_COLORS.text,
-        font: { family: 'JetBrains Mono', size: 10 }
+        font: { family: 'JetBrains Mono', size: 11 }
       }
     },
     y: {
       grid: { color: RAPID_SWAP_CHART_COLORS.grid },
       ticks: {
         color: RAPID_SWAP_CHART_COLORS.text,
-        font: { family: 'JetBrains Mono', size: 10 }
+        font: { family: 'JetBrains Mono', size: 11 }
       }
     }
   }
@@ -69,7 +69,7 @@ const affiliateLabelHoverPlugin = {
     const yPosition = yScale.getPixelForValue(hoveredIndex);
     const context = chart.ctx;
     context.save();
-    context.font = '11px JetBrains Mono';
+    context.font = '600 11px JetBrains Mono';
     const textWidth = context.measureText(label).width;
     const xEnd = yScale.right - 8;
     context.strokeStyle = '#5588cc';
@@ -191,7 +191,11 @@ export function createRapidSwapChartRenderer() {
           ...base.plugins,
           legend: {
             display: true,
-            labels: { color: colors.text, font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12 }
+            labels: {
+              color: TERMINAL_CHART_PALETTE.text,
+              font: { family: 'JetBrains Mono', size: 11, weight: 600 },
+              boxWidth: 12
+            }
           },
           tooltip: {
             ...base.plugins.tooltip,
@@ -250,7 +254,11 @@ export function createRapidSwapChartRenderer() {
           ...base.plugins,
           legend: {
             display: true,
-            labels: { color: colors.text, font: { family: 'JetBrains Mono', size: 10 }, boxWidth: 12 }
+            labels: {
+              color: TERMINAL_CHART_PALETTE.text,
+              font: { family: 'JetBrains Mono', size: 11, weight: 600 },
+              boxWidth: 12
+            }
           },
           tooltip: {
             ...base.plugins.tooltip,
@@ -575,6 +583,8 @@ export function createRapidSwapChartRenderer() {
             [...new Set(swapPathData.sankeyFlows.flatMap((flow) => [flow.from, flow.to]))]
               .map((label) => [label, label])
           ),
+          color: TERMINAL_CHART_PALETTE.text,
+          font: { family: "'JetBrains Mono', monospace", size: 11, weight: 600 },
           size: 'max'
         }]
       },
@@ -588,10 +598,10 @@ export function createRapidSwapChartRenderer() {
             backgroundColor: '#1a1a1a',
             borderColor: '#333',
             borderWidth: 1,
-            titleFont: { family: "'JetBrains Mono', monospace", size: 11 },
-            bodyFont: { family: "'JetBrains Mono', monospace", size: 11 },
-            titleColor: '#888',
-            bodyColor: '#ccc',
+            titleFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 700 },
+            bodyFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 500 },
+            titleColor: '#fff',
+            bodyColor: '#ededed',
             padding: 10,
             callbacks: {
               label: (context) => {
