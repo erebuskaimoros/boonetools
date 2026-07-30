@@ -393,11 +393,20 @@
       valueField: 'accrued_value_usd',
       cumulativeField: 'cumulative_usd',
       barLabel: 'Accrued TC value (01 + 03)',
+      barSeries: [
+        {
+          label: '01 · Base Layer earnings accrued',
+          valueField: 'inflow_usd',
+          colors: APP_LAYER_SERIES.collected
+        },
+        {
+          label: '03 · TC liquidity fees generated',
+          valueField: 'liquidity_fee_usd',
+          colors: APP_LAYER_SERIES.generated
+        }
+      ],
       cumulativeLabel: 'Cumulative accrued TC value (01 + 03)',
-      afterBody: (row) => [
-        `01 this bucket: ${usd2.format(row.inflow_usd || 0)}`,
-        `03 this bucket: ${usd2.format(row.liquidity_fee_usd || 0)}`
-      ]
+      afterBody: (row) => [`Combined this bucket: ${usd2.format(row.accrued_value_usd || 0)}`]
     });
   }
 

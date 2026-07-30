@@ -83,14 +83,16 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
     valueField,
     cumulativeField,
     barLabel,
+    barSeries,
     cumulativeLabel,
     afterBody,
     onZoomComplete
   } = config;
   const rows = fillBucketGaps(config.rows, valueField, cumulativeField, grain === 'weekly' ? 7 : 1);
   const cumulative = view === 'cumulative';
-  const dataset = cumulative
-    ? {
+  const stackedBars = !cumulative && barSeries?.length > 1;
+  const datasets = cumulative
+    ? [{
         type: 'line',
         label: cumulativeLabel,
         data: rows.map((row) => row[cumulativeField] || 0),
@@ -102,8 +104,19 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
         borderWidth: 2,
         tension: 0.2,
         fill: true
-      }
-    : {
+      }]
+    : barSeries?.length
+      ? barSeries.map((series) => ({
+          type: 'bar',
+          label: series.label,
+          data: rows.map((row) => row[series.valueField] || 0),
+          backgroundColor: series.colors.fill,
+          borderColor: series.colors.mark,
+          borderWidth: rows.length > 90 ? 0 : 1,
+          borderRadius: 0,
+          stack: 'combined'
+        }))
+      : [{
         type: 'bar',
         label: barLabel,
         data: rows.map((row) => row[valueField] || 0),
@@ -111,20 +124,29 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
         borderColor: colors.mark,
         borderWidth: rows.length > 90 ? 0 : 1,
         borderRadius: 0
-      };
+      }];
 
   return new Chart(canvas.getContext('2d'), /** @type {any} */ ({
     type: 'bar',
     data: {
       labels: rows.map((row) => formatWeekLabel(row.bucket_start)),
-      datasets: [dataset]
+      datasets
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { display: false },
+        legend: {
+          display: stackedBars,
+          labels: {
+            color: '#777',
+            boxWidth: 8,
+            boxHeight: 8,
+            padding: 14,
+            font: { family: "'JetBrains Mono', monospace", size: 10 }
+          }
+        },
         tooltip: {
           backgroundColor: '#0a0a0a',
           borderColor: '#1a1a1a',
@@ -160,11 +182,13 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
       },
       scales: {
         x: {
+          stacked: stackedBars,
           grid: { color: '#111', drawBorder: false },
           border: { color: '#1a1a1a' },
           ticks: { color: '#666', font: { family: "'JetBrains Mono', monospace", size: 10 } }
         },
         y: {
+          stacked: stackedBars,
           grid: { color: '#111', drawBorder: false },
           border: { color: '#1a1a1a' },
           ticks: {
