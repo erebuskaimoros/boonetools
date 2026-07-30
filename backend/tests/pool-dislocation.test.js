@@ -415,10 +415,15 @@ test('public handlers are provider-free and the series query is bounded', async 
             { chain: 'BTC', chain_trading_paused: false },
             { chain: 'SOL', chain_trading_paused: true }
           ],
+          mimir: { L1SLIPMINBPS: 10 },
           field_meta: {
             inbound_addresses: {
               status: 'fresh',
               fetched_at: '2026-07-29T12:06:00Z'
+            },
+            mimir: {
+              status: 'fresh',
+              fetched_at: '2026-07-29T12:06:30Z'
             }
           }
         }
@@ -433,6 +438,9 @@ test('public handlers are provider-free and the series query is bounded', async 
   assert.equal(summaryResponse.body.pools[1].trading_halted, true);
   assert.equal(summaryResponse.body.sources.trading.status, 'fresh');
   assert.equal(summaryResponse.body.sources.trading.observed_at, '2026-07-29T12:06:00Z');
+  assert.equal(summaryResponse.body.l1_slip_min_bps, 10);
+  assert.equal(summaryResponse.body.sources.mimir.status, 'fresh');
+  assert.equal(summaryResponse.body.sources.mimir.observed_at, '2026-07-29T12:06:30Z');
   assert.deepEqual(summaryResponse.body.warnings, ['oracle: unavailable']);
   assert.notEqual(summaryResponse.headers.ETag, model.etag);
 
@@ -501,6 +509,9 @@ test('summary fails open only when current durable trading state is unavailable'
   assert.equal(response.body.pools[0].trading_status_known, false);
   assert.equal(response.body.sources.trading.status, 'error');
   assert.match(response.body.warnings[0], /Current THORNode inbound-address state is unavailable or stale/);
+  assert.equal(response.body.l1_slip_min_bps, null);
+  assert.equal(response.body.sources.mimir.status, 'error');
+  assert.match(response.body.warnings[1], /Current THORNode L1SlipMinBps state is unavailable or stale/);
   assert.match(response.headers['Cache-Control'], /max-age=15/);
 });
 

@@ -255,6 +255,7 @@ export function buildPoolDislocationChartScale(points = [], options = {}) {
     ? options.sourceMode
     : 'both';
   const threshold = Math.abs(finiteNumber(options.threshold) ?? 1);
+  const minimumBand = Math.abs(finiteNumber(options.minimumBand) ?? 0);
   const values = [];
 
   for (const point of Array.isArray(points) ? points : []) {
@@ -270,6 +271,7 @@ export function buildPoolDislocationChartScale(points = [], options = {}) {
 
   if (values.length === 0) values.push(-threshold, threshold);
   else values.push(0);
+  if (minimumBand > 0) values.push(-minimumBand, minimumBand);
   let dataMin = Math.min(...values);
   let dataMax = Math.max(...values);
   if (dataMax === dataMin) {
@@ -480,6 +482,7 @@ export function normalizePoolDislocationSummary(payload = {}) {
 
   return {
     ...payload,
+    l1SlipMinBps: finiteNumber(payload?.l1_slip_min_bps),
     pools,
     coverage: {
       totalPools: Number(payload?.coverage?.total_pools || pools.length),

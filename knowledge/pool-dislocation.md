@@ -86,6 +86,10 @@ minutes:
   degrades to unknown, uses a short response cache, and never hides a pool. The
   UI defaults to hiding pools on known halted chains and lets the user include
   them with one toggle.
+- Main minimum fee: the summary also overlays the current `L1SlipMinBps` from
+  the durable core Mimir field. The chart renders that value as a symmetric
+  corridor around zero (for example, `10` renders at `±10 BPS`) and omits the
+  corridor with an explicit source warning when current Mimir state is stale.
 
 An observation is aligned only when source timestamps are within 30 seconds.
 References older than two five-minute intervals are stale and excluded from

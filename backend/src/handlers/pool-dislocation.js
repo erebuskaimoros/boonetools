@@ -36,15 +36,23 @@ function withoutSampledTradingWarnings(warnings = []) {
     .filter((warning) => !/^trading\s*:/i.test(String(warning || '').trim()));
 }
 
-function tradingSourceObservedAt(coreModel) {
-  return coreModel?.payload?.field_meta?.inbound_addresses?.fetched_at
+function coreFieldObservedAt(coreModel, field) {
+  return coreModel?.payload?.field_meta?.[field]?.fetched_at
     || coreModel?.payload?.source_updated_at
     || coreModel?.sourceUpdatedAt
     || coreModel?.generatedAt
     || null;
 }
 
-async function loadCurrentTradingOverlay(options = {}) {
+function currentMimirNumber(coreModel, key) {
+  const mimir = coreSnapshotValue(coreModel, 'mimir', {});
+  const entry = Object.entries(mimir || {})
+    .find(([candidate]) => String(candidate || '').toUpperCase() === key);
+  const value = Number(entry?.[1]);
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+async function loadCurrentCoreOverlay(options = {}) {
   try {
     const coreModel = await (options.getThorNodeCoreSnapshot || getThorNodeCoreSnapshot)({
       allowStale: true
@@ -56,22 +64,41 @@ async function loadCurrentTradingOverlay(options = {}) {
     if (!Array.isArray(inboundAddresses)) {
       throw new Error('Current THORNode inbound-address state is invalid');
     }
+    const mimirStale = isThorNodeCoreSnapshotStale(coreModel, ['mimir']);
+    const l1SlipMinBps = mimirStale ? null : currentMimirNumber(coreModel, 'L1SLIPMINBPS');
+    const mimirError = l1SlipMinBps === null
+      ? 'Current THORNode L1SlipMinBps state is unavailable or stale'
+      : null;
     return {
       chainTrading: normalizeChainTradingStatus(inboundAddresses),
+      l1SlipMinBps,
       source: {
         error: null,
         status: 'fresh',
         provider: 'thornode-core-snapshot',
-        observed_at: tradingSourceObservedAt(coreModel)
+        observed_at: coreFieldObservedAt(coreModel, 'inbound_addresses')
       },
-      degraded: false
+      mimirSource: {
+        error: mimirError,
+        status: mimirError ? 'error' : 'fresh',
+        provider: 'thornode-core-snapshot',
+        observed_at: mimirError ? null : coreFieldObservedAt(coreModel, 'mimir')
+      },
+      degraded: Boolean(mimirError)
     };
   } catch (error) {
     const message = error?.message || 'Current THORNode inbound-address state is unavailable';
     return {
       chainTrading: normalizeChainTradingStatus(),
+      l1SlipMinBps: null,
       source: {
         error: message,
+        status: 'error',
+        provider: 'thornode-core-snapshot',
+        observed_at: null
+      },
+      mimirSource: {
+        error: 'Current THORNode L1SlipMinBps state is unavailable or stale',
         status: 'error',
         provider: 'thornode-core-snapshot',
         observed_at: null
@@ -90,15 +117,18 @@ export async function handlePoolDislocation(_request, _url, options = {}) {
     });
   }
   const stale = Boolean(model.stale);
-  const trading = await loadCurrentTradingOverlay(options);
-  const payload = applyPoolDislocationTradingStatus(model.payload, trading.chainTrading);
+  const current = await loadCurrentCoreOverlay(options);
+  const payload = applyPoolDislocationTradingStatus(model.payload, current.chainTrading);
   const warnings = withoutSampledTradingWarnings(model.payload?.warnings);
-  if (trading.source.error) warnings.push(`trading: ${trading.source.error}`);
+  if (current.source.error) warnings.push(`trading: ${current.source.error}`);
+  if (current.mimirSource.error) warnings.push(`mimir: ${current.mimirSource.error}`);
   const body = {
     ...payload,
+    l1_slip_min_bps: current.l1SlipMinBps,
     sources: {
       ...(payload.sources || {}),
-      trading: trading.source
+      trading: current.source,
+      mimir: current.mimirSource
     },
     stale,
     warnings: [...new Set([
@@ -117,9 +147,11 @@ export async function handlePoolDislocation(_request, _url, options = {}) {
     summary: model.etag,
     chain_trading: body.chain_trading,
     trading_source: body.sources.trading,
+    l1_slip_min_bps: body.l1_slip_min_bps,
+    mimir_source: body.sources.mimir,
     stale
   });
-  return json(body, 200, headersForModel(model, etag, { degraded: trading.degraded }));
+  return json(body, 200, headersForModel(model, etag, { degraded: current.degraded }));
 }
 
 export async function handlePoolDislocationSeries(_request, url, options = {}) {

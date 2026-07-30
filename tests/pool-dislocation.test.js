@@ -124,6 +124,9 @@ test('chart scale follows the visible points and selected reference source', () 
     { oracleDislocation: -0.2, binanceDislocation: 0.4 },
     { oracleDislocation: 0.3, binanceDislocation: 0.5 }
   ], { sourceMode: 'both', threshold: 2 });
+  const withMinimumBand = buildPoolDislocationChartScale([
+    { oracleDislocation: -0.02, binanceDislocation: 0.03 }
+  ], { sourceMode: 'both', threshold: 1, minimumBand: 0.1 });
 
   assert.ok(quiet.min < -0.2 && quiet.max > 0.5);
   assert.ok((quiet.max - 0.5) / (quiet.max - quiet.min) < 0.05);
@@ -132,6 +135,7 @@ test('chart scale follows the visible points and selected reference source', () 
   assert.ok(binanceOnly.max > 0.5);
   assert.ok(binanceOnly.max - binanceOnly.min < volatile.max - volatile.min);
   assert.deepEqual(differentThreshold, quiet);
+  assert.ok(withMinimumBand.min < -0.1 && withMinimumBand.max > 0.1);
   assert.equal(volatile.ticks.length, 7);
   assert.ok(volatile.ticks.every((tick, index) => index === 0 || tick < volatile.ticks[index - 1]));
 });
@@ -295,6 +299,7 @@ test('dislocation states separate normal, watch, critical, and missing values', 
 test('production summary normalization preserves source coverage and threshold windows', () => {
   const normalized = normalizePoolDislocationSummary({
     as_of: '2026-07-29T12:00:00Z',
+    l1_slip_min_bps: 10,
     coverage: {
       total_pools: 2,
       fully_mapped: 1,
@@ -335,6 +340,7 @@ test('production summary normalization preserves source coverage and threshold w
   assert.equal(dashboard.pools[0].sparkline[0].oracleDislocation, 2);
   assert.equal(normalized.pools[0].tradingHalted, false);
   assert.equal(normalized.pools[0].tradingStatusKnown, true);
+  assert.equal(normalized.l1SlipMinBps, 10);
   assert.deepEqual(normalized.chainTrading.haltedChains, ['SOL']);
 });
 
