@@ -179,7 +179,9 @@ seven days every fifteen minutes and processes at most 24 missing, degraded,
 or source-wide incomplete buckets per run. A reconstructed source that is
 genuinely absent at its exact block or market interval is labelled
 `thornode-oracle-unavailable` or `kline-close-unavailable`, so the repair is
-idempotent without hiding the null reference.
+idempotent without hiding the null reference. A source value that exists but
+falls outside the 30-second alignment contract uses the corresponding
+`*-unaligned` method instead and remains null in the dislocation series.
 
 Rapid Swaps is hybrid in the Dune-backed deployment. Dune query `7619996`
 remains the canonical source and runs on its own cadence, while the scheduler

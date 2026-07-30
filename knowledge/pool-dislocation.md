@@ -158,8 +158,12 @@ scheduled observation still wins every primary-key conflict. If the exact
 historical oracle response or Binance interval genuinely has no value, the null
 leg is retained with `thornode-oracle-unavailable` or
 `kline-close-unavailable` provenance. That confirmed absence makes later repair
-scans idempotent while keeping the chart gap honest. The repair job shares the
-operator backfill advisory lock so the two historical readers cannot overlap.
+scans idempotent while keeping the chart gap honest. A value that exists but is
+more than 30 seconds from the finalized THORChain block is retained as a null
+leg with `thornode-oracle-unaligned` or `kline-close-unaligned` provenance; it
+is not silently compared across mismatched time boundaries. The repair job
+shares the operator backfill advisory lock so the two historical readers cannot
+overlap.
 
 ## Interface Scope
 

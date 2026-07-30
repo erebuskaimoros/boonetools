@@ -161,6 +161,25 @@ test('historical rows label confirmed reference absence for idempotent repair', 
   assert.equal(rows[0].binancePriceMethod, 'kline-close-unavailable');
 });
 
+test('historical rows distinguish an available but unaligned Binance close', () => {
+  const observedAt = '2026-07-22T12:05:00.000Z';
+  const rows = buildHistoricalPoolDislocationRows({
+    observedAt,
+    height: 123,
+    blockTime: '2026-07-22T12:03:00.000Z'
+  }, {
+    pools: [{
+      asset: 'BTC.BTC',
+      status: 'Available',
+      asset_tor_price: '10100000000'
+    }],
+    oracle: { prices: [{ symbol: 'BTC', price: '100' }] }
+  }, new Map([['BTCUSDT', new Map([[observedAt, 100.5]])]]));
+  assert.equal(rows[0].binancePriceUsd, null);
+  assert.equal(rows[0].binancePriceMethod, 'kline-close-unaligned');
+  assert.equal(rows[0].sourceSkewMs, 119_999);
+});
+
 test('an empty historical oracle remains an explicit source gap', async () => {
   const responses = [[{
     asset: 'BTC.BTC',
@@ -240,7 +259,9 @@ test('recent repair planning floors bounds and replaces degraded or missing buck
   assert.match(sql, /bool_or\(oracle_price_usd is not null\)/);
   assert.match(sql, /bool_or\(binance_price_usd is not null\)/);
   assert.match(sql, /thornode-oracle-unavailable/);
+  assert.match(sql, /thornode-oracle-unaligned/);
   assert.match(sql, /kline-close-unavailable/);
+  assert.match(sql, /kline-close-unaligned/);
 });
 
 test('bulk upsert gives scheduled observations precedence over historical rows', async () => {

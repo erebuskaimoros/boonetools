@@ -303,6 +303,7 @@ export async function fetchHistoricalPoolDislocationState(height, options = {}) 
 }
 
 export function buildHistoricalPoolDislocationRows(anchor, state, binanceHistory = new Map()) {
+  const oraclePrices = normalizeOraclePrices(state.oracle);
   const binanceTickers = new Map();
   for (const [symbol, closes] of binanceHistory) {
     const close = closes.get(anchor.observedAt);
@@ -310,7 +311,7 @@ export function buildHistoricalPoolDislocationRows(anchor, state, binanceHistory
   }
   return buildObservationRows({
     pools: state.pools,
-    oraclePrices: normalizeOraclePrices(state.oracle),
+    oraclePrices,
     binanceTickers,
     observedAt: anchor.observedAt,
     poolObservedAt: anchor.blockTime,
@@ -324,10 +325,14 @@ export function buildHistoricalPoolDislocationRows(anchor, state, binanceHistory
   }).map((row) => ({
     ...row,
     oraclePriceMethod: row.oracleSymbol && row.oraclePriceUsd == null
-      ? 'thornode-oracle-unavailable'
+      ? (oraclePrices.has(row.oracleSymbol)
+        ? 'thornode-oracle-unaligned'
+        : 'thornode-oracle-unavailable')
       : row.oraclePriceMethod,
     binancePriceMethod: row.binanceSymbol && row.binancePriceUsd == null
-      ? 'kline-close-unavailable'
+      ? (binanceHistory.get(row.binanceSymbol)?.has(anchor.observedAt)
+        ? 'kline-close-unaligned'
+        : 'kline-close-unavailable')
       : row.binancePriceMethod
   }));
 }
@@ -391,12 +396,18 @@ export async function loadPoolDislocationRecentGapRepairPlan(client, options = {
             and (
               not bool_or(oracle_symbol is not null)
               or bool_or(oracle_price_usd is not null)
-              or bool_or(oracle_price_method = 'thornode-oracle-unavailable')
+              or bool_or(oracle_price_method in (
+                'thornode-oracle-unavailable',
+                'thornode-oracle-unaligned'
+              ))
             )
             and (
               not bool_or(binance_symbol is not null)
               or bool_or(binance_price_usd is not null)
-              or bool_or(binance_price_method = 'kline-close-unavailable')
+              or bool_or(binance_price_method in (
+                'kline-close-unavailable',
+                'kline-close-unaligned'
+              ))
             ) as authoritative
      from pool_dislocation_observations
      where observed_at >= $1::timestamptz
