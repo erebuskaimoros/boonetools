@@ -1,4 +1,9 @@
 <script>
+  import {
+    buildBlockProductionChartScale,
+    projectBlockProductionChartY
+  } from './block-production-chart.js';
+
   /** @type {{
    *   points?: Array<{time?: string, height?: number, seconds_per_block?: number, block_count?: number}>,
    *   live_interval_minutes?: number,
@@ -50,16 +55,15 @@
     : 0;
   $: latestSeconds = points.at(-1)?.seconds || 0;
   $: maxSeconds = points.length ? Math.max(...points.map((point) => point.seconds)) : 0;
-  $: yMax = Math.max(10, Math.ceil((maxSeconds * 1.12) / 2) * 2);
-  $: yTicks = Array.from(
-    { length: Y_TICK_INTERVALS + 1 },
-    (_, index) => yMax * (1 - (index / Y_TICK_INTERVALS))
-  );
-  // Keep yMax explicit so Svelte invalidates the target SVG coordinates after a zoom rescale.
-  $: targetY = TOP + ((1 - Math.min(yMax, TARGET_SECONDS) / yMax) * (BOTTOM - TOP));
+  $: yScale = buildBlockProductionChartScale(points, {
+    targetSeconds: TARGET_SECONDS,
+    tickIntervals: Y_TICK_INTERVALS
+  });
+  $: yTicks = yScale.ticks;
+  $: targetY = chartY(TARGET_SECONDS, yScale);
   $: xTicks = buildHourlyTicks(startTime, endTime);
   $: linePath = points.map((point, index) => (
-    `${index === 0 ? 'M' : 'L'} ${chartX(point, index).toFixed(2)} ${chartY(point.seconds).toFixed(2)}`
+    `${index === 0 ? 'M' : 'L'} ${chartX(point, index).toFixed(2)} ${chartY(point.seconds, yScale).toFixed(2)}`
   )).join(' ');
   $: areaPath = points.length > 1
     ? `${linePath} L ${chartX(points.at(-1), points.length - 1).toFixed(2)} ${BOTTOM} L ${chartX(points[0], 0).toFixed(2)} ${BOTTOM} Z`
@@ -68,7 +72,7 @@
   $: activePointX = activePoint && activePointIndex !== null
     ? chartX(activePoint, activePointIndex)
     : 0;
-  $: activePointY = activePoint ? chartY(activePoint.seconds) : 0;
+  $: activePointY = activePoint ? chartY(activePoint.seconds, yScale) : 0;
   $: tooltipX = Math.max(
     LEFT,
     Math.min(WIDTH - RIGHT - TOOLTIP_WIDTH, activePointX - (TOOLTIP_WIDTH / 2))
@@ -89,8 +93,13 @@
     return LEFT + (((point.timestamp - startTime) / (endTime - startTime)) * plotWidth);
   }
 
-  function chartY(seconds) {
-    return TOP + ((1 - Math.min(yMax, Math.max(0, seconds)) / yMax) * (BOTTOM - TOP));
+  function chartY(seconds, scale = yScale) {
+    return projectBlockProductionChartY(seconds, {
+      min: scale.min,
+      max: scale.max,
+      top: TOP,
+      bottom: BOTTOM
+    });
   }
 
   function formatSeconds(value) {
@@ -263,8 +272,8 @@
     <div class="chart-scroll">
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label="Average seconds per THORChain block. Drag across the plot to highlight and zoom into a time range.">
         {#each yTicks as tick}
-          <line class="grid-line" x1={LEFT} x2={WIDTH - RIGHT} y1={chartY(tick)} y2={chartY(tick)} />
-          <text class="axis-label y-label" x={LEFT - 9} y={chartY(tick) + 3}>{formatAxisSeconds(tick)}</text>
+          <line class="grid-line" x1={LEFT} x2={WIDTH - RIGHT} y1={chartY(tick, yScale)} y2={chartY(tick, yScale)} />
+          <text class="axis-label y-label" x={LEFT - 9} y={chartY(tick, yScale) + 3}>{formatAxisSeconds(tick)}</text>
         {/each}
 
         {#each xTicks as tick}
@@ -307,8 +316,8 @@
             on:click={() => showTooltip(index)}
             on:keydown={(event) => handleTooltipKeydown(event, index)}
           >
-            <circle class="point-hit" cx={chartX(point, index)} cy={chartY(point.seconds)} r="11"></circle>
-            <circle class="series-point" cx={chartX(point, index)} cy={chartY(point.seconds)} r="2.4"></circle>
+            <circle class="point-hit" cx={chartX(point, index)} cy={chartY(point.seconds, yScale)} r="11"></circle>
+            <circle class="series-point" cx={chartX(point, index)} cy={chartY(point.seconds, yScale)} r="2.4"></circle>
           </g>
         {/each}
 
