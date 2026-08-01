@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="thorchain" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#00ccff" />
+      <stop offset="1" stop-color="#33ff99" />
+    </linearGradient>
+    <radialGradient id="glow" cx="82%" cy="46%" r="38%">
+      <stop offset="0" stop-color="#00cc66" stop-opacity="0.10" />
+      <stop offset="1" stop-color="#00cc66" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="#080808" />
+  <rect width="1200" height="630" fill="url(#glow)" />
+  <rect x="38.5" y="38.5" width="1123" height="553" fill="#0a0a0a" stroke="#2a2a2a" />
+
+  <path d="M39 101.5H1161" stroke="#1a1a1a" />
+  <path d="M39 518.5H1161" stroke="#1a1a1a" />
+  <path d="M39 101.5H250" stroke="#00cc66" />
+
+  <g font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace">
+    <text x="72" y="77" fill="#00cc66" font-size="22" font-weight="700">$</text>
+    <text x="95" y="77" fill="#f5f5f5" font-size="22" font-weight="700" letter-spacing="1">boone.tools</text>
+    <text x="241" y="77" fill="#00cc66" font-size="22" font-weight="700">_</text>
+
+    <circle cx="917" cy="69" r="5" fill="#00cc66" />
+    <text x="935" y="75" fill="#c8c8c8" font-size="14" font-weight="600" letter-spacing="2">THORCHAIN ONLINE</text>
+
+    <text x="72" y="174" fill="#00cc66" font-size="17" font-weight="700">$ explore</text>
+    <text x="183" y="174" fill="#a0a0a0" font-size="17" font-weight="600">--network thorchain</text>
+
+    <text x="70" y="277" fill="#f5f5f5" font-size="64" font-weight="800" letter-spacing="2">NETWORK</text>
+    <text x="70" y="351" fill="#f5f5f5" font-size="64" font-weight="800" letter-spacing="2">INTELLIGENCE</text>
+    <rect x="646" y="302" width="12" height="49" fill="#00cc66" />
+
+    <text x="73" y="413" fill="#d8d8d8" font-size="21" font-weight="500">Live status, analytics, operator tools &amp; research.</text>
+
+    <text x="72" y="559" fill="#00cc66" font-size="14" font-weight="700">&gt;</text>
+    <text x="92" y="559" fill="#b2b2b2" font-size="14" font-weight="600" letter-spacing="0.8">STATUS  /  RAPID SWAPS  /  POOLS  /  NODES  /  FEES</text>
+    <text x="1041" y="559" fill="#a0a0a0" font-size="14" font-weight="600">[LIVE]</text>
+  </g>
+
+  <g transform="translate(826 169)">
+    <rect x="0.5" y="0.5" width="262" height="262" fill="#060606" stroke="#1a1a1a" />
+    <path d="M0.5 0.5H70.5" stroke="#00cc66" />
+    <path d="M193 35L107 135L159 188L28 243L118 142L66 89Z" fill="url(#thorchain)" />
+    <rect x="24" y="22" width="61" height="23" fill="#0a0a0a" stroke="#2a2a2a" />
+    <circle cx="37" cy="33.5" r="4" fill="#00cc66" />
+    <text
+      x="48"
+      y="38"
+      fill="#c8c8c8"
+      font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, monospace"
+      font-size="10"
+      font-weight="700"
+      letter-spacing="1"
+    >LIVE</text>
+  </g>
+</svg>

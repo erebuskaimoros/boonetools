@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   POOL_DISLOCATION_CHART_WINDOWS,
+  DEFAULT_POOL_DISLOCATION_SOURCE_MODE,
   POOL_DISLOCATION_ROLLING_MIN_COVERAGE,
   POOL_DISLOCATION_ROLLING_WINDOWS,
   POOL_DISLOCATION_TABLE_COLUMNS,
@@ -20,10 +21,20 @@ import {
   normalizePoolDislocationSummary,
   projectPoolDislocationChartY,
   projectPoolDislocationChartSelection,
+  resolvePoolDislocationSourceMode,
   sortPoolDislocationPools,
   summarizePool,
   summarizePoolDislocation
 } from '../src/lib/pool-dislocation/model.js';
+
+test('chart source defaults to both and restores that preference after a single-source pool', () => {
+  assert.equal(DEFAULT_POOL_DISLOCATION_SOURCE_MODE, 'both');
+  assert.equal(resolvePoolDislocationSourceMode(['both', 'oracle', 'binance']), 'both');
+  assert.equal(resolvePoolDislocationSourceMode(['binance']), 'binance');
+  assert.equal(resolvePoolDislocationSourceMode(['both', 'oracle', 'binance']), 'both');
+  assert.equal(resolvePoolDislocationSourceMode(['oracle'], 'binance'), 'oracle');
+  assert.equal(resolvePoolDislocationSourceMode(['both', 'oracle', 'binance'], 'binance'), 'binance');
+});
 
 test('chart rolling averages require elapsed windows and minimum exact-point coverage', () => {
   const oneHour = POOL_DISLOCATION_ROLLING_WINDOWS.find((window) => window.id === '1h');

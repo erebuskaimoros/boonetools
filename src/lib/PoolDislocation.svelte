@@ -3,6 +3,7 @@
   import { fetchPoolDislocation, fetchPoolDislocationSeries } from './pool-dislocation/api.js';
   import {
     POOL_DISLOCATION_CHART_WINDOWS,
+    DEFAULT_POOL_DISLOCATION_SOURCE_MODE,
     POOL_DISLOCATION_ROLLING_MIN_COVERAGE,
     POOL_DISLOCATION_ROLLING_WINDOWS,
     POOL_DISLOCATION_TABLE_COLUMNS,
@@ -20,6 +21,7 @@
     normalizePoolDislocationSummary,
     projectPoolDislocationChartY,
     projectPoolDislocationChartSelection,
+    resolvePoolDislocationSourceMode,
     sortPoolDislocationPools
   } from './pool-dislocation/model.js';
 
@@ -45,7 +47,8 @@
   let selectedSeries = null;
   let selectedAsset = '';
   let threshold = 1;
-  let sourceMode = 'both';
+  let preferredSourceMode = DEFAULT_POOL_DISLOCATION_SOURCE_MODE;
+  let sourceMode = DEFAULT_POOL_DISLOCATION_SOURCE_MODE;
   let chartWindow = '7d';
   let selectedRollingAverageIds = [];
   let chartZoom = null;
@@ -78,9 +81,7 @@
     if (mode.id === 'both') return oracleAvailable && binanceAvailable;
     return mode.id === 'oracle' ? oracleAvailable : binanceAvailable;
   });
-  $: if (availableSourceModes.length && !availableSourceModes.some((mode) => mode.id === sourceMode)) {
-    sourceMode = availableSourceModes[0].id;
-  }
+  $: sourceMode = resolvePoolDislocationSourceMode(availableSourceModes, preferredSourceMode);
   $: selectedPoints = selectedSeries?.asset === selectedAsset ? selectedSeries.points : [];
   $: backfilledSamples = selectedSeries?.asset === selectedAsset
     ? selectedSeries?.provenance?.backfilledSamples || 0
@@ -599,7 +600,11 @@
           <span class="control-label">REF</span>
           {#if availableSourceModes.length}
             {#each availableSourceModes as mode}
-              <button class:active={sourceMode === mode.id} on:click={() => sourceMode = mode.id}><i>[{mode.label}]</i> {mode.text}</button>
+              <button
+                class:active={sourceMode === mode.id}
+                aria-pressed={sourceMode === mode.id}
+                on:click={() => preferredSourceMode = mode.id}
+              ><i>[{mode.label}]</i> {mode.text}</button>
             {/each}
           {:else}
             <span class="source-unavailable">[—] NO EXTERNAL REFERENCE</span>

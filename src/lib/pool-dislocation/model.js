@@ -17,6 +17,20 @@ export const POOL_DISLOCATION_ROLLING_WINDOWS = Object.freeze([
 ]);
 
 export const POOL_DISLOCATION_ROLLING_MIN_COVERAGE = 0.95;
+export const DEFAULT_POOL_DISLOCATION_SOURCE_MODE = 'both';
+
+export function resolvePoolDislocationSourceMode(availableSourceModes = [], preferredSourceMode = DEFAULT_POOL_DISLOCATION_SOURCE_MODE) {
+  const available = [...new Set((Array.isArray(availableSourceModes) ? availableSourceModes : [])
+    .map((mode) => String(mode?.id ?? mode ?? '').toLowerCase())
+    .filter((mode) => ['both', 'oracle', 'binance'].includes(mode)))];
+  const preferred = ['both', 'oracle', 'binance'].includes(preferredSourceMode)
+    ? preferredSourceMode
+    : DEFAULT_POOL_DISLOCATION_SOURCE_MODE;
+
+  if (available.includes(preferred)) return preferred;
+  if (available.includes(DEFAULT_POOL_DISLOCATION_SOURCE_MODE)) return DEFAULT_POOL_DISLOCATION_SOURCE_MODE;
+  return available[0] || preferred;
+}
 
 export const DISLOCATION_WINDOWS = Object.freeze([
   { id: '1h', label: '1H', durationMs: HOUR_MS },
