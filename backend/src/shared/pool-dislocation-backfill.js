@@ -46,6 +46,7 @@ function sleep(delayMs) {
 
 export function isTransientPoolDislocationBackfillError(error) {
   const status = Number(error?.status) || 0;
+  if (error?.transient) return true;
   if (error?.name === 'ProviderCooldownError' || error?.name === 'AbortError') return true;
   if (status === 0 && TRANSIENT_ERROR_PATTERN.test(String(error?.message || ''))) return true;
   return status === 408 || status === 425 || status === 429 || status >= 500;
@@ -151,12 +152,13 @@ export function parsePoolDislocationRpcBlock(payload = {}) {
 }
 
 export function poolDislocationHistoricalRpcUrls(options = {}) {
-  return options.rpcUrls || [config.rpcArchiveRestUrl, ...config.rpcRestUrls].filter(Boolean);
+  return options.rpcUrls || [...config.rpcRestUrls, config.rpcArchiveRestUrl].filter(Boolean);
 }
 
 async function defaultFetchRpcStatus(options = {}) {
   return fetchThorchainRpc('/status', {}, {
     cooldownClient: options.client,
+    cooldownScope: 'market-snapshots',
     sharedCooldown: true,
     rpcUrls: poolDislocationHistoricalRpcUrls(options),
     timeoutMs: options.timeoutMs
@@ -166,6 +168,7 @@ async function defaultFetchRpcStatus(options = {}) {
 async function defaultFetchRpcBlock(height, options = {}) {
   return fetchThorchainRpc('/block', { height }, {
     cooldownClient: options.client,
+    cooldownScope: 'market-snapshots',
     sharedCooldown: true,
     rpcUrls: poolDislocationHistoricalRpcUrls(options),
     timeoutMs: options.timeoutMs
@@ -203,7 +206,9 @@ export async function resolvePoolDislocationBlockAnchors(bucketTimes = [], optio
     const targetMs = Date.parse(observedAt);
     if (Date.parse(previous.blockTime) > targetMs) previous = earliest;
     if (Date.parse(previous.blockTime) > targetMs || Date.parse(latest.blockTime) <= targetMs) {
-      throw new Error(`Backfill point ${observedAt} is outside RPC history bounds`);
+      const error = new Error(`Backfill point ${observedAt} is outside RPC history bounds`);
+      error.transient = true;
+      throw error;
     }
 
     let low = previous;
@@ -309,6 +314,7 @@ export async function fetchHistoricalPoolDislocationState(height, options = {}) 
     ].filter(Boolean),
     historical: true,
     cooldownClient: options.cooldownClient,
+    cooldownScope: 'market-snapshots',
     sharedCooldown: true,
     timeoutMs: options.thornodeTimeoutMs || 12_000
   }));

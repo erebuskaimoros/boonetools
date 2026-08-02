@@ -59,10 +59,10 @@ test('canonical market acquisition reuses one same-height pool/oracle snapshot',
   ]);
 });
 
-test('canonical historical block time uses the isolated Liquify archive RPC lane', () => {
+test('canonical historical block time uses a dedicated live-RPC cooldown lane', () => {
   const urls = thorchainMarketSnapshotRpcUrls();
-  assert.match(urls[0], /rpc\.thorchain\.liquify\.com/);
-  assert.ok(urls.some((url) => url.includes('/chain/thorchain_rpc')));
+  assert.ok(urls[0].includes('/chain/thorchain_rpc'));
+  assert.ok(urls.some((url) => /rpc\.thorchain\.liquify\.com/.test(url)));
 });
 
 test('Wasm production lanes are independently registered, timed, and primed', async () => {

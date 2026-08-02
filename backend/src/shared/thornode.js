@@ -30,7 +30,8 @@ export async function fetchThorchain(endpoint, options = {}) {
     },
     ...providerLifecycleHooks({
       client: options.cooldownClient,
-      enabled: options.sharedCooldown
+      enabled: options.sharedCooldown,
+      scope: options.cooldownScope
     }),
     validateResponse: options.validateResponse,
     shouldStop: options.shouldStop,

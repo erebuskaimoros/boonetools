@@ -32,12 +32,16 @@ function providerServicePath(base) {
   }
 }
 
-export function providerCooldownKeys(base) {
+export function providerCooldownKeys(base, options = {}) {
   const hostname = providerHostname(base);
   if (!hostname) return { global: '', service: '' };
+  const scope = String(options.scope || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-');
   return {
     global: `global:${hostname}`,
-    service: `service:${hostname}${providerServicePath(base)}`
+    service: `service:${hostname}${providerServicePath(base)}${scope ? `:${scope}` : ''}`
   };
 }
 
@@ -78,7 +82,7 @@ function database(options = {}) {
 
 export async function assertProviderAvailable(base, options = {}) {
   if (!enabled(options)) return;
-  const keys = providerCooldownKeys(base);
+  const keys = providerCooldownKeys(base, options);
   const candidates = [keys.global, keys.service].filter(Boolean);
   if (!candidates.length) return;
   try {
@@ -112,7 +116,7 @@ export async function assertProviderAvailable(base, options = {}) {
 export async function recordProviderFailure(base, error, options = {}) {
   if (!enabled(options) || error?.skipProvider) return;
   if (!shouldRecordServiceFailure(error)) return;
-  const keys = providerCooldownKeys(base);
+  const keys = providerCooldownKeys(base, options);
   const globalRateLimited = isProviderGatewayRateLimitError(error);
   const key = globalRateLimited ? keys.global : keys.service;
   if (!key) return;
@@ -145,7 +149,7 @@ export async function recordProviderFailure(base, error, options = {}) {
 
 export async function recordProviderSuccess(base, options = {}) {
   if (!enabled(options)) return;
-  const key = providerCooldownKeys(base).service;
+  const key = providerCooldownKeys(base, options).service;
   if (!key) return;
   try {
     await database(options).query(

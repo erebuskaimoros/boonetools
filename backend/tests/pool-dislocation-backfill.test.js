@@ -32,10 +32,10 @@ test('backfill buckets are exact five-minute UTC points with an exclusive end', 
   );
 });
 
-test('historical block anchors prefer the Liquify archive RPC', () => {
+test('historical block anchors prefer the live Liquify RPC with archive fallback', () => {
   const urls = poolDislocationHistoricalRpcUrls();
-  assert.match(urls[0], /rpc\.thorchain\.liquify\.com/);
-  assert.ok(urls.some((url) => url.includes('/chain/thorchain_rpc')));
+  assert.ok(urls[0].includes('/chain/thorchain_rpc'));
+  assert.ok(urls.some((url) => /rpc\.thorchain\.liquify\.com/.test(url)));
   assert.deepEqual(poolDislocationHistoricalRpcUrls({ rpcUrls: ['https://rpc.test'] }), [
     'https://rpc.test'
   ]);

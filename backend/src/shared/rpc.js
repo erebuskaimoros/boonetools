@@ -31,7 +31,8 @@ async function fetchFromBases(bases, path, params = {}, options = {}) {
     },
     ...providerLifecycleHooks({
       client: options.cooldownClient,
-      enabled: options.sharedCooldown
+      enabled: options.sharedCooldown,
+      scope: options.cooldownScope
     })
   });
 }

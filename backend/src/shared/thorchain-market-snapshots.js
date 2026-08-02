@@ -29,7 +29,7 @@ function normalizedSnapshot(row = {}) {
 }
 
 export function thorchainMarketSnapshotRpcUrls(options = {}) {
-  return options.rpcUrls || [config.rpcArchiveRestUrl, ...config.rpcRestUrls].filter(Boolean);
+  return options.rpcUrls || [...config.rpcRestUrls, config.rpcArchiveRestUrl].filter(Boolean);
 }
 
 export async function loadThorchainMarketSnapshot(client, height) {
@@ -84,7 +84,11 @@ export async function ensureThorchainMarketSnapshot(client, height, options = {}
   const fetchBlock = options.fetchBlock || ((path, params, fetchOptions) => fetchRpc(
     path,
     params,
-    { ...fetchOptions, rpcUrls: thorchainMarketSnapshotRpcUrls(options) }
+    {
+      ...fetchOptions,
+      cooldownScope: 'market-snapshots',
+      rpcUrls: thorchainMarketSnapshotRpcUrls(options)
+    }
   ));
   // The three provider calls run concurrently. Cooldown bookkeeping therefore
   // uses the shared pool by default instead of issuing overlapping queries on
@@ -95,12 +99,14 @@ export async function ensureThorchainMarketSnapshot(client, height, options = {}
       historical: true,
       timeoutMs: options.timeoutMs || 30_000,
       cooldownClient,
+      cooldownScope: 'market-snapshots',
       sharedCooldown: true
     }),
     fetchThor(`/thorchain/oracle/prices?height=${targetHeight}`, {
       historical: true,
       timeoutMs: options.timeoutMs || 30_000,
       cooldownClient,
+      cooldownScope: 'market-snapshots',
       sharedCooldown: true
     }),
     fetchBlock(

@@ -38,6 +38,12 @@ test('provider cooldown reserves the gateway-wide lane for 429 or Retry-After re
     global: 'global:gateway.liquify.com',
     service: 'service:gateway.liquify.com/chain/thorchain_midgard'
   });
+  assert.equal(
+    providerCooldownKeys('https://gateway.liquify.com/chain/thorchain_rpc', {
+      scope: 'market snapshots'
+    }).service,
+    'service:gateway.liquify.com/chain/thorchain_rpc:market-snapshots'
+  );
   const queries = [];
   const client = { query: async (sql, params) => (queries.push({ sql, params }), { rows: [] }) };
   await recordProviderFailure(
