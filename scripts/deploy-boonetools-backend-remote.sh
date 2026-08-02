@@ -288,13 +288,14 @@ install_units_from_release() {
 start_unit_with_retry() {
   local unit="$1"
   local attempt
+  local retry_delay_seconds=35
   for attempt in 1 2 3; do
     if systemctl start "$unit"; then
       return
     fi
     if [[ "$attempt" -lt 3 ]]; then
-      echo "Prime attempt $attempt for $unit failed; retrying in 5 seconds..." >&2
-      sleep 5
+      echo "Prime attempt $attempt for $unit failed; retrying in ${retry_delay_seconds} seconds..." >&2
+      sleep "$retry_delay_seconds"
     fi
   done
   return 1
