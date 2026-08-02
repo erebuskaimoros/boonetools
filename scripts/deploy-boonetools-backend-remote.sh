@@ -382,7 +382,7 @@ start_and_verify_timers() {
   shopt -s nullglob
   local timer_paths=("$CURRENT_LINK"/ops/systemd/*.timer)
   local timers=()
-  local path timer timer_row attempt
+  local path timer timer_row attempt target_unit target_state
   local timer_state_wait_seconds=90
   for path in "${timer_paths[@]}"; do
     timers+=("$(basename "$path")")
@@ -397,16 +397,30 @@ start_and_verify_timers() {
     systemctl is-enabled --quiet "$timer" || die "$timer is not enabled"
     systemctl is-active --quiet "$timer" || die "$timer is not active"
     timer_row=
+    target_unit=
+    target_state=
     for attempt in $(seq 1 "$timer_state_wait_seconds"); do
       timer_row="$(systemctl list-timers --all --no-legend "$timer")"
       if [[ -n "$timer_row" ]] \
         && ! grep -Eq '^[[:space:]]*n/a[[:space:]]' <<<"$timer_row"; then
         break
       fi
+      # OnUnitActiveSec timers legitimately report NEXT=n/a while their oneshot
+      # target is still running. The next trigger is scheduled when that target
+      # exits, so a live target is a healthy timer state after a successful prime.
+      target_unit="$(systemctl show "$timer" --property=Triggers --value | awk '{ print $1 }')"
+      if [[ -n "$target_unit" ]]; then
+        target_state="$(systemctl show "$target_unit" --property=ActiveState --value)"
+        if [[ "$target_state" == active || "$target_state" == activating || "$target_state" == reloading ]]; then
+          log "$timer target $target_unit is $target_state; its next trigger will be scheduled after the target exits"
+          break
+        fi
+      fi
       sleep 1
     done
     [[ -n "$timer_row" ]] || die "$timer has no timer state"
-    if grep -Eq '^[[:space:]]*n/a[[:space:]]' <<<"$timer_row"; then
+    if grep -Eq '^[[:space:]]*n/a[[:space:]]' <<<"$timer_row" \
+      && [[ "$target_state" != active && "$target_state" != activating && "$target_state" != reloading ]]; then
       die "$timer has no future trigger after waiting ${timer_state_wait_seconds} seconds"
     fi
   done
