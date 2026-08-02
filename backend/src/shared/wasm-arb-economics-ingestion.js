@@ -20,6 +20,7 @@ const ACTION_PAGE_LIMIT = 50;
 const COLLECTOR_TX_PAGE_LIMIT = 100;
 const ACTION_OVERLAP_BLOCKS = 1_200;
 const NETWORK_INTERVAL_LIMIT = 400;
+const WASM_THORNODE_REQUEST_TIMEOUT_MS = 15_000;
 const WASM_ARB_ACCOUNTING_VERSION = 2;
 const TRACKED_ORACLE_POOLS = new Map([
   ['AVAX.AVAX', 'AVAX'],
@@ -1466,11 +1467,14 @@ async function pruneOldRows(client) {
 
 export async function runWasmArbEconomicsIngestion(client, options = {}) {
   const stats = {};
-  const fetchThor = options.fetchThorchain || fetchThorchain;
+  const fetchThor = options.fetchThorchain || ((path, fetchOptions = {}) => fetchThorchain(path, {
+    timeoutMs: WASM_THORNODE_REQUEST_TIMEOUT_MS,
+    ...fetchOptions
+  }));
   const latestHeight = Math.trunc(safeNumber(options.latestHeight)) || Math.trunc(
     extractThorHeight(await fetchThor('/thorchain/lastblock'))
   );
-  const runtimeOptions = { ...options, latestHeight };
+  const runtimeOptions = { ...options, fetchThorchain: fetchThor, latestHeight };
   stats.network = await ingestNetworkBuckets(client, runtimeOptions);
   stats.actions = await ingestActions(client, runtimeOptions);
   stats.collectorTransfers = await ingestCollectorTransfers(client, runtimeOptions);
