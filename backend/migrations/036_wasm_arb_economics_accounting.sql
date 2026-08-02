@@ -1,3 +1,4 @@
+-- Correct Wasm arb economics fee accounting.
 begin;
 
 alter table public.wasm_arb_economics_regimes

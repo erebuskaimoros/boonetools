@@ -92,8 +92,10 @@ default 400-day chart response. Transaction detail is capped at 31 days.
 Responses use persistent and single-flight caches because this is a bounded
 historical drill-down rather than a dashboard summary read model.
 
-The public `/functions/v1/wasm-arb-economics` endpoint serves the corrected v2
-Wasm intervention ledger without request-time provider calls. Its scheduled
+The public `/functions/v1/wasm-arb-economics` endpoint serves the corrected v3
+post-Mimir-zero monitoring series without request-time provider calls. Recent
+history is compacted hourly and older history daily while preserving additive
+accounting, so the payload remains bounded as the series grows. Its scheduled
 job rebuilds duplicate-safe Midgard action volume, discovers RUJI Trade fees
 through Tendermint `tx_search` and `block_search`, scans canonical
 `block_results`, prices otherwise unsupported FIN denoms through a
@@ -303,11 +305,14 @@ It writes in bounded transactions, preserves any live row at a conflicting
 timestamp, verifies every planned bucket, and refreshes the public read model.
 It has no timer and does not run automatically during future deploys.
 
-Migrations `031_wasm_arb_economics.sql` and
-`032_wasm_arb_economics_accounting.sql` own the Wasm dashboard. Migration 032
+Migrations `035_wasm_arb_economics.sql`,
+`036_wasm_arb_economics_accounting.sql`, and
+`037_wasm_arb_monitoring_series.sql` own the Wasm dashboard. Migration 036
 adds FIN market metadata, spread interventions, and same-height oracle samples;
 it clears only derived action/block/fee caches and invalidates prior dashboard
-snapshots so the corrected v2 read model cannot mix old and new accounting.
+snapshots so the corrected v2 accounting cannot mix old and new data. Migration
+037 invalidates the intervention-comparison snapshot before publishing the
+bounded v3 monitoring contract.
 
 Rapid-Swap websocket ingestion is disabled by default in the shared
 `rapid-swap-listener.service`, while Node-Vote websocket ingestion remains

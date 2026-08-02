@@ -1,3 +1,4 @@
+-- Wasm arb economics read model support.
 begin;
 
 create table if not exists public.wasm_arb_economics_job_runs (

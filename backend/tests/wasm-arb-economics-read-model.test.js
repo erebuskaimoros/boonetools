@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { buildWasmArbEconomicsPayload } from '../src/shared/wasm-arb-economics.js';
 
-test('read model preserves separate archives for the original Mimir and latest spread', async () => {
+test('read model publishes a bounded post-zero monitoring series and retains later markers', async () => {
   const queries = [];
   const responses = [
     { rows: [{
@@ -54,7 +54,11 @@ test('read model preserves separate archives for the original Mimir and latest s
     generatedAt: '2026-10-01T00:00:00Z'
   });
 
+  assert.equal(result.payload.schemaVersion, 3);
   assert.equal(result.payload.meta.currentRegime.activationHeight, 27181679);
+  assert.equal(result.payload.meta.trackingRegime.activationHeight, 27181679);
+  assert.equal(result.payload.meta.trackingStart, '2026-07-27T14:04:45.000Z');
+  assert.equal(result.payload.meta.seriesMode, 'post-mimir-zero');
   assert.equal(result.payload.meta.currentSpreadRegime.activationHeight, 27184679);
   assert.equal(result.payload.meta.currentIntervention.activationHeight, 27184679);
   assert.deepEqual(
@@ -62,9 +66,9 @@ test('read model preserves separate archives for the original Mimir and latest s
     ['mimir', 'spread']
   );
   for (const query of queries.slice(1, 5)) {
-    assert.equal(query.params.length, 5);
-    assert.match(query.sql, /\$4::timestamptz/);
-    assert.match(query.sql, /\$5::timestamptz/);
+    assert.deepEqual(query.params, ['2026-07-27T14:04:45.000Z']);
+    assert.match(query.sql, /\$1::timestamptz/);
+    assert.doesNotMatch(query.sql, /\$2::timestamptz/);
   }
   assert.match(
     queries[3].sql,

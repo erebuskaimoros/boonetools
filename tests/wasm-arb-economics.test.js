@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  compactWasmArbMonitoringRows,
   compareWasmArbEqualWindows,
   normalizeWasmArbEconomicsBucket,
   summarizeWasmArbWindow
@@ -176,4 +177,33 @@ test('comparison refuses to issue a verdict when a source window has gaps', () =
 
   assert.equal(result.ready, false);
   assert.match(result.reason, /backfilling/i);
+});
+
+test('monitoring compaction preserves corrected accounting while bounding the public series', () => {
+  const start = Date.parse('2026-06-23T00:00:00Z') / 1000;
+  const sourceRows = distributedRows(start, 35 * 24 * 12, afterTotals, { mimirValue: 0 });
+  const compacted = compactWasmArbMonitoringRows(sourceRows);
+  const sourceSummary = summarizeWasmArbWindow(sourceRows);
+  const compactSummary = summarizeWasmArbWindow(compacted.rows);
+
+  assert.equal(compacted.sourceRowCount, sourceRows.length);
+  assert.ok(compacted.historicalRowCount >= 4);
+  assert.ok(compacted.recentRowCount <= 31 * 24);
+  assert.ok(compacted.rows.length < sourceRows.length / 10);
+  assert.equal(
+    Number(compactSummary.tcLinkedValueUsd.toFixed(6)),
+    Number(sourceSummary.tcLinkedValueUsd.toFixed(6))
+  );
+  assert.equal(
+    Number(compactSummary.wasmLegVolumeUsd.toFixed(4)),
+    Number(sourceSummary.wasmLegVolumeUsd.toFixed(4))
+  );
+  assert.equal(
+    Number(compactSummary.linkedRujiraFeeUsd.toFixed(6)),
+    Number(sourceSummary.linkedRujiraFeeUsd.toFixed(6))
+  );
+  assert.equal(
+    Number(compactSummary.finRangeFeeUsd.toFixed(6)),
+    Number(sourceSummary.finRangeFeeUsd.toFixed(6))
+  );
 });

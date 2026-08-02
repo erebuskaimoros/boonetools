@@ -538,6 +538,181 @@ export function compareWasmArbEqualWindows(rows = [], options = {}) {
   };
 }
 
+const SOURCE_ADDITIVE_FIELDS = Object.freeze([
+  'networkVolumeUsd',
+  'networkLiquidityFeeRune',
+  'networkLiquidityFeeUsd',
+  'networkSwapLegCount',
+  'wasmActionCount',
+  'wasmLegCount',
+  'wasmSingleActionCount',
+  'wasmDoubleActionCount',
+  'wasmInputVolumeUsd',
+  'wasmLegVolumeUsd',
+  'wasmLiquidityFeeRune',
+  'wasmLiquidityFeeUsd',
+  'zeroSlipActionCount',
+  'zeroFeeActionCount',
+  'belowReferenceActionCount',
+  'ammFeeUsd',
+  'finFeeUsd',
+  'finRangeFeeUsd',
+  'linkedAmmFeeUsd',
+  'linkedFinFeeUsd',
+  'linkedFinRangeFeeUsd',
+  'rujiraFeeEventCount',
+  'unpricedRujiraFeeEventCount',
+  'oracleObservationCount',
+  'oracleAbsDeviationSumBps',
+  'oracleSignedDeviationSumBps',
+  'oracleWeightedAbsNumerator',
+  'oracleDepthWeightUsd',
+  'oracleWithin10Count',
+  'oracleWithin25Count',
+  'oracleExLtcObservationCount',
+  'oracleExLtcAbsDeviationSumBps',
+  'oracleExLtcSignedDeviationSumBps',
+  'oracleExLtcWeightedAbsNumerator',
+  'oracleExLtcDepthWeightUsd',
+  'oracleExLtcWithin10Count',
+  'oracleExLtcWithin25Count'
+]);
+
+function weightedAverage(rows, valueField, weightField) {
+  const weight = sum(rows, weightField);
+  if (!(weight > 0)) return null;
+  return rows.reduce(
+    (total, row) => total + finiteNumber(row?.[valueField]) * finiteNumber(row?.[weightField]),
+    0
+  ) / weight;
+}
+
+/**
+ * Compact canonical source buckets without losing any additive accounting
+ * fields. Unlike summarizeWasmArbWindow(), this returns the same bucket
+ * contract that the API and frontend normalizer consume, so compacted rows can
+ * be summarized again without double counting FIN range fees or TC allocation.
+ */
+export function aggregateWasmArbSourceBuckets(rows = [], grainSeconds = 60 * 60) {
+  const normalized = normalizeWasmArbEconomicsBuckets(rows);
+  const size = Math.max(
+    FIVE_MINUTES_SECONDS,
+    Math.trunc(finiteNumber(grainSeconds, 60 * 60) / FIVE_MINUTES_SECONDS)
+      * FIVE_MINUTES_SECONDS
+  );
+  const groups = new Map();
+
+  for (const row of normalized) {
+    const key = Math.floor(row.startSeconds / size) * size;
+    const group = groups.get(key) || [];
+    group.push(row);
+    groups.set(key, group);
+  }
+
+  return [...groups.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, group]) => {
+      const first = group[0];
+      const last = group.at(-1);
+      const slipHistogram = mergeHistograms(group, 'slipHistogram');
+      const linkedFeeWeight = group.reduce(
+        (total, row) => total + row.linkedAmmFeeUsd + row.linkedFinFeeUsd,
+        0
+      );
+      const durationWeight = group.reduce((total, row) => total + row.bucketSeconds, 0);
+      const tcShare = linkedFeeWeight > 0
+        ? group.reduce(
+            (total, row) => total
+              + (row.linkedAmmFeeUsd + row.linkedFinFeeUsd) * row.tcShare,
+            0
+          ) / linkedFeeWeight
+        : durationWeight > 0
+          ? group.reduce((total, row) => total + row.tcShare * row.bucketSeconds, 0)
+            / durationWeight
+          : 0.5;
+      const runePriceUsd = weightedAverage(group, 'runePriceUsd', 'networkVolumeUsd')
+        ?? weightedAverage(group, 'runePriceUsd', 'bucketSeconds')
+        ?? 0;
+      const result = {
+        bucketStart: first.bucketStart,
+        bucketSeconds: durationWeight,
+        runePriceUsd,
+        slipHistogram,
+        medianSlipBps: histogramQuantile(slipHistogram, 0.5),
+        p90SlipBps: histogramQuantile(slipHistogram, 0.9),
+        maxSlipBps: histogramQuantile(slipHistogram, 1),
+        oracleMaxAbsDeviationBps: max(group, 'oracleMaxAbsDeviationBps'),
+        oracleExLtcMaxAbsDeviationBps: max(group, 'oracleExLtcMaxAbsDeviationBps'),
+        tcShare,
+        mimirValue: last.mimirValue,
+        referenceMimirValue: first.referenceMimirValue,
+        networkComplete: group.every((row) => row.networkComplete),
+        actionsComplete: group.every((row) => row.actionsComplete),
+        feesComplete: group.every((row) => row.feesComplete),
+        oracleComplete: group.every((row) => row.oracleComplete)
+      };
+
+      for (const field of SOURCE_ADDITIVE_FIELDS) {
+        result[field] = sum(group, field);
+      }
+      return result;
+    });
+}
+
+/**
+ * Keep the public monitoring payload bounded over time: recent history remains
+ * hourly, while older post-change history is represented by daily buckets.
+ */
+export function compactWasmArbMonitoringRows(rows = [], options = {}) {
+  const normalized = normalizeWasmArbEconomicsBuckets(rows);
+  const recentSeconds = Math.max(
+    24 * 60 * 60,
+    Math.trunc(finiteNumber(options.recentSeconds, 30 * 24 * 60 * 60))
+  );
+  const recentGrainSeconds = Math.max(
+    FIVE_MINUTES_SECONDS,
+    Math.trunc(finiteNumber(options.recentGrainSeconds, 60 * 60))
+  );
+  const historicalGrainSeconds = Math.max(
+    recentGrainSeconds,
+    Math.trunc(finiteNumber(options.historicalGrainSeconds, 24 * 60 * 60))
+  );
+  const latestEnd = normalized.reduce(
+    (latest, row) => Math.max(latest, row.startSeconds + row.bucketSeconds),
+    0
+  );
+  if (!(latestEnd > 0)) {
+    return {
+      rows: [],
+      recentStart: null,
+      sourceRowCount: 0,
+      recentRowCount: 0,
+      historicalRowCount: 0,
+      recentGrainSeconds,
+      historicalGrainSeconds
+    };
+  }
+
+  const recentStartSeconds = floorWasmArbBucket(
+    latestEnd - recentSeconds,
+    historicalGrainSeconds
+  );
+  const historical = normalized.filter((row) => row.startSeconds < recentStartSeconds);
+  const recent = normalized.filter((row) => row.startSeconds >= recentStartSeconds);
+  const historicalRows = aggregateWasmArbSourceBuckets(historical, historicalGrainSeconds);
+  const recentRows = aggregateWasmArbSourceBuckets(recent, recentGrainSeconds);
+
+  return {
+    rows: [...historicalRows, ...recentRows],
+    recentStart: new Date(recentStartSeconds * 1000).toISOString(),
+    sourceRowCount: normalized.length,
+    recentRowCount: recentRows.length,
+    historicalRowCount: historicalRows.length,
+    recentGrainSeconds,
+    historicalGrainSeconds
+  };
+}
+
 export function aggregateWasmArbEconomicsBuckets(rows = [], grainSeconds = 60 * 60) {
   const normalized = normalizeWasmArbEconomicsBuckets(rows);
   const size = Math.max(FIVE_MINUTES_SECONDS, Math.trunc(finiteNumber(grainSeconds, 3600)));
@@ -552,10 +727,18 @@ export function aggregateWasmArbEconomicsBuckets(rows = [], grainSeconds = 60 * 
 
   return [...groups.entries()]
     .sort(([left], [right]) => left - right)
-    .map(([startSeconds, group]) => ({
-      bucketStart: new Date(startSeconds * 1000).toISOString(),
-      startSeconds,
-      bucketSeconds: size,
-      ...summarizeWasmArbWindow(group)
-    }));
+    .map(([startSeconds, group]) => {
+      const observedSeconds = group.reduce(
+        (total, row) => total + finiteNumber(row.bucketSeconds),
+        0
+      );
+      return {
+        bucketStart: new Date(startSeconds * 1000).toISOString(),
+        startSeconds,
+        bucketSeconds: size,
+        observedSeconds,
+        partial: observedSeconds < size,
+        ...summarizeWasmArbWindow(group)
+      };
+    });
 }

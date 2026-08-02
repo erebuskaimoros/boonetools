@@ -2,23 +2,26 @@
   import { onDestroy, onMount, tick } from 'svelte';
 
   import { TerminalAlert } from '$lib/components/terminal';
+  import './styles/variables.css';
   import { fetchWasmArbEconomics } from './wasm-arb-economics/api.js';
   import {
     ceilWasmArbBucket,
-    compareWasmArbEqualWindows,
-    normalizeWasmArbEconomicsBuckets
+    normalizeWasmArbEconomicsBuckets,
+    summarizeWasmArbWindow
   } from './wasm-arb-economics/model.js';
   import {
+    renderWasmArbActivityChart,
     renderWasmArbEfficiencyChart,
+    renderWasmArbFeeBehaviorChart,
+    renderWasmArbOracleChart,
     renderWasmArbValueChart
   } from './wasm-arb-economics/charts.js';
 
-  const WINDOW_OPTIONS = [
-    { key: 'since', label: 'since change', seconds: 14 * 24 * 60 * 60 },
-    { key: '6h', label: '6h', seconds: 6 * 60 * 60 },
-    { key: '24h', label: '24h', seconds: 24 * 60 * 60 },
-    { key: '3d', label: '3d', seconds: 3 * 24 * 60 * 60 },
-    { key: '7d', label: '7d', seconds: 7 * 24 * 60 * 60 }
+  const RANGE_OPTIONS = [
+    { key: 'all', label: 'all since zero', seconds: null },
+    { key: '30d', label: '30d', seconds: 30 * 24 * 60 * 60 },
+    { key: '7d', label: '7d', seconds: 7 * 24 * 60 * 60 },
+    { key: '24h', label: '24h', seconds: 24 * 60 * 60 }
   ];
 
   const usd2 = new Intl.NumberFormat('en-US', {
@@ -26,92 +29,83 @@
     currency: 'USD',
     maximumFractionDigits: 2
   });
-  const usd4 = new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    maximumFractionDigits: 4
-  });
   const number0 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 
   let dashboard = null;
   let loading = true;
   let refreshing = false;
   let error = '';
-  let selectedWindow = 'since';
-  let selectedInterventionHeight = null;
+  let selectedRange = 'all';
   let valueCanvas;
+  let activityCanvas;
   let efficiencyCanvas;
+  let feeCanvas;
+  let oracleCanvas;
   let valueChart;
+  let activityChart;
   let efficiencyChart;
-  let chartRenderKey = '';
+  let feeChart;
+  let oracleChart;
   let chartRenderTimer;
+  let chartRenderKey = '';
 
   $: rows = normalizeWasmArbEconomicsBuckets(dashboard?.rows || []);
-  $: interventions = dashboard?.meta?.interventions || [];
-  $: regime = interventions.find(
-    (row) => Number(row.activationHeight) === Number(selectedInterventionHeight)
-  ) || dashboard?.meta?.currentIntervention || dashboard?.meta?.currentRegime || null;
-  $: regimeKind = regime?.changeKind?.includes('spread') ? 'spread' : 'mimir';
-  $: selectedOption = WINDOW_OPTIONS.find((option) => option.key === selectedWindow)
-    || WINDOW_OPTIONS[0];
-  $: latestEnd = rows.reduce(
+  $: trackingRegime = dashboard?.meta?.trackingRegime
+    || dashboard?.meta?.currentRegime
+    || null;
+  $: trackingStart = dashboard?.meta?.trackingStart
+    || trackingRegime?.activationTime
+    || rows[0]?.bucketStart
+    || null;
+  $: trackingStartSeconds = trackingStart ? ceilWasmArbBucket(trackingStart) : 0;
+  $: postChangeRows = rows.filter((row) => row.startSeconds >= trackingStartSeconds);
+  $: latestEnd = postChangeRows.reduce(
     (latest, row) => Math.max(latest, row.startSeconds + row.bucketSeconds),
     0
   );
-  $: availableSinceChange = regime
-    ? Math.max(300, latestEnd - ceilWasmArbBucket(regime.activationTime))
-    : 300;
-  $: requestedWindowSeconds = selectedWindow === 'since'
-    ? Math.min(selectedOption.seconds, availableSinceChange)
-    : selectedOption.seconds;
-  $: comparison = regime
-    ? compareWasmArbEqualWindows(rows, {
-        anchorTime: regime.activationTime,
-        windowSeconds: requestedWindowSeconds
-      })
-    : { ready: false, reason: 'No Wasm arb intervention has been recorded yet.' };
-  $: visibleRows = comparison.ready
-    ? rows.filter((row) => (
-        row.startSeconds >= comparison.bounds.preStart
-          && row.startSeconds < comparison.bounds.postEnd
-      ))
-    : rows;
+  $: selectedOption = RANGE_OPTIONS.find((option) => option.key === selectedRange)
+    || RANGE_OPTIONS[0];
+  $: visibleStart = selectedOption.seconds
+    ? Math.max(trackingStartSeconds, latestEnd - selectedOption.seconds)
+    : trackingStartSeconds;
+  $: visibleRows = postChangeRows.filter((row) => (
+    row.startSeconds + row.bucketSeconds > visibleStart
+      && row.startSeconds < latestEnd
+  ));
+  $: visibleSeconds = Math.max(0, latestEnd - visibleStart);
+  $: chartGrainSeconds = visibleSeconds > 30 * 24 * 60 * 60
+    ? 24 * 60 * 60
+    : 60 * 60;
+  $: trailingBucketPartial = latestEnd % chartGrainSeconds !== 0;
+  $: summary = summarizeWasmArbWindow(visibleRows);
+  $: interventions = dashboard?.meta?.interventions || dashboard?.regimes || [];
+  $: visibleMilestones = interventions.filter((row) => {
+    const timestamp = Date.parse(row?.activationTime || '') / 1000;
+    return Number(row?.activationHeight) !== Number(trackingRegime?.activationHeight)
+      && Number.isFinite(timestamp)
+      && timestamp >= visibleStart
+      && timestamp < latestEnd;
+  });
+  $: sourceCoverage = dashboard?.meta?.coverage || {};
+  $: economicsComplete = summary.bucketCount > 0
+    && summary.networkBucketCoverage >= 0.98
+    && summary.actionBucketCoverage >= 0.98
+    && summary.feeBucketCoverage >= 0.98
+    && summary.pricingCoverage >= 0.98;
+  $: oracleComplete = summary.bucketCount > 0
+    && summary.oracleCoverageComplete
+    && summary.oracleBucketCoverage >= 0.98;
   $: newChartRenderKey = [
     visibleRows.length,
+    visibleRows[0]?.bucketStart || '',
     visibleRows.at(-1)?.bucketStart || '',
-    regime?.activationTime || '',
-    selectedWindow,
-    comparison.ready ? comparison.windowSeconds : 0
+    dashboard?.meta?.sourceUpdatedAt || '',
+    chartGrainSeconds,
+    visibleMilestones.map((row) => row.activationHeight).join(',')
   ].join('|');
   $: if (newChartRenderKey && newChartRenderKey !== chartRenderKey) {
     chartRenderKey = newChartRenderKey;
     scheduleCharts();
-  }
-  $: metricRows = comparison.ready ? buildMetricRows(comparison) : [];
-  $: sourceCoverage = dashboard?.meta?.coverage || {};
-  $: economicsComplete = comparison?.ready
-    ? Boolean(comparison.dataComplete)
-    : Boolean(
-        sourceCoverage.networkComplete
-          && sourceCoverage.actionBackfillComplete
-          && sourceCoverage.feeBackfillComplete
-      );
-  $: comparisonProvisional = comparison?.ready && (
-    comparison.truncated
-      || (selectedWindow === 'since' && availableSinceChange < selectedOption.seconds)
-  );
-  $: verdictTone = comparison?.verdict === 'positive'
-    ? 'positive'
-    : comparison?.verdict === 'negative'
-      ? 'negative'
-      : 'neutral';
-
-  function interventionLabel(row) {
-    if (row?.changeKind?.includes('spread')) {
-      const previous = row.previousSpreadBps == null ? '—' : row.previousSpreadBps;
-      return `SPREAD ${previous}→${row.spreadBps}`;
-    }
-    return `MIMIR ${row?.previousMimirValue ?? '—'}→${row?.mimirValue ?? '—'}`;
   }
 
   function asFiniteNumber(value) {
@@ -120,9 +114,9 @@
     return Number.isFinite(number) ? number : null;
   }
 
-  function formatUsd(value, precise = false) {
+  function formatUsd(value) {
     const number = asFiniteNumber(value);
-    return number === null ? '—' : (precise ? usd4 : usd2).format(number);
+    return number === null ? '—' : usd2.format(number);
   }
 
   function formatCompactUsd(value) {
@@ -143,42 +137,19 @@
     return number === null ? '—' : `${(number * 100).toFixed(digits)}%`;
   }
 
-  function formatSignedPercent(value, digits = 1) {
-    const number = asFiniteNumber(value);
-    if (number === null) return '—';
-    return `${number >= 0 ? '+' : ''}${(number * 100).toFixed(digits)}%`;
-  }
-
-  function formatSignedPoints(value, digits = 1) {
-    const number = asFiniteNumber(value);
-    if (number === null) return '—';
-    return `${number >= 0 ? '+' : ''}${(number * 100).toFixed(digits)} pp`;
-  }
-
   function formatBps(value) {
     const number = asFiniteNumber(value);
     return number === null ? '—' : `${number.toFixed(2)} bps`;
   }
 
-  function signedBps(value) {
-    const number = asFiniteNumber(value);
-    if (number === null) return '—';
-    return `${number >= 0 ? '+' : '−'}${Math.abs(number).toFixed(2)} bps`;
-  }
-
-  function numericDelta(before, after) {
-    const left = asFiniteNumber(before);
-    const right = asFiniteNumber(after);
-    return left !== null && right !== null ? right - left : null;
-  }
-
   function formatDateTime(value) {
-    if (value === null || value === undefined || value === '') return '—';
+    if (!value) return '—';
     const date = new Date(value);
     if (!Number.isFinite(date.getTime())) return '—';
     return `${date.toLocaleString('en-US', {
       month: 'short',
       day: '2-digit',
+      year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
@@ -187,25 +158,16 @@
   }
 
   function formatDuration(seconds) {
-    const totalMinutes = Math.round((Number(seconds) || 0) / 60);
-    const days = Math.floor(totalMinutes / 1440);
-    const hours = Math.floor((totalMinutes % 1440) / 60);
-    const minutes = totalMinutes % 60;
-    return [days ? `${days}d` : '', hours ? `${hours}h` : '', minutes ? `${minutes}m` : '']
-      .filter(Boolean)
-      .join(' ') || '0m';
+    const totalHours = Math.max(0, Math.round((Number(seconds) || 0) / 3600));
+    const days = Math.floor(totalHours / 24);
+    const hours = totalHours % 24;
+    return [days ? `${days}d` : '', hours ? `${hours}h` : ''].filter(Boolean).join(' ') || '<1h';
   }
 
-  function signedUsd(value) {
-    const number = asFiniteNumber(value);
-    if (number === null) return '—';
-    return `${number >= 0 ? '+' : '−'}${formatUsd(Math.abs(number))}`;
-  }
-
-  function deltaClass(value) {
-    const number = asFiniteNumber(value);
-    if (number === null) return '';
-    return number > 0 ? 'up' : number < 0 ? 'down' : '';
+  function formatGrain(seconds) {
+    if (seconds >= 24 * 60 * 60) return 'DAY';
+    if (seconds >= 60 * 60) return `${seconds / 3600}H`;
+    return `${seconds / 60}M`;
   }
 
   function shortAddress(value) {
@@ -213,153 +175,9 @@
     return address.length > 24 ? `${address.slice(0, 13)}…${address.slice(-8)}` : address || '—';
   }
 
-  function buildMetricRows(result) {
-    const before = result.before;
-    const after = result.after;
-    const deltas = result.deltas;
-    return [
-      {
-        label: 'Network executed-leg volume',
-        before: formatCompactUsd(before.networkVolumeUsd),
-        after: formatCompactUsd(after.networkVolumeUsd),
-        delta: formatSignedPercent(deltas.networkVolumeUsd.percent),
-        deltaValue: deltas.networkVolumeUsd.absolute
-      },
-      {
-        label: 'Network liquidity fees',
-        before: formatUsd(before.networkLiquidityFeeUsd),
-        after: formatUsd(after.networkLiquidityFeeUsd),
-        delta: `${signedUsd(deltas.networkLiquidityFeeUsd.absolute)} · ${formatSignedPercent(deltas.networkLiquidityFeeUsd.percent)}`,
-        deltaValue: deltas.networkLiquidityFeeUsd.absolute
-      },
-      {
-        label: 'Network liquidity-fee yield',
-        before: formatBps(before.networkFeeBps),
-        after: formatBps(after.networkFeeBps),
-        delta: formatSignedPercent(deltas.networkFeeBps.percent),
-        deltaValue: deltas.networkFeeBps.absolute
-      },
-      {
-        label: 'Wasm actions',
-        before: formatCount(before.wasmActionCount),
-        after: formatCount(after.wasmActionCount),
-        delta: formatSignedPercent(deltas.wasmActionCount.percent),
-        deltaValue: deltas.wasmActionCount.absolute
-      },
-      {
-        label: 'Wasm executed-leg volume',
-        before: formatCompactUsd(before.wasmLegVolumeUsd),
-        after: formatCompactUsd(after.wasmLegVolumeUsd),
-        delta: formatSignedPercent(deltas.wasmLegVolumeUsd.percent),
-        deltaValue: deltas.wasmLegVolumeUsd.absolute
-      },
-      {
-        label: 'Wasm share of network volume',
-        before: formatPercent(before.wasmNetworkVolumeShare, 3),
-        after: formatPercent(after.wasmNetworkVolumeShare, 3),
-        delta: formatSignedPercent(deltas.wasmNetworkVolumeShare.percent),
-        deltaValue: deltas.wasmNetworkVolumeShare.absolute
-      },
-      {
-        label: 'THOR liquidity fees from Wasm',
-        before: formatUsd(before.wasmLiquidityFeeUsd),
-        after: formatUsd(after.wasmLiquidityFeeUsd),
-        delta: `${signedUsd(deltas.wasmLiquidityFeeUsd.absolute)} · ${formatSignedPercent(deltas.wasmLiquidityFeeUsd.percent)}`,
-        deltaValue: deltas.wasmLiquidityFeeUsd.absolute
-      },
-      {
-        label: 'Wasm liquidity-fee yield',
-        before: formatBps(before.wasmLegFeeBps),
-        after: formatBps(after.wasmLegFeeBps),
-        delta: formatSignedPercent(deltas.wasmLegFeeBps.percent),
-        deltaValue: deltas.wasmLegFeeBps.absolute
-      },
-      {
-        label: 'Wasm AMM collector fees',
-        before: formatUsd(before.ammFeeUsd),
-        after: formatUsd(after.ammFeeUsd),
-        delta: `${signedUsd(after.ammFeeUsd - before.ammFeeUsd)} · ${formatSignedPercent(before.ammFeeUsd ? (after.ammFeeUsd - before.ammFeeUsd) / before.ammFeeUsd : null)}`,
-        deltaValue: after.ammFeeUsd - before.ammFeeUsd
-      },
-      {
-        label: 'All FIN fees (range included)',
-        before: formatUsd(before.finFeeUsd),
-        after: formatUsd(after.finFeeUsd),
-        delta: `${signedUsd(after.finFeeUsd - before.finFeeUsd)} · ${formatSignedPercent(before.finFeeUsd ? (after.finFeeUsd - before.finFeeUsd) / before.finFeeUsd : null)}`,
-        deltaValue: after.finFeeUsd - before.finFeeUsd
-      },
-      {
-        label: 'FIN range subset',
-        before: formatUsd(before.finRangeFeeUsd),
-        after: formatUsd(after.finRangeFeeUsd),
-        delta: signedUsd(after.finRangeFeeUsd - before.finRangeFeeUsd),
-        deltaValue: after.finRangeFeeUsd - before.finRangeFeeUsd
-      },
-      {
-        label: 'All tracked Rujira fees (FIN + AMM)',
-        before: formatUsd(before.allRujiraFeeUsd),
-        after: formatUsd(after.allRujiraFeeUsd),
-        delta: `${signedUsd(deltas.allRujiraFeeUsd.absolute)} · ${formatSignedPercent(deltas.allRujiraFeeUsd.percent)}`,
-        deltaValue: deltas.allRujiraFeeUsd.absolute
-      },
-      {
-        label: 'Wasm-linked Rujira fees',
-        before: formatUsd(before.linkedRujiraFeeUsd),
-        after: formatUsd(after.linkedRujiraFeeUsd),
-        delta: `${signedUsd(deltas.linkedRujiraFeeUsd.absolute)} · ${formatSignedPercent(deltas.linkedRujiraFeeUsd.percent)}`,
-        deltaValue: deltas.linkedRujiraFeeUsd.absolute
-      },
-      {
-        label: `TC accrual from linked Rujira (${formatPercent(after.averageTcShare, 0)})`,
-        before: formatUsd(before.linkedTcReserveUsd),
-        after: formatUsd(after.linkedTcReserveUsd),
-        delta: signedUsd(deltas.linkedTcReserveUsd.absolute),
-        deltaValue: deltas.linkedTcReserveUsd.absolute
-      },
-      {
-        label: 'TC linked value (LP fees + accrual)',
-        before: formatUsd(before.tcLinkedValueUsd),
-        after: formatUsd(after.tcLinkedValueUsd),
-        delta: `${signedUsd(deltas.tcLinkedValueUsd.absolute)} · ${formatSignedPercent(deltas.tcLinkedValueUsd.percent)}`,
-        deltaValue: deltas.tcLinkedValueUsd.absolute,
-        emphasis: true
-      },
-      {
-        label: 'Broad TC value (all FIN + AMM)',
-        before: formatUsd(before.tcBroadValueUsd),
-        after: formatUsd(after.tcBroadValueUsd),
-        delta: `${signedUsd(deltas.tcBroadValueUsd.absolute)} · ${formatSignedPercent(deltas.tcBroadValueUsd.percent)}`,
-        deltaValue: deltas.tcBroadValueUsd.absolute
-      },
-      {
-        label: 'TC value per $1m network volume',
-        before: formatUsd(before.tcPerMillionNetworkVolumeUsd),
-        after: formatUsd(after.tcPerMillionNetworkVolumeUsd),
-        delta: formatSignedPercent(deltas.tcPerMillionNetworkVolumeUsd.percent),
-        deltaValue: deltas.tcPerMillionNetworkVolumeUsd.absolute
-      },
-      {
-        label: 'Broad TC value per $1m network volume',
-        before: formatUsd(before.tcBroadPerMillionNetworkVolumeUsd),
-        after: formatUsd(after.tcBroadPerMillionNetworkVolumeUsd),
-        delta: formatSignedPercent(deltas.tcBroadPerMillionNetworkVolumeUsd.percent),
-        deltaValue: deltas.tcBroadPerMillionNetworkVolumeUsd.absolute
-      },
-      {
-        label: 'TC value per $1m Wasm volume',
-        before: formatUsd(before.tcPerMillionWasmVolumeUsd),
-        after: formatUsd(after.tcPerMillionWasmVolumeUsd),
-        delta: formatSignedPercent(deltas.tcPerMillionWasmVolumeUsd.percent),
-        deltaValue: deltas.tcPerMillionWasmVolumeUsd.absolute
-      },
-      {
-        label: 'Broad TC value per $1m Wasm volume',
-        before: formatUsd(before.tcBroadPerMillionWasmVolumeUsd),
-        after: formatUsd(after.tcBroadPerMillionWasmVolumeUsd),
-        delta: formatSignedPercent(deltas.tcBroadPerMillionWasmVolumeUsd.percent),
-        deltaValue: deltas.tcBroadPerMillionWasmVolumeUsd.absolute
-      }
-    ];
+  function milestoneLabel(row) {
+    if (row?.changeKind?.includes('spread')) return `SPREAD_BPS → ${row.spreadBps}`;
+    return `MIMIR → ${row?.mimirValue ?? '—'}`;
   }
 
   async function load(forceRefresh = false) {
@@ -368,11 +186,6 @@
     error = '';
     try {
       dashboard = await fetchWasmArbEconomics({ forceRefresh });
-      if (!selectedInterventionHeight) {
-        selectedInterventionHeight = dashboard?.meta?.currentIntervention?.activationHeight
-          || dashboard?.meta?.currentRegime?.activationHeight
-          || null;
-      }
     } catch (loadError) {
       error = loadError?.message || 'Wasm arb economics data is unavailable';
     } finally {
@@ -385,18 +198,41 @@
     clearTimeout(chartRenderTimer);
     chartRenderTimer = setTimeout(async () => {
       await tick();
-      if (!valueCanvas || !efficiencyCanvas || !visibleRows.length) return;
+      if (!visibleRows.length) return;
       valueChart = renderWasmArbValueChart(
         valueCanvas,
         valueChart,
         visibleRows,
-        regime?.activationTime
+        chartGrainSeconds,
+        visibleMilestones
+      );
+      activityChart = renderWasmArbActivityChart(
+        activityCanvas,
+        activityChart,
+        visibleRows,
+        chartGrainSeconds,
+        visibleMilestones
       );
       efficiencyChart = renderWasmArbEfficiencyChart(
         efficiencyCanvas,
         efficiencyChart,
         visibleRows,
-        regime?.activationTime
+        chartGrainSeconds,
+        visibleMilestones
+      );
+      feeChart = renderWasmArbFeeBehaviorChart(
+        feeCanvas,
+        feeChart,
+        visibleRows,
+        chartGrainSeconds,
+        visibleMilestones
+      );
+      oracleChart = renderWasmArbOracleChart(
+        oracleCanvas,
+        oracleChart,
+        visibleRows,
+        chartGrainSeconds,
+        visibleMilestones
       );
     }, 0);
   }
@@ -405,13 +241,16 @@
   onDestroy(() => {
     clearTimeout(chartRenderTimer);
     valueChart?.destroy();
+    activityChart?.destroy();
     efficiencyChart?.destroy();
+    feeChart?.destroy();
+    oracleChart?.destroy();
   });
 </script>
 
-<div class="wasm-economics">
+<div class="wasm-monitor">
   <div class="command-head">
-    <div><span class="prompt">$</span> inspect wasm-arb <span class="arg">--economics --equal-window</span></div>
+    <div><span class="prompt">$</span> monitor wasm-arb <span class="arg">--since-mimir-zero</span></div>
     <div class="command-actions">
       <span class="status-pill" class:warn={!economicsComplete}>
         <span class="status-dot" class:warn={!economicsComplete}></span>
@@ -424,9 +263,9 @@
   </div>
 
   <header class="page-head">
-    <div class="eyebrow">PROTOCOL REVENUE ATTRIBUTION</div>
-    <h1><span>›</span> WASM ARB ECONOMICS<span class="cursor">_</span></h1>
-    <p>Tracks whether Wasm arbitrage activity adds more value to THORChain than it displaces in pool fees, including the Base Layer share of linked FIN and AMM revenue.</p>
+    <div class="eyebrow">POST-CHANGE ECONOMIC TELEMETRY</div>
+    <h1><span>›</span> WASM ARB MONITOR<span class="cursor">_</span></h1>
+    <p>A continuous time series beginning when <code>WasmArbSlipMinBps</code> changed to zero. It tracks THORChain value accrued, Wasm activity, unit economics, fee behavior, and pool/oracle alignment without anchoring the dashboard to a pre-change window.</p>
   </header>
 
   {#if error}
@@ -435,233 +274,183 @@
   {#if dashboard?.meta?.warning}
     <TerminalAlert tone="warn">{dashboard.meta.warning}</TerminalAlert>
   {/if}
-  {#if comparison?.ready && !comparison.dataComplete && dashboard && !loading}
-    <TerminalAlert tone="warn">Economic verdict withheld while source backfills, block scans, or historical fee pricing remain incomplete.</TerminalAlert>
-  {/if}
 
   {#if loading}
-    <div class="loading-block"><span>▓░░░░</span> loading five-minute economics ledger…</div>
-  {:else if dashboard}
-    <section class="control-strip" aria-label="Comparison controls">
+    <div class="loading-block"><span>▓░░░░</span> loading post-change economics series…</div>
+  {:else if dashboard && postChangeRows.length}
+    <section class="control-strip" aria-label="Time range controls">
       <div class="control-copy">
-        <span class="control-label">COMPARE</span>
-        <span>equal windows around {regimeKind === 'spread' ? 'spread_bps' : 'Mimir'} activation</span>
+        <span class="control-label">VIEW</span>
+        <span>{formatDateTime(visibleRows[0]?.bucketStart)} → {formatDateTime(summary.endTime)}</span>
       </div>
-      <div class="control-groups">
-        <div class="intervention-buttons" aria-label="Intervention">
-          {#each interventions as intervention}
-            <button
-              class:active={Number(regime?.activationHeight) === Number(intervention.activationHeight)}
-              on:click={() => selectedInterventionHeight = intervention.activationHeight}
-            ><span>[</span>{interventionLabel(intervention)}<span>]</span></button>
-          {/each}
-        </div>
-        <div class="window-buttons">
-          {#each WINDOW_OPTIONS as option}
-            <button
-              class:active={selectedWindow === option.key}
-              on:click={() => selectedWindow = option.key}
-            ><span>[</span>{option.label}<span>]</span></button>
-          {/each}
-        </div>
+      <div class="range-buttons">
+        {#each RANGE_OPTIONS as option}
+          <button
+            class:active={selectedRange === option.key}
+            on:click={() => selectedRange = option.key}
+          ><span>[</span>{option.label}<span>]</span></button>
+        {/each}
       </div>
     </section>
 
-    {#if comparison.ready}
-      <div class="metric-grid">
-        <article>
-          <span class="metric-index">01</span>
-          <span class="metric-label">TC LINKED VALUE</span>
-          <strong>{formatUsd(comparison.after.tcLinkedValueUsd)}</strong>
-          <span class="metric-delta {deltaClass(comparison.deltas.tcLinkedValueUsd.absolute)}">
-            {signedUsd(comparison.deltas.tcLinkedValueUsd.absolute)} · {formatSignedPercent(comparison.deltas.tcLinkedValueUsd.percent)}
-          </span>
-        </article>
-        <article>
-          <span class="metric-index">02</span>
-          <span class="metric-label">TC / $1M NETWORK VOL</span>
-          <strong>{formatUsd(comparison.after.tcPerMillionNetworkVolumeUsd)}</strong>
-          <span class="metric-delta {deltaClass(comparison.deltas.tcPerMillionNetworkVolumeUsd.absolute)}">
-            {formatSignedPercent(comparison.deltas.tcPerMillionNetworkVolumeUsd.percent)}
-          </span>
-        </article>
-        <article>
-          <span class="metric-index">03</span>
-          <span class="metric-label">WASM THOR LP FEES</span>
-          <strong>{formatUsd(comparison.after.wasmLiquidityFeeUsd)}</strong>
-          <span class="metric-delta {deltaClass(comparison.deltas.wasmLiquidityFeeUsd.absolute)}">
-            {signedUsd(comparison.deltas.wasmLiquidityFeeUsd.absolute)} · {formatSignedPercent(comparison.deltas.wasmLiquidityFeeUsd.percent)}
-          </span>
-        </article>
-        <article>
-          <span class="metric-index">04</span>
-          <span class="metric-label">BREAK-EVEN COVERAGE</span>
-          <strong>{comparison.breakEven.coverage == null ? 'N/A' : formatPercent(comparison.breakEven.coverage, 1)}</strong>
-          <span class="metric-delta" class:down={comparison.breakEven.coverage != null && comparison.breakEven.coverage < 1} class:up={comparison.breakEven.coverage != null && comparison.breakEven.coverage >= 1}>
-            TC share of linked lift / LP loss
-          </span>
-        </article>
+    <section class="tracking-strip" aria-label="Tracking origin">
+      <div>
+        <span>TRACKING ORIGIN</span>
+        <b>MIMIR {trackingRegime?.previousMimirValue ?? '—'} → {trackingRegime?.mimirValue ?? 0}</b>
+        <small>{formatDateTime(trackingStart)} · height {formatCount(trackingRegime?.activationHeight)}</small>
       </div>
+      <div>
+        <span>OBSERVED</span>
+        <b>{formatDuration(latestEnd - trackingStartSeconds)}</b>
+        <small>{formatCount(postChangeRows.length)} series buckets</small>
+      </div>
+      <div>
+        <span>VISIBLE GRAIN</span>
+        <b>{formatGrain(chartGrainSeconds)}</b>
+        <small>recent hourly · older daily</small>
+      </div>
+      <div>
+        <span>CURRENT SETTINGS</span>
+        <b>MIMIR {dashboard.meta?.currentRegime?.mimirValue ?? '—'} · SPREAD {dashboard.meta?.currentSpreadRegime?.spreadBps ?? '—'}</b>
+        <small>later changes appear as chart markers</small>
+      </div>
+    </section>
 
-      <section class="block verdict-block {verdictTone}">
+    <div class="metric-grid">
+      <article>
+        <span class="metric-index">01</span>
+        <span class="metric-label">ACCRUED TC VALUE</span>
+        <strong>{formatUsd(summary.tcLinkedValueUsd)}</strong>
+        <small>pool fees {formatUsd(summary.wasmLiquidityFeeUsd)} + app accrual {formatUsd(summary.linkedTcReserveUsd)}</small>
+      </article>
+      <article>
+        <span class="metric-index">02</span>
+        <span class="metric-label">WASM EXECUTED VOLUME</span>
+        <strong>{formatCompactUsd(summary.wasmLegVolumeUsd)}</strong>
+        <small>{formatPercent(summary.wasmNetworkVolumeShare, 3)} of network volume</small>
+      </article>
+      <article>
+        <span class="metric-index">03</span>
+        <span class="metric-label">TC / $1M WASM VOL</span>
+        <strong>{formatUsd(summary.tcPerMillionWasmVolumeUsd)}</strong>
+        <small>{formatUsd(summary.tcPerMillionNetworkVolumeUsd)} per $1m network volume</small>
+      </article>
+      <article>
+        <span class="metric-index">04</span>
+        <span class="metric-label">LINKED APP FEES</span>
+        <strong>{formatUsd(summary.linkedRujiraFeeUsd)}</strong>
+        <small>{formatPercent(summary.averageTcShare, 0)} allocated to TC · settlement not implied</small>
+      </article>
+    </div>
+
+    <section class="block chart-block primary-chart">
+      <div class="block-head">
+        <h2><span>▌</span> ACCRUED TC VALUE</h2>
+        <span>[USD / {formatGrain(chartGrainSeconds)}{trailingBucketPartial ? ' · LIVE BUCKET DIMMED' : ''}]</span>
+      </div>
+      <p class="block-lede">Each column is split into the two attributable sources: Wasm THOR pool fees and THORChain’s configured share of Wasm-linked FIN + AMM fees.</p>
+      <div class="chart-shell primary"><canvas bind:this={valueCanvas}></canvas></div>
+    </section>
+
+    <div class="chart-grid">
+      <section class="block chart-block">
         <div class="block-head">
-          <h2><span>▌</span> OBSERVED TC CASH-FLOW VERDICT</h2>
-          <span>[{formatDuration(comparison.windowSeconds)} PER SIDE]</span>
+          <h2><span>▌</span> WASM ACTIVITY</h2>
+          <span>[VOLUME + NETWORK SHARE]</span>
         </div>
-        <div class="verdict-layout">
-          <div class="verdict-value">
-            <span>{comparison.dataComplete ? comparison.verdict.toUpperCase() : 'INCOMPLETE'}</span>
-            <strong>{signedUsd(comparison.deltas.tcLinkedValueUsd.absolute)}</strong>
-            <small>{formatSignedPercent(comparison.deltas.tcLinkedValueUsd.percent)} vs matched pre-change window</small>
-          </div>
-          <div class="verdict-notes">
-            <p><b>Activity:</b> actions {formatSignedPercent(comparison.deltas.wasmActionCount.percent)}; executed-leg volume {formatSignedPercent(comparison.deltas.wasmLegVolumeUsd.percent)}; network share {formatPercent(comparison.before.wasmNetworkVolumeShare, 3)} → {formatPercent(comparison.after.wasmNetworkVolumeShare, 3)}.</p>
-            <p><b>Collection:</b> THOR LP fees {formatSignedPercent(comparison.deltas.wasmLiquidityFeeUsd.percent)}; linked Rujira fees {formatSignedPercent(comparison.deltas.linkedRujiraFeeUsd.percent)}; TC value per $1m network volume {formatSignedPercent(comparison.deltas.tcPerMillionNetworkVolumeUsd.percent)}.</p>
-            <p class="caveat">Cash-flow verdict only. Pool/oracle tracking is reported separately below; LVR reduction and arbitrage profit remain outside this calculation.</p>
-          </div>
-        </div>
+        <p class="block-lede">Executed-leg volume through the Wasm arb path and its share of total THORChain executed-leg volume.</p>
+        <div class="chart-shell"><canvas bind:this={activityCanvas}></canvas></div>
       </section>
 
-      <section class="block">
+      <section class="block chart-block">
         <div class="block-head">
-          <h2><span>▌</span> EQUAL-WINDOW LEDGER</h2>
-          <span>[TRANSITION BUCKET EXCLUDED]</span>
+          <h2><span>▌</span> VALUE DENSITY</h2>
+          <span>[TC VALUE / $1M]</span>
         </div>
-        <div class="window-meta">
-          <div><b>PRE</b> {formatDateTime(comparison.before.startTime)} → {formatDateTime(comparison.before.endTime)}</div>
-          <div><b>POST</b> {formatDateTime(comparison.after.startTime)} → {formatDateTime(comparison.after.endTime)}</div>
-          {#if comparisonProvisional}<div class="provisional">PROVISIONAL · post window still accumulating</div>{/if}
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>METRIC</th><th>BEFORE</th><th>AFTER</th><th>Δ</th></tr></thead>
-            <tbody>
-              {#each metricRows as row}
-                <tr class:emphasis={row.emphasis}>
-                  <td>{row.label}</td>
-                  <td>{row.before}</td>
-                  <td>{row.after}</td>
-                  <td class={deltaClass(row.deltaValue)}>{row.delta}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
+        <p class="block-lede">Value accrued to THORChain per unit of both Wasm volume and total network volume.</p>
+        <div class="chart-shell"><canvas bind:this={efficiencyCanvas}></canvas></div>
       </section>
 
-      <div class="chart-grid">
-        <section class="block chart-block">
-          <div class="block-head">
-            <h2><span>▌</span> TC VALUE CAPTURE</h2>
-            <span>[USD / HOUR]</span>
-          </div>
-          <p class="block-lede">THOR pool fees plus the observed Base Layer allocation of Wasm-linked FIN and AMM revenue.</p>
-          <div class="chart-shell"><canvas bind:this={valueCanvas}></canvas></div>
-        </section>
-        <section class="block chart-block">
-          <div class="block-head">
-            <h2><span>▌</span> UNIT ECONOMICS</h2>
-            <span>[NORMALIZED]</span>
-          </div>
-          <p class="block-lede">TC value per $1m of total network leg volume, alongside Wasm’s share of that volume.</p>
-          <div class="chart-shell"><canvas bind:this={efficiencyCanvas}></canvas></div>
-        </section>
-      </div>
-
-      <div class="detail-grid">
-        <section class="block">
-          <div class="block-head">
-            <h2><span>▌</span> FEE BEHAVIOR</h2>
-            <span>[ACTION LEVEL]</span>
-          </div>
-          <div class="mini-grid">
-            <div><span>ZERO SLIP</span><b>{formatPercent(comparison.before.zeroSlipShare, 1)} → {formatPercent(comparison.after.zeroSlipShare, 1)}</b></div>
-            <div><span>BELOW OLD FLOOR</span><b>{formatPercent(comparison.before.belowReferenceShare, 1)} → {formatPercent(comparison.after.belowReferenceShare, 1)}</b></div>
-            <div><span>ZERO THOR FEE</span><b>{formatPercent(comparison.before.zeroFeeShare, 1)} → {formatPercent(comparison.after.zeroFeeShare, 1)}</b></div>
-            <div><span>MEDIAN SLIP</span><b>{comparison.before.medianSlipBps ?? '—'} → {comparison.after.medianSlipBps ?? '—'} bps</b></div>
-            <div><span>P90 SLIP</span><b>{comparison.before.p90SlipBps ?? '—'} → {comparison.after.p90SlipBps ?? '—'} bps</b></div>
-            <div><span>THOR FEE / LEG VOL</span><b>{formatBps(comparison.before.wasmLegFeeBps)} → {formatBps(comparison.after.wasmLegFeeBps)}</b></div>
-          </div>
-        </section>
-
-        <section class="block">
-          <div class="block-head">
-            <h2><span>▌</span> BREAK-EVEN TEST</h2>
-            <span>[TC SHARE {formatPercent(comparison.breakEven.tcShare, 0)}]</span>
-          </div>
-          <div class="break-even">
-            <div><span>THOR LP fee loss</span><b>{formatUsd(comparison.breakEven.lpFeeLossUsd)}</b></div>
-            <div><span>Required linked Rujira lift</span><b>{formatUsd(comparison.breakEven.breakEvenRujiraIncreaseUsd)}</b></div>
-            <div><span>Actual linked Rujira lift</span><b>{signedUsd(comparison.breakEven.actualRujiraIncreaseUsd)}</b></div>
-            <div class="coverage-line"><span style={`width:${Math.max(0, Math.min(100, (comparison.breakEven.coverage || 0) * 100))}%`}></span></div>
-          </div>
-        </section>
-      </div>
-
-      <section class="block price-block">
+      <section class="block chart-block">
         <div class="block-head">
-          <h2><span>▌</span> POOL PRICE / ORACLE TRACKING</h2>
-          <span>[SAME-HEIGHT SAMPLES · 12 WASM-PATH POOLS]</span>
+          <h2><span>▌</span> FEE + EXECUTION BEHAVIOR</h2>
+          <span>[BASIS POINTS]</span>
         </div>
-        <p class="block-lede">Pool balance-ratio prices versus THORChain’s oracle. Lower absolute deviation is tighter tracking; the cash-flow verdict does not assign this improvement a dollar value.</p>
-        {#if !comparison.priceDataComplete}
-          <div class="price-sync">WRN · the selected before/after window is not fully covered by same-height samples; displayed values are provisional.</div>
-        {/if}
-        <div class="price-grid">
-          <div>
-            <span>DEPTH-WEIGHTED ABS</span>
-            <b>{formatBps(comparison.before.priceTracking.depthWeightedAbsoluteDeviationBps)} → {formatBps(comparison.after.priceTracking.depthWeightedAbsoluteDeviationBps)}</b>
-            <small>{signedBps(numericDelta(comparison.before.priceTracking.depthWeightedAbsoluteDeviationBps, comparison.after.priceTracking.depthWeightedAbsoluteDeviationBps))}</small>
-          </div>
-          <div>
-            <span>MEAN ABS</span>
-            <b>{formatBps(comparison.before.priceTracking.meanAbsoluteDeviationBps)} → {formatBps(comparison.after.priceTracking.meanAbsoluteDeviationBps)}</b>
-            <small>{signedBps(numericDelta(comparison.before.priceTracking.meanAbsoluteDeviationBps, comparison.after.priceTracking.meanAbsoluteDeviationBps))}</small>
-          </div>
-          <div>
-            <span>MEAN SIGNED</span>
-            <b>{formatBps(comparison.before.priceTracking.meanSignedDeviationBps)} → {formatBps(comparison.after.priceTracking.meanSignedDeviationBps)}</b>
-            <small>negative = pool discount</small>
-          </div>
-          <div>
-            <span>WITHIN 10 BPS</span>
-            <b>{formatPercent(comparison.before.priceTracking.within10Share, 1)} → {formatPercent(comparison.after.priceTracking.within10Share, 1)}</b>
-            <small>{formatSignedPoints(numericDelta(comparison.before.priceTracking.within10Share, comparison.after.priceTracking.within10Share), 1)}</small>
-          </div>
-          <div>
-            <span>MAX ABS / TAIL</span>
-            <b>{formatBps(comparison.before.priceTracking.maxAbsoluteDeviationBps)} → {formatBps(comparison.after.priceTracking.maxAbsoluteDeviationBps)}</b>
-            <small>inspect alongside LTC-excluded result</small>
-          </div>
-          <div>
-            <span>DEPTH-WEIGHTED EX-LTC</span>
-            <b>{formatBps(comparison.before.priceTrackingExcludingLtc.depthWeightedAbsoluteDeviationBps)} → {formatBps(comparison.after.priceTrackingExcludingLtc.depthWeightedAbsoluteDeviationBps)}</b>
-            <small>{formatCount(comparison.before.priceTrackingExcludingLtc.observations)} → {formatCount(comparison.after.priceTrackingExcludingLtc.observations)} observations</small>
-          </div>
+        <p class="block-lede">Effective THOR pool-fee yield alongside the median and p90 action slip paid by Wasm swaps.</p>
+        <div class="chart-shell"><canvas bind:this={feeCanvas}></canvas></div>
+      </section>
+
+      <section class="block chart-block">
+        <div class="block-head">
+          <h2><span>▌</span> POOL / ORACLE ALIGNMENT</h2>
+          <span>[SAME-HEIGHT SAMPLES]</span>
+        </div>
+        <p class="block-lede">Depth-weighted absolute pool-price deviation from THORChain’s oracle, with an LTC-excluded line and the share within 10 bps.</p>
+        {#if !oracleComplete}<div class="inline-warning">WRN · selected range has incomplete oracle coverage</div>{/if}
+        <div class="chart-shell"><canvas bind:this={oracleCanvas}></canvas></div>
+      </section>
+    </div>
+
+    {#if visibleMilestones.length}
+      <section class="block milestone-block">
+        <div class="block-head">
+          <h2><span>▌</span> REGIME MARKERS</h2>
+          <span>[WITHIN VISIBLE RANGE]</span>
+        </div>
+        <div class="milestone-list">
+          {#each visibleMilestones as milestone}
+            <div>
+              <span>{milestoneLabel(milestone)}</span>
+              <b>{formatDateTime(milestone.activationTime)}</b>
+              <small>height {formatCount(milestone.activationHeight)}</small>
+            </div>
+          {/each}
         </div>
       </section>
-    {:else}
-      <TerminalAlert tone="warn">{comparison.reason}</TerminalAlert>
     {/if}
 
-    <section class="block health-block">
+    <div class="detail-grid">
+      <section class="block">
+        <div class="block-head">
+          <h2><span>▌</span> VISIBLE-RANGE TOTALS</h2>
+          <span>[{selectedOption.label.toUpperCase()}]</span>
+        </div>
+        <div class="ledger-grid">
+          <div><span>NETWORK LEG VOLUME</span><b>{formatCompactUsd(summary.networkVolumeUsd)}</b></div>
+          <div><span>WASM ACTIONS</span><b>{formatCount(summary.wasmActionCount)}</b></div>
+          <div><span>WASM THOR FEES</span><b>{formatUsd(summary.wasmLiquidityFeeUsd)}</b></div>
+          <div><span>THOR FEE YIELD</span><b>{formatBps(summary.wasmLegFeeBps)}</b></div>
+          <div><span>ZERO-SLIP ACTIONS</span><b>{formatPercent(summary.zeroSlipShare, 1)}</b></div>
+          <div><span>ZERO-THOR-FEE ACTIONS</span><b>{formatPercent(summary.zeroFeeShare, 1)}</b></div>
+          <div><span>ALL TRACKED APP FEES</span><b>{formatUsd(summary.allRujiraFeeUsd)}</b></div>
+          <div><span>LINKED FEE PRICING</span><b>{formatPercent(summary.pricingCoverage, 1)}</b></div>
+        </div>
+      </section>
+
+      <section class="block health-block">
+        <div class="block-head">
+          <h2><span>▌</span> DATA HEALTH</h2>
+          <span>[AS OF {formatDateTime(dashboard.meta?.sourceUpdatedAt)}]</span>
+        </div>
+        <div class="health-grid">
+          <div><span class:ok={sourceCoverage.networkComplete} class="health-dot"></span><b>NETWORK 5M</b><small>{sourceCoverage.networkComplete ? 'caught up' : 'backfilling'}</small></div>
+          <div><span class:ok={sourceCoverage.actionBackfillComplete} class="health-dot"></span><b>WASM ACTIONS</b><small>{sourceCoverage.actionBackfillComplete ? 'caught up' : 'backfilling'}</small></div>
+          <div><span class:ok={sourceCoverage.feeBackfillComplete} class="health-dot"></span><b>FIN + AMM FEES</b><small>{sourceCoverage.pendingBlocks || 0} blocks pending</small></div>
+          <div><span class:ok={sourceCoverage.oracleBackfillComplete} class="health-dot"></span><b>POOL / ORACLE</b><small>{sourceCoverage.oracleBackfillComplete ? 'caught up' : 'backfilling'}</small></div>
+        </div>
+      </section>
+    </div>
+
+    <section class="block attribution-block">
       <div class="block-head">
-        <h2><span>▌</span> DATA HEALTH + ATTRIBUTION</h2>
-        <span>[AS OF {formatDateTime(dashboard.meta?.sourceUpdatedAt)}]</span>
-      </div>
-      <div class="health-grid">
-        <div><span class:ok={sourceCoverage.networkComplete} class="health-dot"></span><b>NETWORK 5M</b><small>{sourceCoverage.networkComplete ? 'caught up' : 'backfilling'}</small></div>
-        <div><span class:ok={sourceCoverage.actionBackfillComplete} class="health-dot"></span><b>WASM ACTIONS</b><small>{sourceCoverage.actionBackfillComplete ? 'caught up' : 'backfilling'}</small></div>
-        <div><span class:ok={sourceCoverage.feeBackfillComplete} class="health-dot"></span><b>FIN + AMM FEES</b><small>{sourceCoverage.pendingBlocks || 0} blocks pending</small></div>
-        <div><span class:ok={(dashboard.meta?.contracts?.finContractCount || 0) > 0} class="health-dot"></span><b>FIN SCOPE</b><small>{dashboard.meta?.contracts?.finContractCount || '—'} contracts · code {dashboard.meta?.contracts?.finCodeIds?.join(', ') || '—'}</small></div>
-        <div><span class:ok={sourceCoverage.oracleBackfillComplete} class="health-dot"></span><b>POOL / ORACLE</b><small>{sourceCoverage.oracleBackfillComplete ? 'caught up' : 'backfilling'}</small></div>
+        <h2><span>▌</span> ATTRIBUTION + GUARDRAILS</h2>
+        <span>[CORRECTED ACCOUNTING V2]</span>
       </div>
       <div class="attribution-grid">
         <div><span>WASM ARB</span><code title={dashboard.meta?.contracts?.wasmArb}>{shortAddress(dashboard.meta?.contracts?.wasmArb)}</code></div>
         <div><span>TRADE COLLECTOR</span><code title={dashboard.meta?.contracts?.rujiraTradeCollector}>{shortAddress(dashboard.meta?.contracts?.rujiraTradeCollector)}</code></div>
         <div><span>BASE LAYER</span><code title={dashboard.meta?.contracts?.baseLayerCollector}>{shortAddress(dashboard.meta?.contracts?.baseLayerCollector)}</code></div>
-        <div><span>CURRENT MIMIR</span><code>{dashboard.meta?.currentRegime?.mimirValue ?? '—'} bps @ {formatCount(dashboard.meta?.currentRegime?.activationHeight)}</code></div>
-        <div><span>CURRENT SPREAD</span><code>{dashboard.meta?.currentSpreadRegime?.spreadBps ?? '—'} bps @ {formatCount(dashboard.meta?.currentSpreadRegime?.activationHeight)}</code></div>
+        <div><span>FIN SCOPE</span><code>{dashboard.meta?.contracts?.finContractCount || '—'} contracts · code {dashboard.meta?.contracts?.finCodeIds?.join(', ') || '—'}</code></div>
       </div>
       <details>
         <summary><span>[+]</span> methodology and guardrails</summary>
@@ -671,26 +460,29 @@
           {/each}
         </ul>
       </details>
+      <p class="scope-note">This is an observed cash-flow monitor, not a causal verdict. It does not price LVR reduction or arbitrage profit, and the app-fee allocation represents economic accrual rather than same-period Reserve settlement.</p>
     </section>
+  {:else if dashboard}
+    <TerminalAlert tone="warn">No complete post-change series is available yet.</TerminalAlert>
   {/if}
 </div>
 
 <style>
-  .wasm-economics {
+  .wasm-monitor {
     max-width: 1400px;
     margin: 0 auto;
     padding: 24px 0 56px;
-    color: #c8c8c8;
+    color: var(--term-text-body);
+    font-family: var(--term-font-body);
+    font-size: var(--term-type-body);
+    line-height: var(--term-leading-body);
   }
 
   .command-head,
   .command-actions,
   .control-strip,
-  .control-groups,
-  .intervention-buttons,
-  .window-buttons,
+  .range-buttons,
   .block-head,
-  .window-meta,
   .attribution-grid > div {
     display: flex;
     align-items: center;
@@ -700,275 +492,327 @@
     justify-content: space-between;
     gap: 16px;
     padding-bottom: 13px;
-    border-bottom: 1px solid #1a1a1a;
-    color: #666;
-    font: 11px 'JetBrains Mono', monospace;
+    border-bottom: 1px solid var(--term-border);
+    color: var(--term-text-3);
+    font: 12px var(--term-font-mono);
   }
 
   .prompt,
   h1 > span:first-child,
   .metric-index,
-  .block-head h2 span,
-  summary span {
-    color: #00cc66;
+  .block-head h2 span {
+    color: var(--term-accent);
   }
 
-  .arg { color: #444; }
-  .command-actions { gap: 8px; }
+  .arg { color: var(--term-text-5); }
+  .command-actions { gap: 9px; }
 
   .status-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 2px 7px;
-    border: 1px solid #1a1a1a;
+    padding: 3px 8px;
+    border: 1px solid var(--term-border);
     border-radius: 999px;
-    color: #00cc66;
-    font: 700 9px 'JetBrains Mono', monospace;
+    color: var(--term-accent);
+    font: 700 10px var(--term-font-mono);
+    letter-spacing: 0.08em;
   }
 
-  .status-pill.warn { color: #d4a017; }
+  .status-pill.warn { color: var(--term-amber); }
   .status-dot,
   .health-dot {
+    display: inline-block;
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: #d4a017;
+    background: var(--term-text-6);
   }
-  .status-dot:not(.warn), .health-dot.ok {
-    background: #00cc66;
-    box-shadow: 0 0 6px rgba(0, 204, 102, 0.4);
-  }
+  .status-dot { background: var(--term-accent); animation: pulse-dot 2s infinite; }
+  .status-dot.warn { background: var(--term-amber); animation: none; }
+  .health-dot.ok { background: var(--term-accent); box-shadow: var(--term-accent-glow); }
 
   .bracket-button,
-  .intervention-buttons button,
-  .window-buttons button {
-    border: 1px solid #1a1a1a;
-    border-radius: 0;
+  .range-buttons button {
+    border: 1px solid var(--term-border);
     background: transparent;
-    color: #888;
-    font: 10px 'JetBrains Mono', monospace;
+    color: var(--term-text-2);
     cursor: pointer;
+    font: 600 11px var(--term-font-mono);
+    transition: border-color var(--term-transition), color var(--term-transition);
   }
-
   .bracket-button { padding: 5px 10px; }
   .bracket-button span,
-  .intervention-buttons button span,
-  .window-buttons button span { color: #444; }
-  .bracket-button b { color: #00cc66; }
-  .bracket-button:hover:not(:disabled),
-  .intervention-buttons button:hover,
-  .window-buttons button:hover,
-  .intervention-buttons button.active,
-  .window-buttons button.active { border-color: #00cc66; color: #00cc66; }
-  .bracket-button:disabled { opacity: 0.45; cursor: default; }
+  .range-buttons button span { color: var(--term-text-5); }
+  .bracket-button b { color: var(--term-accent); }
+  .bracket-button:hover,
+  .range-buttons button:hover,
+  .range-buttons button.active { border-color: var(--term-accent); color: var(--term-accent); }
+  .bracket-button:disabled { opacity: 0.55; cursor: wait; }
 
-  .page-head { padding: 30px 0 24px; }
+  .page-head { padding: 28px 0 24px; }
   .eyebrow,
-  .control-label,
-  .metric-label,
-  .mini-grid span,
-  .break-even span,
-  .attribution-grid span {
-    color: #666;
-    font: 700 9px 'JetBrains Mono', monospace;
-    letter-spacing: 0.14em;
+  .control-label {
+    color: var(--term-accent);
+    font: 700 11px var(--term-font-mono);
+    letter-spacing: 0.16em;
   }
   h1 {
-    margin: 7px 0 10px;
-    color: #e8e8e8;
-    font: 800 30px/1.1 'JetBrains Mono', monospace;
+    margin: 6px 0 10px;
+    color: var(--term-text);
+    font: 800 30px/1.1 var(--term-font-mono);
     letter-spacing: 0.06em;
   }
-  .cursor { animation: blink 1s steps(2, start) infinite; }
-  .page-head p { max-width: 820px; margin: 0; color: #888; font-size: 13px; }
+  .cursor { color: var(--term-accent); animation: cursor-blink 1s steps(1) infinite; }
+  .page-head p,
+  .block-lede,
+  .scope-note {
+    max-width: 940px;
+    margin: 0;
+    color: var(--term-text-2);
+    font-size: 14px;
+    line-height: 1.65;
+  }
+  .page-head code {
+    padding: 1px 5px;
+    border: 1px solid var(--term-border);
+    background: var(--term-border-faint);
+    color: var(--term-accent);
+    font: 12px var(--term-font-mono);
+  }
 
   .loading-block {
-    border: 1px solid #1a1a1a;
-    background: #0a0a0a;
-    padding: 28px 20px;
-    color: #666;
-    font: 11px 'JetBrains Mono', monospace;
+    padding: 34px 20px;
+    border: 1px solid var(--term-border);
+    background: var(--term-surface);
+    color: var(--term-text-3);
+    font: 12px var(--term-font-mono);
   }
-  .loading-block span { color: #00cc66; }
+  .loading-block span { color: var(--term-accent); }
 
   .control-strip {
     justify-content: space-between;
     gap: 16px;
-    margin: 18px 0 12px;
-    padding: 9px 12px;
-    border: 1px solid #1a1a1a;
-    background: #080808;
-    font: 10px 'JetBrains Mono', monospace;
+    margin-bottom: 12px;
+    padding: 11px 12px;
+    border: 1px solid var(--term-border);
+    background: var(--term-surface-deep);
   }
-  .control-copy { display: flex; gap: 10px; color: #666; }
-  .control-label { color: #00cc66; }
-  .control-groups { justify-content: flex-end; gap: 8px; min-width: 0; }
-  .intervention-buttons, .window-buttons { gap: 0; }
-  .intervention-buttons button, .window-buttons button {
-    padding: 5px 8px;
-    margin-left: -1px;
+  .control-copy {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--term-text-3);
+    font: 11px var(--term-font-mono);
   }
+  .range-buttons { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .range-buttons button { padding: 5px 8px; text-transform: uppercase; }
 
+  .tracking-strip,
   .metric-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    border: 1px solid #1a1a1a;
-    margin-bottom: 12px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border: 1px solid var(--term-border);
+    background: var(--term-surface);
   }
+  .tracking-strip { margin-bottom: 12px; }
+  .tracking-strip > div,
   .metric-grid article {
     min-width: 0;
-    height: 116px;
     padding: 15px 17px;
-    background: #0a0a0a;
-    border-right: 1px solid #1a1a1a;
+    border-right: 1px solid var(--term-border);
   }
-  .metric-grid article:last-child { border-right: 0; }
-  .metric-index { display: block; font: 700 9px 'JetBrains Mono', monospace; }
-  .metric-label { display: block; margin: 7px 0 8px; }
+  .tracking-strip > div:last-child,
+  .metric-grid article:last-child { border-right: none; }
+  .tracking-strip span,
+  .metric-label,
+  .ledger-grid span,
+  .attribution-grid span,
+  .milestone-list span {
+    display: block;
+    color: var(--term-text-4);
+    font: 700 11px var(--term-font-mono);
+    letter-spacing: 0.1em;
+  }
+  .tracking-strip b {
+    display: block;
+    margin: 5px 0 2px;
+    color: var(--term-text);
+    font: 700 13px var(--term-font-mono);
+  }
+  .tracking-strip small,
+  .metric-grid small,
+  .milestone-list small {
+    display: block;
+    color: var(--term-text-4);
+    font: 11px/1.5 var(--term-font-mono);
+  }
+
+  .metric-grid { margin-bottom: 12px; }
+  .metric-grid article { min-height: 118px; }
+  .metric-index { font: 700 11px var(--term-font-mono); }
+  .metric-label { margin-top: 5px; color: var(--term-text-3); }
   .metric-grid strong {
     display: block;
+    margin: 8px 0 5px;
+    color: var(--term-text-strong);
+    font: 800 24px/1.1 var(--term-font-mono);
+    letter-spacing: -0.01em;
+  }
+
+  .block {
+    min-width: 0;
+    border: 1px solid var(--term-border);
+    background: var(--term-surface);
+    padding: 18px 20px 22px;
+  }
+  .block-head {
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 10px;
+    color: var(--term-text-4);
+    font: 11px var(--term-font-mono);
+  }
+  .block-head h2 {
+    margin: 0;
+    color: var(--term-text);
+    font: 700 14px/1.2 var(--term-font-mono);
+    letter-spacing: 0.08em;
+  }
+  .block-head h2 span { margin-right: 7px; }
+  .primary-chart { margin-bottom: 12px; }
+  .chart-grid,
+  .detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .chart-shell { position: relative; height: 300px; margin-top: 12px; }
+  .chart-shell.primary { height: 340px; }
+  .inline-warning {
+    margin-top: 9px;
+    color: var(--term-amber);
+    font: 11px var(--term-font-mono);
+  }
+
+  .milestone-block { margin-bottom: 12px; }
+  .milestone-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--term-border);
+  }
+  .milestone-list > div { padding: 13px 14px; background: var(--term-surface-deep); }
+  .milestone-list span { color: var(--term-amber); }
+  .milestone-list b {
+    display: block;
+    margin-top: 5px;
+    color: var(--term-text);
+    font: 600 12px var(--term-font-mono);
+  }
+
+  .ledger-grid,
+  .health-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--term-border);
+  }
+  .ledger-grid > div,
+  .health-grid > div {
+    padding: 12px 13px;
+    background: var(--term-surface-deep);
+  }
+  .ledger-grid b {
+    display: block;
+    margin-top: 5px;
+    color: var(--term-text);
+    font: 700 13px var(--term-font-mono);
+  }
+  .health-grid > div {
+    display: grid;
+    grid-template-columns: 10px 1fr;
+    align-items: center;
+    column-gap: 7px;
+  }
+  .health-grid b { color: var(--term-text); font: 700 11px var(--term-font-mono); }
+  .health-grid small {
+    grid-column: 2;
+    color: var(--term-text-4);
+    font: 11px var(--term-font-mono);
+  }
+
+  .attribution-block { margin-top: 0; }
+  .attribution-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--term-border);
+  }
+  .attribution-grid > div {
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+    padding: 11px 12px;
+    background: var(--term-surface-deep);
+  }
+  .attribution-grid code {
     overflow: hidden;
-    color: #e8e8e8;
-    font: 800 23px 'JetBrains Mono', monospace;
+    color: var(--term-text-2);
+    font: 11px var(--term-font-mono);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .metric-delta { display: block; margin-top: 6px; color: #666; font: 10px 'JetBrains Mono', monospace; }
-  .up { color: #00cc66 !important; }
-  .down { color: #dc5b67 !important; }
-
-  .block {
-    margin-bottom: 12px;
-    padding: 18px 20px 22px;
-    border: 1px solid #1a1a1a;
-    border-radius: 0;
-    background: #0a0a0a;
+  details { margin-top: 14px; border-top: 1px solid var(--term-border); padding-top: 12px; }
+  summary {
+    color: var(--term-text-2);
+    cursor: pointer;
+    font: 600 12px var(--term-font-mono);
   }
-  .block-head { justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-  .block-head h2 {
-    margin: 0;
-    color: #e8e8e8;
-    font: 700 13px 'JetBrains Mono', monospace;
-    letter-spacing: 0.08em;
-  }
-  .block-head > span { color: #444; font: 9px 'JetBrains Mono', monospace; }
-  .block-lede { margin: -6px 0 14px; color: #666; font-size: 12px; }
+  summary span { color: var(--term-accent); }
+  details ul { margin: 12px 0 0; padding-left: 18px; color: var(--term-text-2); }
+  details li { margin: 6px 0; font-size: 13px; line-height: 1.55; }
+  .scope-note { max-width: none; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--term-border); }
 
-  .verdict-block { border-left: 3px solid #444; }
-  .verdict-block.positive { border-left-color: #00cc66; }
-  .verdict-block.negative { border-left-color: #dc3545; }
-  .verdict-layout { display: grid; grid-template-columns: minmax(220px, 0.75fr) 2fr; gap: 28px; }
-  .verdict-value { display: flex; flex-direction: column; justify-content: center; border-right: 1px solid #1a1a1a; }
-  .verdict-value span { color: #888; font: 700 10px 'JetBrains Mono', monospace; letter-spacing: 0.14em; }
-  .negative .verdict-value span, .negative .verdict-value strong { color: #dc5b67; }
-  .positive .verdict-value span, .positive .verdict-value strong { color: #00cc66; }
-  .verdict-value strong { margin: 6px 0; color: #e8e8e8; font: 800 28px 'JetBrains Mono', monospace; }
-  .verdict-value small { color: #666; font: 10px 'JetBrains Mono', monospace; }
-  .verdict-notes p { margin: 0 0 8px; color: #aaa; font-size: 12px; }
-  .verdict-notes b { color: #e8e8e8; font-family: 'JetBrains Mono', monospace; }
-  .verdict-notes .caveat { margin: 13px 0 0; padding-top: 10px; border-top: 1px dashed #1a1a1a; color: #666; }
+  @keyframes cursor-blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+  @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
-  .window-meta { flex-wrap: wrap; gap: 8px 20px; margin: -4px 0 14px; color: #666; font: 9px 'JetBrains Mono', monospace; }
-  .window-meta b { color: #00cc66; }
-  .window-meta .provisional { color: #d4a017; }
-  .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font: 11px 'JetBrains Mono', monospace; }
-  th { padding: 8px 10px; border-bottom: 1px solid #2a2a2a; color: #666; font-size: 9px; letter-spacing: 0.12em; text-align: right; }
-  th:first-child, td:first-child { text-align: left; }
-  td { padding: 9px 10px; border-bottom: 1px solid #111; color: #888; text-align: right; white-space: nowrap; }
-  td:first-child { color: #c8c8c8; }
-  tr:hover td { background: #0d0d0d; }
-  tr.emphasis td { border-top: 1px solid #2a2a2a; color: #e8e8e8; font-weight: 700; }
-  tr.emphasis td:nth-child(3) { color: #00cc66; }
-
-  .chart-grid, .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  .chart-block { min-width: 0; }
-  .chart-shell { height: 290px; }
-  .chart-shell canvas { width: 100% !important; height: 100% !important; }
-
-  .mini-grid { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid #111; }
-  .mini-grid > div { padding: 12px; border-right: 1px solid #111; border-bottom: 1px solid #111; }
-  .mini-grid > div:nth-child(3n) { border-right: 0; }
-  .mini-grid > div:nth-last-child(-n + 3) { border-bottom: 0; }
-  .mini-grid span, .mini-grid b { display: block; }
-  .mini-grid b { margin-top: 7px; color: #c8c8c8; font: 700 11px 'JetBrains Mono', monospace; }
-
-  .break-even { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: #111; border: 1px solid #111; }
-  .break-even > div:not(.coverage-line) { padding: 15px 12px; background: #080808; }
-  .break-even span, .break-even b { display: block; }
-  .break-even b { margin-top: 7px; color: #e8e8e8; font: 700 13px 'JetBrains Mono', monospace; }
-  .coverage-line { grid-column: 1 / -1; height: 3px; background: #1a1a1a; }
-  .coverage-line span { display: block; height: 100%; background: #d4a017; }
-
-  .price-sync {
-    margin: -4px 0 14px;
-    padding: 7px 9px;
-    border: 1px solid rgba(212, 160, 23, 0.35);
-    color: #d4a017;
-    font: 9px 'JetBrains Mono', monospace;
-  }
-  .price-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    border: 1px solid #111;
-  }
-  .price-grid > div { padding: 13px 12px; border-right: 1px solid #111; border-bottom: 1px solid #111; }
-  .price-grid > div:nth-child(3n) { border-right: 0; }
-  .price-grid > div:nth-last-child(-n + 3) { border-bottom: 0; }
-  .price-grid span, .price-grid b, .price-grid small { display: block; }
-  .price-grid span { color: #666; font: 700 9px 'JetBrains Mono', monospace; letter-spacing: 0.12em; }
-  .price-grid b { margin-top: 7px; color: #c8c8c8; font: 700 11px 'JetBrains Mono', monospace; }
-  .price-grid small { margin-top: 5px; color: #555; font: 9px 'JetBrains Mono', monospace; }
-
-  .health-grid { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid #111; }
-  .health-grid > div { display: grid; grid-template-columns: 8px 1fr; gap: 4px 8px; padding: 12px; border-right: 1px solid #111; }
-  .health-grid > div:last-child { border-right: 0; }
-  .health-grid .health-dot { grid-row: 1 / span 2; margin-top: 3px; }
-  .health-grid b { color: #c8c8c8; font: 700 10px 'JetBrains Mono', monospace; }
-  .health-grid small { color: #666; font: 9px 'JetBrains Mono', monospace; }
-  .attribution-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 14px; }
-  .attribution-grid > div { justify-content: space-between; gap: 8px; padding-bottom: 7px; border-bottom: 1px dashed #1a1a1a; }
-  code { color: #00cc66; font: 9px 'JetBrains Mono', monospace; }
-  details { margin-top: 16px; border-top: 1px solid #1a1a1a; padding-top: 12px; }
-  summary { color: #888; font: 10px 'JetBrains Mono', monospace; cursor: pointer; list-style: none; }
-  details ul { margin: 12px 0 0 18px; padding: 0; color: #777; font-size: 12px; }
-  details li { margin-bottom: 7px; }
-
-  @keyframes blink { 50% { opacity: 0; } }
-
-  @media (max-width: 1000px) {
-    .metric-grid { grid-template-columns: repeat(2, 1fr); }
-    .metric-grid article:nth-child(2) { border-right: 0; }
-    .metric-grid article:nth-child(-n + 2) { border-bottom: 1px solid #1a1a1a; }
-    .chart-grid, .detail-grid { grid-template-columns: 1fr; }
-    .control-strip { align-items: flex-start; }
-    .control-groups { align-items: flex-end; flex-direction: column; }
-    .health-grid, .attribution-grid { grid-template-columns: repeat(2, 1fr); }
-    .health-grid > div { border-bottom: 1px solid #111; }
-    .health-grid > div:nth-child(2n) { border-right: 0; }
-    .health-grid > div:last-child { border-right: 1px solid #111; border-bottom: 0; }
+  @media (max-width: 1050px) {
+    .tracking-strip,
+    .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tracking-strip > div:nth-child(2),
+    .metric-grid article:nth-child(2) { border-right: none; }
+    .tracking-strip > div:nth-child(-n + 2),
+    .metric-grid article:nth-child(-n + 2) { border-bottom: 1px solid var(--term-border); }
+    .attribution-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
 
-  @media (max-width: 680px) {
-    .wasm-economics { padding-top: 16px; }
-    .command-head, .control-strip { align-items: flex-start; flex-direction: column; }
-    h1 { font-size: 22px; }
-    .control-groups { align-items: flex-start; width: 100%; }
-    .intervention-buttons, .window-buttons { width: 100%; overflow-x: auto; }
+  @media (max-width: 760px) {
+    .wasm-monitor { padding: 16px 0 40px; }
+    .command-head,
+    .control-strip { align-items: flex-start; flex-direction: column; }
+    .command-actions { width: 100%; justify-content: space-between; }
+    h1 { font-size: 24px; }
+    .range-buttons { justify-content: flex-start; }
+    .chart-grid,
+    .detail-grid { grid-template-columns: 1fr; }
+    .chart-shell,
+    .chart-shell.primary { height: 290px; }
+    .block { padding: 16px 14px 18px; }
+    .block-head { align-items: flex-start; flex-direction: column; gap: 4px; }
+    .milestone-list,
+    .attribution-grid { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 520px) {
+    .tracking-strip,
     .metric-grid { grid-template-columns: 1fr; }
-    .metric-grid article { height: 104px; border-right: 0; border-bottom: 1px solid #1a1a1a; }
-    .metric-grid article:last-child { border-bottom: 0; }
-    .verdict-layout { grid-template-columns: 1fr; gap: 16px; }
-    .verdict-value { padding-bottom: 15px; border-right: 0; border-bottom: 1px solid #1a1a1a; }
-    .mini-grid, .break-even, .price-grid { grid-template-columns: 1fr; }
-    .mini-grid > div { border-right: 0; border-bottom: 1px solid #111 !important; }
-    .mini-grid > div:last-child { border-bottom: 0 !important; }
-    .price-grid > div { border-right: 0; border-bottom: 1px solid #111 !important; }
-    .price-grid > div:last-child { border-bottom: 0 !important; }
-    .health-grid, .attribution-grid { grid-template-columns: 1fr; }
-    .health-grid > div { border-right: 0; border-bottom: 1px solid #111; }
-    .health-grid > div:last-child { border-bottom: 0; }
-    .block { padding: 15px 13px 18px; }
+    .tracking-strip > div,
+    .metric-grid article { border-right: none; border-bottom: 1px solid var(--term-border); }
+    .tracking-strip > div:last-child,
+    .metric-grid article:last-child { border-bottom: none; }
+    .ledger-grid,
+    .health-grid { grid-template-columns: 1fr; }
   }
 </style>

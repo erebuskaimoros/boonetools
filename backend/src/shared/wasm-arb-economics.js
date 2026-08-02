@@ -5,10 +5,13 @@ import {
   RUJIRA_TRADE_COLLECTOR,
   WASM_ARB_CONTRACT
 } from './wasm-arb-economics-ingestion.js';
+import { compactWasmArbMonitoringRows } from '../../../shared/wasm-arb-economics/model.js';
 
-const SERIES_DAYS = 30;
-const COMPARISON_ARCHIVE_DAYS = 14;
+const FALLBACK_SERIES_DAYS = 30;
 const BUCKET_SECONDS = 300;
+const RECENT_DETAIL_SECONDS = 30 * 24 * 60 * 60;
+const RECENT_GRAIN_SECONDS = 60 * 60;
+const HISTORICAL_GRAIN_SECONDS = 24 * 60 * 60;
 
 function iso(value) {
   const date = new Date(value);
@@ -86,8 +89,8 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
     throw new Error('Wasm arb economics payload builder requires a database client');
   }
   const generatedAt = options.generatedAt || new Date().toISOString();
-  const since = options.since || new Date(
-    Date.parse(generatedAt) - SERIES_DAYS * 24 * 60 * 60 * 1000
+  const fallbackStart = new Date(
+    Date.parse(generatedAt) - FALLBACK_SERIES_DAYS * 24 * 60 * 60 * 1000
   ).toISOString();
   const regimeResult = await client.query(
     `select activation_height, activation_time, mimir_value, previous_mimir_value,
@@ -102,39 +105,22 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
     (regime) => isMimirRegime(regime) || isSpreadRegime(regime)
   );
   const firstMimirRegime = regimes.find(isMimirRegime) || null;
+  const trackingRegime = regimes.find((regime) => (
+    isMimirRegime(regime)
+      && regime.mimirValue === 0
+      && regime.previousMimirValue !== 0
+  )) || firstMimirRegime;
   const currentRegime = [...regimes].reverse().find(isMimirRegime)
     || regimes.at(-1)
     || null;
   const currentSpreadRegime = [...regimes].reverse().find(isSpreadRegime) || null;
   const currentIntervention = allInterventions.at(-1) || currentRegime;
-  const archiveAnchors = [...new Map(
-    [firstMimirRegime, currentRegime, currentSpreadRegime]
-      .filter(Boolean)
-      .map((regime) => [regime.activationHeight, regime])
-  ).values()];
-  const archiveRanges = archiveAnchors.flatMap((regime) => {
-    const anchorMs = Date.parse(regime.activationTime || '');
-    if (!Number.isFinite(anchorMs)) return [];
-    const radiusMs = COMPARISON_ARCHIVE_DAYS * 24 * 60 * 60 * 1000;
-    return [[
-      new Date(anchorMs - radiusMs).toISOString(),
-      new Date(anchorMs + radiusMs).toISOString()
-    ]];
-  });
-  const seriesParams = [since, ...archiveRanges.flat()];
-  const seriesPredicate = (column) => [
-    `${column} >= $1::timestamptz`,
-    ...archiveRanges.map((_, index) => {
-      const startIndex = 2 + index * 2;
-      return `(${column} >= $${startIndex}::timestamptz
-              and ${column} < $${startIndex + 1}::timestamptz)`;
-    })
-  ].join('\n        or ');
-  const archiveHeights = new Set(archiveAnchors.map((regime) => regime.activationHeight));
-  const sinceMs = Date.parse(since);
+  const trackingStart = options.since || trackingRegime?.activationTime || fallbackStart;
+  const seriesParams = [trackingStart];
+  const seriesPredicate = (column) => `${column} >= $1::timestamptz`;
+  const trackingStartMs = Date.parse(trackingStart);
   const interventions = allInterventions.filter((regime) => (
-    archiveHeights.has(regime.activationHeight)
-      || Date.parse(regime.activationTime || '') >= sinceMs
+    Date.parse(regime.activationTime || '') >= trackingStartMs
   ));
 
   const networkResult = await client.query(
@@ -319,7 +305,7 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
     && pendingBlocks === 0;
   const oracleBackfillComplete = Boolean(sync['oracle:backfill']?.complete);
 
-  const rows = networkResult.rows.map((network) => {
+  const sourceRows = networkResult.rows.map((network) => {
     const bucketStart = iso(network.bucket_start);
     const action = actions.get(bucketStart) || {};
     const fee = fees.get(bucketStart) || {};
@@ -392,6 +378,12 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
       oracleComplete: oracleBackfillComplete
     };
   });
+  const compacted = compactWasmArbMonitoringRows(sourceRows, {
+    recentSeconds: RECENT_DETAIL_SECONDS,
+    recentGrainSeconds: RECENT_GRAIN_SECONDS,
+    historicalGrainSeconds: HISTORICAL_GRAIN_SECONDS
+  });
+  const rows = compacted.rows;
 
   const blockCoverage = blockResult.rows[0] || {};
   const latestJob = jobResult.rows[0] || {};
@@ -408,14 +400,20 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
 
   return {
     payload: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       meta: {
         source: 'boonetools-postgres',
         generatedAt,
         sourceUpdatedAt: sourceUpdatedAt > 0 ? new Date(sourceUpdatedAt).toISOString() : null,
-        bucketSeconds: BUCKET_SECONDS,
-        seriesDays: SERIES_DAYS,
-        comparisonArchiveDays: COMPARISON_ARCHIVE_DAYS,
+        sourceBucketSeconds: BUCKET_SECONDS,
+        trackingStart,
+        trackingRegime,
+        seriesMode: 'post-mimir-zero',
+        seriesResolution: {
+          recentStart: compacted.recentStart,
+          recentBucketSeconds: compacted.recentGrainSeconds,
+          historicalBucketSeconds: compacted.historicalGrainSeconds
+        },
         volumeBasis: 'executed-leg-usd',
         currentRegime,
         currentSpreadRegime,
@@ -449,6 +447,7 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
         },
         methodology: {
           network: 'Midgard five-minute swap history; USD values are converted from e2 fields.',
+          series: 'The public series starts when WasmArbSlipMinBps changed to zero. Recent source buckets are compacted hourly and older history daily.',
           wasm: 'Successful Midgard swaps whose inbound address is the configured WasmArbContract.',
           volume: 'Executed-leg USD: one leg for RUNE routes and both legs for asset-to-asset routes, after collapsing identical duplicate outbound records inside an action.',
           thorFees: 'Midgard action liquidityFee in base RUNE, priced with the matching five-minute RUNE price.',
@@ -468,6 +467,9 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
     sourceUpdatedAt: sourceUpdatedAt > 0 ? new Date(sourceUpdatedAt).toISOString() : null,
     stats: {
       rows: rows.length,
+      source_rows: compacted.sourceRowCount,
+      recent_rows: compacted.recentRowCount,
+      historical_rows: compacted.historicalRowCount,
       regimes: regimes.length,
       pending_blocks: pendingBlocks,
       action_backfill_complete: actionBackfillComplete,
