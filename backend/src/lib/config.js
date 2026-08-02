@@ -118,6 +118,7 @@ export const config = Object.freeze({
     rpcRestUrl,
     rpcFallbackRestUrl
   ]),
+  rujiraBaseFeesMidgardHeadMaxPages: readInt('RUJIRA_BASE_FEES_MIDGARD_HEAD_MAX_PAGES', 10),
   rujiraBaseFeesMidgardMaxPages: readInt('RUJIRA_BASE_FEES_MIDGARD_MAX_PAGES', 10),
   rujiraBaseFeesBlockMaxHeights: readInt('RUJIRA_BASE_FEES_BLOCK_MAX_HEIGHTS', 75),
   rujiraBaseFeesRequestDelayMs: readInt('RUJIRA_BASE_FEES_REQUEST_DELAY_MS', 250),

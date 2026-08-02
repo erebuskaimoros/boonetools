@@ -249,6 +249,26 @@ The defensible conclusion is **no demonstrated volume uplift yet**, not that dyn
 
 The three removed TC OG selling routes from `thor1wqg9…s780` are excluded from the displayed curated observations, but they occurred after activation and initialized or heavily influenced SS's ETH.USDC dynamic-fee record. Removing them from an off-chain series cannot undo their effect on subsequent on-chain controller state. The curated view is therefore a sensitivity analysis of observed fee and volume flow, not a counterfactual replay of how the controller would have evolved without those routes.
 
+### Deployed-code version caveat
+
+Dynamic-fee behavior must be read from the Thornode tag matching the live
+economic version, not from whichever local feature branch happens to be
+checked out. In mainnet v3.19.x, `getMinSlipBps` immediately returns a positive
+active `dynamic_bps`; it therefore replaces the network-wide
+`L1SlipMinBps` fallback. Sub-10-bps SS swaps are expected when the pair's
+dynamic record is below 10 bps.
+
+The local Thornode branch
+`boonew/per-asset-min-bps-mimirs-2026-05-26` contains an unshipped change that
+instead takes the maximum of the asset/static floor and `dynamic_bps`. Reading
+that branch as deployed code incorrectly implies that SS's 1–7 bps controller
+movement was non-binding. Before interpreting later observations, query
+`/thorchain/version` and inspect the matching source explicitly, for example:
+
+```sh
+git -C ../../ThorNode show v3.19.3:x/thorchain/helpers.go
+```
+
 ## Bottom line
 
 As of July 26, SS flow is showing substantially cheaper observed protocol liquidity-fee pricing after the ADR-026 rollout. Fee yield fell about **66%** in the curated equal-window comparison and about **68%** in the matched-route counterfactual. However, the first 23 complete days provide no evidence that curated volume increased enough to compensate: curated volume was **53% lower** and liquidity-fee generation was **84% lower** than in the matched pre-period.

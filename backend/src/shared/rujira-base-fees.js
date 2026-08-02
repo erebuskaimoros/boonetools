@@ -870,6 +870,27 @@ async function upsertActionsAndBlocks(client, actions) {
   };
 }
 
+async function loadKnownCoverageHeight(client) {
+  const { rows } = await client.query(
+    `select greatest(
+              coalesce((select max(height) from rujira_base_fee_actions), 0),
+              coalesce((select max(height) from rujira_base_fee_blocks where status = 'fetched'), 0),
+              coalesce((select max(height) from rujira_base_fee_events), 0)
+            )::bigint as max_height`
+  );
+  return Math.max(0, Number(rows[0]?.max_height) || 0);
+}
+
+function actionHeightRange(actions) {
+  const heights = actions
+    .map((action) => Number(action?.height) || 0)
+    .filter((height) => height > 0);
+  return {
+    min: heights.length ? Math.min(...heights) : 0,
+    max: heights.length ? Math.max(...heights) : 0
+  };
+}
+
 export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
   const syncState = await loadActionSyncState(client);
   if (isCooldownActive(syncState)) {
@@ -884,34 +905,144 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
   let nextPageToken = alreadyComplete ? '' : String(syncState?.next_page_token || '');
   let complete = alreadyComplete;
   const maxPages = alreadyComplete
-    ? 1
+    ? 0
     : Math.max(0, Number(options.maxPages ?? config.rujiraBaseFeesMidgardMaxPages) || 0);
+  const headMaxPages = Math.max(
+    0,
+    Number(options.headMaxPages ?? config.rujiraBaseFeesMidgardHeadMaxPages) || 0
+  );
+  const fetchPage = options.fetchPage || fetchRujiraSwapActionPage;
+  const sleepFn = options.sleepFn || sleep;
+  const requestDelayMs = Math.max(
+    0,
+    Number(options.requestDelayMs ?? config.rujiraBaseFeesRequestDelayMs) || 0
+  );
+  const knownMaxHeight = await loadKnownCoverageHeight(client);
+  // The historical backfill may be months behind. Preserve a separate head cursor so
+  // each run can discover current actions and still walk through any recent outage gap.
+  const previousHeadCatchup = syncState?.stats_json?.head_catchup || {};
+  const previousHeadCatchupToken = String(previousHeadCatchup.next_page_token || '');
+  const previousHeadCatchupFloor = Math.max(
+    0,
+    Number(previousHeadCatchup.floor_height) || knownMaxHeight
+  );
   const stats = {
     pages: 0,
     actions: 0,
     heights: 0,
+    head_refresh: {
+      pages: 0,
+      actions: 0,
+      heights: 0,
+      min_height: 0,
+      max_height: 0
+    },
+    head_catchup: {
+      pages: 0,
+      actions: 0,
+      heights: 0,
+      min_height: 0,
+      max_height: 0,
+      floor_height: previousHeadCatchupToken
+        ? previousHeadCatchupFloor
+        : knownMaxHeight,
+      next_page_token: previousHeadCatchupToken,
+      complete: false
+    },
+    backfill: {
+      pages: 0,
+      actions: 0,
+      heights: 0,
+      min_height: 0,
+      max_height: 0,
+      reused_head_page: false
+    },
     next_page_token: nextPageToken,
     complete
   };
 
-  for (let page = 0; page < maxPages; page += 1) {
-    const payload = await fetchRujiraSwapActionPage(nextPageToken);
+  async function ingestPage(pageToken, bucket) {
+    if (stats.pages > 0 && requestDelayMs > 0) {
+      await sleepFn(requestDelayMs);
+    }
+    const payload = await fetchPage(pageToken);
     const actions = Array.isArray(payload?.actions) ? payload.actions : [];
     const inserted = await upsertActionsAndBlocks(client, actions);
     stats.pages += 1;
     stats.actions += inserted.actions;
     stats.heights += inserted.heights;
+    bucket.pages += 1;
+    bucket.actions += inserted.actions;
+    bucket.heights += inserted.heights;
+    const range = actionHeightRange(actions);
+    if (range.min > 0) {
+      bucket.min_height = bucket.min_height > 0
+        ? Math.min(bucket.min_height, range.min)
+        : range.min;
+    }
+    bucket.max_height = Math.max(bucket.max_height || 0, range.max);
+    return {
+      nextPageToken: String(payload?.meta?.nextPageToken || ''),
+      range,
+      inserted
+    };
+  }
 
-    nextPageToken = payload?.meta?.nextPageToken || '';
+  const headPage = await ingestPage('', stats.head_refresh);
+  let headCatchupToken = previousHeadCatchupToken || headPage.nextPageToken;
+  const headCatchupFloor = stats.head_catchup.floor_height;
+  let headCatchupComplete = false;
+
+  if (!previousHeadCatchupToken) {
+    headCatchupComplete = !headCatchupToken || (
+      headCatchupFloor > 0 &&
+      headPage.range.min > 0 &&
+      headPage.range.min <= headCatchupFloor
+    );
+    if (headCatchupComplete) {
+      headCatchupToken = '';
+    }
+  }
+
+  for (let page = 0; page < headMaxPages && headCatchupToken && !headCatchupComplete; page += 1) {
+    const catchupPage = await ingestPage(headCatchupToken, stats.head_catchup);
+    const reachedFloor = headCatchupFloor > 0 &&
+      catchupPage.range.min > 0 &&
+      catchupPage.range.min <= headCatchupFloor;
+    headCatchupToken = catchupPage.nextPageToken;
+    headCatchupComplete = reachedFloor || !headCatchupToken;
+    if (headCatchupComplete) {
+      headCatchupToken = '';
+    }
+  }
+
+  stats.head_catchup.next_page_token = headCatchupToken;
+  stats.head_catchup.complete = headCatchupComplete;
+
+  let backfillPage = 0;
+  if (!alreadyComplete && maxPages > 0 && !nextPageToken) {
+    stats.backfill.pages = 1;
+    stats.backfill.actions = headPage.inserted.actions;
+    stats.backfill.heights = headPage.inserted.heights;
+    stats.backfill.min_height = headPage.range.min;
+    stats.backfill.max_height = headPage.range.max;
+    stats.backfill.reused_head_page = true;
+    nextPageToken = headPage.nextPageToken;
+    complete = !nextPageToken;
+    backfillPage = 1;
+  }
+
+  for (; backfillPage < maxPages && !complete; backfillPage += 1) {
+    const backfillResult = await ingestPage(nextPageToken, stats.backfill);
+    nextPageToken = backfillResult.nextPageToken;
+
     if (!nextPageToken) {
       complete = true;
       break;
     }
-
-    if (config.rujiraBaseFeesRequestDelayMs > 0) {
-      await sleep(config.rujiraBaseFeesRequestDelayMs);
-    }
   }
+
+  const mode = alreadyComplete ? 'head_refresh' : 'backfill';
 
   await saveActionSyncState(client, {
     next_page_token: alreadyComplete ? '' : nextPageToken,
@@ -921,7 +1052,7 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
       ...stats,
       next_page_token: alreadyComplete ? '' : nextPageToken,
       complete,
-      mode: alreadyComplete ? 'head_refresh' : 'backfill'
+      mode
     }
   });
 
@@ -929,7 +1060,7 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
     ...stats,
     next_page_token: alreadyComplete ? '' : nextPageToken,
     complete,
-    mode: alreadyComplete ? 'head_refresh' : 'backfill'
+    mode
   };
 }
 
@@ -1827,7 +1958,7 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
           ? 'Execute the BooneTools Rujira Base Fees Dune source query over thorchain.core_wasm_contracts_events and thorchain.defi_swaps, classify Rujira app context by WASM event type, and upsert generated base-layer swap-fee rows into the local dashboard cache.'
           : sourceProvider === 'mixed'
             ? 'Use validated Dune rows where available and the legacy THORNode RPC/Midgard parser for fallback or live rows. Canonical swap identities prevent the overlapping sources from being counted twice.'
-          : 'Listen to THORChain NewBlock websocket events for steady-state heights, fetch that block_results payload by RPC, match Rujira-emitted swap memos to final THORNode swap events, and sum liquidity_fee_in_rune for non-RUJI-Swap app contexts. Midgard action paging is retained as the backfill/reconciliation fallback.',
+          : 'Listen to THORChain NewBlock websocket events for steady-state heights, independently page the current Midgard head with a durable catch-up cursor, fetch candidate block_results payloads by RPC, match Rujira-emitted swap memos to final THORNode swap events, and sum liquidity_fee_in_rune for non-RUJI-Swap app contexts. Historical Midgard paging retains its own backfill cursor.',
       caveat:
         'This tracks base-layer liquidity fees generated by app-layer activity. It is separate from explicit Reserve revenue-share deposits and intentionally keeps excluded RUJI Swap/direct contexts out of the headline total.',
       rujiraThorchainSwapContract: RUJIRA_THORCHAIN_SWAP_CONTRACT,
@@ -1841,6 +1972,16 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
       errorBlockCount: blockCounts.error || 0,
       backfillComplete: Boolean(sync.complete),
       nextPageToken: sync.next_page_token || '',
+      headCatchup: sync.stats_json?.head_catchup
+        ? {
+            complete: Boolean(sync.stats_json.head_catchup.complete),
+            floorHeight: Number(sync.stats_json.head_catchup.floor_height) || 0,
+            minHeight: Number(sync.stats_json.head_catchup.min_height) || 0,
+            maxHeight: Number(sync.stats_json.head_catchup.max_height) || 0,
+            pages: Number(sync.stats_json.head_catchup.pages) || 0,
+            nextPageToken: String(sync.stats_json.head_catchup.next_page_token || '')
+          }
+        : null,
       rateLimitedUntil: toIsoString(sync.rate_limited_until),
       duneQueryId: usesDune ? sync.stats_json?.dune_query_id || config.rujiraBaseFeesDuneQueryId : '',
       duneExecutionId: usesDune ? sync.stats_json?.dune_execution_id || '' : '',

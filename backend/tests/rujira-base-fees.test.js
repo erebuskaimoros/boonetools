@@ -11,6 +11,43 @@ function event(type, attrs) {
   };
 }
 
+function midgardAction(height, txId = `tx-${height}`) {
+  return {
+    height: String(height),
+    date: '1785680000000000000',
+    status: 'success',
+    in: [{ txID: txId }],
+    out: [],
+    metadata: { swap: { memo: `=:THOR.RUNE:thor1dest:${height}` } }
+  };
+}
+
+function createActionIngestClient({ syncState = null, maxHeight = 0 } = {}) {
+  const queries = [];
+  const savedStates = [];
+  return {
+    queries,
+    savedStates,
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (sql.includes('select sync_key') && sql.includes('from rujira_base_fee_sync_state')) {
+        return { rows: syncState ? [syncState] : [] };
+      }
+      if (sql.includes('select greatest(')) {
+        return { rows: [{ max_height: String(maxHeight) }] };
+      }
+      if (sql.includes('insert into "rujira_base_fee_sync_state"')) {
+        savedStates.push({
+          next_page_token: params[1],
+          complete: params[2],
+          stats_json: JSON.parse(params[5])
+        });
+      }
+      return { rows: [], rowCount: 1 };
+    }
+  };
+}
+
 test('parseRujiraBaseFeeBlock counts only memo-matched Rujira THORChain swap fees', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const {
@@ -140,6 +177,153 @@ test('saveParsedRujiraBaseFeeBlock skips empty websocket blocks by default', asy
 
   assert.equal(parsed.events.length, 0);
   assert.equal(queries.length, 0);
+});
+
+test('generated-fee action ingestion refreshes the head without disturbing historical backfill', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
+  const client = createActionIngestClient({
+    maxHeight: 100,
+    syncState: {
+      next_page_token: 'history-cursor',
+      complete: false,
+      rate_limited_until: null,
+      stats_json: {}
+    }
+  });
+  const requestedTokens = [];
+  const pages = new Map([
+    ['', { actions: [midgardAction(300)], meta: { nextPageToken: 'head-cursor' } }],
+    ['head-cursor', { actions: [midgardAction(200)], meta: { nextPageToken: 'head-next' } }],
+    ['history-cursor', { actions: [midgardAction(50)], meta: { nextPageToken: 'history-next' } }]
+  ]);
+
+  const result = await ingestRujiraBaseFeeActionPages(client, {
+    maxPages: 1,
+    headMaxPages: 1,
+    requestDelayMs: 0,
+    fetchPage: async (token) => {
+      requestedTokens.push(token);
+      return pages.get(token);
+    }
+  });
+
+  assert.deepEqual(requestedTokens, ['', 'head-cursor', 'history-cursor']);
+  assert.equal(result.head_refresh.max_height, 300);
+  assert.equal(result.head_catchup.floor_height, 100);
+  assert.equal(result.head_catchup.next_page_token, 'head-next');
+  assert.equal(result.head_catchup.complete, false);
+  assert.equal(result.next_page_token, 'history-next');
+  assert.equal(result.mode, 'backfill');
+  assert.equal(client.savedStates[0].next_page_token, 'history-next');
+  assert.equal(client.savedStates[0].stats_json.head_catchup.next_page_token, 'head-next');
+  const queuedHeights = client.queries
+    .filter(({ sql }) => sql.includes('insert into "rujira_base_fee_blocks"'))
+    .map(({ params }) => Number(params[0]));
+  assert.deepEqual(queuedHeights, [300, 200, 50]);
+});
+
+test('generated-fee head catch-up resumes its own cursor until it reaches the known floor', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
+  const client = createActionIngestClient({
+    maxHeight: 300,
+    syncState: {
+      next_page_token: 'history-cursor',
+      complete: false,
+      rate_limited_until: null,
+      stats_json: {
+        head_catchup: {
+          next_page_token: 'saved-head-cursor',
+          floor_height: 100,
+          complete: false
+        }
+      }
+    }
+  });
+  const requestedTokens = [];
+  const pages = new Map([
+    ['', { actions: [midgardAction(320)], meta: { nextPageToken: 'new-head-cursor' } }],
+    ['saved-head-cursor', { actions: [midgardAction(90)], meta: { nextPageToken: 'older-head-cursor' } }]
+  ]);
+
+  const result = await ingestRujiraBaseFeeActionPages(client, {
+    maxPages: 0,
+    headMaxPages: 1,
+    requestDelayMs: 0,
+    fetchPage: async (token) => {
+      requestedTokens.push(token);
+      return pages.get(token);
+    }
+  });
+
+  assert.deepEqual(requestedTokens, ['', 'saved-head-cursor']);
+  assert.equal(result.head_catchup.floor_height, 100);
+  assert.equal(result.head_catchup.next_page_token, '');
+  assert.equal(result.head_catchup.complete, true);
+  assert.equal(result.next_page_token, 'history-cursor');
+  assert.equal(client.savedStates[0].next_page_token, 'history-cursor');
+});
+
+test('generated-fee first run reuses the head page as historical page one', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
+  const client = createActionIngestClient();
+  const requestedTokens = [];
+  const pages = new Map([
+    ['', { actions: [midgardAction(20)], meta: { nextPageToken: 'page-2' } }],
+    ['page-2', { actions: [midgardAction(10)], meta: { nextPageToken: 'page-3' } }]
+  ]);
+
+  const result = await ingestRujiraBaseFeeActionPages(client, {
+    maxPages: 2,
+    headMaxPages: 0,
+    requestDelayMs: 0,
+    fetchPage: async (token) => {
+      requestedTokens.push(token);
+      return pages.get(token);
+    }
+  });
+
+  assert.deepEqual(requestedTokens, ['', 'page-2']);
+  assert.equal(result.pages, 2);
+  assert.equal(result.backfill.pages, 2);
+  assert.equal(result.backfill.reused_head_page, true);
+  assert.equal(result.next_page_token, 'page-3');
+});
+
+test('generated-fee head refresh failure preserves both cursors', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
+  const syncState = {
+    next_page_token: 'history-cursor',
+    complete: false,
+    rate_limited_until: null,
+    stats_json: {
+      head_catchup: {
+        next_page_token: 'head-cursor',
+        floor_height: 100,
+        complete: false
+      }
+    }
+  };
+  const client = createActionIngestClient({ syncState, maxHeight: 200 });
+
+  await assert.rejects(
+    () => ingestRujiraBaseFeeActionPages(client, {
+      maxPages: 1,
+      headMaxPages: 1,
+      requestDelayMs: 0,
+      fetchPage: async () => {
+        throw new Error('head unavailable');
+      }
+    }),
+    /head unavailable/
+  );
+
+  assert.equal(client.savedStates.length, 0);
+  assert.equal(syncState.next_page_token, 'history-cursor');
+  assert.equal(syncState.stats_json.head_catchup.next_page_token, 'head-cursor');
 });
 
 test('buildRujiraBaseFeeRowsFromDune normalizes Dune generated-fee rows', async () => {
@@ -373,7 +557,15 @@ test('dashboard provenance reflects persisted Dune and legacy rows instead of th
             stats_json: {
               source: 'dune',
               dune_query_id: '7620091',
-              dune_execution_id: 'execution-1'
+              dune_execution_id: 'execution-1',
+              head_catchup: {
+                complete: false,
+                floor_height: 100,
+                min_height: 150,
+                max_height: 200,
+                pages: 4,
+                next_page_token: 'head-next'
+              }
             }
           }]
         };
@@ -390,4 +582,12 @@ test('dashboard provenance reflects persisted Dune and legacy rows instead of th
   assert.equal(payload.meta.source, 'mixed-dune-and-legacy-postgres');
   assert.deepEqual(payload.meta.sourceProviders, ['dune', 'legacy']);
   assert.match(payload.meta.method, /Canonical swap identities prevent/i);
+  assert.deepEqual(payload.meta.headCatchup, {
+    complete: false,
+    floorHeight: 100,
+    minHeight: 150,
+    maxHeight: 200,
+    pages: 4,
+    nextPageToken: 'head-next'
+  });
 });
