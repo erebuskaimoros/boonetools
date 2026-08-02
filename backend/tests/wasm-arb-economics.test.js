@@ -11,6 +11,8 @@ import {
   normalizeWasmArbNetworkBucket,
   parseWasmArbRujiraFeeEvents,
   RUJIRA_TRADE_COLLECTOR,
+  scanCandidateBlocks,
+  scanCollectorSearchPages,
   WASM_ARB_CONTRACT
 } from '../src/shared/wasm-arb-economics-ingestion.js';
 
@@ -318,6 +320,66 @@ test('Tendermint tx and block search candidates preserve both discovery lanes', 
     blockTime: '2026-07-28T09:42:12.000Z',
     source: 'trade-collector-block-search'
   }]);
+});
+
+test('collector search persists its failed page for a later timer run', async () => {
+  const writes = [];
+  const attemptedPages = [];
+  const client = {
+    async query(sql, params) {
+      if (sql.includes('from wasm_arb_economics_sync_state')) {
+        return {
+          rows: [{
+            sync_key: 'collector-tx-search-backfill',
+            cursor_value: '27260000',
+            next_page_token: '3',
+            complete: false,
+            stats_json: { max_height: 27260000, target_height: 27262600 }
+          }]
+        };
+      }
+      if (sql.includes('insert into wasm_arb_economics_sync_state')) {
+        writes.push(params);
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    }
+  };
+
+  const result = await scanCollectorSearchPages(client, {
+    syncKey: 'collector-tx-search-backfill',
+    maxPages: 12,
+    backfill: true,
+    kind: 'tx',
+    latestHeight: 27262600,
+    async fetchCollectorTxSearchPage(params) {
+      attemptedPages.push(params.page);
+      throw new Error('provider deadline');
+    }
+  });
+
+  assert.deepEqual(attemptedPages, [3]);
+  assert.equal(result.pages, 0);
+  assert.deepEqual(result.errors, ['provider deadline']);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0][2], '3');
+  assert.deepEqual(writes[0][4].errors, ['provider deadline']);
+});
+
+test('candidate block scanning defers when FIN discovery is unavailable', async () => {
+  const result = await scanCandidateBlocks({
+    async query() {
+      throw new Error('block rows must not load before FIN metadata');
+    }
+  }, {
+    async fetchThorchain() {
+      throw new Error('THORNode unavailable');
+    }
+  });
+
+  assert.equal(result.deferred, true);
+  assert.equal(result.blocks, 0);
+  assert.equal(result.error, 'THORNode unavailable');
 });
 
 test('builds same-height pool and oracle tracking rows on the report price basis', () => {

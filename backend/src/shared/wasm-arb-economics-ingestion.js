@@ -760,7 +760,7 @@ async function fetchCollectorSearchPage(client, params, options = {}) {
   return payload?.result || {};
 }
 
-async function scanCollectorSearchPages(client, options = {}) {
+export async function scanCollectorSearchPages(client, options = {}) {
   const { syncKey, maxPages, backfill, kind, latestHeight } = options;
   const state = await getSyncState(client, syncKey);
   if (backfill && state.complete) {
@@ -778,16 +778,23 @@ async function scanCollectorSearchPages(client, options = {}) {
   let blockCount = 0;
   let maxHeight = previousMaxHeight;
   let complete = Boolean(state.complete);
+  const errors = [];
 
   while (pages < Math.max(1, maxPages)) {
-    const payload = await fetchCollectorSearchPage(client, {
-      kind,
-      page,
-      startHeight: config.wasmArbEconomicsStartHeight,
-      endHeight: targetHeight,
-      orderBy: backfill ? 'asc' : 'desc',
-      backfill
-    }, options);
+    let payload;
+    try {
+      payload = await fetchCollectorSearchPage(client, {
+        kind,
+        page,
+        startHeight: config.wasmArbEconomicsStartHeight,
+        endHeight: targetHeight,
+        orderBy: backfill ? 'asc' : 'desc',
+        backfill
+      }, options);
+    } catch (error) {
+      errors.push(String(error?.message || error).slice(0, 500));
+      break;
+    }
     const matches = kind === 'tx'
       ? (Array.isArray(payload?.txs) ? payload.txs : [])
       : (Array.isArray(payload?.blocks) ? payload.blocks : []);
@@ -828,10 +835,11 @@ async function scanCollectorSearchPages(client, options = {}) {
       last_pages: pages,
       last_matches: matchCount,
       last_blocks: blockCount,
+      errors,
       last_scanned_at: new Date().toISOString()
     }
   });
-  return { pages, matches: matchCount, blocks: blockCount, complete };
+  return { pages, matches: matchCount, blocks: blockCount, complete, errors };
 }
 
 async function ingestCollectorTransfers(client, options = {}) {
@@ -1117,8 +1125,20 @@ function blockContexts(payload) {
   return contexts;
 }
 
-async function scanCandidateBlocks(client, options = {}) {
-  const finContracts = await fetchFinContracts(client, options);
+export async function scanCandidateBlocks(client, options = {}) {
+  let finContracts;
+  try {
+    finContracts = await fetchFinContracts(client, options);
+  } catch (error) {
+    return {
+      blocks: 0,
+      events: 0,
+      failures: 0,
+      finContracts: 0,
+      deferred: true,
+      error: String(error?.message || error).slice(0, 500)
+    };
+  }
   const { rows: blocks } = await client.query(
     `select height, block_time, attempts
      from wasm_arb_economics_blocks
