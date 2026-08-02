@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh BooneTools Wasm arb fee economics every five minutes
+
+[Timer]
+OnActiveSec=2min
+OnUnitActiveSec=5min
+AccuracySec=15s
+Persistent=true
+Unit=boonetools-wasm-arb-economics-fees.service
+
+[Install]
+WantedBy=timers.target

@@ -12,12 +12,33 @@ export class ProviderCooldownError extends Error {
   }
 }
 
-function providerKey(base) {
+function providerHostname(base) {
   try {
     return new URL(String(base || '')).hostname.toLowerCase();
   } catch {
     return String(base || '').trim().toLowerCase();
   }
+}
+
+function providerServicePath(base) {
+  try {
+    const pathname = new URL(String(base || '')).pathname
+      .replace(/\/+$/, '')
+      .toLowerCase();
+    const liquifyService = pathname.match(/^\/chain\/[^/]+/i)?.[0];
+    return liquifyService || pathname;
+  } catch {
+    return '';
+  }
+}
+
+export function providerCooldownKeys(base) {
+  const hostname = providerHostname(base);
+  if (!hostname) return { global: '', service: '' };
+  return {
+    global: `global:${hostname}`,
+    service: `service:${hostname}${providerServicePath(base)}`
+  };
 }
 
 function errorMessage(error) {
@@ -26,6 +47,17 @@ function errorMessage(error) {
 
 export function isProviderRateLimitError(error) {
   return Number(error?.status) === 429 || RATE_LIMIT_PATTERN.test(errorMessage(error));
+}
+
+export function isProviderGatewayRateLimitError(error) {
+  return Number(error?.status) === 429 || Number(error?.retryAfterSeconds) > 0;
+}
+
+function shouldRecordServiceFailure(error) {
+  const status = Number(error?.status) || 0;
+  if (isProviderRateLimitError(error)) return true;
+  if (status === 0) return true;
+  return status === 408 || status === 425 || status >= 500;
 }
 
 function enabled(options) {
@@ -46,25 +78,28 @@ function database(options = {}) {
 
 export async function assertProviderAvailable(base, options = {}) {
   if (!enabled(options)) return;
-  const key = providerKey(base);
-  if (!key) return;
+  const keys = providerCooldownKeys(base);
+  const candidates = [keys.global, keys.service].filter(Boolean);
+  if (!candidates.length) return;
   try {
     const { rows } = await database(options).query(
-      `select blocked_until, last_error, failure_count
+      `select provider_key, blocked_until, last_error, failure_count
        from provider_circuit_breakers
-       where provider_key = $1
-       limit 1`,
-      [key]
+       where provider_key = any($1::text[])`,
+      [candidates]
     );
-    const row = rows[0];
+    const row = rows.find((candidate) => (
+      Date.parse(String(candidate.blocked_until || '')) > Date.now()
+    ));
     if (row && Date.parse(String(row.blocked_until || '')) > Date.now()) {
       throw new ProviderCooldownError(
-        key,
+        row.provider_key,
         new Date(row.blocked_until).toISOString(),
         String(row.last_error || '')
       );
     }
-    if (row && Number(row.failure_count || 0) > 0) {
+    const serviceRow = rows.find((candidate) => candidate.provider_key === keys.service);
+    if (serviceRow && Number(serviceRow.failure_count || 0) > 0) {
       await recordProviderSuccess(base, options);
     }
   } catch (error) {
@@ -76,7 +111,10 @@ export async function assertProviderAvailable(base, options = {}) {
 
 export async function recordProviderFailure(base, error, options = {}) {
   if (!enabled(options) || error?.skipProvider) return;
-  const key = providerKey(base);
+  if (!shouldRecordServiceFailure(error)) return;
+  const keys = providerCooldownKeys(base);
+  const globalRateLimited = isProviderGatewayRateLimitError(error);
+  const key = globalRateLimited ? keys.global : keys.service;
   if (!key) return;
   const rateLimited = isProviderRateLimitError(error);
   const retryAfterMs = Math.max(0, Number(error?.retryAfterSeconds) || 0) * 1000;
@@ -107,7 +145,7 @@ export async function recordProviderFailure(base, error, options = {}) {
 
 export async function recordProviderSuccess(base, options = {}) {
   if (!enabled(options)) return;
-  const key = providerKey(base);
+  const key = providerCooldownKeys(base).service;
   if (!key) return;
   try {
     await database(options).query(

@@ -367,6 +367,8 @@ prime_read_models() {
     boonetools-pool-dislocation-repair.service
     boonetools-pool-dislocation.service
     boonetools-wasm-arb-economics.service
+    boonetools-wasm-arb-economics-fees.service
+    boonetools-wasm-arb-economics-oracle.service
   )
   local unit
   refresh_core_and_app_layer_models

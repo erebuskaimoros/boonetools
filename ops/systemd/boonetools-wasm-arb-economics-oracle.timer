@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh BooneTools Wasm arb Oracle tracking every five minutes
+
+[Timer]
+OnActiveSec=3min30s
+OnUnitActiveSec=5min
+AccuracySec=15s
+Persistent=true
+Unit=boonetools-wasm-arb-economics-oracle.service
+
+[Install]
+WantedBy=timers.target

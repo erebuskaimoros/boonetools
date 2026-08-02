@@ -50,10 +50,15 @@ are monotonic under replay and concurrent writers.
   NodeOp, Rapid Swaps, App Layer, and the frontend's stable THORNode helpers
   read that model rather than repeating `/lastblock`, `/mimir`, `/nodes`,
   `/network`, `/pools`, or `/inbound_addresses`.
-- Provider-host circuit breakers live in Postgres, making cooldowns effective
-  across systemd oneshot processes. App Layer static routes use a slower
+- Hierarchical provider circuit breakers live in Postgres, making cooldowns
+  effective across systemd oneshot processes. Ordinary failures are scoped to
+  a configured service base; confirmed 429/`Retry-After` responses alone use a
+  hostname-wide breaker. App Layer static routes use a slower
   persistent refresh and bounded concurrency; stuck-transaction status/details
   reuse is keyed by transaction plus queue fingerprint.
+- Historical THORChain pool/Oracle acquisition is persisted by height in
+  `thorchain_market_snapshots`. Pool Dislocation and Wasm analytics reuse the
+  same raw snapshot while retaining feature-owned derivation methods.
 - Caddy compresses API responses, deploys enforce public latency/payload gates,
   and failed rollouts restore backend/shared code, systemd state, the API
   process, and Caddy.

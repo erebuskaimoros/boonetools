@@ -10,6 +10,10 @@ import {
 } from './pool-dislocation.js';
 import { persistPoolDislocationRows } from './pool-dislocation-store.js';
 import { fetchThorchainRpc } from './rpc.js';
+import {
+  loadThorchainMarketSnapshot,
+  persistThorchainMarketSnapshot
+} from './thorchain-market-snapshots.js';
 import { fetchThorchain } from './thornode.js';
 
 const FIVE_MINUTES_MS = POOL_DISLOCATION_SAMPLE_MINUTES * 60 * 1000;
@@ -148,7 +152,8 @@ export function parsePoolDislocationRpcBlock(payload = {}) {
 
 async function defaultFetchRpcStatus(options = {}) {
   return fetchThorchainRpc('/status', {}, {
-    sharedCooldown: false,
+    cooldownClient: options.client,
+    sharedCooldown: true,
     rpcUrls: options.rpcUrls || config.rpcRestUrls,
     timeoutMs: options.timeoutMs
   });
@@ -156,7 +161,8 @@ async function defaultFetchRpcStatus(options = {}) {
 
 async function defaultFetchRpcBlock(height, options = {}) {
   return fetchThorchainRpc('/block', { height }, {
-    sharedCooldown: false,
+    cooldownClient: options.client,
+    sharedCooldown: true,
     rpcUrls: options.rpcUrls || config.rpcRestUrls,
     timeoutMs: options.timeoutMs
   });
@@ -298,7 +304,8 @@ export async function fetchHistoricalPoolDislocationState(height, options = {}) 
       ...config.poolDislocationThornodeUrls.slice(1)
     ].filter(Boolean),
     historical: true,
-    sharedCooldown: false,
+    cooldownClient: options.client,
+    sharedCooldown: true,
     timeoutMs: options.thornodeTimeoutMs || 12_000
   }));
   const [pools, oracle] = await Promise.all([
@@ -449,6 +456,14 @@ export async function loadPoolDislocationRecentGapRepairPlan(client, options = {
                 ),
                 false
               )
+            )
+            and bool_and(
+              observation.thorchain_height is not null
+              and exists (
+                select 1
+                from thorchain_market_snapshots snapshot
+                where snapshot.height = observation.thorchain_height
+              )
             ) as authoritative
      from pool_dislocation_observations observation
      left join expected_references expected on expected.asset = observation.asset
@@ -486,7 +501,10 @@ export async function runPoolDislocationHistoricalBackfill(client, options = {})
   }
 
   const [anchors, binanceHistory] = await Promise.all([
-    (options.resolveAnchors || resolvePoolDislocationBlockAnchors)(plan.pendingBuckets, options),
+    (options.resolveAnchors || resolvePoolDislocationBlockAnchors)(
+      plan.pendingBuckets,
+      { ...options, client }
+    ),
     (options.loadBinanceHistory || loadBinanceBackfillHistory)(plan.pendingBuckets, options)
   ]);
   report({ stage: 'sources_ready', anchors: anchors.length, binance_symbols: binanceHistory.size });
@@ -504,29 +522,44 @@ export async function runPoolDislocationHistoricalBackfill(client, options = {})
     const batch = anchors.slice(index, index + batchSize);
     const batchRows = [];
     for (const anchor of batch) {
-      const state = await retryPoolDislocationBackfillOperation(
-        () => (options.fetchHistoricalState || fetchHistoricalPoolDislocationState)(
-          anchor.height,
-          options
-        ),
-        {
-          attempts: options.retryAttempts,
-          baseDelayMs: options.retryBaseDelayMs,
-          maxDelayMs: options.retryMaxDelayMs,
-          sleep: options.retrySleep,
-          now: options.now,
-          onRetry: ({ attempt, nextAttempt, attempts, delayMs, error }) => report({
-            stage: 'retrying_historical_state',
-            observed_at: anchor.observedAt,
-            height: anchor.height,
-            attempt,
-            next_attempt: nextAttempt,
-            max_attempts: attempts,
-            delay_ms: delayMs,
-            error: String(error?.message || error)
-          })
-        }
+      const cached = await (options.loadMarketSnapshot || loadThorchainMarketSnapshot)(
+        client,
+        anchor.height
       );
+      const state = cached
+        ? { pools: cached.pools, oracle: { prices: cached.oraclePrices } }
+        : await retryPoolDislocationBackfillOperation(
+          () => (options.fetchHistoricalState || fetchHistoricalPoolDislocationState)(
+            anchor.height,
+            { ...options, client }
+          ),
+          {
+            attempts: options.retryAttempts,
+            baseDelayMs: options.retryBaseDelayMs,
+            maxDelayMs: options.retryMaxDelayMs,
+            sleep: options.retrySleep,
+            now: options.now,
+            onRetry: ({ attempt, nextAttempt, attempts, delayMs, error }) => report({
+              stage: 'retrying_historical_state',
+              observed_at: anchor.observedAt,
+              height: anchor.height,
+              attempt,
+              next_attempt: nextAttempt,
+              max_attempts: attempts,
+              delay_ms: delayMs,
+              error: String(error?.message || error)
+            })
+          }
+        );
+      if (!cached) {
+        await (options.persistMarketSnapshot || persistThorchainMarketSnapshot)(client, {
+          height: anchor.height,
+          blockTime: anchor.blockTime,
+          pools: state.pools,
+          oraclePrices: state.oracle,
+          source: 'pool-dislocation-backfill'
+        });
+      }
       if (state.oracle.prices.length === 0) {
         report({
           stage: 'source_gap',

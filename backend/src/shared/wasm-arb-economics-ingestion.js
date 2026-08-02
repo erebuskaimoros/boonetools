@@ -5,6 +5,10 @@ import { config } from '../lib/config.js';
 import { safeNumber, sleep } from '../lib/utils.js';
 import { fetchMidgard, fetchMidgardActions, fetchMidgardSwapHistory } from './midgard.js';
 import { fetchThorchainRpc } from './rpc.js';
+import {
+  ensureThorchainMarketSnapshot,
+  pruneThorchainMarketSnapshots
+} from './thorchain-market-snapshots.js';
 import { fetchThorchain, extractThorHeight } from './thornode.js';
 
 export const WASM_ARB_CONTRACT =
@@ -921,30 +925,21 @@ async function fetchOracleTrackingSample(height, client, options = {}) {
   }
   const fetchThor = options.fetchThorchain || fetchThorchain;
   const fetchRpc = options.fetchRpc || fetchThorchainRpc;
-  const [pools, oraclePrices, block] = await Promise.all([
-    fetchThor(`/thorchain/pools?height=${height}`, {
-      historical: true,
-      timeoutMs: 30_000,
-      cooldownClient: client,
-      sharedCooldown: true
-    }),
-    fetchThor(`/thorchain/oracle/prices?height=${height}`, {
-      historical: true,
-      timeoutMs: 30_000,
-      cooldownClient: client,
-      sharedCooldown: true
-    }),
-    (options.fetchOracleBlock || fetchRpc)(
-      '/block',
-      { height },
-      { cooldownClient: client, sharedCooldown: true }
-    )
-  ]);
+  const snapshot = await (options.ensureMarketSnapshot || ensureThorchainMarketSnapshot)(
+    client,
+    height,
+    {
+      fetchThorchain: fetchThor,
+      fetchRpc,
+      fetchBlock: options.fetchOracleBlock,
+      source: 'wasm-arb-oracle'
+    }
+  );
   return {
     height,
-    blockTime: block?.result?.block?.header?.time || block?.block?.header?.time,
-    pools: Array.isArray(pools) ? pools : pools?.pools || [],
-    oraclePrices: oraclePrices?.prices || oraclePrices || []
+    blockTime: snapshot.blockTime,
+    pools: snapshot.pools,
+    oraclePrices: snapshot.oraclePrices
   };
 }
 
@@ -1482,11 +1477,12 @@ async function pruneOldRows(client) {
     );
     deleted[table] = result.rowCount || 0;
   }
+  const snapshots = await pruneThorchainMarketSnapshots(client, 30);
+  deleted.thorchain_market_snapshots = snapshots.rowCount || 0;
   return deleted;
 }
 
-export async function runWasmArbEconomicsIngestion(client, options = {}) {
-  const stats = {};
+async function wasmRuntimeOptions(options = {}) {
   const fetchThor = options.fetchThorchain || ((path, fetchOptions = {}) => fetchThorchain(path, {
     timeoutMs: WASM_THORNODE_REQUEST_TIMEOUT_MS,
     ...fetchOptions
@@ -1494,13 +1490,13 @@ export async function runWasmArbEconomicsIngestion(client, options = {}) {
   const latestHeight = Math.trunc(safeNumber(options.latestHeight)) || Math.trunc(
     extractThorHeight(await fetchThor('/thorchain/lastblock'))
   );
-  const runtimeOptions = { ...options, fetchThorchain: fetchThor, latestHeight };
+  return { ...options, fetchThorchain: fetchThor, latestHeight };
+}
+
+async function runWasmArbActivityLane(client, runtimeOptions) {
+  const stats = {};
   stats.network = await ingestNetworkBuckets(client, runtimeOptions);
   stats.actions = await ingestActions(client, runtimeOptions);
-  stats.collectorTransfers = await ingestCollectorTransfers(client, runtimeOptions);
-  stats.blocks = await scanCandidateBlocks(client, runtimeOptions);
-  stats.pricing = await priceRujiraFeeEvents(client, runtimeOptions);
-  stats.oracle = await ingestOracleTracking(client, runtimeOptions);
   try {
     stats.regime = await observeRegime(client, runtimeOptions);
   } catch (error) {
@@ -1508,4 +1504,37 @@ export async function runWasmArbEconomicsIngestion(client, options = {}) {
   }
   stats.pruned = await pruneOldRows(client);
   return stats;
+}
+
+async function runWasmArbFeeLane(client, runtimeOptions) {
+  return {
+    collectorTransfers: await ingestCollectorTransfers(client, runtimeOptions),
+    blocks: await scanCandidateBlocks(client, runtimeOptions),
+    pricing: await priceRujiraFeeEvents(client, runtimeOptions)
+  };
+}
+
+async function runWasmArbOracleLane(client, runtimeOptions) {
+  return { oracle: await ingestOracleTracking(client, runtimeOptions) };
+}
+
+export async function runWasmArbActivityIngestion(client, options = {}) {
+  return runWasmArbActivityLane(client, await wasmRuntimeOptions(options));
+}
+
+export async function runWasmArbFeeIngestion(client, options = {}) {
+  return runWasmArbFeeLane(client, await wasmRuntimeOptions(options));
+}
+
+export async function runWasmArbOracleIngestion(client, options = {}) {
+  return runWasmArbOracleLane(client, await wasmRuntimeOptions(options));
+}
+
+export async function runWasmArbEconomicsIngestion(client, options = {}) {
+  const runtimeOptions = await wasmRuntimeOptions(options);
+  return {
+    ...await runWasmArbActivityLane(client, runtimeOptions),
+    ...await runWasmArbFeeLane(client, runtimeOptions),
+    ...await runWasmArbOracleLane(client, runtimeOptions)
+  };
 }
