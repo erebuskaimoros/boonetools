@@ -1,3 +1,4 @@
+import { config } from '../lib/config.js';
 import { fetchThorchainRpc } from './rpc.js';
 import { fetchThorchain } from './thornode.js';
 
@@ -25,6 +26,10 @@ function normalizedSnapshot(row = {}) {
     oraclePrices: Array.isArray(row.oracle_prices_json) ? row.oracle_prices_json : [],
     source: String(row.source || 'thornode-historical')
   };
+}
+
+export function thorchainMarketSnapshotRpcUrls(options = {}) {
+  return options.rpcUrls || [config.rpcArchiveRestUrl, ...config.rpcRestUrls].filter(Boolean);
 }
 
 export async function loadThorchainMarketSnapshot(client, height) {
@@ -76,6 +81,11 @@ export async function ensureThorchainMarketSnapshot(client, height, options = {}
 
   const fetchThor = options.fetchThorchain || fetchThorchain;
   const fetchRpc = options.fetchRpc || fetchThorchainRpc;
+  const fetchBlock = options.fetchBlock || ((path, params, fetchOptions) => fetchRpc(
+    path,
+    params,
+    { ...fetchOptions, rpcUrls: thorchainMarketSnapshotRpcUrls(options) }
+  ));
   // The three provider calls run concurrently. Cooldown bookkeeping therefore
   // uses the shared pool by default instead of issuing overlapping queries on
   // the advisory-lock client.
@@ -93,7 +103,7 @@ export async function ensureThorchainMarketSnapshot(client, height, options = {}
       cooldownClient,
       sharedCooldown: true
     }),
-    (options.fetchBlock || fetchRpc)(
+    fetchBlock(
       '/block',
       { height: targetHeight },
       { cooldownClient, sharedCooldown: true }

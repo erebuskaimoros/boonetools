@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { ensureThorchainMarketSnapshot } from '../src/shared/thorchain-market-snapshots.js';
+import {
+  ensureThorchainMarketSnapshot,
+  thorchainMarketSnapshotRpcUrls
+} from '../src/shared/thorchain-market-snapshots.js';
 
 function memoryClient() {
   let stored = null;
@@ -54,6 +57,12 @@ test('canonical market acquisition reuses one same-height pool/oracle snapshot',
     '/thorchain/pools?height=27200000',
     '/thorchain/oracle/prices?height=27200000'
   ]);
+});
+
+test('canonical historical block time uses the isolated Liquify archive RPC lane', () => {
+  const urls = thorchainMarketSnapshotRpcUrls();
+  assert.match(urls[0], /rpc\.thorchain\.liquify\.com/);
+  assert.ok(urls.some((url) => url.includes('/chain/thorchain_rpc')));
 });
 
 test('Wasm production lanes are independently registered, timed, and primed', async () => {

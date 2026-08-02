@@ -71,7 +71,9 @@ Oracle lane reuse a snapshot when they request the same height, but keep their
 own derivation formulas and output tables. Raw snapshots retain 30 days; the
 derived Wasm monitoring series keeps the longer economics retention. Historical
 block anchors use Liquify's archive RPC before the live gateway and retry
-transient anchor lookups through the shared cooldown policy.
+transient anchor lookups through the shared cooldown policy. Wasm Oracle block
+times use that archive lane too, so an ordinary fee-discovery RPC timeout does
+not suppress Oracle sampling.
 
 Liquify cooldowns are hierarchical. Ordinary transport/5xx failures block only
 the affected Midgard, RPC, or THORNode service path, endpoint-specific 4xx
