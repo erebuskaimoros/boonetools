@@ -318,6 +318,22 @@ refresh_status_models_after_long_primes() {
   return 1
 }
 
+refresh_core_and_app_layer_models() {
+  local attempt
+  local retry_delay_seconds=35
+  for attempt in 1 2 3; do
+    systemctl start boonetools-thornode-core-snapshot.service || true
+    if systemctl start boonetools-app-layer-live-state.service; then
+      return
+    fi
+    if [[ "$attempt" -lt 3 ]]; then
+      echo "Core/App Layer refresh attempt $attempt failed; retrying in ${retry_delay_seconds} seconds..." >&2
+      sleep "$retry_delay_seconds"
+    fi
+  done
+  return 1
+}
+
 start_persistent_services() {
   local persistent=(
     boonetools-api.service
@@ -342,21 +358,18 @@ start_persistent_services() {
 
 prime_read_models() {
   local prime_units=(
-    boonetools-thornode-core-snapshot.service
-    boonetools-app-layer-live-state.service
     boonetools-rujira-base-fees.service
     boonetools-rujira-reserve-payments.service
     boonetools-analytics-read-models.service
     boonetools-node-votes-summary.service
     boonetools-rapid-swaps-market-history.service
     boonetools-treasury-snapshot.service
-    boonetools-status-live.service
-    boonetools-status-dashboard.service
     boonetools-pool-dislocation-repair.service
     boonetools-pool-dislocation.service
     boonetools-wasm-arb-economics.service
   )
   local unit
+  refresh_core_and_app_layer_models
   for unit in "${prime_units[@]}"; do
     start_unit_with_retry "$unit"
   done

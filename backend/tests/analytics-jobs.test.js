@@ -238,9 +238,10 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(remoteDeployScript, /local retry_delay_seconds=35/);
   assert.match(remoteDeployScript, /local timer_state_wait_seconds=90/);
   assert.match(remoteDeployScript, /refresh_status_models_after_long_primes/);
+  assert.match(remoteDeployScript, /refresh_core_and_app_layer_models/);
   assert.match(
     remoteDeployScript,
-    /prime_read_models[\s\S]*boonetools-status-live\.service[\s\S]*boonetools-wasm-arb-economics\.service[\s\S]*boonetools-analytics-read-models\.service/
+    /prime_read_models[\s\S]*boonetools-wasm-arb-economics\.service[\s\S]*refresh_status_models_after_long_primes[\s\S]*boonetools-analytics-read-models\.service/
   );
   assert.match(remoteDeployScript, /has no future trigger/);
   assert.match(remoteDeployScript, /https:\/\/mail\.theaiguys\.ai\//);
