@@ -301,6 +301,23 @@ start_unit_with_retry() {
   return 1
 }
 
+refresh_status_models_after_long_primes() {
+  local attempt
+  local retry_delay_seconds=35
+  for attempt in 1 2 3; do
+    systemctl start boonetools-thornode-core-snapshot.service || true
+    if systemctl start boonetools-status-live.service \
+      && systemctl start boonetools-status-dashboard.service; then
+      return
+    fi
+    if [[ "$attempt" -lt 3 ]]; then
+      echo "Post-prime status refresh attempt $attempt failed; retrying in ${retry_delay_seconds} seconds..." >&2
+      sleep "$retry_delay_seconds"
+    fi
+  done
+  return 1
+}
+
 start_persistent_services() {
   local persistent=(
     boonetools-api.service
@@ -338,13 +355,14 @@ prime_read_models() {
     boonetools-pool-dislocation-repair.service
     boonetools-pool-dislocation.service
     boonetools-wasm-arb-economics.service
-    # Publish the newly ingested Wasm rows before the public API gate.
-    boonetools-analytics-read-models.service
   )
   local unit
   for unit in "${prime_units[@]}"; do
     start_unit_with_retry "$unit"
   done
+  refresh_status_models_after_long_primes
+  # Publish the newly ingested Wasm rows before the public API gate.
+  start_unit_with_retry boonetools-analytics-read-models.service
 }
 
 start_and_verify_timers() {

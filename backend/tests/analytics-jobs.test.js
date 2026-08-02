@@ -237,6 +237,7 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(remoteDeployScript, /boonetools-db-migrate\.sh/);
   assert.match(remoteDeployScript, /local retry_delay_seconds=35/);
   assert.match(remoteDeployScript, /local timer_state_wait_seconds=90/);
+  assert.match(remoteDeployScript, /refresh_status_models_after_long_primes/);
   assert.match(
     remoteDeployScript,
     /prime_read_models[\s\S]*boonetools-status-live\.service[\s\S]*boonetools-wasm-arb-economics\.service[\s\S]*boonetools-analytics-read-models\.service/
