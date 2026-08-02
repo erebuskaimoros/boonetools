@@ -24,7 +24,7 @@ fresh, and performance-gated.
 
 ## Discoveries
 
-- Provider-backed one-shot systemd primes can fail on a brief Liquify request plus an unresolved `thornode.thorchain.network` fallback; immediate reruns succeeded, so deploy-level bounded retries prevent unnecessary full rollbacks while retaining final failure safety.
+- Provider-backed one-shot systemd primes can fail on a brief Liquify request plus an unresolved deprecated fallback; immediate reruns succeeded, so deploy-level bounded retries prevent unnecessary full rollbacks while retaining final failure safety.
 - The existing status container used `100vw`, which ignored the sidebar and clipped the right edge at common desktop widths; sizing against the content container fixes the whole status surface.
 - A 20-block sample at hourly historical anchors produces a useful low-cost 24-hour view, while five-minute live samples steadily replace bootstrap points without increasing browser latency.
 

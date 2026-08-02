@@ -43,8 +43,7 @@ export {
  */
 export const ENDPOINTS = {
   thornode: {
-    thorchain: 'https://gateway.liquify.com/chain/thorchain_api',
-    fallback: 'https://thornode.thorchain.network'
+    thorchain: 'https://gateway.liquify.com/chain/thorchain_api'
   },
   midgard: 'https://gateway.liquify.com/chain/thorchain_midgard/v2',
   coingecko: 'https://api.coingecko.com/api/v3'

@@ -19,8 +19,7 @@
   "sourceMidgard": "https://gateway.liquify.com/chain/thorchain_midgard",
   "sourceThornode": "https://gateway.liquify.com/chain/thorchain_api",
   "sourceRpc": [
-    "https://gateway.liquify.com/chain/thorchain_rpc",
-    "https://rpc.thorchain.network"
+    "https://gateway.liquify.com/chain/thorchain_rpc"
   ],
   "priceBasis": "amountRune × Midgard daily RUNE/USD for each Reserve deposit date; weekly rows aggregate historical USD at dispersal time, not current RUNE value"
 }

@@ -44,6 +44,10 @@ function fallbackPayload(url) {
 
 test('fetchAppLayerLiveStatePayload builds a backend snapshot through the Thornode fallback', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  process.env.THORNODE_URLS = [
+    'https://gateway.liquify.com/chain/thorchain_api',
+    'https://thornode-fallback.example'
+  ].join(',');
   const [
     { fetchAppLayerLiveStatePayload },
     { THORNODE_FALLBACK, THORNODE_PRIMARY }

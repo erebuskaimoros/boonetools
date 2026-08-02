@@ -4,9 +4,7 @@
  * Midgard provides aggregated and historical data for THORChain.
  * It's better suited for analytics, historical queries, and member data.
  *
- * Endpoints:
- * - https://gateway.liquify.com/chain/thorchain_midgard/v2
- * - https://midgard.thorchain.network/v2
+ * Endpoint: https://gateway.liquify.com/chain/thorchain_midgard/v2
  */
 
 import { requestFromProviders } from './provider.js';
@@ -15,8 +13,7 @@ import { requestFromProviders } from './provider.js';
  * Midgard API base URL
  */
 export const MIDGARD_BASE = 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
-export const MIDGARD_FALLBACK_BASE = 'https://midgard.thorchain.network/v2';
-export const MIDGARD_BASES = [MIDGARD_BASE, MIDGARD_FALLBACK_BASE];
+export const MIDGARD_BASES = [MIDGARD_BASE];
 
 function getPathSearchParams(path) {
   try {

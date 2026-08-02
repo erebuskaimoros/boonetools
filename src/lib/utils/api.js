@@ -2,7 +2,7 @@
  * THORChain API Utilities
  *
  * Provides centralized API endpoint management and fetch utilities
- * with automatic failover between primary and fallback endpoints.
+ * across configured providers.
  *
  * @module utils/api
  *
@@ -21,29 +21,24 @@ import { resolveCoreSnapshotPath } from '../api/core-snapshot.js';
 // ============================================
 
 /**
- * THORNode API endpoints with fallback
+ * THORNode API endpoint
  */
 const DEV_THORNODE_ENDPOINTS = {
-  primary: '/__thornode_primary',
-  fallback: '/__thornode_fallback'
+  primary: '/__thornode_primary'
 };
 const IS_DEV = Boolean(import.meta.env?.DEV);
 
 export const THORNODE_ENDPOINTS = {
   primary: IS_DEV
     ? DEV_THORNODE_ENDPOINTS.primary
-    : 'https://gateway.liquify.com/chain/thorchain_api',
-  fallback: IS_DEV
-    ? DEV_THORNODE_ENDPOINTS.fallback
-    : 'https://thornode.thorchain.network'
+    : 'https://gateway.liquify.com/chain/thorchain_api'
 };
 
 /**
  * Midgard API endpoints
  */
 export const MIDGARD_ENDPOINTS = {
-  primary: 'https://gateway.liquify.com/chain/thorchain_midgard',
-  fallback: 'https://midgard.thorchain.network'
+  primary: 'https://gateway.liquify.com/chain/thorchain_midgard'
 };
 
 // ============================================
@@ -82,7 +77,7 @@ export async function fetchWithFallback(endpoint, options = {}, endpoints = THOR
     ...fetchOptions
   } = options;
   return requestFromProviders({
-    bases: [endpoints.primary, endpoints.fallback],
+    bases: [endpoints.primary, endpoints.fallback].filter(Boolean),
     path: endpoint,
     responseType: 'response',
     timeoutMs,

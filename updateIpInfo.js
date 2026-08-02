@@ -9,8 +9,7 @@ const __dirname = path.dirname(__filename);
 
 // THORChain API endpoints
 const API_ENDPOINTS = {
-  primary: 'https://gateway.liquify.com/chain/thorchain_api',
-  fallback: 'https://thornode.thorchain.network'
+  primary: 'https://gateway.liquify.com/chain/thorchain_api'
 };
 
 // Helper function to make HTTP requests
@@ -55,34 +54,15 @@ const makeRequest = (url, options = {}) => {
   });
 };
 
-// Fetch data from API with automatic fallback
+// Fetch data from the configured API
 const fetchWithFallback = async (endpoint) => {
   const primaryUrl = `${API_ENDPOINTS.primary}${endpoint}`;
-  const fallbackUrl = `${API_ENDPOINTS.fallback}${endpoint}`;
-  
-  try {
-    console.log(`Trying primary endpoint: ${primaryUrl}`);
-    const response = await makeRequest(primaryUrl);
-    if (response.ok) {
-      return response;
-    }
-    throw new Error(`Primary endpoint failed: ${response.status}`);
-  } catch (error) {
-    console.warn(`Primary endpoint failed, trying fallback: ${error.message}`);
-    
-    try {
-      console.log(`Trying fallback endpoint: ${fallbackUrl}`);
-      const fallbackResponse = await makeRequest(fallbackUrl);
-      if (fallbackResponse.ok) {
-        console.log(`Using fallback endpoint for: ${endpoint}`);
-        return fallbackResponse;
-      }
-      throw new Error(`Fallback endpoint failed: ${fallbackResponse.status}`);
-    } catch (fallbackError) {
-      console.error(`Both endpoints failed for ${endpoint}:`, fallbackError);
-      throw fallbackError;
-    }
+  console.log(`Trying endpoint: ${primaryUrl}`);
+  const response = await makeRequest(primaryUrl);
+  if (!response.ok) {
+    throw new Error(`Endpoint failed: ${response.status}`);
   }
+  return response;
 };
 
 // Fetch IP info from ip-api.com in batches

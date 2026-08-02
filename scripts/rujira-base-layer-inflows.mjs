@@ -30,14 +30,10 @@ const THORNODE_BASES = process.env.THORNODE_BASES
   : [
       THORNODE_BASE,
       "https://thornode-archive.ninerealms.com",
-      "https://thornode.thorchain.network",
     ];
 const RPC_BASES = process.env.RPC_BASES
   ? process.env.RPC_BASES.split(",").map((base) => base.trim()).filter(Boolean)
-  : [
-      "https://gateway.liquify.com/chain/thorchain_rpc",
-      "https://rpc.thorchain.network",
-    ];
+  : ["https://gateway.liquify.com/chain/thorchain_rpc"];
 
 const BASE_LAYER_REVENUE_COLLECTOR =
   "thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr";

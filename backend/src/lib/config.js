@@ -36,12 +36,12 @@ function readList(name, fallback = []) {
 
 const thornodePrimaryUrl = optional(process.env.THORNODE_PRIMARY_URL) || 'https://gateway.liquify.com/chain/thorchain_api';
 const thornodeArchiveUrl = optional(process.env.THORNODE_ARCHIVE_URL) || 'https://thornode-archive.ninerealms.com';
-const thornodeFallbackUrl = optional(process.env.THORNODE_FALLBACK_URL) || 'https://thornode.thorchain.network';
+const thornodeFallbackUrl = '';
 const midgardUrl = optional(process.env.MIDGARD_URL) || 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
-const midgardFallbackUrl = optional(process.env.MIDGARD_FALLBACK_URL) || 'https://midgard.thorchain.network/v2';
+const midgardFallbackUrl = '';
 const rpcWsUrl = optional(process.env.RPC_WS_URL) || 'wss://gateway.liquify.com/chain/thorchain_rpc/websocket';
 const rpcRestUrl = optional(process.env.RPC_REST_URL) || 'https://gateway.liquify.com/chain/thorchain_rpc';
-const rpcFallbackRestUrl = optional(process.env.RPC_FALLBACK_REST_URL) || 'https://rpc.thorchain.network';
+const rpcFallbackRestUrl = '';
 const rpcArchiveRestUrl = optional(process.env.RPC_ARCHIVE_REST_URL) || 'https://rpc.thorchain.liquify.com';
 const duneApiBaseUrl = optional(process.env.DUNE_API_BASE_URL) || 'https://api.dune.com';
 const binanceApiBaseUrl = optional(process.env.BINANCE_API_BASE_URL) || 'https://data-api.binance.vision';
@@ -83,10 +83,7 @@ export const config = Object.freeze({
     rpcFallbackRestUrl
   ]),
   rpcWsUrl,
-  rpcWsUrls: readList('RPC_WS_URLS', [
-    rpcWsUrl,
-    'wss://rpc.thorchain.network/websocket'
-  ]),
+  rpcWsUrls: readList('RPC_WS_URLS', [rpcWsUrl]),
   midgardDelayMs: readInt('MIDGARD_DELAY_MS', 5000),
   rapidSwapsMaxPages: readInt('RAPID_SWAPS_MAX_PAGES', 200),
   rapidSwapsCatchupMaxPages: readInt('RAPID_SWAPS_CATCHUP_MAX_PAGES', 200),

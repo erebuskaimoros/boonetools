@@ -14,16 +14,17 @@ import {
   resolveRapidSwapHint
 } from '../src/lib/rapid-swaps/backend.js';
 
-test('rapid swap backend keeps Liquify Midgard first and avoids known bad fallback URL', () => {
-  assert.equal(MIDGARD_BASES[0], 'https://gateway.liquify.com/chain/thorchain_midgard/v2');
-  assert.equal(MIDGARD_BASES.includes('https://midgard.liquify.com/v2'), false);
-  assert.equal(MIDGARD_BASES.includes('https://midgard.thorchain.network/v2'), true);
+const TEST_MIDGARD_BASES = [
+  MIDGARD_BASES[0],
+  'https://midgard-fallback.example/v2'
+];
+
+test('rapid swap backend uses only Liquify Midgard by default', () => {
+  assert.deepEqual(MIDGARD_BASES, ['https://gateway.liquify.com/chain/thorchain_midgard/v2']);
 });
 
-test('rapid swap backend uses Liquify THORNode first and official fallback', () => {
-  assert.equal(THORNODE_BASES[0], 'https://gateway.liquify.com/chain/thorchain_api');
-  assert.equal(THORNODE_BASES.includes('https://thornode.ninerealms.com'), false);
-  assert.equal(THORNODE_BASES.includes('https://thornode.thorchain.network'), true);
+test('rapid swap backend uses only Liquify THORNode by default', () => {
+  assert.deepEqual(THORNODE_BASES, ['https://gateway.liquify.com/chain/thorchain_api']);
 });
 
 test('rapid swap backend recognizes provider rate limits and daily cooldowns', () => {
@@ -57,8 +58,8 @@ test('rapid swap lifecycle skips a cooling provider and continues to fallback', 
     });
   };
   try {
-    await fetchMidgardActions({ limit: 1 });
-    assert.deepEqual(urls, [`${MIDGARD_BASES[1]}/actions?type=swap&limit=1&offset=0`]);
+    await fetchMidgardActions({ limit: 1, bases: TEST_MIDGARD_BASES });
+    assert.deepEqual(urls, [`${TEST_MIDGARD_BASES[1]}/actions?type=swap&limit=1&offset=0`]);
   } finally {
     configureRapidSwapProviderLifecycle();
     global.fetch = originalFetch;
@@ -206,7 +207,7 @@ test('fetchRapidSwapRows preserves a catch-up cursor when it stops after consecu
 
 test('fetchMidgardActions falls back when a provider ignores nextPageToken paging', async () => {
   const originalFetch = global.fetch;
-  const [primaryBase, ...fallbackBases] = MIDGARD_BASES;
+  const [primaryBase, ...fallbackBases] = TEST_MIDGARD_BASES;
 
   global.fetch = async (url) => {
     if (url === `${primaryBase}/actions?type=swap&limit=5&nextPageToken=cursor-2`) {
@@ -243,7 +244,8 @@ test('fetchMidgardActions falls back when a provider ignores nextPageToken pagin
   try {
     const result = await fetchMidgardActions({
       limit: 5,
-      nextPageToken: 'cursor-2'
+      nextPageToken: 'cursor-2',
+      bases: TEST_MIDGARD_BASES
     });
 
     assert.equal(result.actions.length, 1);
@@ -256,7 +258,7 @@ test('fetchMidgardActions falls back when a provider ignores nextPageToken pagin
 
 test('fetchMidgardActions falls back when a provider ignores txid filtering', async () => {
   const originalFetch = global.fetch;
-  const [primaryBase, ...fallbackBases] = MIDGARD_BASES;
+  const [primaryBase, ...fallbackBases] = TEST_MIDGARD_BASES;
 
   global.fetch = async (url) => {
     if (url === `${primaryBase}/actions?type=swap&limit=5&txid=target-tx`) {
@@ -293,7 +295,8 @@ test('fetchMidgardActions falls back when a provider ignores txid filtering', as
   try {
     const result = await fetchMidgardActions({
       txId: 'target-tx',
-      limit: 5
+      limit: 5,
+      bases: TEST_MIDGARD_BASES
     });
 
     assert.equal(result.actions.length, 1);
@@ -338,7 +341,7 @@ test('fetchMidgardActions can anchor scans before a timestamp without offset pag
 
 test('fetchMidgardActions re-probes primary Midgard first after a fallback success', async () => {
   const originalFetch = global.fetch;
-  const [primaryBase, ...fallbackBases] = MIDGARD_BASES;
+  const [primaryBase, ...fallbackBases] = TEST_MIDGARD_BASES;
   const urls = [];
 
   global.fetch = async (url) => {
@@ -404,13 +407,15 @@ test('fetchMidgardActions re-probes primary Midgard first after a fallback succe
   try {
     const fallbackResult = await fetchMidgardActions({
       txId: 'fallback-first',
-      limit: 5
+      limit: 5,
+      bases: TEST_MIDGARD_BASES
     });
     assert.equal(fallbackResult.actions[0]?.in?.[0]?.txID, 'fallback-first');
 
     const recoveredResult = await fetchMidgardActions({
       txId: 'official-recovered',
-      limit: 5
+      limit: 5,
+      bases: TEST_MIDGARD_BASES
     });
     assert.equal(recoveredResult.actions[0]?.in?.[0]?.txID, 'official-recovered');
     assert.deepEqual(urls, [

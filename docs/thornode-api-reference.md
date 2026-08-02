@@ -2,18 +2,15 @@
 
 ## Overview
 
-THORNode provides a RESTful API for interacting with the THORChain network. BooneTools should prefer Liquify gateway endpoints first, with official `thorchain.network` hosts retained as fallbacks where failover is available.
+THORNode provides a RESTful API for interacting with the THORChain network. BooneTools uses Liquify gateway endpoints by default; additional providers must be explicitly configured after verification.
 
 ## Base URLs
 
 | Service | URL | Description |
 |---------|-----|-------------|
 | THORNode (Primary) | `https://gateway.liquify.com/chain/thorchain_api` | Liquify gateway THORNode API |
-| THORNode (Fallback) | `https://thornode.thorchain.network` | Official THORNode API |
 | Midgard (Primary) | `https://gateway.liquify.com/chain/thorchain_midgard` | Liquify gateway Midgard API |
-| Midgard (Fallback) | `https://midgard.thorchain.network` | Official Midgard API |
 | RPC (Primary) | `https://gateway.liquify.com/chain/thorchain_rpc` | Liquify gateway RPC |
-| RPC (Fallback) | `https://rpc.thorchain.network` | Official RPC |
 
 ## Interactive Documentation
 

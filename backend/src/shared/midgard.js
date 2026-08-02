@@ -83,19 +83,21 @@ export async function fetchMidgard(path, options = {}) {
   });
 }
 
-export async function fetchMidgardBond(bondAddress) {
+export async function fetchMidgardBond(bondAddress, options = {}) {
   const payload = await fetchMidgard(`/bonds/${bondAddress}`, {
+    ...options,
     validateResponse: (_path, data) => !Array.isArray(data?.nodes)
   });
 
   return payload;
 }
 
-export async function fetchMidgardActions(params = {}) {
+export async function fetchMidgardActions(params = {}, options = {}) {
   const query = new URLSearchParams(params).toString();
   const path = query ? `/actions?${query}` : '/actions';
 
   return fetchMidgard(path, {
+    ...options,
     validateResponse: (candidatePath, data) => (
       shouldRetryMidgardResponse(candidatePath, data) || !Array.isArray(data?.actions)
     )

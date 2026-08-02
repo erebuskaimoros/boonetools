@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 
 import {
   MIDGARD_BASE,
-  MIDGARD_FALLBACK_BASE,
   MidgardClient
 } from '../src/lib/api/midgard.js';
+
+const TEST_MIDGARD_FALLBACK_BASE = 'https://midgard-fallback.example/v2';
 
 function createJsonResponse(data, status = 200, statusText = 'OK') {
   return {
@@ -19,7 +20,7 @@ function createJsonResponse(data, status = 200, statusText = 'OK') {
 }
 
 test('getSwapHistory falls back when the primary origin returns empty interval buckets', async () => {
-  const client = new MidgardClient();
+  const client = new MidgardClient({ bases: [MIDGARD_BASE, TEST_MIDGARD_FALLBACK_BASE] });
   const originalFetch = globalThis.fetch;
   const calls = [];
 
@@ -36,7 +37,7 @@ test('getSwapHistory falls back when the primary origin returns empty interval b
       });
     }
 
-    if (url === `${MIDGARD_FALLBACK_BASE}/history/swaps?interval=hour&count=24`) {
+    if (url === `${TEST_MIDGARD_FALLBACK_BASE}/history/swaps?interval=hour&count=24`) {
       return createJsonResponse({
         intervals: [
           {
@@ -61,7 +62,7 @@ test('getSwapHistory falls back when the primary origin returns empty interval b
     assert.equal(data.intervals.length, 1);
     assert.deepEqual(calls, [
       `${MIDGARD_BASE}/history/swaps?interval=hour&count=24`,
-      `${MIDGARD_FALLBACK_BASE}/history/swaps?interval=hour&count=24`
+      `${TEST_MIDGARD_FALLBACK_BASE}/history/swaps?interval=hour&count=24`
     ]);
   } finally {
     globalThis.fetch = originalFetch;
@@ -69,7 +70,7 @@ test('getSwapHistory falls back when the primary origin returns empty interval b
 });
 
 test('getActions falls back when the primary origin ignores a small limit', async () => {
-  const client = new MidgardClient();
+  const client = new MidgardClient({ bases: [MIDGARD_BASE, TEST_MIDGARD_FALLBACK_BASE] });
   const originalFetch = globalThis.fetch;
   const calls = [];
 
@@ -84,7 +85,7 @@ test('getActions falls back when the primary origin ignores a small limit', asyn
       });
     }
 
-    if (url === `${MIDGARD_FALLBACK_BASE}/actions?type=swap&limit=3`) {
+    if (url === `${TEST_MIDGARD_FALLBACK_BASE}/actions?type=swap&limit=3`) {
       return createJsonResponse({
         actions: [{ id: 1 }, { id: 2 }, { id: 3 }],
         count: '3',
@@ -100,7 +101,7 @@ test('getActions falls back when the primary origin ignores a small limit', asyn
     assert.equal(data.actions.length, 3);
     assert.deepEqual(calls, [
       `${MIDGARD_BASE}/actions?type=swap&limit=3`,
-      `${MIDGARD_FALLBACK_BASE}/actions?type=swap&limit=3`
+      `${TEST_MIDGARD_FALLBACK_BASE}/actions?type=swap&limit=3`
     ]);
   } finally {
     globalThis.fetch = originalFetch;

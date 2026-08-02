@@ -7,7 +7,6 @@ import { fileURLToPath } from 'node:url'
 
 const THORNODE_PRIMARY = 'https://gateway.liquify.com/chain/thorchain_api'
 export const THORNODE_ARCHIVE = 'https://thornode-archive.ninerealms.com'
-const THORNODE_FALLBACK = 'https://thornode.thorchain.network'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RUJIRA_BASE_LAYER_DATA_DIR = path.resolve(__dirname, '../docs/rujira-base-layer-fees')
 const RUJIRA_BASE_LAYER_DATA_FILES = new Map([
@@ -97,7 +96,7 @@ function createTreasuryLpProxy() {
   async function fetchJson(path) {
     let lastError = null
 
-    for (const baseUrl of [THORNODE_PRIMARY, THORNODE_FALLBACK]) {
+    for (const baseUrl of [THORNODE_PRIMARY]) {
       const response = await fetch(`${baseUrl}${path}`)
       if (response.ok) {
         return response.json()
@@ -214,14 +213,9 @@ function createTreasuryLpProxy() {
           await proxyThorNodeRequest(
             req,
             res,
-            [THORNODE_PRIMARY, THORNODE_FALLBACK],
+            [THORNODE_PRIMARY],
             '/__thornode_primary'
           )
-          return
-        }
-
-        if (req.method === 'GET' && req.url?.startsWith('/__thornode_fallback')) {
-          await proxyThorNodeRequest(req, res, [THORNODE_FALLBACK], '/__thornode_fallback')
           return
         }
 
@@ -339,11 +333,6 @@ export default defineConfig({
         target: THORNODE_PRIMARY,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/__thornode_primary/, '')
-      },
-      '/__thornode_fallback': {
-        target: THORNODE_FALLBACK,
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/__thornode_fallback/, '')
       },
       '/__thornode_archive': {
         target: THORNODE_ARCHIVE,

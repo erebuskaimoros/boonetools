@@ -35,10 +35,7 @@
     text: '#c8c8c8',
     legend: '#e8e8e8'
   };
-  const RPC_WS_URLS = [
-    'wss://gateway.liquify.com/chain/thorchain_rpc/websocket',
-    'wss://rpc.thorchain.network/websocket'
-  ];
+  const RPC_WS_URLS = ['wss://gateway.liquify.com/chain/thorchain_rpc/websocket'];
   const RECONNECT_BASE_MS = 1_000;
   const RECONNECT_MAX_MS = 30_000;
   const EPOCH_REFRESH_DEBOUNCE_MS = 2_500;

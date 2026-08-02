@@ -22,7 +22,7 @@ Recovered BooneTools production after Rapid Swap ingestion and Bond Tracker regr
 
 ## Discoveries
 
-- `midgard.thorchain.network` and `rpc.thorchain.network/websocket` can return 403 from the Hetzner host, so production needs tested fallback endpoints.
+- The former Chainnet Midgard and RPC WebSocket hosts could return 403 from the Hetzner host, so production needs tested fallback endpoints.
 - Midgard `/bonds/{address}` is not reliable enough for Bond Tracker initialization; THORNode `/thorchain/nodes` bond provider data is the safer current-state source.
 - Bond history should serve cached rows on transient churn-list failures instead of surfacing a 500, because cached churn rows are still useful and usually complete.
 - Liquify Midgard first-page `/actions` scans need `offset=0`; without it the gateway returned `500 Too many hops`.

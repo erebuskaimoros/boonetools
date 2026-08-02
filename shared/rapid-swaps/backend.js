@@ -34,16 +34,14 @@ const configuredMidgardBases = envBases('MIDGARD_URLS');
 export const MIDGARD_BASES = uniqueBases(configuredMidgardBases.length
   ? configuredMidgardBases
   : [
-      readEnv('MIDGARD_URL') || 'https://gateway.liquify.com/chain/thorchain_midgard/v2',
-      readEnv('MIDGARD_FALLBACK_URL') || 'https://midgard.thorchain.network/v2'
+      readEnv('MIDGARD_URL') || 'https://gateway.liquify.com/chain/thorchain_midgard/v2'
     ]);
 
 const configuredThornodeBases = envBases('THORNODE_URLS');
 export const THORNODE_BASES = uniqueBases(configuredThornodeBases.length
   ? configuredThornodeBases
   : [
-      readEnv('THORNODE_PRIMARY_URL') || 'https://gateway.liquify.com/chain/thorchain_api',
-      readEnv('THORNODE_FALLBACK_URL') || 'https://thornode.thorchain.network'
+      readEnv('THORNODE_PRIMARY_URL') || 'https://gateway.liquify.com/chain/thorchain_api'
     ]);
 
 export const ACTION_PAGE_LIMIT = 50;
@@ -252,7 +250,10 @@ export async function fetchMidgardActions(options = {}) {
     params.set('fromTimestamp', String(Math.max(0, Math.trunc(options.fromTimestamp))));
   }
 
-  const result = await fetchWithFallback(MIDGARD_BASES, `/actions?${params.toString()}`, {
+  const bases = Array.isArray(options.bases) && options.bases.length
+    ? uniqueBases(options.bases)
+    : MIDGARD_BASES;
+  const result = await fetchWithFallback(bases, `/actions?${params.toString()}`, {
     startIndex: 0,
     validatePayload: isMidgardPayloadInvalid
   });

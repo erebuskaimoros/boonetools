@@ -3,7 +3,6 @@
  *
  * Provider Strategy:
  * - Liquify Gateway (gateway.liquify.com/chain/thorchain_api): Primary public endpoint
- * - THORChain Network (thornode.thorchain.network): Official fallback endpoint
  */
 
 import { fromBaseUnit } from '../utils/blockchain.js';
@@ -14,8 +13,7 @@ import { resolveCoreSnapshotPath } from './core-snapshot.js';
  * API Provider configurations
  */
 const DEV_THORNODE_BASES = {
-  primary: '/__thornode_primary',
-  fallback: '/__thornode_fallback'
+  primary: '/__thornode_primary'
 };
 
 export const PROVIDERS = {
@@ -27,15 +25,6 @@ export const PROVIDERS = {
     supportsBlockHeight: true,
     updateFrequency: 6000,
     priority: 1
-  },
-  fallback: {
-    name: 'fallback',
-    base: import.meta.env.DEV
-      ? DEV_THORNODE_BASES.fallback
-      : 'https://thornode.thorchain.network',
-    supportsBlockHeight: true,
-    updateFrequency: 30000,
-    priority: 2
   }
 };
 
@@ -45,8 +34,7 @@ export const PROVIDERS = {
 class ThorNodeClient {
   constructor() {
     this.failureCount = {
-      liquify: 0,
-      fallback: 0
+      liquify: 0
     };
     this.maxFailures = 3;
     this.cache = new Map();
@@ -60,7 +48,6 @@ class ThorNodeClient {
 
   resetFailures() {
     this.failureCount.liquify = 0;
-    this.failureCount.fallback = 0;
   }
 
   /**
@@ -118,7 +105,7 @@ class ThorNodeClient {
     }
 
     const pending = requestFromProviders({
-      bases: [PROVIDERS.thorchain.base, PROVIDERS.fallback.base],
+      bases: [PROVIDERS.thorchain.base],
       path: requestPath,
       responseType: parseJson ? 'json' : 'text',
       timeoutMs,
@@ -327,6 +314,5 @@ export { ThorNodeClient };
 
 // Export provider endpoints for direct use if needed
 export const THORNODE_ENDPOINTS = {
-  thorchain: PROVIDERS.thorchain.base,
-  fallback: PROVIDERS.fallback.base
+  thorchain: PROVIDERS.thorchain.base
 };

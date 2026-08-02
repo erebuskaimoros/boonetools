@@ -222,6 +222,6 @@ https://boone.tools/functions/v1
 ## Notes For Future Work
 
 - Prefer Liquify gateway endpoints first for THORNode, Midgard, and RPC traffic.
-- Keep official `*.thorchain.network` endpoints as tested fallbacks where the code already uses failover.
+- Configure additional providers only after verifying their availability and API behavior.
 - Avoid pushing browser traffic directly into Midgard-heavy scan paths when a cached backend route exists.
 - New UI work should follow `DESIGN.md`, which reflects the current terminal-style BooneTools interface.

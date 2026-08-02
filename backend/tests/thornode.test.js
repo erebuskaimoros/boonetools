@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 
 import {
   THORNODE_ARCHIVE,
-  THORNODE_FALLBACK,
   THORNODE_PRIMARY,
   fetchThorchain
 } from '../src/shared/thornode.js';
+
+const TEST_THORNODE_FALLBACK = 'https://thornode-fallback.example';
+const TEST_THORNODE_BASES = [THORNODE_PRIMARY, TEST_THORNODE_FALLBACK];
 
 function createJsonResponse(data, status = 200, statusText = 'OK', headers = {}) {
   return {
@@ -98,7 +100,7 @@ test('fetchThorchain re-probes the primary after serving a fallback response', a
         : createJsonResponse({ rune_price_in_tor: '2' });
     }
 
-    if (url === `${THORNODE_FALLBACK}/thorchain/network`) {
+    if (url === `${TEST_THORNODE_FALLBACK}/thorchain/network`) {
       return createJsonResponse({ rune_price_in_tor: '1' });
     }
 
@@ -106,14 +108,14 @@ test('fetchThorchain re-probes the primary after serving a fallback response', a
   };
 
   try {
-    const fallbackPayload = await fetchThorchain('/thorchain/network');
-    const recoveredPayload = await fetchThorchain('/thorchain/network');
+    const fallbackPayload = await fetchThorchain('/thorchain/network', { bases: TEST_THORNODE_BASES });
+    const recoveredPayload = await fetchThorchain('/thorchain/network', { bases: TEST_THORNODE_BASES });
 
     assert.equal(fallbackPayload.rune_price_in_tor, '1');
     assert.equal(recoveredPayload.rune_price_in_tor, '2');
     assert.deepEqual(calls, [
       `${THORNODE_PRIMARY}/thorchain/network`,
-      `${THORNODE_FALLBACK}/thorchain/network`,
+      `${TEST_THORNODE_FALLBACK}/thorchain/network`,
       `${THORNODE_PRIMARY}/thorchain/network`
     ]);
   } finally {
@@ -130,7 +132,7 @@ test('fetchThorchain falls back when a primary returns malformed HTTP-200 data',
     if (url === `${THORNODE_PRIMARY}/thorchain/nodes`) {
       return createJsonResponse({ nodes: [] });
     }
-    if (url === `${THORNODE_FALLBACK}/thorchain/nodes`) {
+    if (url === `${TEST_THORNODE_FALLBACK}/thorchain/nodes`) {
       return createJsonResponse([]);
     }
     throw new Error(`Unexpected URL: ${url}`);
@@ -138,12 +140,13 @@ test('fetchThorchain falls back when a primary returns malformed HTTP-200 data',
 
   try {
     const payload = await fetchThorchain('/thorchain/nodes', {
+      bases: TEST_THORNODE_BASES,
       validateResponse: (value) => Array.isArray(value) ? null : 'Invalid nodes payload'
     });
     assert.deepEqual(payload, []);
     assert.deepEqual(calls, [
       `${THORNODE_PRIMARY}/thorchain/nodes`,
-      `${THORNODE_FALLBACK}/thorchain/nodes`
+      `${TEST_THORNODE_FALLBACK}/thorchain/nodes`
     ]);
   } finally {
     globalThis.fetch = originalFetch;

@@ -156,7 +156,6 @@ const logo = getAssetLogo(pool.asset);
 
 **Provider Strategy:**
 - **Liquify** (`gateway.liquify.com/chain/thorchain_api`): primary THORNode route
-- **Official THORChain** (`thornode.thorchain.network`): fallback route
 - **Archive** (`thornode-archive.ninerealms.com`): Historical queries with block height
 
 ### Available Methods

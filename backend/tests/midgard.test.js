@@ -8,6 +8,11 @@ import {
   fetchMidgardChurns
 } from '../src/shared/midgard.js';
 
+const TEST_MIDGARD_BASES = [
+  MIDGARD_BASES[0],
+  'https://midgard-fallback.example/v2'
+];
+
 function createResponse({
   body,
   status = 200,
@@ -31,7 +36,7 @@ function createResponse({
 
 test('fetchMidgardBond falls back when the primary bond endpoint fails', async () => {
   const originalFetch = globalThis.fetch;
-  const [primary, fallback] = MIDGARD_BASES;
+  const [primary, fallback] = TEST_MIDGARD_BASES;
   const calls = [];
 
   globalThis.fetch = async (url) => {
@@ -57,7 +62,7 @@ test('fetchMidgardBond falls back when the primary bond endpoint fails', async (
   };
 
   try {
-    const payload = await fetchMidgardBond('thor1test');
+    const payload = await fetchMidgardBond('thor1test', { bases: TEST_MIDGARD_BASES });
     assert.equal(payload.nodes[0].address, 'thor1node');
     assert.deepEqual(calls, [
       `${primary}/bonds/thor1test`,
@@ -70,7 +75,7 @@ test('fetchMidgardBond falls back when the primary bond endpoint fails', async (
 
 test('fetchMidgardActions falls back when the primary returns invalid JSON', async () => {
   const originalFetch = globalThis.fetch;
-  const [primary, fallback] = MIDGARD_BASES;
+  const [primary, fallback] = TEST_MIDGARD_BASES;
   const calls = [];
 
   globalThis.fetch = async (url) => {
@@ -100,7 +105,7 @@ test('fetchMidgardActions falls back when the primary returns invalid JSON', asy
       type: 'bond',
       limit: 50,
       offset: 0
-    });
+    }, { bases: TEST_MIDGARD_BASES });
 
     assert.equal(payload.actions.length, 1);
     assert.deepEqual(calls, [
@@ -151,7 +156,7 @@ test('fetchMidgardActions stops when the primary is rate-limited', async () => {
 
 test('fetchMidgardChurns falls back when the primary returns malformed JSON', async () => {
   const originalFetch = globalThis.fetch;
-  const [primary, fallback] = MIDGARD_BASES;
+  const [primary, fallback] = TEST_MIDGARD_BASES;
   const calls = [];
 
   globalThis.fetch = async (url) => {
@@ -174,7 +179,7 @@ test('fetchMidgardChurns falls back when the primary returns malformed JSON', as
   };
 
   try {
-    const payload = await fetchMidgardChurns();
+    const payload = await fetchMidgardChurns({ bases: TEST_MIDGARD_BASES });
     assert.equal(payload.length, 1);
     assert.deepEqual(calls, [
       `${primary}/churns`,
