@@ -53,6 +53,14 @@ canonical `block_results` supplies amounts and transaction-local linkage. This
 avoids both the ignored Cosmos REST offset that repeated the first page and the
 blind spot in Midgard action address filters.
 
+Every ingestion lane begins at the verified Mimir-zero activation height
+`27181679` (`2026-07-27T14:04:45Z`). Candidate enqueueing, block scanning, and
+coverage counts enforce the same boundary as the public read model. Collector
+discovery and candidate block retrieval use separate ordinary-failure RPC
+sub-lanes, so a search timeout does not suppress known-block processing; an
+open breaker stops the current batch without falsely marking every unattempted
+row as failed.
+
 Asset fees use historical bucket prices: RUNE history for RUNE, parity for
 recognized stablecoins, and Midgard depth history for other denoms. If a FIN
 fee denom has no direct historical pool price, the same transaction's FIN
@@ -114,7 +122,9 @@ collector-allocation changes can all move the same series.
 - Migrations: `backend/migrations/035_wasm_arb_economics.sql` and
   `backend/migrations/036_wasm_arb_economics_accounting.sql`, plus
   `backend/migrations/037_wasm_arb_monitoring_series.sql` and
-  `backend/migrations/038_provider_lanes_and_market_snapshots.sql`
+  `backend/migrations/038_provider_lanes_and_market_snapshots.sql`, with
+  `backend/migrations/040_wasm_post_change_boundary.sql` removing retired
+  pre-change work and resetting range-relative collector pagination
 - Ingestion: `backend/src/shared/wasm-arb-economics-ingestion.js`
 - Read model: `backend/src/shared/wasm-arb-economics.js`
 - Schedulers: `backend/src/jobs/wasm-arb-economics-scheduler.js`,

@@ -75,4 +75,6 @@ test('read model publishes a bounded post-zero monitoring series and retains lat
     /event_key like 'wasm-arb-rujira-fee:v2:%'\s+and \(block_time >=/s
   );
   assert.match(queries[6].sql, /fetched_version < 2/);
+  assert.match(queries[6].sql, /height >= \$1/);
+  assert.deepEqual(queries[6].params, [27181679]);
 });

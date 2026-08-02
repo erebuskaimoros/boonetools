@@ -200,8 +200,8 @@ export const config = Object.freeze({
   tcFeeDashRequestDelayMs: readInt('TC_FEE_DASH_REQUEST_DELAY_MS', 1000),
   tcFeeDashRateLimitCooldownMs: readInt('TC_FEE_DASH_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000,
   wasmArbEconomicsStartTime: optional(process.env.WASM_ARB_ECONOMICS_START_TIME)
-    || '2026-07-13T00:00:00Z',
-  wasmArbEconomicsStartHeight: readInt('WASM_ARB_ECONOMICS_START_HEIGHT', 26950000),
+    || '2026-07-27T14:04:45Z',
+  wasmArbEconomicsStartHeight: readInt('WASM_ARB_ECONOMICS_START_HEIGHT', 27181679),
   wasmArbEconomicsActionBackfillPages: readInt('WASM_ARB_ECONOMICS_ACTION_BACKFILL_PAGES', 12),
   wasmArbEconomicsActionHeadPages: readInt('WASM_ARB_ECONOMICS_ACTION_HEAD_PAGES', 6),
   wasmArbEconomicsTransferBackfillPages: readInt('WASM_ARB_ECONOMICS_TRANSFER_BACKFILL_PAGES', 12),
@@ -210,7 +210,7 @@ export const config = Object.freeze({
   wasmArbEconomicsBlockMaxHeights: readInt('WASM_ARB_ECONOMICS_BLOCK_MAX_HEIGHTS', 80),
   wasmArbEconomicsOracleStartHeight: readInt(
     'WASM_ARB_ECONOMICS_ORACLE_START_HEIGHT',
-    27164000
+    27181679
   ),
   wasmArbEconomicsOracleStrideBlocks: readInt(
     'WASM_ARB_ECONOMICS_ORACLE_STRIDE_BLOCKS',

@@ -103,6 +103,14 @@ same-transaction execution rate, and samples pool/oracle prices at matching
 heights. Independent source flags keep cash-flow and price-quality conclusions
 provisional until their backfills are complete.
 
+All Wasm ingestion and coverage begins at the verified Mimir-zero activation,
+height `27181679` (`2026-07-27T14:04:45Z`). Fee collector discovery and
+candidate-block retrieval have separate ordinary-failure RPC cooldown scopes;
+confirmed gateway 429s remain global. Migration
+`040_wasm_post_change_boundary.sql` removes legacy pre-change queue/data rows
+and resets the `tx_search` backfill cursor because its page number is relative
+to the requested height interval.
+
 All backend volume producers follow
 [`volume-accounting.md`](./volume-accounting.md): aggregates and fee-rate
 denominators use executed-leg volume, while intentional route-notional display
@@ -303,13 +311,15 @@ timestamp, verifies every planned bucket, and refreshes the public read model.
 It has no timer and does not run automatically during future deploys.
 
 Migrations `035_wasm_arb_economics.sql`,
-`036_wasm_arb_economics_accounting.sql`, and
-`037_wasm_arb_monitoring_series.sql` own the Wasm dashboard. Migration 036
+`036_wasm_arb_economics_accounting.sql`,
+`037_wasm_arb_monitoring_series.sql`, and
+`040_wasm_post_change_boundary.sql` own the Wasm dashboard. Migration 036
 adds FIN market metadata, spread interventions, and same-height oracle samples;
 it clears only derived action/block/fee caches and invalidates prior dashboard
 snapshots so the corrected v2 accounting cannot mix old and new data. Migration
 037 invalidates the intervention-comparison snapshot before publishing the
-bounded v3 monitoring contract.
+bounded v3 monitoring contract. Migration 040 aligns storage, queueing, and
+coverage with the post-change-only contract.
 
 Rapid-Swap websocket ingestion is disabled by default in the shared
 `rapid-swap-listener.service`, while Node-Vote websocket ingestion remains

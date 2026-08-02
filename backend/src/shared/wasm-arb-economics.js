@@ -284,7 +284,9 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
             ) as latest_fetched_height,
             max(fetched_at) filter (where fetched_version >= 2) as latest_fetched_at
      from wasm_arb_economics_blocks
-     where scan_version >= 2`
+     where scan_version >= 2
+       and height >= $1`,
+    [trackingRegime?.activationHeight || config.wasmArbEconomicsStartHeight]
   );
   const jobResult = await client.query(
     `select finished_at, stats_json

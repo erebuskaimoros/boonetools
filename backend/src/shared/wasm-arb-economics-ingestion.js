@@ -23,6 +23,8 @@ const RUNE_BASE = 1e8;
 const ACTION_PAGE_LIMIT = 50;
 const COLLECTOR_TX_PAGE_LIMIT = 100;
 const ACTION_OVERLAP_BLOCKS = 1_200;
+const FEE_DISCOVERY_COOLDOWN_SCOPE = 'wasm-fee-discovery';
+const FEE_BLOCK_COOLDOWN_SCOPE = 'wasm-fee-blocks';
 const NETWORK_INTERVAL_LIMIT = 400;
 const WASM_THORNODE_REQUEST_TIMEOUT_MS = 15_000;
 const WASM_ARB_ACCOUNTING_VERSION = 2;
@@ -517,7 +519,7 @@ async function enqueueBlocks(client, candidates) {
   const grouped = new Map();
   for (const candidate of candidates || []) {
     const height = Math.trunc(safeNumber(candidate?.height));
-    if (height <= 0) continue;
+    if (height < config.wasmArbEconomicsStartHeight) continue;
     const existing = grouped.get(height) || {
       height,
       block_time: candidate.blockTime || null,
@@ -756,7 +758,8 @@ async function fetchCollectorSearchPage(client, params, options = {}) {
   }, {
     timeoutMs: 30_000,
     cooldownClient: client,
-    sharedCooldown: true
+    sharedCooldown: true,
+    cooldownScope: FEE_DISCOVERY_COOLDOWN_SCOPE
   });
   if (payload?.error) {
     throw new Error(payload.error?.data || payload.error?.message || `${params.kind}_search failed`);
@@ -1139,11 +1142,17 @@ export async function scanCandidateBlocks(client, options = {}) {
      from wasm_arb_economics_blocks
      where scan_version = $2
        and fetched_version < $2
+       and height >= $3
        and next_retry_at <= now()
      order by height asc
      limit $1`,
-    [Math.max(1, config.wasmArbEconomicsBlockMaxHeights), WASM_ARB_ACCOUNTING_VERSION]
+    [
+      Math.max(1, config.wasmArbEconomicsBlockMaxHeights),
+      WASM_ARB_ACCOUNTING_VERSION,
+      config.wasmArbEconomicsStartHeight
+    ]
   );
+  let attemptedBlocks = 0;
   let eventCount = 0;
   let failures = 0;
 
@@ -1153,14 +1162,22 @@ export async function scanCandidateBlocks(client, options = {}) {
       const payload = await fetchRpc(
         '/block_results',
         { height: block.height },
-        { cooldownClient: client, sharedCooldown: true }
+        {
+          cooldownClient: client,
+          sharedCooldown: true,
+          cooldownScope: FEE_BLOCK_COOLDOWN_SCOPE
+        }
       );
       let blockTime = block.block_time;
       if (!Number.isFinite(Date.parse(blockTime || ''))) {
         const blockPayload = await (options.fetchBlock || fetchRpc)(
           '/block',
           { height: block.height },
-          { cooldownClient: client, sharedCooldown: true }
+          {
+            cooldownClient: client,
+            sharedCooldown: true,
+            cooldownScope: FEE_BLOCK_COOLDOWN_SCOPE
+          }
         );
         blockTime = blockPayload?.result?.block?.header?.time
           || blockPayload?.block?.header?.time
@@ -1197,7 +1214,10 @@ export async function scanCandidateBlocks(client, options = {}) {
           WASM_ARB_ACCOUNTING_VERSION
         ]
       );
+      attemptedBlocks += 1;
     } catch (error) {
+      if (error?.skipProvider) break;
+      attemptedBlocks += 1;
       failures += 1;
       const attempts = Math.max(1, safeNumber(block.attempts) + 1);
       const retrySeconds = Math.min(3600, 30 * 2 ** Math.min(7, attempts - 1));
@@ -1219,7 +1239,12 @@ export async function scanCandidateBlocks(client, options = {}) {
       await sleep(config.wasmArbEconomicsRequestDelayMs);
     }
   }
-  return { blocks: blocks.length, events: eventCount, failures, finContracts: finContracts.length };
+  return {
+    blocks: attemptedBlocks,
+    events: eventCount,
+    failures,
+    finContracts: finContracts.length
+  };
 }
 
 async function fetchPriceIntervals(poolAsset, from, to, options = {}) {
