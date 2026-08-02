@@ -15,7 +15,7 @@ Added a durable Midgard live-head catch-up cursor so App Layer generated-fee lan
 - Exposed head catch-up progress in the Base Layer fee payload and documented the new provider behavior.
 - Verified that Liquify's REST RPC serves current status and historical THORChain blocks.
 - Confirmed the earlier `rpc.thorchain.network` failure was a deprecated fallback transport failure with a 60-second local circuit-breaker cooldown, not a Liquify HTTP 429 rate limit.
-- Corrected the deploy timer gate to accept an active long-running oneshot target when an `OnUnitActiveSec` timer temporarily reports no future trigger.
+- Corrected the deploy timer gate to preserve its normal settle window, then accept an active long-running oneshot target when an `OnUnitActiveSec` timer temporarily reports no future trigger.
 - Ran 226 backend tests, 178 frontend tests, repository checks, Svelte diagnostics, and the production frontend build.
 - Deployed the resulting production release and verified its Liquify-backed services and read models.
 

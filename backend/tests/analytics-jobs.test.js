@@ -239,6 +239,7 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(remoteDeployScript, /local timer_state_wait_seconds=90/);
   assert.match(remoteDeployScript, /systemctl show "\$timer" --property=Triggers --value/);
   assert.match(remoteDeployScript, /target_state" == activating/);
+  assert.match(remoteDeployScript, /still \$target_state after the settle window/);
   assert.match(remoteDeployScript, /next trigger will be scheduled after the target exits/);
   assert.match(remoteDeployScript, /refresh_status_models_after_long_primes/);
   assert.match(remoteDeployScript, /refresh_core_and_app_layer_models/);

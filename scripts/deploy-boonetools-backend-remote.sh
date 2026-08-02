@@ -405,23 +405,22 @@ start_and_verify_timers() {
         && ! grep -Eq '^[[:space:]]*n/a[[:space:]]' <<<"$timer_row"; then
         break
       fi
-      # OnUnitActiveSec timers legitimately report NEXT=n/a while their oneshot
-      # target is still running. The next trigger is scheduled when that target
-      # exits, so a live target is a healthy timer state after a successful prime.
-      target_unit="$(systemctl show "$timer" --property=Triggers --value | awk '{ print $1 }')"
-      if [[ -n "$target_unit" ]]; then
-        target_state="$(systemctl show "$target_unit" --property=ActiveState --value)"
-        if [[ "$target_state" == active || "$target_state" == activating || "$target_state" == reloading ]]; then
-          log "$timer target $target_unit is $target_state; its next trigger will be scheduled after the target exits"
-          break
-        fi
-      fi
       sleep 1
     done
     [[ -n "$timer_row" ]] || die "$timer has no timer state"
-    if grep -Eq '^[[:space:]]*n/a[[:space:]]' <<<"$timer_row" \
-      && [[ "$target_state" != active && "$target_state" != activating && "$target_state" != reloading ]]; then
-      die "$timer has no future trigger after waiting ${timer_state_wait_seconds} seconds"
+    if grep -Eq '^[[:space:]]*n/a[[:space:]]' <<<"$timer_row"; then
+      # Preserve the full settle window so ordinary timer jobs finish before the
+      # performance gate. A legitimately long OnUnitActiveSec oneshot may still
+      # report NEXT=n/a; its next trigger is scheduled when that target exits.
+      target_unit="$(systemctl show "$timer" --property=Triggers --value | awk '{ print $1 }')"
+      if [[ -n "$target_unit" ]]; then
+        target_state="$(systemctl show "$target_unit" --property=ActiveState --value)"
+      fi
+      if [[ "$target_state" == active || "$target_state" == activating || "$target_state" == reloading ]]; then
+        log "$timer target $target_unit is still $target_state after the settle window; its next trigger will be scheduled after the target exits"
+      else
+        die "$timer has no future trigger after waiting ${timer_state_wait_seconds} seconds"
+      fi
     fi
   done
 }
