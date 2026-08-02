@@ -71,6 +71,7 @@ test('Wasm production lanes are independently registered, timed, and primed', as
   assert.match(registry, /'wasm-arb-economics-oracle': runWasmArbEconomicsOracle/);
   assert.match(activity, /wasm-arb-economics-scheduler/);
   assert.match(fees, /wasm-arb-economics-fees/);
+  assert.match(fees, /TimeoutStartSec=10min/);
   assert.match(oracle, /wasm-arb-economics-oracle/);
   assert.match(deploy, /boonetools-wasm-arb-economics\.service[\s\S]*boonetools-wasm-arb-economics-fees\.service[\s\S]*boonetools-wasm-arb-economics-oracle\.service/);
 });

@@ -76,23 +76,27 @@ export async function ensureThorchainMarketSnapshot(client, height, options = {}
 
   const fetchThor = options.fetchThorchain || fetchThorchain;
   const fetchRpc = options.fetchRpc || fetchThorchainRpc;
+  // The three provider calls run concurrently. Cooldown bookkeeping therefore
+  // uses the shared pool by default instead of issuing overlapping queries on
+  // the advisory-lock client.
+  const cooldownClient = options.cooldownClient;
   const [poolsPayload, oraclePayload, blockPayload] = await Promise.all([
     fetchThor(`/thorchain/pools?height=${targetHeight}`, {
       historical: true,
       timeoutMs: options.timeoutMs || 30_000,
-      cooldownClient: client,
+      cooldownClient,
       sharedCooldown: true
     }),
     fetchThor(`/thorchain/oracle/prices?height=${targetHeight}`, {
       historical: true,
       timeoutMs: options.timeoutMs || 30_000,
-      cooldownClient: client,
+      cooldownClient,
       sharedCooldown: true
     }),
     (options.fetchBlock || fetchRpc)(
       '/block',
       { height: targetHeight },
-      { cooldownClient: client, sharedCooldown: true }
+      { cooldownClient, sharedCooldown: true }
     )
   ]);
   const pools = Array.isArray(poolsPayload) ? poolsPayload : poolsPayload?.pools || [];

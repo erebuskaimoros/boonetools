@@ -275,6 +275,25 @@ test('recent repair planning floors bounds and replaces degraded or missing buck
   assert.match(sql, /kline-close-unaligned/);
 });
 
+test('recent repair default window excludes the partial RPC-retention boundary bucket', async () => {
+  let params;
+  const client = {
+    query: async (_statement, values) => {
+      params = values;
+      return { rows: [] };
+    }
+  };
+  await loadPoolDislocationRecentGapRepairPlan(client, {
+    endAt: '2026-07-29T12:17:42Z',
+    lookbackHours: 1,
+    maxBuckets: 1
+  });
+  assert.deepEqual(params.slice(0, 2), [
+    '2026-07-29T11:20:00.000Z',
+    '2026-07-29T12:15:00.000Z'
+  ]);
+});
+
 test('bulk upsert gives scheduled observations precedence over historical rows', async () => {
   let sql = '';
   let payload;

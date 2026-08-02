@@ -304,7 +304,7 @@ export async function fetchHistoricalPoolDislocationState(height, options = {}) 
       ...config.poolDislocationThornodeUrls.slice(1)
     ].filter(Boolean),
     historical: true,
-    cooldownClient: options.client,
+    cooldownClient: options.cooldownClient,
     sharedCooldown: true,
     timeoutMs: options.thornodeTimeoutMs || 12_000
   }));
@@ -391,7 +391,9 @@ export async function loadPoolDislocationRecentGapRepairPlan(client, options = {
     options.lookbackHours ?? config.poolDislocationRepairLookbackHours
   ));
   const startAt = floorToFiveMinuteBucket(
-    options.startAt || new Date(Date.parse(endAt) - (lookbackHours * 60 * 60 * 1000))
+    options.startAt || new Date(
+      Date.parse(endAt) - (lookbackHours * 60 * 60 * 1000) + FIVE_MINUTES_MS
+    )
   );
   const windowBuckets = buildPoolDislocationBackfillBuckets(startAt, endAt);
   if (!windowBuckets.length) {
