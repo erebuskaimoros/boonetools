@@ -11,6 +11,7 @@ import {
   loadPoolDislocationBackfillPlan,
   loadPoolDislocationRecentGapRepairPlan,
   normalizeBinanceKlineCloses,
+  poolDislocationHistoricalRpcUrls,
   retryPoolDislocationBackfillOperation,
   resolvePoolDislocationBlockAnchors
 } from '../src/shared/pool-dislocation-backfill.js';
@@ -29,6 +30,15 @@ test('backfill buckets are exact five-minute UTC points with an exclusive end', 
     () => buildPoolDislocationBackfillBuckets('2026-07-22T12:01:00Z', '2026-07-22T12:15:00Z'),
     /exact five-minute/
   );
+});
+
+test('historical block anchors prefer the Liquify archive RPC', () => {
+  const urls = poolDislocationHistoricalRpcUrls();
+  assert.match(urls[0], /rpc\.thorchain\.liquify\.com/);
+  assert.ok(urls.some((url) => url.includes('/chain/thorchain_rpc')));
+  assert.deepEqual(poolDislocationHistoricalRpcUrls({ rpcUrls: ['https://rpc.test'] }), [
+    'https://rpc.test'
+  ]);
 });
 
 test('Binance five-minute closes map to the following exact boundary', () => {

@@ -150,11 +150,15 @@ export function parsePoolDislocationRpcBlock(payload = {}) {
   return result;
 }
 
+export function poolDislocationHistoricalRpcUrls(options = {}) {
+  return options.rpcUrls || [config.rpcArchiveRestUrl, ...config.rpcRestUrls].filter(Boolean);
+}
+
 async function defaultFetchRpcStatus(options = {}) {
   return fetchThorchainRpc('/status', {}, {
     cooldownClient: options.client,
     sharedCooldown: true,
-    rpcUrls: options.rpcUrls || config.rpcRestUrls,
+    rpcUrls: poolDislocationHistoricalRpcUrls(options),
     timeoutMs: options.timeoutMs
   });
 }
@@ -163,7 +167,7 @@ async function defaultFetchRpcBlock(height, options = {}) {
   return fetchThorchainRpc('/block', { height }, {
     cooldownClient: options.client,
     sharedCooldown: true,
-    rpcUrls: options.rpcUrls || config.rpcRestUrls,
+    rpcUrls: poolDislocationHistoricalRpcUrls(options),
     timeoutMs: options.timeoutMs
   });
 }
@@ -503,9 +507,26 @@ export async function runPoolDislocationHistoricalBackfill(client, options = {})
   }
 
   const [anchors, binanceHistory] = await Promise.all([
-    (options.resolveAnchors || resolvePoolDislocationBlockAnchors)(
-      plan.pendingBuckets,
-      { ...options, client }
+    retryPoolDislocationBackfillOperation(
+      () => (options.resolveAnchors || resolvePoolDislocationBlockAnchors)(
+        plan.pendingBuckets,
+        { ...options, client }
+      ),
+      {
+        attempts: options.retryAttempts,
+        baseDelayMs: options.retryBaseDelayMs,
+        maxDelayMs: options.retryMaxDelayMs,
+        sleep: options.retrySleep,
+        now: options.now,
+        onRetry: ({ attempt, nextAttempt, attempts, delayMs, error }) => report({
+          stage: 'retrying_rpc_anchors',
+          attempt,
+          next_attempt: nextAttempt,
+          max_attempts: attempts,
+          delay_ms: delayMs,
+          error: String(error?.message || error)
+        })
+      }
     ),
     (options.loadBinanceHistory || loadBinanceBackfillHistory)(plan.pendingBuckets, options)
   ]);

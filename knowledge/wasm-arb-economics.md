@@ -69,7 +69,9 @@ Historical pool and Oracle payloads are acquired through the canonical
 `thorchain_market_snapshots` cache. Pool Dislocation backfill and the Wasm
 Oracle lane reuse a snapshot when they request the same height, but keep their
 own derivation formulas and output tables. Raw snapshots retain 30 days; the
-derived Wasm monitoring series keeps the longer economics retention.
+derived Wasm monitoring series keeps the longer economics retention. Historical
+block anchors use Liquify's archive RPC before the live gateway and retry
+transient anchor lookups through the shared cooldown policy.
 
 Liquify cooldowns are hierarchical. Ordinary transport/5xx failures block only
 the affected Midgard, RPC, or THORNode service path, endpoint-specific 4xx
