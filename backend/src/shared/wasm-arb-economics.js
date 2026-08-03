@@ -306,6 +306,18 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
     && Boolean(sync['collector-block-search-backfill']?.complete)
     && pendingBlocks === 0;
   const oracleBackfillComplete = Boolean(sync['oracle:backfill']?.complete);
+  const oracleGaps = Array.isArray(sync['oracle:backfill']?.stats?.gaps)
+    ? sync['oracle:backfill'].stats.gaps
+    : [];
+  const oracleGapBuckets = new Set(oracleGaps.flatMap((gap) => {
+    const seconds = Math.floor(Date.parse(String(gap?.block_time || '')) / 1000);
+    if (!Number.isFinite(seconds)) return [];
+    return [new Date(Math.floor(seconds / BUCKET_SECONDS) * BUCKET_SECONDS * 1000).toISOString()];
+  }));
+  const hasUnknownOracleGapTime = oracleGaps.some((gap) => (
+    !Number.isFinite(Date.parse(String(gap?.block_time || '')))
+  ));
+  const oracleCoverageComplete = oracleBackfillComplete && oracleGaps.length === 0;
 
   const sourceRows = networkResult.rows.map((network) => {
     const bucketStart = iso(network.bucket_start);
@@ -378,6 +390,8 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
       actionsComplete: actionBackfillComplete,
       feesComplete: feeBackfillComplete,
       oracleComplete: oracleBackfillComplete
+        && !hasUnknownOracleGapTime
+        && !oracleGapBuckets.has(bucketStart)
     };
   });
   const compacted = compactWasmArbMonitoringRows(sourceRows, {
@@ -433,6 +447,9 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
           actionBackfillComplete,
           feeBackfillComplete,
           oracleBackfillComplete,
+          oracleCoverageComplete,
+          oracleGapCount: oracleGaps.length,
+          oracleGaps,
           collectorTxSearchComplete: Boolean(sync['collector-tx-search-backfill']?.complete),
           collectorBlockSearchComplete: Boolean(
             sync['collector-block-search-backfill']?.complete
@@ -476,7 +493,9 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
       pending_blocks: pendingBlocks,
       action_backfill_complete: actionBackfillComplete,
       fee_backfill_complete: feeBackfillComplete,
-      oracle_backfill_complete: oracleBackfillComplete
+      oracle_backfill_complete: oracleBackfillComplete,
+      oracle_coverage_complete: oracleCoverageComplete,
+      oracle_gap_count: oracleGaps.length
     }
   };
 }

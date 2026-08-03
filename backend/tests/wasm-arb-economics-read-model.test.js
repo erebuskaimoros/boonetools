@@ -39,7 +39,19 @@ test('read model publishes a bounded post-zero monitoring series and retains lat
     { rows: [] },
     { rows: [] },
     { rows: [] },
-    { rows: [] },
+    { rows: [{
+      sync_key: 'oracle:backfill',
+      cursor_value: '27276350',
+      complete: true,
+      stats_json: {
+        gaps: [{
+          height: 27276350,
+          block_time: '2026-08-03T12:00:00Z',
+          reason: 'empty-oracle-prices'
+        }]
+      },
+      updated_at: '2026-08-03T12:05:00Z'
+    }] },
     { rows: [{}] },
     { rows: [] }
   ];
@@ -61,6 +73,9 @@ test('read model publishes a bounded post-zero monitoring series and retains lat
   assert.equal(result.payload.meta.seriesMode, 'post-mimir-zero');
   assert.equal(result.payload.meta.currentSpreadRegime.activationHeight, 27184679);
   assert.equal(result.payload.meta.currentIntervention.activationHeight, 27184679);
+  assert.equal(result.payload.meta.coverage.oracleBackfillComplete, true);
+  assert.equal(result.payload.meta.coverage.oracleCoverageComplete, false);
+  assert.equal(result.payload.meta.coverage.oracleGapCount, 1);
   assert.deepEqual(
     result.payload.meta.interventions.map((row) => row.changeKind),
     ['mimir', 'spread']

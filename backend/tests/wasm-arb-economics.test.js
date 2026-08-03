@@ -6,15 +6,19 @@ import { config } from '../src/lib/config.js';
 import {
   buildWasmArbOracleTrackingRows,
   deriveFinExecutionPriceUsd,
+  ingestOracleTracking,
+  isUnsupportedPoolPriceError,
   normalizeCollectorBlockSearchCandidates,
   normalizeCollectorTxSearchCandidates,
   normalizeCollectorTransferCandidates,
   normalizeWasmArbAction,
   normalizeWasmArbNetworkBucket,
   parseWasmArbRujiraFeeEvents,
+  priceRujiraFeeEvents,
   RUJIRA_TRADE_COLLECTOR,
   scanCandidateBlocks,
   scanCollectorSearchPages,
+  wasmRuntimeOptions,
   WASM_ARB_CONTRACT
 } from '../src/shared/wasm-arb-economics-ingestion.js';
 
@@ -24,6 +28,8 @@ test('Wasm monitoring ingestion starts at the Mimir-zero activation', () => {
   assert.equal(config.wasmArbEconomicsStartTime, '2026-07-27T14:04:45Z');
   assert.equal(config.wasmArbEconomicsStartHeight, 27181679);
   assert.equal(config.wasmArbEconomicsOracleStartHeight, 27181679);
+  assert.equal(config.wasmArbEconomicsOracleGapRetryAttempts, 3);
+  assert.equal(config.wasmArbEconomicsMissingPoolCacheMs, 24 * 60 * 60 * 1000);
 });
 
 function event(type, attributes) {
@@ -503,6 +509,164 @@ test('candidate block scanning stops without poisoning the batch on an open brea
   assert.equal(updates[0][0], 27181680);
   assert.equal(result.blocks, 1);
   assert.equal(result.failures, 1);
+});
+
+test('Wasm lanes isolate THORNode head cooldown scopes', async () => {
+  const calls = [];
+  const client = { query() {} };
+  const runtime = await wasmRuntimeOptions(client, {
+    async fetchThorchain(path, options) {
+      calls.push({ path, options });
+      return [{ thorchain: '27276380' }];
+    }
+  }, 'oracle');
+
+  assert.equal(runtime.latestHeight, 27276380);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, '/thorchain/lastblock');
+  assert.equal(calls[0].options.cooldownClient, client);
+  assert.equal(calls[0].options.sharedCooldown, true);
+  assert.equal(calls[0].options.cooldownScope, 'wasm-oracle-head');
+});
+
+function oracleStateClient(state) {
+  const writes = [];
+  return {
+    writes,
+    async query(sql, params) {
+      if (sql.includes('from wasm_arb_economics_sync_state')) return { rows: [state] };
+      if (sql.includes('insert into wasm_arb_economics_sync_state')) {
+        writes.push(params);
+        return { rowCount: 1, rows: [] };
+      }
+      if (sql.includes('wasm_arb_economics_oracle_samples')) {
+        return { rowCount: 1, rows: [] };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    }
+  };
+}
+
+test('Oracle ingestion retries an empty same-height Oracle response without advancing', async () => {
+  const height = config.wasmArbEconomicsOracleStartHeight;
+  const client = oracleStateClient({
+    sync_key: 'oracle:backfill',
+    cursor_value: String(height - config.wasmArbEconomicsOracleStrideBlocks),
+    complete: false,
+    stats_json: { errors: [`${height}: No comparable pool/oracle rows at height ${height}`] }
+  });
+  const cleared = [];
+  const result = await ingestOracleTracking(client, {
+    latestHeight: height,
+    async fetchOracleTrackingSample() {
+      return {
+        height,
+        blockTime: '2026-08-03T12:00:00Z',
+        pools: [{ asset: 'BTC.BTC', status: 'Available' }],
+        oraclePrices: []
+      };
+    },
+    async clearOracleGapSnapshot(target) {
+      cleared.push(target);
+    }
+  });
+
+  assert.equal(result.cursor, height - config.wasmArbEconomicsOracleStrideBlocks);
+  assert.equal(result.complete, false);
+  assert.deepEqual(cleared, [height]);
+  assert.equal(client.writes[0][4].gap_attempts[String(height)], 2);
+  assert.deepEqual(client.writes[0][4].gaps, []);
+});
+
+test('Oracle ingestion records and skips only a confirmed empty-Oracle height', async () => {
+  const height = config.wasmArbEconomicsOracleStartHeight;
+  const client = oracleStateClient({
+    sync_key: 'oracle:backfill',
+    cursor_value: String(height - config.wasmArbEconomicsOracleStrideBlocks),
+    complete: false,
+    stats_json: { gap_attempts: { [String(height)]: 2 } }
+  });
+  const result = await ingestOracleTracking(client, {
+    latestHeight: height + 1,
+    async fetchOracleTrackingSample(targetHeight) {
+      if (targetHeight === height + 1) {
+        return {
+          height: targetHeight,
+          blockTime: '2026-08-03T12:00:06Z',
+          pools: [{
+            asset: 'BTC.BTC',
+            status: 'Available',
+            balance_rune: '10000000000',
+            balance_asset: '100000000'
+          }],
+          oraclePrices: [
+            { symbol: 'RUNE', price: '2' },
+            { symbol: 'BTC', price: '200' }
+          ]
+        };
+      }
+      return {
+        height,
+        blockTime: '2026-08-03T12:00:00Z',
+        pools: [{ asset: 'BTC.BTC', status: 'Available' }],
+        oraclePrices: []
+      };
+    }
+  });
+
+  assert.equal(result.cursor, height);
+  assert.equal(result.complete, true);
+  assert.equal(result.gapCount, 1);
+  assert.equal(result.headObservations, 1);
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(client.writes[0][4].gaps[0], {
+    height,
+    block_time: '2026-08-03T12:00:00Z',
+    reason: 'empty-oracle-prices',
+    attempts: 3,
+    confirmed_at: client.writes[0][4].gaps[0].confirmed_at
+  });
+});
+
+test('fee pricing negative-caches deterministic missing Midgard pools', async () => {
+  const cached = [];
+  const client = {
+    async query(sql) {
+      if (sql.includes('from wasm_arb_economics_rujira_fees')) {
+        return { rows: [{
+          event_key: 'wasm-arb-rujira-fee:v2:test',
+          height: 27270000,
+          block_time: '2026-08-03T12:00:00Z',
+          denom: 'x/brune',
+          amount: 1,
+          raw_event: {}
+        }] };
+      }
+      if (sql.includes('from wasm_arb_economics_network_buckets')) return { rows: [] };
+      throw new Error(`Unexpected query: ${sql}`);
+    }
+  };
+  const error = Object.assign(new Error('400 Bad Request /history/depths/THOR.BRUNE'), {
+    status: 400
+  });
+  const result = await priceRujiraFeeEvents(client, {
+    async isMissingPoolPriceCached() {
+      return false;
+    },
+    async fetchMidgard() {
+      throw error;
+    },
+    async cacheMissingPoolPrice(poolAsset, receivedError) {
+      cached.push({ poolAsset, receivedError });
+    }
+  });
+
+  assert.equal(isUnsupportedPoolPriceError(error), true);
+  assert.deepEqual(result.unsupportedDenoms, ['x/brune']);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.unpriced, 1);
+  assert.equal(cached[0].poolAsset, 'THOR.BRUNE');
+  assert.equal(cached[0].receivedError, error);
 });
 
 test('post-change migration removes legacy work and resets range-relative tx pagination', async () => {

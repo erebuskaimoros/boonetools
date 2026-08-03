@@ -84,6 +84,23 @@ block-time calls use a shared `market-snapshots` ordinary-failure sub-lane, so
 an ordinary fee-discovery timeout does not suppress Oracle sampling; confirmed
 gateway 429s still block every sub-lane.
 
+An otherwise valid same-height snapshot with pools but no Oracle prices is
+retried three times. Each retry evicts only that empty cached snapshot so the
+provider is queried again. If the height is still empty and the following
+height has valid pool and Oracle sources, ingestion records an exact isolated
+source gap and advances without fabricating or interpolating a price;
+the affected chart bucket and global Oracle coverage remain visibly
+incomplete. Transport errors and other non-comparable responses still stop the
+cursor. Activity, fee, Oracle, and combined THORNode head reads also have
+separate ordinary-failure cooldown scopes; a confirmed provider 429 remains a
+gateway-wide cooldown.
+
+Midgard `400 Bad Request` responses for non-existent historical depth pools are
+negative-cached for 24 hours. Their fee rows remain unpriced unless the
+same-context FIN execution cross supplies a valid price. This prevents known
+unsupported denoms from consuming the five-minute retry loop while allowing a
+newly listed pool to be discovered after the bounded cache expires.
+
 Liquify cooldowns are hierarchical. Ordinary transport/5xx failures block only
 the affected Midgard, RPC, or THORNode service path, endpoint-specific 4xx
 responses do not open a breaker, and only an actual 429 or `Retry-After`

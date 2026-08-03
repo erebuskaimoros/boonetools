@@ -321,6 +321,19 @@ snapshots so the corrected v2 accounting cannot mix old and new data. Migration
 bounded v3 monitoring contract. Migration 040 aligns storage, queueing, and
 coverage with the post-change-only contract.
 
+Wasm provider hardening is metadata-only and requires no migration. The three
+scheduled lanes use `wasm-activity-head`, `wasm-fees-head`, and
+`wasm-oracle-head` for ordinary THORNode head failures; the combined manual job
+uses `wasm-combined-head`. Actual 429/`Retry-After` responses still open the
+provider-wide breaker. Same-height pool snapshots with an empty Oracle payload
+are evicted and retried three times, then—only when the following height has
+valid sources—recorded in `oracle:backfill` `stats_json.gaps` and skipped
+without interpolation. The public read model
+reports both cursor completion and gap-free Oracle coverage. Deterministic
+Midgard missing-depth-pool 400s are stored in `api_response_cache` for 24 hours
+under `wasm-arb:missing-price-pool:*`; expiration safely re-probes for newly
+available pools.
+
 Rapid-Swap websocket ingestion is disabled by default in the shared
 `rapid-swap-listener.service`, while Node-Vote websocket ingestion remains
 enabled. The deploy keeps that shared process running whenever either lane is

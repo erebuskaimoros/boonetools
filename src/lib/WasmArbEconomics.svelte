@@ -87,6 +87,9 @@
       && timestamp < latestEnd;
   });
   $: sourceCoverage = dashboard?.meta?.coverage || {};
+  $: oracleGapCount = Number(
+    sourceCoverage.oracleGapCount || sourceCoverage.oracleGaps?.length || 0
+  );
   $: economicsComplete = summary.bucketCount > 0
     && summary.networkBucketCoverage >= 0.98
     && summary.actionBucketCoverage >= 0.98
@@ -436,7 +439,7 @@
           <div><span class:ok={sourceCoverage.networkComplete} class="health-dot"></span><b>NETWORK 5M</b><small>{sourceCoverage.networkComplete ? 'caught up' : 'backfilling'}</small></div>
           <div><span class:ok={sourceCoverage.actionBackfillComplete} class="health-dot"></span><b>WASM ACTIONS</b><small>{sourceCoverage.actionBackfillComplete ? 'caught up' : 'backfilling'}</small></div>
           <div><span class:ok={sourceCoverage.feeBackfillComplete} class="health-dot"></span><b>FIN + AMM FEES</b><small>{sourceCoverage.pendingBlocks || 0} blocks pending</small></div>
-          <div><span class:ok={sourceCoverage.oracleBackfillComplete} class="health-dot"></span><b>POOL / ORACLE</b><small>{sourceCoverage.oracleBackfillComplete ? 'caught up' : 'backfilling'}</small></div>
+          <div><span class:ok={sourceCoverage.oracleCoverageComplete} class:warn={sourceCoverage.oracleBackfillComplete && oracleGapCount > 0} class="health-dot"></span><b>POOL / ORACLE</b><small>{sourceCoverage.oracleBackfillComplete ? (oracleGapCount > 0 ? `${oracleGapCount} source gap${oracleGapCount === 1 ? '' : 's'}` : 'caught up') : 'backfilling'}</small></div>
         </div>
       </section>
     </div>
@@ -531,6 +534,7 @@
   .status-dot { background: var(--term-accent); animation: pulse-dot 2s infinite; }
   .status-dot.warn { background: var(--term-amber); animation: none; }
   .health-dot.ok { background: var(--term-accent); box-shadow: var(--term-accent-glow); }
+  .health-dot.warn { background: var(--term-amber); box-shadow: 0 0 6px var(--term-amber); }
 
   .bracket-button,
   .range-buttons button {

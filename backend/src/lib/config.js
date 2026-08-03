@@ -220,6 +220,14 @@ export const config = Object.freeze({
     'WASM_ARB_ECONOMICS_ORACLE_SAMPLES_PER_RUN',
     40
   ),
+  wasmArbEconomicsOracleGapRetryAttempts: readInt(
+    'WASM_ARB_ECONOMICS_ORACLE_GAP_RETRY_ATTEMPTS',
+    3
+  ),
+  wasmArbEconomicsMissingPoolCacheMs: readInt(
+    'WASM_ARB_ECONOMICS_MISSING_POOL_CACHE_SECONDS',
+    24 * 60 * 60
+  ) * 1000,
   wasmArbEconomicsRequestDelayMs: readInt('WASM_ARB_ECONOMICS_REQUEST_DELAY_MS', 75),
   wasmArbEconomicsRetentionDays: readInt('WASM_ARB_ECONOMICS_RETENTION_DAYS', 400),
   wasmArbEconomicsFinCodeIds: readList('WASM_ARB_ECONOMICS_FIN_CODE_IDS', ['180'])

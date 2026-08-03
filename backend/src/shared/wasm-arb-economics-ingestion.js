@@ -28,6 +28,8 @@ const FEE_BLOCK_COOLDOWN_SCOPE = 'wasm-fee-blocks';
 const NETWORK_INTERVAL_LIMIT = 400;
 const WASM_THORNODE_REQUEST_TIMEOUT_MS = 15_000;
 const WASM_ARB_ACCOUNTING_VERSION = 2;
+const ORACLE_EMPTY_PRICES_CODE = 'WASM_ORACLE_EMPTY_PRICES';
+const MISSING_POOL_CACHE_PREFIX = 'wasm-arb:missing-price-pool:';
 const TRACKED_ORACLE_POOLS = new Map([
   ['AVAX.AVAX', 'AVAX'],
   ['AVAX.USDC', 'USDC'],
@@ -949,7 +951,17 @@ async function fetchOracleTrackingSample(height, client, options = {}) {
 async function persistOracleTrackingSample(client, height, options = {}) {
   const sample = await fetchOracleTrackingSample(height, client, options);
   const rows = buildWasmArbOracleTrackingRows(sample);
-  if (!rows.length) throw new Error(`No comparable pool/oracle rows at height ${height}`);
+  if (!rows.length) {
+    const error = new Error(`No comparable pool/oracle rows at height ${height}`);
+    const pools = Array.isArray(sample?.pools) ? sample.pools : [];
+    const oraclePrices = oraclePriceRows(sample);
+    if (pools.length > 0 && oraclePrices.length === 0) {
+      error.code = ORACLE_EMPTY_PRICES_CODE;
+      error.oracleGapCandidate = true;
+      error.blockTime = sample.blockTime || null;
+    }
+    throw error;
+  }
   await upsertRows(client, 'wasm_arb_economics_oracle_samples', rows, {
     conflictColumns: ['height', 'pool_asset'],
     jsonColumns: ['source_json']
@@ -957,7 +969,42 @@ async function persistOracleTrackingSample(client, height, options = {}) {
   return rows.length;
 }
 
-async function ingestOracleTracking(client, options = {}) {
+function oraclePriceRows(sample) {
+  return Array.isArray(sample?.oraclePrices?.prices)
+    ? sample.oraclePrices.prices
+    : Array.isArray(sample?.oraclePrices) ? sample.oraclePrices : [];
+}
+
+function hasPoolAndOracleSource(sample) {
+  return Array.isArray(sample?.pools) && sample.pools.length > 0
+    && oraclePriceRows(sample).length > 0;
+}
+
+async function clearEmptyOracleSnapshot(client, height, options = {}) {
+  if (typeof options.clearOracleGapSnapshot === 'function') {
+    return options.clearOracleGapSnapshot(height);
+  }
+  return client.query(
+    `delete from thorchain_market_snapshots
+     where height = $1
+       and jsonb_array_length(oracle_prices_json) = 0`,
+    [height]
+  );
+}
+
+function previousOracleGapAttempt(state, height) {
+  const saved = Math.max(0, Math.trunc(safeNumber(
+    state.stats_json?.gap_attempts?.[String(height)]
+  )));
+  if (saved > 0) return saved;
+  const priorErrors = Array.isArray(state.stats_json?.errors) ? state.stats_json.errors : [];
+  return priorErrors.some((message) => (
+    String(message).startsWith(`${height}: `)
+      && String(message).includes('No comparable pool/oracle rows')
+  )) ? 1 : 0;
+}
+
+export async function ingestOracleTracking(client, options = {}) {
   const state = await getSyncState(client, 'oracle:backfill');
   const stride = Math.max(1, Math.trunc(config.wasmArbEconomicsOracleStrideBlocks));
   const startHeight = Math.max(
@@ -968,17 +1015,72 @@ async function ingestOracleTracking(client, options = {}) {
   const limit = Math.max(1, Math.trunc(config.wasmArbEconomicsOracleSamplesPerRun));
   let cursor = Math.trunc(safeNumber(state.cursor_value));
   let nextHeight = cursor >= startHeight ? cursor + stride : startHeight;
+  let processed = 0;
   let samples = 0;
   let observations = 0;
+  const gapAttempts = { ...(state.stats_json?.gap_attempts || {}) };
+  const gaps = Array.isArray(state.stats_json?.gaps) ? [...state.stats_json.gaps] : [];
+  const confirmedGaps = [];
   const errors = [];
 
-  while (nextHeight <= latestHeight && samples < limit) {
+  while (nextHeight <= latestHeight && processed < limit) {
     try {
       observations += await persistOracleTrackingSample(client, nextHeight, options);
+      delete gapAttempts[String(nextHeight)];
       cursor = nextHeight;
       nextHeight += stride;
+      processed += 1;
       samples += 1;
     } catch (error) {
+      if (error?.oracleGapCandidate) {
+        const attempt = previousOracleGapAttempt({
+          ...state,
+          stats_json: { ...(state.stats_json || {}), gap_attempts: gapAttempts }
+        }, nextHeight) + 1;
+        gapAttempts[String(nextHeight)] = attempt;
+        const retryAttempts = Math.max(
+          1,
+          Math.trunc(config.wasmArbEconomicsOracleGapRetryAttempts)
+        );
+        let isolatedGap = false;
+        if (attempt >= retryAttempts && nextHeight < latestHeight) {
+          try {
+            const followingSample = await fetchOracleTrackingSample(
+              nextHeight + 1,
+              client,
+              options
+            );
+            isolatedGap = hasPoolAndOracleSource(followingSample);
+            if (!isolatedGap && oraclePriceRows(followingSample).length === 0) {
+              await clearEmptyOracleSnapshot(client, nextHeight + 1, options);
+            }
+          } catch (confirmationError) {
+            errors.push(
+              `${nextHeight}: unable to confirm isolated Oracle gap: ${confirmationError?.message || confirmationError}`
+            );
+            break;
+          }
+        }
+        if (isolatedGap) {
+          const gap = {
+            height: nextHeight,
+            block_time: error.blockTime || null,
+            reason: 'empty-oracle-prices',
+            attempts: attempt,
+            confirmed_at: new Date().toISOString()
+          };
+          const existingIndex = gaps.findIndex((row) => safeNumber(row?.height) === nextHeight);
+          if (existingIndex >= 0) gaps[existingIndex] = gap;
+          else gaps.push(gap);
+          confirmedGaps.push(gap);
+          delete gapAttempts[String(nextHeight)];
+          cursor = nextHeight;
+          nextHeight += stride;
+          processed += 1;
+          continue;
+        }
+        await clearEmptyOracleSnapshot(client, nextHeight, options);
+      }
       errors.push(`${nextHeight}: ${error?.message || error}`);
       break;
     }
@@ -1008,11 +1110,24 @@ async function ingestOracleTracking(client, options = {}) {
       last_observations: observations,
       head_height: latestHeight,
       head_observations: headObservations,
+      gap_attempts: gapAttempts,
+      gaps,
+      last_confirmed_gaps: confirmedGaps,
       errors,
       last_scanned_at: new Date().toISOString()
     }
   });
-  return { samples, observations, headObservations, cursor, latestHeight, complete, errors };
+  return {
+    samples,
+    observations,
+    headObservations,
+    cursor,
+    latestHeight,
+    complete,
+    errors,
+    confirmedGaps,
+    gapCount: gaps.length
+  };
 }
 
 async function fetchFinContractConfig(address, options = {}) {
@@ -1274,7 +1389,58 @@ async function fetchPriceIntervals(poolAsset, from, to, options = {}) {
   return prices;
 }
 
-async function priceRujiraFeeEvents(client, options = {}) {
+function missingPoolCacheKey(poolAsset) {
+  return `${MISSING_POOL_CACHE_PREFIX}${normalizeAsset(poolAsset)}`;
+}
+
+export function isUnsupportedPoolPriceError(error) {
+  if (safeNumber(error?.status) === 400 || safeNumber(error?.statusCode) === 400) return true;
+  const message = String(error?.message || error || '');
+  return /400\s+Bad Request/i.test(message) && /history\/depths/i.test(message);
+}
+
+async function hasMissingPoolPriceCache(client, poolAsset, options = {}) {
+  if (typeof options.isMissingPoolPriceCached === 'function') {
+    return Boolean(await options.isMissingPoolPriceCached(poolAsset));
+  }
+  const { rows } = await client.query(
+    `select 1
+     from api_response_cache
+     where cache_key = $1
+       and expires_at > now()
+     limit 1`,
+    [missingPoolCacheKey(poolAsset)]
+  );
+  return Boolean(rows[0]);
+}
+
+async function cacheMissingPoolPrice(client, poolAsset, error, options = {}) {
+  if (typeof options.cacheMissingPoolPrice === 'function') {
+    return options.cacheMissingPoolPrice(poolAsset, error);
+  }
+  const ttlMs = Math.max(1000, Math.trunc(config.wasmArbEconomicsMissingPoolCacheMs));
+  return client.query(
+    `insert into api_response_cache (cache_key, payload_json, fetched_at, expires_at)
+     values ($1, $2, now(), $3)
+     on conflict (cache_key)
+     do update set
+       payload_json = excluded.payload_json,
+       fetched_at = excluded.fetched_at,
+       expires_at = excluded.expires_at`,
+    [
+      missingPoolCacheKey(poolAsset),
+      {
+        kind: 'missing-midgard-depth-pool',
+        poolAsset: normalizeAsset(poolAsset),
+        status: safeNumber(error?.status || error?.statusCode, 400),
+        message: String(error?.message || error).slice(0, 500)
+      },
+      new Date(Date.now() + ttlMs).toISOString()
+    ]
+  );
+}
+
+export async function priceRujiraFeeEvents(client, options = {}) {
   const { rows } = await client.query(
     `select event_key, height, block_time, tx_id, event_origin, event_ordinal,
             source_contract, fee_kind, denom, amount_base, amount,
@@ -1285,7 +1451,7 @@ async function priceRujiraFeeEvents(client, options = {}) {
      order by block_time asc
      limit 5000`
   );
-  if (!rows.length) return { priced: 0, unpriced: 0, errors: [] };
+  if (!rows.length) return { priced: 0, unpriced: 0, errors: [], unsupportedDenoms: [] };
 
   const { rows: networkRows } = await client.query(
     `select bucket_start, rune_price_usd
@@ -1300,6 +1466,7 @@ async function priceRujiraFeeEvents(client, options = {}) {
   ]));
   const priceMaps = new Map();
   const errors = [];
+  const unsupportedDenoms = [];
   const denoms = [...new Set(rows.flatMap((row) => {
     const hint = row.raw_event?.finExecutionPrice;
     return [row.denom, hint?.baseDenom, hint?.quoteDenom]
@@ -1308,15 +1475,25 @@ async function priceRujiraFeeEvents(client, options = {}) {
   }))];
   for (const denom of denoms) {
     if (denom === 'rune' || isStableDenom(denom)) continue;
+    const poolAsset = denomToWasmArbPoolAsset(denom);
+    if (await hasMissingPoolPriceCache(client, poolAsset, options)) {
+      unsupportedDenoms.push(denom);
+      continue;
+    }
     try {
       priceMaps.set(denom, await fetchPriceIntervals(
-        denomToWasmArbPoolAsset(denom),
+        poolAsset,
         unixSeconds(rows[0].block_time),
         unixSeconds(rows.at(-1).block_time),
         { ...options, client }
       ));
     } catch (error) {
-      errors.push(`${denom}: ${error?.message || error}`);
+      if (isUnsupportedPoolPriceError(error)) {
+        await cacheMissingPoolPrice(client, poolAsset, error, options);
+        unsupportedDenoms.push(denom);
+      } else {
+        errors.push(`${denom}: ${error?.message || error}`);
+      }
     }
   }
 
@@ -1368,7 +1545,12 @@ async function priceRujiraFeeEvents(client, options = {}) {
     conflictColumns: ['event_key'],
     jsonColumns: ['raw_event']
   });
-  return { priced: pricedRows.length, unpriced: rows.length - pricedRows.length, errors };
+  return {
+    priced: pricedRows.length,
+    unpriced: rows.length - pricedRows.length,
+    errors,
+    unsupportedDenoms
+  };
 }
 
 function findMimirValue(payload) {
@@ -1507,13 +1689,17 @@ async function pruneOldRows(client) {
   return deleted;
 }
 
-async function wasmRuntimeOptions(options = {}) {
+export async function wasmRuntimeOptions(client, options = {}, lane = 'combined') {
   const fetchThor = options.fetchThorchain || ((path, fetchOptions = {}) => fetchThorchain(path, {
     timeoutMs: WASM_THORNODE_REQUEST_TIMEOUT_MS,
     ...fetchOptions
   }));
   const latestHeight = Math.trunc(safeNumber(options.latestHeight)) || Math.trunc(
-    extractThorHeight(await fetchThor('/thorchain/lastblock'))
+    extractThorHeight(await fetchThor('/thorchain/lastblock', {
+      cooldownClient: client,
+      sharedCooldown: true,
+      cooldownScope: `wasm-${lane}-head`
+    }))
   );
   return { ...options, fetchThorchain: fetchThor, latestHeight };
 }
@@ -1544,19 +1730,19 @@ async function runWasmArbOracleLane(client, runtimeOptions) {
 }
 
 export async function runWasmArbActivityIngestion(client, options = {}) {
-  return runWasmArbActivityLane(client, await wasmRuntimeOptions(options));
+  return runWasmArbActivityLane(client, await wasmRuntimeOptions(client, options, 'activity'));
 }
 
 export async function runWasmArbFeeIngestion(client, options = {}) {
-  return runWasmArbFeeLane(client, await wasmRuntimeOptions(options));
+  return runWasmArbFeeLane(client, await wasmRuntimeOptions(client, options, 'fees'));
 }
 
 export async function runWasmArbOracleIngestion(client, options = {}) {
-  return runWasmArbOracleLane(client, await wasmRuntimeOptions(options));
+  return runWasmArbOracleLane(client, await wasmRuntimeOptions(client, options, 'oracle'));
 }
 
 export async function runWasmArbEconomicsIngestion(client, options = {}) {
-  const runtimeOptions = await wasmRuntimeOptions(options);
+  const runtimeOptions = await wasmRuntimeOptions(client, options, 'combined');
   return {
     ...await runWasmArbActivityLane(client, runtimeOptions),
     ...await runWasmArbFeeLane(client, runtimeOptions),
