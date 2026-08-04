@@ -1,5 +1,9 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
+  import {
+    isChartTrendVisible,
+    toggleHiddenChartTrend
+  } from './charts/terminal.js';
   import { fetchPoolDislocation, fetchPoolDislocationSeries } from './pool-dislocation/api.js';
   import {
     POOL_DISLOCATION_CHART_WINDOWS,
@@ -51,6 +55,7 @@
   let sourceMode = DEFAULT_POOL_DISLOCATION_SOURCE_MODE;
   let chartWindow = '7d';
   let selectedRollingAverageIds = [];
+  let hiddenChartTrendIds = [];
   let chartZoom = null;
   let chartSelectionStartX = null;
   let chartSelectionCurrentX = null;
@@ -102,13 +107,18 @@
   $: chartEndMs = chartViewport.endMs;
   $: chartDurationMs = chartViewport.durationMs;
   $: chartRangeLabel = chartViewport.zoomed ? `${formatChartDuration(chartDurationMs)} ZOOM` : chartWindowConfig.label;
+  $: oracleTrendVisible = isChartTrendVisible(hiddenChartTrendIds, 'oracle');
+  $: binanceTrendVisible = isChartTrendVisible(hiddenChartTrendIds, 'binance');
   $: rollingAverageSeries = POOL_DISLOCATION_ROLLING_WINDOWS.map((window) => ({
     ...window,
     oraclePoints: buildPoolDislocationRollingAverage(selectedPoints, 'oracleDislocation', window),
     binancePoints: buildPoolDislocationRollingAverage(selectedPoints, 'binanceDislocation', window)
   }));
   $: activeRollingAverageSeries = rollingAverageSeries
-    .filter((series) => selectedRollingAverageIds.includes(series.id))
+    .filter((series) => (
+      selectedRollingAverageIds.includes(series.id)
+      && isChartTrendVisible(hiddenChartTrendIds, `average:${series.id}`)
+    ))
     .map((series) => ({
       ...series,
       oraclePoints: series.oraclePoints.filter((point) => {
@@ -122,16 +132,21 @@
     }));
   $: rollingAverageScalePoints = activeRollingAverageSeries.flatMap((series) => [
     ...series.oraclePoints.map((point) => ({
-      oracleDislocation: selectedPool?.oracleSymbol ? point.rollingAverage : null,
+      oracleDislocation: selectedPool?.oracleSymbol && oracleTrendVisible ? point.rollingAverage : null,
       binanceDislocation: null
     })),
     ...series.binancePoints.map((point) => ({
       oracleDislocation: null,
-      binanceDislocation: selectedPool?.binanceSymbol ? point.rollingAverage : null
+      binanceDislocation: selectedPool?.binanceSymbol && binanceTrendVisible ? point.rollingAverage : null
     }))
   ]);
+  $: visibleChartPoints = chartPoints.map((point) => ({
+    ...point,
+    oracleDislocation: oracleTrendVisible ? point.oracleDislocation : null,
+    binanceDislocation: binanceTrendVisible ? point.binanceDislocation : null
+  }));
   $: chartScale = buildPoolDislocationChartScale(
-    [...chartPoints, ...rollingAverageScalePoints],
+    [...visibleChartPoints, ...rollingAverageScalePoints],
     { sourceMode, threshold, minimumBand: l1SlipMinPercent }
   );
   $: yMin = chartScale.min;
@@ -304,6 +319,11 @@
     selectedRollingAverageIds = selectedRollingAverageIds.includes(id)
       ? selectedRollingAverageIds.filter((selectedId) => selectedId !== id)
       : [...selectedRollingAverageIds, id];
+    hiddenChartTrendIds = hiddenChartTrendIds.filter((trendId) => trendId !== `average:${id}`);
+  }
+
+  function toggleChartTrend(trendId) {
+    hiddenChartTrendIds = toggleHiddenChartTrend(hiddenChartTrendIds, trendId);
   }
 
   function formatBasisPoints(value, { signed = true } = {}) {
@@ -628,10 +648,39 @@
       <div class="chart-wrap">
         <div class="chart-legend">
           <span class="zoom-hint">{chartViewport.zoomed ? 'ZOOM ACTIVE · DRAG AGAIN OR RESET' : 'DRAG TO HIGHLIGHT + ZOOM'}</span>
-          {#if selectedPool?.oracleSymbol && sourceMode !== 'binance'}<span class="oracle-key"><i></i>TC / ORACLE</span>{/if}
-          {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle'}<span class="binance-key"><i></i>TC / BINANCE</span>{/if}
+          {#if selectedPool?.oracleSymbol && sourceMode !== 'binance'}
+            <button
+              type="button"
+              class="trend-key oracle-key"
+              class:is-hidden={!oracleTrendVisible}
+              aria-pressed={oracleTrendVisible}
+              aria-label={`${oracleTrendVisible ? 'Hide' : 'Show'} TC / Oracle trends`}
+              title={`${oracleTrendVisible ? 'Hide' : 'Show'} TC / Oracle trends`}
+              on:click={() => toggleChartTrend('oracle')}
+            ><i aria-hidden="true"></i>TC / ORACLE</button>
+          {/if}
+          {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle'}
+            <button
+              type="button"
+              class="trend-key binance-key"
+              class:is-hidden={!binanceTrendVisible}
+              aria-pressed={binanceTrendVisible}
+              aria-label={`${binanceTrendVisible ? 'Hide' : 'Show'} TC / Binance trends`}
+              title={`${binanceTrendVisible ? 'Hide' : 'Show'} TC / Binance trends`}
+              on:click={() => toggleChartTrend('binance')}
+            ><i aria-hidden="true"></i>TC / BINANCE</button>
+          {/if}
           {#each POOL_DISLOCATION_ROLLING_WINDOWS.filter((window) => selectedRollingAverageIds.includes(window.id)) as window}
-            <span class={`average-key avg-${window.id}`}><i></i>{window.label} SIGNED AVG · ≥{Math.round(POOL_DISLOCATION_ROLLING_MIN_COVERAGE * 100)}%</span>
+            {@const averageTrendVisible = isChartTrendVisible(hiddenChartTrendIds, `average:${window.id}`)}
+            <button
+              type="button"
+              class={`trend-key average-key avg-${window.id}`}
+              class:is-hidden={!averageTrendVisible}
+              aria-pressed={averageTrendVisible}
+              aria-label={`${averageTrendVisible ? 'Hide' : 'Show'} ${window.label} signed average trends`}
+              title={`${averageTrendVisible ? 'Hide' : 'Show'} ${window.label} signed average trends`}
+              on:click={() => toggleChartTrend(`average:${window.id}`)}
+            ><i aria-hidden="true"></i>{window.label} SIGNED AVG · ≥{Math.round(POOL_DISLOCATION_ROLLING_MIN_COVERAGE * 100)}%</button>
           {/each}
           {#if l1SlipMinBandVisible}<span class="minbps-key"><i></i>±{formatBasisPoints(l1SlipMinPercent, { signed: false })} L1 MIN</span>{/if}
         </div>
@@ -670,28 +719,28 @@
             <line class="x-tick" x1={chartX(tick.observedAt)} x2={chartX(tick.observedAt)} y1={CHART.bottom} y2={CHART.bottom + 5} />
             <text class="axis-label x" x={chartX(tick.observedAt)} y={CHART.bottom + 24}>{formatChartTick(tick.observedAt, tick.index)}</text>
           {/each}
-          {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && oraclePath}<path class="series oracle" d={oraclePath} />{/if}
-          {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && binancePath}<path class="series binance" d={binancePath} />{/if}
+          {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && oracleTrendVisible && oraclePath}<path class="series oracle" d={oraclePath} />{/if}
+          {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && binanceTrendVisible && binancePath}<path class="series binance" d={binancePath} />{/if}
           {#each rollingAveragePaths as series}
-            {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && series.oraclePath}
+            {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && oracleTrendVisible && series.oraclePath}
               <path class={`series rolling-average oracle avg-${series.id}`} d={series.oraclePath} />
             {/if}
-            {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && series.binancePath}
+            {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && binanceTrendVisible && series.binancePath}
               <path class={`series rolling-average binance avg-${series.id}`} d={series.binancePath} />
             {/if}
           {/each}
           {#each chartPoints as point, index}
             {#if index % pointMarkerStep === 0 || index === chartPoints.length - 1}
-              {#if sourceMode !== 'binance' && Number.isFinite(point.oracleDislocation)}<circle class="point oracle" cx={chartX(point)} cy={chartY(point.oracleDislocation)} r={index === chartPoints.length - 1 ? 4 : 2.25} />{/if}
-              {#if sourceMode !== 'oracle' && Number.isFinite(point.binanceDislocation)}<circle class="point binance" cx={chartX(point)} cy={chartY(point.binanceDislocation)} r={index === chartPoints.length - 1 ? 4 : 2.25} />{/if}
+              {#if sourceMode !== 'binance' && oracleTrendVisible && Number.isFinite(point.oracleDislocation)}<circle class="point oracle" cx={chartX(point)} cy={chartY(point.oracleDislocation)} r={index === chartPoints.length - 1 ? 4 : 2.25} />{/if}
+              {#if sourceMode !== 'oracle' && binanceTrendVisible && Number.isFinite(point.binanceDislocation)}<circle class="point binance" cx={chartX(point)} cy={chartY(point.binanceDislocation)} r={index === chartPoints.length - 1 ? 4 : 2.25} />{/if}
             {/if}
           {/each}
           {#if hoverPoint && !Number.isFinite(chartSelectionStartX)}
             <line class="hover-crosshair" x1={chartX(hoverPoint)} x2={chartX(hoverPoint)} y1={CHART.top} y2={CHART.bottom} />
-            {#if Number.isFinite(hoverPoint.oracleDislocation)}
+            {#if sourceMode !== 'binance' && oracleTrendVisible && Number.isFinite(hoverPoint.oracleDislocation)}
               <circle class="hover-point oracle" cx={chartX(hoverPoint)} cy={chartY(hoverPoint.oracleDislocation)} r="5" />
             {/if}
-            {#if Number.isFinite(hoverPoint.binanceDislocation)}
+            {#if sourceMode !== 'oracle' && binanceTrendVisible && Number.isFinite(hoverPoint.binanceDislocation)}
               <circle class="hover-point binance" cx={chartX(hoverPoint)} cy={chartY(hoverPoint.binanceDislocation)} r="5" />
             {/if}
           {/if}
@@ -728,18 +777,22 @@
           >
             <strong>{formatTimestamp(hoverPoint.observedAt)} UTC</strong>
             <div><span>TC POOL</span><b>{formatPrice(hoverPoint.poolPrice)}</b></div>
-            <div><span>TC ORACLE</span><b>{formatPrice(hoverPoint.oraclePrice)}</b></div>
-            <div><span>BINANCE</span><b>{formatPrice(hoverPoint.binancePrice)}</b></div>
-            <div><span>VS ORACLE</span><b class={dislocationState(hoverPoint.oracleDislocation, threshold)}>{formatBasisPoints(hoverPoint.oracleDislocation)}</b></div>
-            <div><span>VS BINANCE</span><b class={dislocationState(hoverPoint.binanceDislocation, threshold)}>{formatBasisPoints(hoverPoint.binanceDislocation)}</b></div>
+            {#if sourceMode !== 'binance' && oracleTrendVisible}
+              <div><span>TC ORACLE</span><b>{formatPrice(hoverPoint.oraclePrice)}</b></div>
+              <div><span>VS ORACLE</span><b class={dislocationState(hoverPoint.oracleDislocation, threshold)}>{formatBasisPoints(hoverPoint.oracleDislocation)}</b></div>
+            {/if}
+            {#if sourceMode !== 'oracle' && binanceTrendVisible}
+              <div><span>BINANCE</span><b>{formatPrice(hoverPoint.binancePrice)}</b></div>
+              <div><span>VS BINANCE</span><b class={dislocationState(hoverPoint.binanceDislocation, threshold)}>{formatBasisPoints(hoverPoint.binanceDislocation)}</b></div>
+            {/if}
             {#each hoverRollingAverages as average}
-              {#if selectedPool?.oracleSymbol && sourceMode !== 'binance'}
+              {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && oracleTrendVisible}
                 <div>
                   <span>{average.label} ORACLE AVG <small class:partial={average.oraclePoint?.coverage < 1}>{formatRollingCoverage(average.oraclePoint)}</small></span>
                   <b>{formatBasisPoints(average.oracleAverage)}</b>
                 </div>
               {/if}
-              {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle'}
+              {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && binanceTrendVisible}
                 <div>
                   <span>{average.label} BINANCE AVG <small class:partial={average.binancePoint?.coverage < 1}>{formatRollingCoverage(average.binancePoint)}</small></span>
                   <b>{formatBasisPoints(average.binanceAverage)}</b>
@@ -983,6 +1036,11 @@
   .chart-legend { flex-wrap: wrap; justify-content: flex-end; gap: 7px 17px; min-height: 22px; padding-right: 7px; color: var(--term-text-5, #444); font-family: var(--term-font-mono, 'JetBrains Mono', monospace); font-size: 11px; line-height: 1.4; letter-spacing: 0.06em; }
   .chart-legend span { display: inline-flex; align-items: center; gap: 6px; font-family: inherit; }
   .chart-legend .zoom-hint { margin-right: auto; color: var(--term-text-6, #333); }
+  .chart-legend .trend-key { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; cursor: pointer; }
+  .chart-legend .trend-key:hover { color: var(--term-text-2, #d8d8d8); }
+  .chart-legend .trend-key:focus-visible { outline: 1px solid var(--term-accent, #00cc66); outline-offset: 3px; }
+  .chart-legend .trend-key.is-hidden { color: var(--term-text-6, #333); text-decoration: line-through; opacity: 0.62; }
+  .chart-legend .trend-key.is-hidden i { opacity: 0.4; }
   .chart-legend i { display: inline-block; width: 16px; height: 2px; background: var(--term-accent, #00cc66); }
   .chart-legend .binance-key i { background: var(--term-info, #5588cc); }
   .chart-legend .average-key i { background: repeating-linear-gradient(90deg, var(--term-text-3, #666) 0 7px, transparent 7px 10px); }

@@ -16,3 +16,42 @@ export const TERMINAL_CHART_PALETTE = Object.freeze({
 export function terminalChartFont(size = 11, family = "'JetBrains Mono', monospace") {
   return { family, size };
 }
+
+function setChartLegendCursor(event, cursor) {
+  const target = event?.native?.target;
+  if (target?.style) target.style.cursor = cursor;
+}
+
+export function toggleChartLegendItem(_event, legendItem, legend) {
+  const chart = legend?.chart;
+  if (!chart) return;
+
+  if (Number.isInteger(legendItem?.datasetIndex)) {
+    const datasetIndex = legendItem.datasetIndex;
+    if (chart.isDatasetVisible(datasetIndex)) chart.hide(datasetIndex);
+    else chart.show(datasetIndex);
+    return;
+  }
+
+  if (Number.isInteger(legendItem?.index) && typeof chart.toggleDataVisibility === 'function') {
+    chart.toggleDataVisibility(legendItem.index);
+    chart.update();
+  }
+}
+
+export const INTERACTIVE_CHART_LEGEND = Object.freeze({
+  onClick: toggleChartLegendItem,
+  onHover: (event) => setChartLegendCursor(event, 'pointer'),
+  onLeave: (event) => setChartLegendCursor(event, 'default')
+});
+
+export function toggleHiddenChartTrend(hiddenTrendIds, trendId) {
+  const currentIds = Array.isArray(hiddenTrendIds) ? hiddenTrendIds : [];
+  return currentIds.includes(trendId)
+    ? currentIds.filter((currentId) => currentId !== trendId)
+    : [...currentIds, trendId];
+}
+
+export function isChartTrendVisible(hiddenTrendIds, trendId) {
+  return !Array.isArray(hiddenTrendIds) || !hiddenTrendIds.includes(trendId);
+}

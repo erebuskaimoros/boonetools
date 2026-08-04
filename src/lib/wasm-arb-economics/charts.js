@@ -1,7 +1,11 @@
 import Chart from 'chart.js/auto';
 import zoomPlugin from 'chartjs-plugin-zoom';
 
-import { TERMINAL_CHART_PALETTE, terminalChartFont } from '../charts/terminal.js';
+import {
+  INTERACTIVE_CHART_LEGEND,
+  TERMINAL_CHART_PALETTE,
+  terminalChartFont
+} from '../charts/terminal.js';
 import { aggregateWasmArbEconomicsBuckets } from './model.js';
 
 Chart.register(zoomPlugin);
@@ -117,6 +121,7 @@ function baseOptions(series, onZoomRange) {
     animation: false,
     plugins: {
       legend: {
+        ...INTERACTIVE_CHART_LEGEND,
         position: 'top',
         align: 'end',
         labels: {

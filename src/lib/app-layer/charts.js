@@ -1,6 +1,6 @@
 import Chart from 'chart.js/auto';
 import zoomPlugin from 'chartjs-plugin-zoom';
-import { TERMINAL_CHART_PALETTE } from '../charts/terminal.js';
+import { INTERACTIVE_CHART_LEGEND, TERMINAL_CHART_PALETTE } from '../charts/terminal.js';
 import { denomLabel, fillBucketGaps, formatWeekLabel } from './model.js';
 
 Chart.register(zoomPlugin);
@@ -138,6 +138,7 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: {
+          ...INTERACTIVE_CHART_LEGEND,
           display: stackedBars,
           labels: {
             color: '#e8e8e8',

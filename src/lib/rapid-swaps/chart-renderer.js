@@ -1,7 +1,7 @@
 import Chart from 'chart.js/auto';
 import { SankeyController, Flow } from 'chartjs-chart-sankey';
 import { formatNumber, formatUSDCompact } from '../utils/formatting.js';
-import { TERMINAL_CHART_PALETTE } from '../charts/terminal.js';
+import { INTERACTIVE_CHART_LEGEND, TERMINAL_CHART_PALETTE } from '../charts/terminal.js';
 import { affiliateUrl, formatTimeSaved } from './presentation.js';
 
 Chart.register(SankeyController, Flow);
@@ -190,6 +190,7 @@ export function createRapidSwapChartRenderer() {
         plugins: {
           ...base.plugins,
           legend: {
+            ...INTERACTIVE_CHART_LEGEND,
             display: true,
             labels: {
               color: TERMINAL_CHART_PALETTE.text,
@@ -253,6 +254,7 @@ export function createRapidSwapChartRenderer() {
         plugins: {
           ...base.plugins,
           legend: {
+            ...INTERACTIVE_CHART_LEGEND,
             display: true,
             labels: {
               color: TERMINAL_CHART_PALETTE.text,

@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from "svelte";
   import Chart from 'chart.js/auto';
+  import { INTERACTIVE_CHART_LEGEND } from '$lib/charts/terminal.js';
   import { booneToolsApi, thornode } from '$lib/api';
   import { formatNumber, simplifyNumber, formatCountdown, getAddressSuffix } from '$lib/utils/formatting';
   import { fromBaseUnit } from '$lib/utils/blockchain';
@@ -721,6 +722,7 @@
         },
         plugins: {
           legend: {
+            ...INTERACTIVE_CHART_LEGEND,
             labels: {
               color: '#e8e8e8',
               font: { family: "'JetBrains Mono', monospace", size: 11, weight: 600 },

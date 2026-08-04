@@ -2,6 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import Chart from 'chart.js/auto';
   import zoomPlugin from 'chartjs-plugin-zoom';
+  import { INTERACTIVE_CHART_LEGEND } from '$lib/charts/terminal.js';
   import { fetchJSONWithFallback, MIDGARD_ENDPOINTS } from '$lib/utils/api';
   import { booneToolsApi } from '$lib/api/boonetools.js';
   import {
@@ -600,6 +601,7 @@
         },
         plugins: {
           legend: {
+            ...INTERACTIVE_CHART_LEGEND,
             display: true,
             labels: {
               color: CHART.legend,
@@ -844,6 +846,7 @@
         },
         plugins: {
           legend: {
+            ...INTERACTIVE_CHART_LEGEND,
             display: true,
             labels: {
               color: CHART.legend,
