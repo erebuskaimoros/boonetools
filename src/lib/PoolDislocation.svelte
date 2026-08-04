@@ -132,12 +132,12 @@
     }));
   $: rollingAverageScalePoints = activeRollingAverageSeries.flatMap((series) => [
     ...series.oraclePoints.map((point) => ({
-      oracleDislocation: selectedPool?.oracleSymbol && oracleTrendVisible ? point.rollingAverage : null,
+      oracleDislocation: selectedPool?.oracleSymbol ? point.rollingAverage : null,
       binanceDislocation: null
     })),
     ...series.binancePoints.map((point) => ({
       oracleDislocation: null,
-      binanceDislocation: selectedPool?.binanceSymbol && binanceTrendVisible ? point.rollingAverage : null
+      binanceDislocation: selectedPool?.binanceSymbol ? point.rollingAverage : null
     }))
   ]);
   $: visibleChartPoints = chartPoints.map((point) => ({
@@ -722,10 +722,10 @@
           {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && oracleTrendVisible && oraclePath}<path class="series oracle" d={oraclePath} />{/if}
           {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && binanceTrendVisible && binancePath}<path class="series binance" d={binancePath} />{/if}
           {#each rollingAveragePaths as series}
-            {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && oracleTrendVisible && series.oraclePath}
+            {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && series.oraclePath}
               <path class={`series rolling-average oracle avg-${series.id}`} d={series.oraclePath} />
             {/if}
-            {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && binanceTrendVisible && series.binancePath}
+            {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && series.binancePath}
               <path class={`series rolling-average binance avg-${series.id}`} d={series.binancePath} />
             {/if}
           {/each}
@@ -786,13 +786,13 @@
               <div><span>VS BINANCE</span><b class={dislocationState(hoverPoint.binanceDislocation, threshold)}>{formatBasisPoints(hoverPoint.binanceDislocation)}</b></div>
             {/if}
             {#each hoverRollingAverages as average}
-              {#if selectedPool?.oracleSymbol && sourceMode !== 'binance' && oracleTrendVisible}
+              {#if selectedPool?.oracleSymbol && sourceMode !== 'binance'}
                 <div>
                   <span>{average.label} ORACLE AVG <small class:partial={average.oraclePoint?.coverage < 1}>{formatRollingCoverage(average.oraclePoint)}</small></span>
                   <b>{formatBasisPoints(average.oracleAverage)}</b>
                 </div>
               {/if}
-              {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle' && binanceTrendVisible}
+              {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle'}
                 <div>
                   <span>{average.label} BINANCE AVG <small class:partial={average.binancePoint?.coverage < 1}>{formatRollingCoverage(average.binancePoint)}</small></span>
                   <b>{formatBasisPoints(average.binanceAverage)}</b>
