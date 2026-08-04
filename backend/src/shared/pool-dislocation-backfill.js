@@ -355,9 +355,10 @@ export function buildHistoricalPoolDislocationRows(anchor, state, binanceHistory
         : 'thornode-oracle-unavailable')
       : row.oraclePriceMethod,
     binancePriceMethod: row.binanceSymbol && row.binancePriceUsd == null
-      ? (binanceHistory.get(row.binanceSymbol)?.has(anchor.observedAt)
-        ? 'kline-close-unaligned'
-        : 'kline-close-unavailable')
+      ? (row.binancePriceMethod
+        || (binanceHistory.get(row.binanceSymbol)?.has(anchor.observedAt)
+          ? 'kline-close-unaligned'
+          : 'kline-close-unavailable'))
       : row.binancePriceMethod
   }));
 }
@@ -461,7 +462,9 @@ export async function loadPoolDislocationRecentGapRepairPlan(client, options = {
                       observation.binance_price_usd is not null
                       or observation.binance_price_method in (
                         'kline-close-unavailable',
-                        'kline-close-unaligned'
+                        'kline-close-unaligned',
+                        'kline-close-usdt-to-usd-unavailable',
+                        'kline-close-usdt-to-usd-unaligned'
                       )
                     )
                   )

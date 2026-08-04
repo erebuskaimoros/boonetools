@@ -1,5 +1,5 @@
 export const POOL_DISLOCATION_MODEL_KEY = 'pool-dislocation-summary:v1';
-export const POOL_DISLOCATION_SCHEMA_VERSION = 3;
+export const POOL_DISLOCATION_SCHEMA_VERSION = 4;
 export const POOL_DISLOCATION_TTL_MS = 15 * 60 * 1000;
 export const POOL_DISLOCATION_SAMPLE_MINUTES = 5;
 export const POOL_DISLOCATION_WINDOW_DAYS = 7;
@@ -58,6 +58,19 @@ function finiteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function positiveFiniteNumber(value) {
+  const number = finiteNumber(value);
+  return number !== null && number > 0 ? number : null;
+}
+
+function isBinanceUsdtQuote(symbol) {
+  return String(symbol || '').trim().toUpperCase().endsWith('USDT');
+}
+
+function binanceUsdtToUsdMethod(method, status = '') {
+  return `${method}-usdt-to-usd${status ? `-${status}` : ''}`;
 }
 
 function isoTimestamp(value) {
@@ -201,9 +214,22 @@ export function buildObservationRows({
       const mapping = referenceMappingForAsset(identity.asset);
       const poolPrice = finiteNumber(pool.asset_tor_price);
       const normalizedPoolPrice = poolPrice !== null && poolPrice > 0 ? poolPrice / 1e8 : null;
-      const oraclePrice = mapping.oracle && oracleTime ? oraclePrices.get(mapping.oracle) ?? null : null;
+      const oraclePrice = mapping.oracle && oracleTime
+        ? positiveFiniteNumber(oraclePrices.get(mapping.oracle))
+        : null;
       const binance = mapping.binance && binanceTime ? binanceTickers.get(mapping.binance) ?? null : null;
-      const sourceTimes = [poolTime, oraclePrice !== null ? oracleTime : null, binance ? binanceTime : null]
+      const binanceMid = positiveFiniteNumber(binance?.mid);
+      const binanceBid = positiveFiniteNumber(binance?.bid);
+      const binanceAsk = positiveFiniteNumber(binance?.ask);
+      const needsUsdtToUsd = isBinanceUsdtQuote(mapping.binance);
+      const usdtUsdRate = needsUsdtToUsd
+        ? positiveFiniteNumber(oraclePrices.get('USDT'))
+        : null;
+      const sourceTimes = [
+        poolTime,
+        oraclePrice !== null || usdtUsdRate !== null ? oracleTime : null,
+        binanceMid !== null ? binanceTime : null
+      ]
         .filter(Boolean)
         .map(Date.parse)
         .filter(Number.isFinite);
@@ -211,14 +237,36 @@ export function buildObservationRows({
       const poolTimestamp = Date.parse(poolTime || '');
       const oracleTimestamp = Date.parse(oracleTime || '');
       const binanceTimestamp = Date.parse(binanceTime || '');
-      const oracleAligned = oraclePrice !== null
-        && Number.isFinite(poolTimestamp)
+      const oracleSourceAligned = Number.isFinite(poolTimestamp)
         && Number.isFinite(oracleTimestamp)
         && Math.abs(oracleTimestamp - poolTimestamp) <= POOL_DISLOCATION_MAX_SOURCE_SKEW_MS;
-      const binanceAligned = Boolean(binance)
+      const oracleAligned = oraclePrice !== null && oracleSourceAligned;
+      const binanceAligned = binanceMid !== null
         && Number.isFinite(poolTimestamp)
         && Number.isFinite(binanceTimestamp)
         && Math.abs(binanceTimestamp - poolTimestamp) <= POOL_DISLOCATION_MAX_SOURCE_SKEW_MS;
+      const usdtToUsdAligned = usdtUsdRate !== null
+        && oracleSourceAligned
+        && binanceAligned
+        && sourceSkewMs !== null
+        && sourceSkewMs <= POOL_DISLOCATION_MAX_SOURCE_SKEW_MS;
+      const binanceUsdMultiplier = needsUsdtToUsd
+        ? (usdtToUsdAligned ? usdtUsdRate : null)
+        : 1;
+      const binanceMethod = !binanceAligned
+        ? null
+        : !needsUsdtToUsd
+          ? binancePriceMethod
+          : usdtUsdRate === null
+            ? binanceUsdtToUsdMethod(binancePriceMethod, 'unavailable')
+            : !usdtToUsdAligned
+              ? binanceUsdtToUsdMethod(binancePriceMethod, 'unaligned')
+              : binanceUsdtToUsdMethod(binancePriceMethod);
+      const binanceUsdPrice = (price) => binanceAligned
+        && binanceUsdMultiplier !== null
+        && price !== null
+        ? price * binanceUsdMultiplier
+        : null;
 
       return {
         observedAt: bucket,
@@ -233,16 +281,16 @@ export function buildObservationRows({
         oraclePriceUsd: oracleAligned ? oraclePrice : null,
         oracleObservedAt: oracleAligned ? oracleTime : null,
         binanceSymbol: mapping.binance,
-        binanceBidUsd: binanceAligned ? binance?.bid ?? null : null,
-        binanceAskUsd: binanceAligned ? binance?.ask ?? null : null,
-        binancePriceUsd: binanceAligned ? binance?.mid ?? null : null,
+        binanceBidUsd: binanceUsdPrice(binanceBid),
+        binanceAskUsd: binanceUsdPrice(binanceAsk),
+        binancePriceUsd: binanceUsdPrice(binanceMid),
         binanceObservedAt: binanceAligned ? binanceTime : null,
         sourceSkewMs,
         sampleOrigin,
         thorchainHeight,
         poolPriceMethod,
         oraclePriceMethod: oracleAligned ? oraclePriceMethod : null,
-        binancePriceMethod: binanceAligned ? binancePriceMethod : null
+        binancePriceMethod: binanceMethod
       };
     })
     .sort((left, right) => left.asset.localeCompare(right.asset));

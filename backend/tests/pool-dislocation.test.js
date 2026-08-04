@@ -153,7 +153,10 @@ test('chain trading status is sourced from the canonical durable THORNode snapsh
 test('observation rows retain every Available pool and null unaligned references', () => {
   const aligned = buildObservationRows({
     pools: AVAILABLE_POOLS,
-    oraclePrices: new Map([['BTC', 100]]),
+    oraclePrices: new Map([
+      ['BTC', 100],
+      ['USDT', 1]
+    ]),
     binanceTickers: new Map([['BTCUSDT', { bid: 99, ask: 101, mid: 100 }]]),
     observedAt: '2026-07-29T12:07:00Z',
     poolObservedAt: '2026-07-29T12:07:01Z',
@@ -170,7 +173,10 @@ test('observation rows retain every Available pool and null unaligned references
 
   const skewed = buildObservationRows({
     pools: AVAILABLE_POOLS.slice(0, 1),
-    oraclePrices: new Map([['BTC', 100]]),
+    oraclePrices: new Map([
+      ['BTC', 100],
+      ['USDT', 1]
+    ]),
     binanceTickers: new Map([['BTCUSDT', { bid: 99, ask: 101, mid: 100 }]]),
     observedAt: '2026-07-29T12:05:00Z',
     poolObservedAt: '2026-07-29T12:05:00Z',
@@ -179,7 +185,73 @@ test('observation rows retain every Available pool and null unaligned references
   });
   assert.equal(skewed[0].sourceSkewMs, 60_000);
   assert.equal(skewed[0].oraclePriceUsd, null);
-  assert.equal(skewed[0].binancePriceUsd, 100);
+  assert.equal(skewed[0].binancePriceUsd, null);
+  assert.equal(skewed[0].binancePriceMethod, 'book-ticker-mid-usdt-to-usd-unaligned');
+});
+
+test('Binance USDT books are converted to USD before being stored as USD prices', () => {
+  const [row] = buildObservationRows({
+    pools: AVAILABLE_POOLS.slice(0, 1),
+    oraclePrices: new Map([
+      ['BTC', 99],
+      ['USDT', 0.99]
+    ]),
+    binanceTickers: new Map([['BTCUSDT', { bid: 99, ask: 101, mid: 100 }]]),
+    observedAt: '2026-07-29T12:05:00Z',
+    poolObservedAt: '2026-07-29T12:05:01Z',
+    oracleObservedAt: '2026-07-29T12:05:02Z',
+    binanceObservedAt: '2026-07-29T12:05:03Z'
+  });
+
+  assert.equal(row.binanceBidUsd, 98.01);
+  assert.equal(row.binanceAskUsd, 99.99);
+  assert.equal(row.binancePriceUsd, 99);
+  assert.equal(row.binancePriceMethod, 'book-ticker-mid-usdt-to-usd');
+});
+
+test('Binance USD legs fail closed without an aligned Oracle USDT conversion', () => {
+  const common = {
+    pools: AVAILABLE_POOLS.slice(0, 1),
+    binanceTickers: new Map([['BTCUSDT', { bid: 99, ask: 101, mid: 100 }]]),
+    observedAt: '2026-07-29T12:05:00Z',
+    poolObservedAt: '2026-07-29T12:05:01Z',
+    binanceObservedAt: '2026-07-29T12:05:03Z'
+  };
+  const [missing] = buildObservationRows({
+    ...common,
+    oraclePrices: new Map([['BTC', 99]]),
+    oracleObservedAt: '2026-07-29T12:05:02Z'
+  });
+  const [unaligned] = buildObservationRows({
+    ...common,
+    oraclePrices: new Map([
+      ['BTC', 99],
+      ['USDT', 0.99]
+    ]),
+    oracleObservedAt: '2026-07-29T12:06:02Z'
+  });
+  const [crossSkewed] = buildObservationRows({
+    ...common,
+    oraclePrices: new Map([
+      ['BTC', 99],
+      ['USDT', 0.99]
+    ]),
+    poolObservedAt: '2026-07-29T12:05:30Z',
+    oracleObservedAt: '2026-07-29T12:05:00Z',
+    binanceObservedAt: '2026-07-29T12:06:00Z'
+  });
+
+  assert.equal(missing.binanceBidUsd, null);
+  assert.equal(missing.binanceAskUsd, null);
+  assert.equal(missing.binancePriceUsd, null);
+  assert.equal(missing.binanceObservedAt, '2026-07-29T12:05:03.000Z');
+  assert.equal(missing.binancePriceMethod, 'book-ticker-mid-usdt-to-usd-unavailable');
+  assert.equal(unaligned.binancePriceUsd, null);
+  assert.equal(unaligned.binancePriceMethod, 'book-ticker-mid-usdt-to-usd-unaligned');
+  assert.equal(crossSkewed.sourceSkewMs, 60_000);
+  assert.equal(crossSkewed.binancePriceUsd, null);
+  assert.equal(crossSkewed.binanceObservedAt, '2026-07-29T12:06:00.000Z');
+  assert.equal(crossSkewed.binancePriceMethod, 'book-ticker-mid-usdt-to-usd-unaligned');
 });
 
 test('summary uses every five-minute sample for windows and hourly peak-preserving sparklines', () => {
@@ -207,6 +279,7 @@ test('summary uses every five-minute sample for windows and hourly peak-preservi
     ])
   });
   const pool = summary.pools[0];
+  assert.equal(summary.schema_version, 4);
   assert.equal(summary.expected_samples, 2017);
   assert.ok(Math.abs(pool.average_abs['1h'] - (7 / 3)) < 1e-9);
   assert.ok(Math.abs(pool.average_abs['4h'] - 1.75) < 1e-9);
@@ -275,7 +348,11 @@ test('collector degrades a failed reference source while preserving pool observa
   assert.equal(snapshot.observedAt, '2026-07-29T12:05:00.000Z');
   assert.equal(snapshot.sources.oracle.status, 'error');
   assert.equal(snapshot.rows[0].oraclePriceUsd, null);
-  assert.equal(snapshot.rows[0].binancePriceUsd, 100);
+  assert.equal(snapshot.rows[0].binancePriceUsd, null);
+  assert.equal(
+    snapshot.rows[0].binancePriceMethod,
+    'book-ticker-mid-usdt-to-usd-unavailable'
+  );
   assert.equal(snapshot.sources.trading.status, 'fresh');
   assert.equal(snapshot.sources.trading.provider, 'thornode-core-snapshot');
   assert.deepEqual(snapshot.chainTrading.halted_chains, []);
@@ -294,7 +371,10 @@ test('reference snapshots retry transient failures outside a shared cooldown', a
     fetchOracle: async (context) => {
       oracleContexts.push(context);
       if (!context.bypassSharedCooldown) throw new TypeError('fetch failed');
-      return { prices: [{ symbol: 'BTC', price: '100' }] };
+      return { prices: [
+        { symbol: 'BTC', price: '100' },
+        { symbol: 'USDT', price: '1' }
+      ] };
     },
     fetchBinance: async (context) => {
       binanceContexts.push(context);
@@ -371,7 +451,10 @@ test('collector writes a provenance-labelled bucket from the durable core fallba
         field_meta: { pools: { fetched_at: '2026-07-29T12:04:50Z' } }
       }
     }),
-    fetchOracle: async () => ({ prices: [{ symbol: 'BTC', price: '100' }] }),
+    fetchOracle: async () => ({ prices: [
+      { symbol: 'BTC', price: '100' },
+      { symbol: 'USDT', price: '1' }
+    ] }),
     fetchBinance: async () => [{ symbol: 'BTCUSDT', bidPrice: '99', askPrice: '101' }],
     fetchInboundAddresses: async () => []
   });

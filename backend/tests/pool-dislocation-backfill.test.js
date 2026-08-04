@@ -139,17 +139,20 @@ test('historical rows retain same-height THORChain and labelled Binance close pr
       balance_asset: '100',
       balance_rune: '200'
     }],
-    oracle: { prices: [{ symbol: 'BTC', price: '100' }] }
+    oracle: { prices: [
+      { symbol: 'BTC', price: '100' },
+      { symbol: 'USDT', price: '0.99' }
+    ] }
   }, new Map([['BTCUSDT', new Map([['2026-07-22T12:05:00.000Z', 100.5]])]]));
   assert.equal(rows.length, 1);
   assert.equal(rows[0].sampleOrigin, 'historical_backfill');
   assert.equal(rows[0].thorchainHeight, 123);
   assert.equal(rows[0].poolPriceUsd, 101);
   assert.equal(rows[0].oraclePriceUsd, 100);
-  assert.equal(rows[0].binancePriceUsd, 100.5);
+  assert.equal(rows[0].binancePriceUsd, 99.495);
   assert.equal(rows[0].binanceBidUsd, null);
   assert.equal(rows[0].binanceAskUsd, null);
-  assert.equal(rows[0].binancePriceMethod, 'kline-close');
+  assert.equal(rows[0].binancePriceMethod, 'kline-close-usdt-to-usd');
 });
 
 test('historical rows label confirmed reference absence for idempotent repair', () => {
@@ -183,7 +186,10 @@ test('historical rows distinguish an available but unaligned Binance close', () 
       status: 'Available',
       asset_tor_price: '10100000000'
     }],
-    oracle: { prices: [{ symbol: 'BTC', price: '100' }] }
+    oracle: { prices: [
+      { symbol: 'BTC', price: '100' },
+      { symbol: 'USDT', price: '1' }
+    ] }
   }, new Map([['BTCUSDT', new Map([[observedAt, 100.5]])]]));
   assert.equal(rows[0].binancePriceUsd, null);
   assert.equal(rows[0].binancePriceMethod, 'kline-close-unaligned');
@@ -208,8 +214,29 @@ test('an empty historical oracle remains an explicit source gap', async () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].poolPriceUsd, 101);
   assert.equal(rows[0].oraclePriceUsd, null);
-  assert.equal(rows[0].binancePriceUsd, 100.5);
+  assert.equal(rows[0].binancePriceUsd, null);
   assert.equal(rows[0].oraclePriceMethod, 'thornode-oracle-unavailable');
+  assert.equal(rows[0].binancePriceMethod, 'kline-close-usdt-to-usd-unavailable');
+});
+
+test('historical Binance closes fail closed without same-height Oracle USDT conversion', () => {
+  const observedAt = '2026-07-22T12:05:00.000Z';
+  const rows = buildHistoricalPoolDislocationRows({
+    observedAt,
+    height: 123,
+    blockTime: '2026-07-22T12:04:57.000Z'
+  }, {
+    pools: [{
+      asset: 'BTC.BTC',
+      status: 'Available',
+      asset_tor_price: '10100000000'
+    }],
+    oracle: { prices: [{ symbol: 'BTC', price: '100' }] }
+  }, new Map([['BTCUSDT', new Map([[observedAt, 100.5]])]]));
+
+  assert.equal(rows[0].oraclePriceUsd, 100);
+  assert.equal(rows[0].binancePriceUsd, null);
+  assert.equal(rows[0].binancePriceMethod, 'kline-close-usdt-to-usd-unavailable');
 });
 
 test('backfill planning resumes missing buckets without touching scheduled history', async () => {
@@ -283,6 +310,8 @@ test('recent repair planning floors bounds and replaces degraded or missing buck
   assert.match(sql, /thornode-oracle-unaligned/);
   assert.match(sql, /kline-close-unavailable/);
   assert.match(sql, /kline-close-unaligned/);
+  assert.match(sql, /kline-close-usdt-to-usd-unavailable/);
+  assert.match(sql, /kline-close-usdt-to-usd-unaligned/);
 });
 
 test('recent repair default window excludes the partial RPC-retention boundary bucket', async () => {
@@ -324,7 +353,7 @@ test('bulk upsert gives scheduled observations precedence over historical rows',
     sampleOrigin: 'historical_backfill',
     thorchainHeight: 123,
     binancePriceUsd: 99,
-    binancePriceMethod: 'kline-close'
+    binancePriceMethod: 'kline-close-usdt-to-usd'
   }]);
   assert.match(sql, /current\.sample_origin <> 'scheduled'/);
   assert.match(sql, /excluded\.sample_origin = 'scheduled'/);
@@ -333,7 +362,7 @@ test('bulk upsert gives scheduled observations precedence over historical rows',
   assert.match(sql, /current\.binance_price_usd is null/);
   assert.match(sql, /excluded\.sample_origin = 'historical_backfill'/);
   assert.equal(payload[0].sample_origin, 'historical_backfill');
-  assert.equal(payload[0].binance_price_method, 'kline-close');
+  assert.equal(payload[0].binance_price_method, 'kline-close-usdt-to-usd');
 });
 
 test('backfill runner owns an isolated lock and refreshes the live read model', async () => {
