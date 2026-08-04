@@ -53,7 +53,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-tar -C "$ROOT/dist" -czf "$ARCHIVE" .
+tar --no-xattrs --no-mac-metadata -C "$ROOT/dist" -czf "$ARCHIVE" .
 tar -tzf "$ARCHIVE" >/dev/null
 ARCHIVE_SHA256="$(sha256sum "$ARCHIVE" | awk '{ print $1 }')"
 

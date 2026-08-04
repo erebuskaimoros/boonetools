@@ -252,6 +252,10 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.doesNotMatch(remoteDeployScript, /systemctl reload caddy/);
   assert.doesNotMatch(remoteDeployScript, /Caddyfile\.boone\.tools/);
   assert.match(frontendDeployScript, /ARCHIVE_SHA256/);
+  assert.match(
+    frontendDeployScript,
+    /tar --no-xattrs --no-mac-metadata -C "\$ROOT\/dist" -czf "\$ARCHIVE" \./
+  );
   assert.match(remoteFrontendDeployScript, /flock -n 9/);
   assert.match(remoteFrontendDeployScript, /atomic_point_current/);
   assert.match(remoteFrontendDeployScript, /public asset does not match the activated release/);
