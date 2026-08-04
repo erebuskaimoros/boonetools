@@ -105,16 +105,21 @@ UTC buckets. The scheduled backend job persists 30 days of observations,
 publishes the compact `/functions/v1/pool-dislocation` read model, and serves
 the selected pool's exact seven-day points from
 `/functions/v1/pool-dislocation-series?asset=...`. Binance uses its public
-market-data-only endpoint and requires no API key. The default-on halted-chain
-filter reuses the canonical `thornode-core:v1` inbound-address state; unknown
-or stale trading state does not hide pools. The selected-pool chart can show
-the trailing 1 hour, 1 day, or 7 days, and a horizontal drag highlights and
-zooms into any subrange without interpolating missing five-minute samples. A
-resumable one-shot backfill can
+market-data-only endpoint and requires no API key. Because those markets quote
+assets in USDT, each raw `XUSDT` bid, ask, midpoint, or kline close is converted
+to USD with the same-snapshot THORChain Oracle `USDT/USD` rate. The composite
+reference is retained only when its source timestamps are within 30 seconds;
+otherwise its USD values remain null and the price method records why. The
+default-on halted-chain filter reuses the canonical `thornode-core:v1`
+inbound-address state; unknown or stale trading state does not hide pools. The
+selected-pool chart can show the trailing 1 hour, 1 day, or 7 days, and a
+horizontal drag highlights and zooms into any subrange without interpolating
+missing five-minute samples. A resumable one-shot backfill can
 reconstruct the initial seven-day window from same-height historical THORNode
 pool/oracle state and Binance five-minute kline closes. API points label their
-origin and pricing method because Binance does not expose historical
-`bookTicker` midpoints through its public archive.
+origin and composite pricing method because Binance does not expose historical
+`bookTicker` midpoints through its public archive. Migration 042 archives the
+original raw USDT quotes before applying the same conversion to stored history.
 
 All read-only `/functions/v1` routes are public and protected by backend request
 rate limiting. Successful responses retain their established shape and gain a

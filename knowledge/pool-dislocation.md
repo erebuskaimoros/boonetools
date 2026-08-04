@@ -74,10 +74,17 @@ minutes:
   Retry bounded transient failures inside the same exact five-minute run and
   bypass a stale shared provider cooldown after the first attempt.
 - Binance: one backend `bookTicker` request for the configured spot markets;
-  use `(best bid + best ask) / 2` and store the bid, ask, and symbol. Do not make
-  browser-side Binance calls. Local requests may be region-blocked, so the job
-  must retry transient failures, then degrade per source and preserve the last
-  good BooneTools read model.
+  use `(best bid + best ask) / 2` and store the bid, ask, and symbol. Binance
+  `XUSDT` values are USDT per asset, not USD per asset, so multiply each raw
+  bid, ask, and midpoint by the same-snapshot THORChain Oracle `USDT/USD` rate.
+  Treat this as a composite reference rather than a fully independent USD
+  source. Require the Binance observation and USDT Oracle observation to be
+  within 30 seconds; when the rate is missing, nonpositive, or unaligned, keep
+  the Binance USD fields null and record an explicit `*-usdt-to-usd-unavailable`
+  or `*-usdt-to-usd-unaligned` method. Do not make browser-side Binance calls.
+  Local requests may be region-blocked, so the job must retry transient
+  failures, then degrade per source and preserve the last good BooneTools read
+  model.
 - Trading availability: reuse the canonical `thornode-core:v1`
   `inbound_addresses` field (itself populated from
   `/thorchain/inbound_addresses`) and treat `halted`,
@@ -106,7 +113,10 @@ Migration `031_pool_dislocation.sql` creates
 `033_pool_dislocation_provenance.sql` adds reconstruction provenance. Migration
 `034_pool_dislocation_exact_binance_markets.sql` invalidates historical proxy
 legs, assigns WBTC to `WBTCUSDT`, and clears the materialized summary before it
-is rebuilt.
+is rebuilt. Migration `042_pool_dislocation_binance_usdt_to_usd.sql` archives
+the original raw USDT-denominated Binance fields, repairs usable history with
+the same-bucket Oracle `USDT/USD` rate, fails unusable rows closed, and clears
+the materialized summary before it is rebuilt.
 
 ```text
 observed_at, asset, pool_status,
@@ -150,10 +160,12 @@ state boundary for each reconstructed point.
 
 Binance's public Spot archive does not expose historical `bookTicker` best
 bid/ask snapshots. Reconstructed points therefore use the close of the
-five-minute Binance kline ending at the same UTC boundary. Those rows retain
-null bid/ask fields and are explicitly labeled `historical_backfill` plus
-`kline-close`; live scheduled rows remain labeled `scheduled` plus
-`book-ticker-mid`. Scheduled rows win any primary-key conflict.
+five-minute Binance `XUSDT` kline ending at the same UTC boundary, multiplied
+by the same-height THORChain Oracle `USDT/USD` rate. Those rows retain null
+bid/ask fields and are explicitly labeled `historical_backfill` plus
+`kline-close-usdt-to-usd`; live scheduled rows remain labeled `scheduled` plus
+`book-ticker-mid-usdt-to-usd`. Missing or unaligned conversion factors produce
+explicit null Binance legs. Scheduled rows win any primary-key conflict.
 
 The job discovers already-written historical buckets before fetching sources,
 writes bounded transactional batches, verifies the complete bucket range, and

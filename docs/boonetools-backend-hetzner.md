@@ -317,6 +317,16 @@ It writes in bounded transactions, preserves any live row at a conflicting
 timestamp, verifies every planned bucket, and refreshes the public read model.
 It has no timer and does not run automatically during future deploys.
 
+Migration `042_pool_dislocation_binance_usdt_to_usd.sql` corrects the Pool
+Dislocation Binance unit contract. Binance spot markets provide `XUSDT`, so
+the writer and historical repair multiply each raw quote by the same-snapshot
+THORChain Oracle `USDT/USD` rate before storing it in the `*_usd` columns. The
+migration first preserves the original provider values and conversion evidence
+in `pool_dislocation_binance_usdt_archive`; missing or source-unaligned rates
+produce null USD fields rather than mislabeled values. Deploy the corrected
+writer before this forward data migration so the previous release remains a
+safe rollback target.
+
 Migrations `035_wasm_arb_economics.sql`,
 `036_wasm_arb_economics_accounting.sql`,
 `037_wasm_arb_monitoring_series.sql`, and
