@@ -208,7 +208,7 @@ test('buildAffiliateMidgardSeries merges historical affiliate volume and fees be
   assert.equal(series.rateFeeBasis, 'historical-rune-usd');
 });
 
-test('buildAffiliateTrendView uses cached warm-up rows for rolling volume averages', () => {
+test('buildAffiliateTrendView uses cached warm-up rows for rolling volume and fee averages', () => {
   const points = Array.from({ length: 220 }, (_, index) => {
     const volumeUsd = index + 1;
     const feesUsd = volumeUsd / 1000;
@@ -232,18 +232,24 @@ test('buildAffiliateTrendView uses cached warm-up rows for rolling volume averag
   assert.equal(view.rollingVolumeUsd[90].at(-1), 175.5);
   assert.equal(view.rollingVolumeUsd[180][0], 101.5);
   assert.equal(view.rollingVolumeUsd[180].at(-1), 130.5);
+  assert.equal(Number(view.rollingFeesUsd[30][0].toFixed(4)), 0.1765);
+  assert.equal(Number(view.rollingFeesUsd[30].at(-1).toFixed(4)), 0.2055);
+  assert.equal(Number(view.rollingFeesUsd[90][0].toFixed(4)), 0.1465);
+  assert.equal(Number(view.rollingFeesUsd[90].at(-1).toFixed(4)), 0.1755);
+  assert.equal(Number(view.rollingFeesUsd[180][0].toFixed(4)), 0.1015);
+  assert.equal(Number(view.rollingFeesUsd[180].at(-1).toFixed(4)), 0.1305);
   assert.equal(view.totalVolumeUsd, 6165);
   assert.equal(Number(view.totalFeesUsd.toFixed(3)), 6.165);
   assert.equal(Number(view.totalRateBps.toFixed(6)), 10);
   assert.equal(view.sourcePointCount, 220);
 });
 
-test('buildAffiliateTrendView excludes 2026 halt days from calendar-window averages', () => {
+test('buildAffiliateTrendView excludes 2026 halt days from volume and fee averages', () => {
   const point = (date, volumeUsd) => ({
     startTime: String(Date.parse(`${date}T00:00:00.000Z`) / 1000),
     label: date,
     volumeUsd,
-    feesUsd: 0,
+    feesUsd: volumeUsd / 10,
     count: 0,
     rateBps: null
   });
@@ -269,6 +275,9 @@ test('buildAffiliateTrendView excludes 2026 halt days from calendar-window avera
   const averageByDate = new Map(
     points.map((entry, index) => [entry.label, view.rollingVolumeUsd[3][index]])
   );
+  const feeAverageByDate = new Map(
+    points.map((entry, index) => [entry.label, view.rollingFeesUsd[3][index]])
+  );
 
   assert.equal(averageByDate.get('2026-05-15'), 20);
   assert.equal(averageByDate.get('2026-05-16'), null);
@@ -276,6 +285,12 @@ test('buildAffiliateTrendView excludes 2026 halt days from calendar-window avera
   assert.equal(averageByDate.get('2026-06-22'), 60);
   assert.equal(averageByDate.get('2026-06-23'), 75);
   assert.equal(averageByDate.get('2026-06-24'), 90);
+  assert.equal(feeAverageByDate.get('2026-05-15'), 2);
+  assert.equal(feeAverageByDate.get('2026-05-16'), null);
+  assert.equal(feeAverageByDate.get('2026-06-21'), null);
+  assert.equal(feeAverageByDate.get('2026-06-22'), 6);
+  assert.equal(feeAverageByDate.get('2026-06-23'), 7.5);
+  assert.equal(feeAverageByDate.get('2026-06-24'), 9);
 });
 
 test('buildAffiliateTrendView buckets visible daily rows into calendar weeks', () => {
@@ -300,6 +315,7 @@ test('buildAffiliateTrendView buckets visible daily rows into calendar weeks', (
   assert.deepEqual(view.fees, [0.28, 0.27]);
   assert.deepEqual(view.rateBps, [10, 10]);
   assert.deepEqual(view.rollingVolumeUsd[3], [200, 240]);
+  assert.deepEqual(view.rollingFeesUsd[3].map((value) => Number(value.toFixed(2))), [0.2, 0.24]);
   assert.deepEqual(view.points.map((point) => point.dayCount), [7, 3]);
   assert.equal(view.totalVolumeUsd, 550);
   assert.equal(view.bucket, 'week');

@@ -566,13 +566,16 @@ function affiliateBucketIdentity(point, index, bucket) {
   return { key: `month:${month}`, label: month };
 }
 
-function bucketAffiliateTrendPoints(points, rollingVolumeUsd, bucket) {
+function bucketAffiliateTrendPoints(points, rollingVolumeUsd, rollingFeesUsd, bucket) {
   if (bucket === 'day') {
-    return { points, rollingVolumeUsd };
+    return { points, rollingVolumeUsd, rollingFeesUsd };
   }
 
   const groups = new Map();
-  const rollingWindows = Object.keys(rollingVolumeUsd);
+  const rollingWindows = [...new Set([
+    ...Object.keys(rollingVolumeUsd),
+    ...Object.keys(rollingFeesUsd)
+  ])];
 
   points.forEach((point, index) => {
     const identity = affiliateBucketIdentity(point, index, bucket);
@@ -587,8 +590,10 @@ function bucketAffiliateTrendPoints(points, rollingVolumeUsd, bucket) {
         rateFeesComplete: true,
         count: 0,
         dayCount: 0,
-        rollingSums: Object.fromEntries(rollingWindows.map((window) => [window, 0])),
-        rollingCounts: Object.fromEntries(rollingWindows.map((window) => [window, 0]))
+        rollingVolumeSums: Object.fromEntries(rollingWindows.map((window) => [window, 0])),
+        rollingVolumeCounts: Object.fromEntries(rollingWindows.map((window) => [window, 0])),
+        rollingFeesSums: Object.fromEntries(rollingWindows.map((window) => [window, 0])),
+        rollingFeesCounts: Object.fromEntries(rollingWindows.map((window) => [window, 0]))
       });
     }
 
@@ -608,18 +613,25 @@ function bucketAffiliateTrendPoints(points, rollingVolumeUsd, bucket) {
       Boolean(group.rollingAverageExcluded) && Boolean(point?.rollingAverageExcluded);
 
     for (const window of rollingWindows) {
-      const value = rollingVolumeUsd[window]?.[index];
-      if (value !== null && value !== undefined && Number.isFinite(Number(value))) {
-        group.rollingSums[window] += Number(value);
-        group.rollingCounts[window] += 1;
+      const volumeValue = rollingVolumeUsd[window]?.[index];
+      if (volumeValue !== null && volumeValue !== undefined && Number.isFinite(Number(volumeValue))) {
+        group.rollingVolumeSums[window] += Number(volumeValue);
+        group.rollingVolumeCounts[window] += 1;
+      }
+      const feesValue = rollingFeesUsd[window]?.[index];
+      if (feesValue !== null && feesValue !== undefined && Number.isFinite(Number(feesValue))) {
+        group.rollingFeesSums[window] += Number(feesValue);
+        group.rollingFeesCounts[window] += 1;
       }
     }
   });
 
   const bucketedPoints = [...groups.values()].map((group) => {
     const {
-      rollingSums: _rollingSums,
-      rollingCounts: _rollingCounts,
+      rollingVolumeSums: _rollingVolumeSums,
+      rollingVolumeCounts: _rollingVolumeCounts,
+      rollingFeesSums: _rollingFeesSums,
+      rollingFeesCounts: _rollingFeesCounts,
       rateFeesComplete,
       ...point
     } = group;
@@ -636,13 +648,20 @@ function bucketAffiliateTrendPoints(points, rollingVolumeUsd, bucket) {
   const bucketedRollingVolumeUsd = Object.fromEntries(rollingWindows.map((window) => [
     window,
     [...groups.values()].map((group) => (
-      group.rollingCounts[window] > 0 ? group.rollingSums[window] : null
+      group.rollingVolumeCounts[window] > 0 ? group.rollingVolumeSums[window] : null
+    ))
+  ]));
+  const bucketedRollingFeesUsd = Object.fromEntries(rollingWindows.map((window) => [
+    window,
+    [...groups.values()].map((group) => (
+      group.rollingFeesCounts[window] > 0 ? group.rollingFeesSums[window] : null
     ))
   ]));
 
   return {
     points: bucketedPoints,
-    rollingVolumeUsd: bucketedRollingVolumeUsd
+    rollingVolumeUsd: bucketedRollingVolumeUsd,
+    rollingFeesUsd: bucketedRollingFeesUsd
   };
 }
 
@@ -657,12 +676,15 @@ export function buildAffiliateTrendView(
   const startIndex = Math.max(0, sourcePoints.length - visibleCount);
   const visiblePoints = sourcePoints.slice(startIndex);
   const dailyRollingVolumeUsd = {};
+  const dailyRollingFeesUsd = {};
   const normalizedBucket = ['day', 'week', 'month'].includes(bucket) ? bucket : 'day';
 
   for (const rawWindow of new Set(Array.isArray(rollingWindows) ? rollingWindows : [])) {
     const windowDays = Math.max(1, Math.floor(parseNumeric(rawWindow, 1)));
-    const averages = new Array(sourcePoints.length).fill(null);
-    let rollingTotal = 0;
+    const volumeAverages = new Array(sourcePoints.length).fill(null);
+    const feesAverages = new Array(sourcePoints.length).fill(null);
+    let rollingVolumeTotal = 0;
+    let rollingFeesTotal = 0;
     let eligibleDayCount = 0;
 
     for (let index = 0; index < sourcePoints.length; index += 1) {
@@ -670,7 +692,8 @@ export function buildAffiliateTrendView(
       const rollingAverageExcluded = Boolean(point?.rollingAverageExcluded) ||
         isThorchain2026HackHalt(point?.startTime);
       if (!rollingAverageExcluded) {
-        rollingTotal += Number(point?.volumeUsd) || 0;
+        rollingVolumeTotal += Number(point?.volumeUsd) || 0;
+        rollingFeesTotal += Number(point?.feesUsd) || 0;
         eligibleDayCount += 1;
       }
 
@@ -679,26 +702,31 @@ export function buildAffiliateTrendView(
         const expiredPointExcluded = Boolean(expiredPoint?.rollingAverageExcluded) ||
           isThorchain2026HackHalt(expiredPoint?.startTime);
         if (!expiredPointExcluded) {
-          rollingTotal -= Number(expiredPoint?.volumeUsd) || 0;
+          rollingVolumeTotal -= Number(expiredPoint?.volumeUsd) || 0;
+          rollingFeesTotal -= Number(expiredPoint?.feesUsd) || 0;
           eligibleDayCount -= 1;
         }
       }
 
       if (!rollingAverageExcluded && index >= windowDays - 1 && eligibleDayCount > 0) {
-        averages[index] = rollingTotal / eligibleDayCount;
+        volumeAverages[index] = rollingVolumeTotal / eligibleDayCount;
+        feesAverages[index] = rollingFeesTotal / eligibleDayCount;
       }
     }
 
-    dailyRollingVolumeUsd[windowDays] = averages.slice(startIndex);
+    dailyRollingVolumeUsd[windowDays] = volumeAverages.slice(startIndex);
+    dailyRollingFeesUsd[windowDays] = feesAverages.slice(startIndex);
   }
 
   const bucketed = bucketAffiliateTrendPoints(
     visiblePoints,
     dailyRollingVolumeUsd,
+    dailyRollingFeesUsd,
     normalizedBucket
   );
   const points = bucketed.points;
   const rollingVolumeUsd = bucketed.rollingVolumeUsd;
+  const rollingFeesUsd = bucketed.rollingFeesUsd;
   const totalVolumeUsd = points.reduce((sum, point) => sum + (Number(point?.volumeUsd) || 0), 0);
   const totalFeesUsd = points.reduce((sum, point) => sum + (Number(point?.feesUsd) || 0), 0);
   const rateFeesComplete = points.every(
@@ -716,6 +744,7 @@ export function buildAffiliateTrendView(
     fees: points.map((point) => point.feesUsd),
     rateBps: points.map((point) => point.rateBps),
     rollingVolumeUsd,
+    rollingFeesUsd,
     points,
     totalVolumeUsd,
     totalFeesUsd,

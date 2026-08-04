@@ -50,9 +50,13 @@
   // rolling-average warm-up. Volume comes from BooneTools' per-leg backend.
   const AFFILIATE_HISTORY_COUNT = 400;
   const AFFILIATE_ROLLING_AVERAGES = [
-    { days: 30, label: '30D', color: CHART.rolling30, borderDash: [] },
-    { days: 90, label: '90D', color: CHART.rolling90, borderDash: [7, 4] },
-    { days: 180, label: '180D', color: CHART.rolling180, borderDash: [2, 4] }
+    { days: 30, label: '30D', color: CHART.rolling30, borderDash: [], revenueBorderDash: [10, 3] },
+    { days: 90, label: '90D', color: CHART.rolling90, borderDash: [7, 4], revenueBorderDash: [7, 3, 2, 3] },
+    { days: 180, label: '180D', color: CHART.rolling180, borderDash: [2, 4], revenueBorderDash: [2, 2, 8, 2] }
+  ];
+  const AFFILIATE_ROLLING_METRICS = [
+    { id: 'volume', label: 'volume', controlLabel: 'volume rolling avg', seriesKey: 'rollingVolumeUsd', yAxisID: 'yVolume' },
+    { id: 'fees', label: 'revenue', controlLabel: 'revenue (fees) rolling avg', seriesKey: 'rollingFeesUsd', yAxisID: 'yFees' }
   ];
   const AFFILIATE_BUCKETS = [
     { id: 'day', label: 'DAY' },
@@ -72,7 +76,7 @@
   let selectedAffiliateId = '';
   let affiliateTimeframe = '90d';
   let affiliateBucket = 'day';
-  let affiliateRollingAverages = [];
+  let affiliateRollingAverages = { volume: [], fees: [] };
   let sortField = 'currentFeesUsd';
   let sortDir = 'desc';
   let chartCanvas;
@@ -136,9 +140,10 @@
         affiliateBucket
       )
     : null;
-  $: affiliateRollingLabel = affiliateRollingAverages.length
-    ? affiliateRollingAverages.map((days) => `${days}D`).join(' + ')
-    : 'RAW';
+  $: affiliateRollingLabel = [
+    formatAffiliateRollingSelection('VOLUME', affiliateRollingAverages.volume),
+    formatAffiliateRollingSelection('REVENUE', affiliateRollingAverages.fees)
+  ].filter(Boolean).join(' / ') || 'RAW';
   $: filteredRecords = sortRecords(filterRecords(records, search, stateFilter), sortField, sortDir);
   $: selectedRecord =
     records.find((record) => record.id === selectedId) ||
@@ -165,7 +170,7 @@
     ? `${selectedRecord.id}:${selectedRecord.history.length}:${selectedRecord.dynamicBps}:${selectedRecord.currentFeesUsd}`
     : 'empty';
   $: affiliateChartKey = affiliateHistory
-    ? `${affiliateHistoryKey}:${affiliateTimeframeOption.id}:${affiliateBucket}:${affiliateHistory.points.length}:${affiliateHistory.totalVolumeUsd}:${affiliateHistory.totalFeesUsd}:${affiliateHistory.totalRateBps}:${affiliateRollingAverages.join(',')}:${selectedAffiliateBucket?.key || ''}`
+    ? `${affiliateHistoryKey}:${affiliateTimeframeOption.id}:${affiliateBucket}:${affiliateHistory.points.length}:${affiliateHistory.totalVolumeUsd}:${affiliateHistory.totalFeesUsd}:${affiliateHistory.totalRateBps}:volume-${affiliateRollingAverages.volume.join(',')}:fees-${affiliateRollingAverages.fees.join(',')}:${selectedAffiliateBucket?.key || ''}`
     : `${affiliateHistoryKey}:empty:${affiliateHistoryLoading}`;
   $: if (chartCanvas && chartKey !== renderedChartKey) {
     renderedChartKey = chartKey;
@@ -760,22 +765,24 @@
     const selectedBarColor = (index, normal, selected) => (
       index === selectedIndex ? selected : normal
     );
-    const rollingDatasets = AFFILIATE_ROLLING_AVERAGES
-      .filter((option) => affiliateRollingAverages.includes(option.days))
-      .map((option) => ({
-        type: /** @type {'line'} */ ('line'),
-        label: `${option.label.toLowerCase()} volume avg`,
-        data: affiliateHistory.rollingVolumeUsd?.[option.days] || [],
-        borderColor: option.color,
-        backgroundColor: option.color,
-        pointRadius: 0,
-        pointHoverRadius: 3,
-        borderWidth: 2,
-        borderDash: option.borderDash,
-        tension: 0.2,
-        spanGaps: false,
-        yAxisID: 'yVolume'
-      }));
+    const rollingDatasets = AFFILIATE_ROLLING_METRICS.flatMap((metric) => (
+      AFFILIATE_ROLLING_AVERAGES
+        .filter((option) => affiliateRollingAverages[metric.id].includes(option.days))
+        .map((option) => ({
+          type: /** @type {'line'} */ ('line'),
+          label: `${option.label.toLowerCase()} ${metric.label} avg`,
+          data: affiliateHistory[metric.seriesKey]?.[option.days] || [],
+          borderColor: option.color,
+          backgroundColor: option.color,
+          pointRadius: 0,
+          pointHoverRadius: 3,
+          borderWidth: metric.id === 'fees' ? 2.4 : 1.8,
+          borderDash: metric.id === 'fees' ? option.revenueBorderDash : option.borderDash,
+          tension: 0.2,
+          spanGaps: false,
+          yAxisID: metric.yAxisID
+        }))
+    ));
 
     affiliateChartInstance = new Chart(affiliateChartCanvas, {
       type: 'bar',
@@ -857,7 +864,7 @@
                 if (ctx.dataset.label === 'fees / volume') {
                   return `fees / volume: ${formatRateBps(ctx.parsed.y)}`;
                 }
-                const suffix = String(ctx.dataset.label || '').endsWith('volume avg')
+                const suffix = String(ctx.dataset.label || '').endsWith('avg')
                   ? ' · halt days excluded'
                   : '';
                 return `${ctx.dataset.label}: ${formatUsd(ctx.parsed.y)}${suffix}`;
@@ -1003,10 +1010,18 @@
     }
   }
 
-  function toggleAffiliateRollingAverage(days) {
-    affiliateRollingAverages = affiliateRollingAverages.includes(days)
-      ? affiliateRollingAverages.filter((entry) => entry !== days)
-      : [...affiliateRollingAverages, days].sort((a, b) => a - b);
+  function formatAffiliateRollingSelection(label, days) {
+    return days.length ? `${label} ${days.map((entry) => `${entry}D`).join(' + ')}` : '';
+  }
+
+  function toggleAffiliateRollingAverage(metric, days) {
+    const selected = affiliateRollingAverages[metric] || [];
+    affiliateRollingAverages = {
+      ...affiliateRollingAverages,
+      [metric]: selected.includes(days)
+        ? selected.filter((entry) => entry !== days)
+        : [...selected, days].sort((a, b) => a - b)
+    };
   }
 
   function statusMessage() {
@@ -1545,30 +1560,38 @@
       </article>
     </div>
 
-    <section class="block">
+    <section class="block affiliate-trend-block">
       <div class="block-head">
         <div class="block-title"><span class="title-marker">|</span><h2>Affiliate Trend</h2></div>
         <div class="block-meta">[{selectedAffiliate?.thorname || '--'} / {affiliateTimeframeOption.label} / {affiliateBucket} / {affiliateRollingLabel}]</div>
       </div>
 
       <div class="affiliate-chart-toolbar">
-        <div class="affiliate-chart-control">
-          <span class="chart-control-label">volume rolling avg</span>
-          <div class="timeframe-tabs rolling-average-tabs" role="group" aria-label="Volume rolling averages">
-            {#each AFFILIATE_ROLLING_AVERAGES as option}
-              <button
-                type="button"
-                aria-label={`Toggle ${option.days}-day volume rolling average`}
-                aria-pressed={affiliateRollingAverages.includes(option.days)}
-                class:active={affiliateRollingAverages.includes(option.days)}
-                style:color={affiliateRollingAverages.includes(option.days) ? option.color : null}
-                on:click={() => toggleAffiliateRollingAverage(option.days)}
-              >
-                <span class="rolling-swatch" style:background={option.color}></span>
-                {option.label}
-              </button>
-            {/each}
-          </div>
+        <div class="affiliate-rolling-controls">
+          {#each AFFILIATE_ROLLING_METRICS as metric}
+            <div class="affiliate-chart-control">
+              <span class="chart-control-label">{metric.controlLabel}</span>
+              <div class="timeframe-tabs rolling-average-tabs" role="group" aria-label={`${metric.controlLabel} windows`}>
+                {#each AFFILIATE_ROLLING_AVERAGES as option}
+                  <button
+                    type="button"
+                    aria-label={`Toggle ${option.days}-day ${metric.controlLabel}`}
+                    aria-pressed={affiliateRollingAverages[metric.id].includes(option.days)}
+                    class:active={affiliateRollingAverages[metric.id].includes(option.days)}
+                    style:color={affiliateRollingAverages[metric.id].includes(option.days) ? option.color : null}
+                    on:click={() => toggleAffiliateRollingAverage(metric.id, option.days)}
+                  >
+                    <span
+                      class="rolling-swatch"
+                      class:revenue={metric.id === 'fees'}
+                      style={`--swatch-color: ${option.color};`}
+                    ></span>
+                    {option.label}
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/each}
         </div>
         <div class="affiliate-chart-view-controls">
           <div class="affiliate-chart-control">
@@ -2293,6 +2316,13 @@
     gap: 5px;
   }
 
+  .affiliate-rolling-controls {
+    align-items: flex-end;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
   .timeframe-control {
     align-items: flex-end;
   }
@@ -2348,10 +2378,19 @@
   }
 
   .rolling-swatch {
+    background: var(--swatch-color);
     display: inline-block;
     height: 2px;
     opacity: 0.55;
     width: 12px;
+  }
+
+  .rolling-swatch.revenue {
+    background: repeating-linear-gradient(
+      90deg,
+      var(--swatch-color) 0 4px,
+      transparent 4px 6px
+    );
   }
 
   .rolling-average-tabs button.active .rolling-swatch {
@@ -2982,10 +3021,26 @@
       flex-direction: column;
     }
 
+    .affiliate-trend-block .block-head {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .affiliate-trend-block .block-meta {
+      flex-shrink: 1;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
     .affiliate-chart-control,
     .timeframe-control {
       align-items: flex-start;
       margin-left: 0;
+    }
+
+    .affiliate-rolling-controls {
+      align-items: flex-start;
     }
 
     .affiliate-chart-view-controls {
