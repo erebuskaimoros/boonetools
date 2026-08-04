@@ -1,7 +1,10 @@
 import Chart from 'chart.js/auto';
+import zoomPlugin from 'chartjs-plugin-zoom';
 
 import { TERMINAL_CHART_PALETTE, terminalChartFont } from '../charts/terminal.js';
 import { aggregateWasmArbEconomicsBuckets } from './model.js';
+
+Chart.register(zoomPlugin);
 
 const usd = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -75,7 +78,38 @@ function milestonePlugin(milestones, rows) {
   };
 }
 
-function baseOptions() {
+function resolveScaleIndex(value, labels, fallback) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+  const labelIndex = labels.indexOf(value);
+  return labelIndex >= 0 ? labelIndex : fallback;
+}
+
+function selectedZoomRange(chart, series) {
+  const scale = chart?.scales?.x;
+  if (!scale || series.length < 2) return null;
+  const labels = chart.data.labels || [];
+  const firstIndex = Math.max(
+    0,
+    Math.min(series.length - 1, Math.floor(resolveScaleIndex(scale.min, labels, 0)))
+  );
+  const lastIndex = Math.max(
+    firstIndex,
+    Math.min(
+      series.length - 1,
+      Math.ceil(resolveScaleIndex(scale.max, labels, series.length - 1))
+    )
+  );
+  if (firstIndex === 0 && lastIndex === series.length - 1) return null;
+  const first = series[firstIndex];
+  const last = series[lastIndex];
+  return {
+    startSeconds: first.startSeconds,
+    endSeconds: last.startSeconds + last.bucketSeconds
+  };
+}
+
+function baseOptions(series, onZoomRange) {
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -102,6 +136,24 @@ function baseOptions() {
         titleFont: terminalChartFont(12),
         bodyFont: terminalChartFont(12),
         padding: 10
+      },
+      zoom: {
+        limits: { x: { min: 'original', max: 'original', minRange: 1 } },
+        zoom: {
+          mode: 'x',
+          wheel: { enabled: false },
+          pinch: { enabled: true },
+          drag: {
+            enabled: true,
+            backgroundColor: 'rgba(0, 204, 102, 0.08)',
+            borderColor: TERMINAL_CHART_PALETTE.accent,
+            borderWidth: 1
+          },
+          onZoomComplete({ chart }) {
+            const range = selectedZoomRange(chart, series);
+            if (range && onZoomRange) onZoomRange(range);
+          }
+        }
       }
     },
     scales: {
@@ -132,10 +184,10 @@ function chartRows(rows, grainSeconds) {
   return aggregateWasmArbEconomicsBuckets(rows, grainSeconds);
 }
 
-function partialBucketLine(row, grainSeconds) {
+function partialBucketLine(row) {
   if (!row?.partial) return [];
   const observedMinutes = Math.round((row.observedSeconds || 0) / 60);
-  const grainMinutes = Math.round(grainSeconds / 60);
+  const grainMinutes = Math.round(row.bucketSeconds / 60);
   return [`LIVE PARTIAL: ${observedMinutes}m of ${grainMinutes}m observed`];
 }
 
@@ -144,12 +196,13 @@ export function renderWasmArbValueChart(
   previous,
   rows,
   grainSeconds,
-  milestones = []
+  milestones = [],
+  onZoomRange
 ) {
   previous?.destroy();
   if (!canvas) return null;
   const series = chartRows(rows, grainSeconds);
-  const options = baseOptions();
+  const options = baseOptions(series, onZoomRange);
   options.scales.x.stacked = true;
   options.scales.y.stacked = true;
   options.scales.y.ticks.callback = compactUsd;
@@ -162,7 +215,7 @@ export function renderWasmArbValueChart(
       return row
         ? [
             `Accrued TC value: ${usd.format(row.tcLinkedValueUsd)}`,
-            ...partialBucketLine(row, grainSeconds)
+            ...partialBucketLine(row)
           ]
         : [];
     }
@@ -171,7 +224,7 @@ export function renderWasmArbValueChart(
   return new Chart(canvas.getContext('2d'), /** @type {any} */ ({
     type: 'bar',
     data: {
-      labels: series.map((row) => label(row.bucketStart, grainSeconds)),
+      labels: series.map((row) => label(row.bucketStart, row.bucketSeconds)),
       datasets: [
         {
           label: 'THOR pool fees',
@@ -209,12 +262,13 @@ export function renderWasmArbActivityChart(
   previous,
   rows,
   grainSeconds,
-  milestones = []
+  milestones = [],
+  onZoomRange
 ) {
   previous?.destroy();
   if (!canvas) return null;
   const series = chartRows(rows, grainSeconds);
-  const options = baseOptions();
+  const options = baseOptions(series, onZoomRange);
   options.scales.y.ticks.callback = compactUsd;
   options.scales.y.title = {
     display: true,
@@ -246,14 +300,14 @@ export function renderWasmArbActivityChart(
         : `${context.dataset.label}: ${usd.format(Number(context.raw) || 0)}`;
     },
     afterBody(items) {
-      return partialBucketLine(series[items[0]?.dataIndex], grainSeconds);
+      return partialBucketLine(series[items[0]?.dataIndex]);
     }
   };
 
   return new Chart(canvas.getContext('2d'), /** @type {any} */ ({
     type: 'bar',
     data: {
-      labels: series.map((row) => label(row.bucketStart, grainSeconds)),
+      labels: series.map((row) => label(row.bucketStart, row.bucketSeconds)),
       datasets: [
         {
           type: 'bar',
@@ -292,12 +346,13 @@ export function renderWasmArbEfficiencyChart(
   previous,
   rows,
   grainSeconds,
-  milestones = []
+  milestones = [],
+  onZoomRange
 ) {
   previous?.destroy();
   if (!canvas) return null;
   const series = chartRows(rows, grainSeconds);
-  const options = baseOptions();
+  const options = baseOptions(series, onZoomRange);
   options.scales.y.ticks.callback = compactUsd;
   options.scales.y.title = {
     display: true,
@@ -331,7 +386,7 @@ export function renderWasmArbEfficiencyChart(
   return new Chart(canvas.getContext('2d'), /** @type {any} */ ({
     type: 'line',
     data: {
-      labels: series.map((row) => label(row.bucketStart, grainSeconds)),
+      labels: series.map((row) => label(row.bucketStart, row.bucketSeconds)),
       datasets: [
         {
           label: 'TC / $1m Wasm volume',
@@ -367,12 +422,13 @@ export function renderWasmArbFeeBehaviorChart(
   previous,
   rows,
   grainSeconds,
-  milestones = []
+  milestones = [],
+  onZoomRange
 ) {
   previous?.destroy();
   if (!canvas) return null;
   const series = chartRows(rows, grainSeconds);
-  const options = baseOptions();
+  const options = baseOptions(series, onZoomRange);
   options.scales.y.title = {
     display: true,
     text: 'BASIS POINTS',
@@ -389,7 +445,7 @@ export function renderWasmArbFeeBehaviorChart(
   return new Chart(canvas.getContext('2d'), /** @type {any} */ ({
     type: 'line',
     data: {
-      labels: series.map((row) => label(row.bucketStart, grainSeconds)),
+      labels: series.map((row) => label(row.bucketStart, row.bucketSeconds)),
       datasets: [
         {
           label: 'THOR fee / Wasm leg volume',
@@ -429,12 +485,13 @@ export function renderWasmArbOracleChart(
   previous,
   rows,
   grainSeconds,
-  milestones = []
+  milestones = [],
+  onZoomRange
 ) {
   previous?.destroy();
   if (!canvas) return null;
   const series = chartRows(rows, grainSeconds);
-  const options = baseOptions();
+  const options = baseOptions(series, onZoomRange);
   options.scales.y.title = {
     display: true,
     text: 'DEPTH-WEIGHTED ABS DEVIATION',
@@ -471,7 +528,7 @@ export function renderWasmArbOracleChart(
   return new Chart(canvas.getContext('2d'), /** @type {any} */ ({
     type: 'line',
     data: {
-      labels: series.map((row) => label(row.bucketStart, grainSeconds)),
+      labels: series.map((row) => label(row.bucketStart, row.bucketSeconds)),
       datasets: [
         {
           label: 'All comparable pools',

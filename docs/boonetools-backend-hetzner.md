@@ -188,6 +188,13 @@ Use them to put a dedicated node or paid provider ahead of the public defaults
 without changing application code. The older primary/fallback variables remain
 the defaults when the list variables are empty.
 
+Authenticated Liquify Portal URLs belong only in the server-owned
+`backend.env`; never commit their embedded API keys. A dedicated
+`https://gateway.liquify.com/api=...` route has a redacted, independent
+provider-cooldown scope, so a public gateway 429 cannot disable that endpoint.
+Keep `RPC_WS_URL` on the public WebSocket route unless the Portal explicitly
+supplies and verifies a dedicated WebSocket URL.
+
 `POOL_DISLOCATION_THORNODE_URLS` is an independent ordered list for this
 sampler and its historical repair. Add a second provider only after its DNS and
 `/thorchain/pools` response have been verified from the production host. The

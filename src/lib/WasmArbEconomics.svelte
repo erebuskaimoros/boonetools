@@ -4,7 +4,9 @@
   import { TerminalAlert } from '$lib/components/terminal';
   import './styles/variables.css';
   import { fetchWasmArbEconomics } from './wasm-arb-economics/api.js';
+  import ChartControls from './wasm-arb-economics/ChartControls.svelte';
   import {
+    aggregateWasmArbEconomicsBuckets,
     ceilWasmArbBucket,
     normalizeWasmArbEconomicsBuckets,
     summarizeWasmArbWindow
@@ -19,9 +21,14 @@
 
   const RANGE_OPTIONS = [
     { key: 'all', label: 'all since zero', seconds: null },
-    { key: '30d', label: '30d', seconds: 30 * 24 * 60 * 60 },
-    { key: '7d', label: '7d', seconds: 7 * 24 * 60 * 60 },
+    { key: '1mo', label: '1mo', seconds: 30 * 24 * 60 * 60 },
+    { key: '1w', label: '1w', seconds: 7 * 24 * 60 * 60 },
     { key: '24h', label: '24h', seconds: 24 * 60 * 60 }
+  ];
+  const BUCKET_OPTIONS = [
+    { key: '1h', label: '1h', seconds: 60 * 60 },
+    { key: '1d', label: '1d', seconds: 24 * 60 * 60 },
+    { key: '1w', label: '1w', seconds: 7 * 24 * 60 * 60 }
   ];
 
   const usd2 = new Intl.NumberFormat('en-US', {
@@ -36,6 +43,8 @@
   let refreshing = false;
   let error = '';
   let selectedRange = 'all';
+  let selectedBucket = '1h';
+  let zoomRange = null;
   let valueCanvas;
   let activityCanvas;
   let efficiencyCanvas;
@@ -65,26 +74,50 @@
   );
   $: selectedOption = RANGE_OPTIONS.find((option) => option.key === selectedRange)
     || RANGE_OPTIONS[0];
-  $: visibleStart = selectedOption.seconds
+  $: selectedBucketOption = BUCKET_OPTIONS.find((option) => option.key === selectedBucket)
+    || BUCKET_OPTIONS[0];
+  $: presetStart = selectedOption.seconds
     ? Math.max(trackingStartSeconds, latestEnd - selectedOption.seconds)
     : trackingStartSeconds;
+  $: visibleStart = zoomRange
+    ? Math.max(presetStart, zoomRange.startSeconds)
+    : presetStart;
+  $: visibleEnd = zoomRange
+    ? Math.min(latestEnd, zoomRange.endSeconds)
+    : latestEnd;
   $: visibleRows = postChangeRows.filter((row) => (
     row.startSeconds + row.bucketSeconds > visibleStart
-      && row.startSeconds < latestEnd
+      && row.startSeconds < visibleEnd
   ));
-  $: visibleSeconds = Math.max(0, latestEnd - visibleStart);
-  $: chartGrainSeconds = visibleSeconds > 30 * 24 * 60 * 60
-    ? 24 * 60 * 60
-    : 60 * 60;
-  $: trailingBucketPartial = latestEnd % chartGrainSeconds !== 0;
+  $: visibleSeconds = Math.max(0, visibleEnd - visibleStart);
+  $: chartGrainSeconds = selectedBucketOption.seconds;
+  $: chartSeries = aggregateWasmArbEconomicsBuckets(visibleRows, chartGrainSeconds);
+  $: trailingBucketPartial = Boolean(chartSeries.at(-1)?.partial);
+  $: hasCoarserSourceBuckets = chartSeries.some(
+    (row) => row.bucketSeconds > chartGrainSeconds
+  );
   $: summary = summarizeWasmArbWindow(visibleRows);
+  $: chartControlProps = {
+    windowStart: formatDateTime(visibleRows[0]?.bucketStart),
+    windowEnd: formatDateTime(summary.endTime),
+    customDuration: formatDuration(visibleSeconds),
+    rangeOptions: RANGE_OPTIONS,
+    bucketOptions: BUCKET_OPTIONS,
+    selectedRange,
+    selectedBucket,
+    zoomed: Boolean(zoomRange),
+    hasCoarserSourceBuckets,
+    onRange: setRange,
+    onBucket: setBucket,
+    onReset: resetZoom
+  };
   $: interventions = dashboard?.meta?.interventions || dashboard?.regimes || [];
   $: visibleMilestones = interventions.filter((row) => {
     const timestamp = Date.parse(row?.activationTime || '') / 1000;
     return Number(row?.activationHeight) !== Number(trackingRegime?.activationHeight)
       && Number.isFinite(timestamp)
       && timestamp >= visibleStart
-      && timestamp < latestEnd;
+      && timestamp < visibleEnd;
   });
   $: sourceCoverage = dashboard?.meta?.coverage || {};
   $: oracleGapCount = Number(
@@ -104,6 +137,7 @@
     visibleRows.at(-1)?.bucketStart || '',
     dashboard?.meta?.sourceUpdatedAt || '',
     chartGrainSeconds,
+    visibleEnd,
     visibleMilestones.map((row) => row.activationHeight).join(',')
   ].join('|');
   $: if (newChartRenderKey && newChartRenderKey !== chartRenderKey) {
@@ -168,9 +202,30 @@
   }
 
   function formatGrain(seconds) {
-    if (seconds >= 24 * 60 * 60) return 'DAY';
+    if (seconds >= 7 * 24 * 60 * 60) return '1W';
+    if (seconds >= 24 * 60 * 60) return '1D';
     if (seconds >= 60 * 60) return `${seconds / 3600}H`;
     return `${seconds / 60}M`;
+  }
+
+  function setRange(key) {
+    selectedRange = key;
+    zoomRange = null;
+  }
+
+  function setBucket(key) {
+    selectedBucket = key;
+  }
+
+  function applyChartZoom(range) {
+    const startSeconds = Math.max(visibleStart, Number(range?.startSeconds) || visibleStart);
+    const endSeconds = Math.min(visibleEnd, Number(range?.endSeconds) || visibleEnd);
+    if (endSeconds <= startSeconds || endSeconds - startSeconds >= visibleSeconds) return;
+    zoomRange = { startSeconds, endSeconds };
+  }
+
+  function resetZoom() {
+    zoomRange = null;
   }
 
   function shortAddress(value) {
@@ -207,35 +262,40 @@
         valueChart,
         visibleRows,
         chartGrainSeconds,
-        visibleMilestones
+        visibleMilestones,
+        applyChartZoom
       );
       activityChart = renderWasmArbActivityChart(
         activityCanvas,
         activityChart,
         visibleRows,
         chartGrainSeconds,
-        visibleMilestones
+        visibleMilestones,
+        applyChartZoom
       );
       efficiencyChart = renderWasmArbEfficiencyChart(
         efficiencyCanvas,
         efficiencyChart,
         visibleRows,
         chartGrainSeconds,
-        visibleMilestones
+        visibleMilestones,
+        applyChartZoom
       );
       feeChart = renderWasmArbFeeBehaviorChart(
         feeCanvas,
         feeChart,
         visibleRows,
         chartGrainSeconds,
-        visibleMilestones
+        visibleMilestones,
+        applyChartZoom
       );
       oracleChart = renderWasmArbOracleChart(
         oracleCanvas,
         oracleChart,
         visibleRows,
         chartGrainSeconds,
-        visibleMilestones
+        visibleMilestones,
+        applyChartZoom
       );
     }, 0);
   }
@@ -281,21 +341,6 @@
   {#if loading}
     <div class="loading-block"><span>▓░░░░</span> loading post-change economics series…</div>
   {:else if dashboard && postChangeRows.length}
-    <section class="control-strip" aria-label="Time range controls">
-      <div class="control-copy">
-        <span class="control-label">VIEW</span>
-        <span>{formatDateTime(visibleRows[0]?.bucketStart)} → {formatDateTime(summary.endTime)}</span>
-      </div>
-      <div class="range-buttons">
-        {#each RANGE_OPTIONS as option}
-          <button
-            class:active={selectedRange === option.key}
-            on:click={() => selectedRange = option.key}
-          ><span>[</span>{option.label}<span>]</span></button>
-        {/each}
-      </div>
-    </section>
-
     <section class="tracking-strip" aria-label="Tracking origin">
       <div>
         <span>TRACKING ORIGIN</span>
@@ -308,9 +353,9 @@
         <small>{formatCount(postChangeRows.length)} series buckets</small>
       </div>
       <div>
-        <span>VISIBLE GRAIN</span>
+        <span>CHART BUCKET</span>
         <b>{formatGrain(chartGrainSeconds)}</b>
-        <small>recent hourly · older daily</small>
+        <small>{formatCount(chartSeries.length)} plotted buckets{hasCoarserSourceBuckets ? ' · mixed source floor' : ''}</small>
       </div>
       <div>
         <span>CURRENT SETTINGS</span>
@@ -352,7 +397,8 @@
         <span>[USD / {formatGrain(chartGrainSeconds)}{trailingBucketPartial ? ' · LIVE BUCKET DIMMED' : ''}]</span>
       </div>
       <p class="block-lede">Each column is split into the two attributable sources: Wasm THOR pool fees and THORChain’s configured share of Wasm-linked FIN + AMM fees.</p>
-      <div class="chart-shell primary"><canvas bind:this={valueCanvas}></canvas></div>
+      <ChartControls {...chartControlProps} chartLabel="Accrued TC value" />
+      <div class="chart-shell primary"><canvas bind:this={valueCanvas} on:dblclick={resetZoom} aria-label="Accrued THORChain value time series; drag to zoom"></canvas></div>
     </section>
 
     <div class="chart-grid">
@@ -362,7 +408,8 @@
           <span>[VOLUME + NETWORK SHARE]</span>
         </div>
         <p class="block-lede">Executed-leg volume through the Wasm arb path and its share of total THORChain executed-leg volume.</p>
-        <div class="chart-shell"><canvas bind:this={activityCanvas}></canvas></div>
+        <ChartControls {...chartControlProps} chartLabel="Wasm activity" />
+        <div class="chart-shell"><canvas bind:this={activityCanvas} on:dblclick={resetZoom} aria-label="Wasm activity time series; drag to zoom"></canvas></div>
       </section>
 
       <section class="block chart-block">
@@ -371,7 +418,8 @@
           <span>[TC VALUE / $1M]</span>
         </div>
         <p class="block-lede">Value accrued to THORChain per unit of both Wasm volume and total network volume.</p>
-        <div class="chart-shell"><canvas bind:this={efficiencyCanvas}></canvas></div>
+        <ChartControls {...chartControlProps} chartLabel="Value density" />
+        <div class="chart-shell"><canvas bind:this={efficiencyCanvas} on:dblclick={resetZoom} aria-label="THORChain value density time series; drag to zoom"></canvas></div>
       </section>
 
       <section class="block chart-block">
@@ -380,7 +428,8 @@
           <span>[BASIS POINTS]</span>
         </div>
         <p class="block-lede">Effective THOR pool-fee yield alongside the median and p90 action slip paid by Wasm swaps.</p>
-        <div class="chart-shell"><canvas bind:this={feeCanvas}></canvas></div>
+        <ChartControls {...chartControlProps} chartLabel="Fee and execution behavior" />
+        <div class="chart-shell"><canvas bind:this={feeCanvas} on:dblclick={resetZoom} aria-label="Fee and execution behavior time series; drag to zoom"></canvas></div>
       </section>
 
       <section class="block chart-block">
@@ -389,8 +438,9 @@
           <span>[SAME-HEIGHT SAMPLES]</span>
         </div>
         <p class="block-lede">Depth-weighted absolute pool-price deviation from THORChain’s oracle, with an LTC-excluded line and the share within 10 bps.</p>
+        <ChartControls {...chartControlProps} chartLabel="Pool and oracle alignment" />
         {#if !oracleComplete}<div class="inline-warning">WRN · selected range has incomplete oracle coverage</div>{/if}
-        <div class="chart-shell"><canvas bind:this={oracleCanvas}></canvas></div>
+        <div class="chart-shell"><canvas bind:this={oracleCanvas} on:dblclick={resetZoom} aria-label="Pool and oracle alignment time series; drag to zoom"></canvas></div>
       </section>
     </div>
 
@@ -416,7 +466,7 @@
       <section class="block">
         <div class="block-head">
           <h2><span>▌</span> VISIBLE-RANGE TOTALS</h2>
-          <span>[{selectedOption.label.toUpperCase()}]</span>
+          <span>[{zoomRange ? `CUSTOM · ${formatDuration(visibleSeconds)}` : selectedOption.label.toUpperCase()}]</span>
         </div>
         <div class="ledger-grid">
           <div><span>NETWORK LEG VOLUME</span><b>{formatCompactUsd(summary.networkVolumeUsd)}</b></div>
@@ -483,8 +533,6 @@
 
   .command-head,
   .command-actions,
-  .control-strip,
-  .range-buttons,
   .block-head,
   .attribution-grid > div {
     display: flex;
@@ -536,8 +584,7 @@
   .health-dot.ok { background: var(--term-accent); box-shadow: var(--term-accent-glow); }
   .health-dot.warn { background: var(--term-amber); box-shadow: 0 0 6px var(--term-amber); }
 
-  .bracket-button,
-  .range-buttons button {
+  .bracket-button {
     border: 1px solid var(--term-border);
     background: transparent;
     color: var(--term-text-2);
@@ -546,17 +593,13 @@
     transition: border-color var(--term-transition), color var(--term-transition);
   }
   .bracket-button { padding: 5px 10px; }
-  .bracket-button span,
-  .range-buttons button span { color: var(--term-text-5); }
+  .bracket-button span { color: var(--term-text-5); }
   .bracket-button b { color: var(--term-accent); }
-  .bracket-button:hover,
-  .range-buttons button:hover,
-  .range-buttons button.active { border-color: var(--term-accent); color: var(--term-accent); }
+  .bracket-button:hover { border-color: var(--term-accent); color: var(--term-accent); }
   .bracket-button:disabled { opacity: 0.55; cursor: wait; }
 
   .page-head { padding: 28px 0 24px; }
-  .eyebrow,
-  .control-label {
+  .eyebrow {
     color: var(--term-accent);
     font: 700 11px var(--term-font-mono);
     letter-spacing: 0.16em;
@@ -593,24 +636,6 @@
     font: 12px var(--term-font-mono);
   }
   .loading-block span { color: var(--term-accent); }
-
-  .control-strip {
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 12px;
-    padding: 11px 12px;
-    border: 1px solid var(--term-border);
-    background: var(--term-surface-deep);
-  }
-  .control-copy {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    color: var(--term-text-3);
-    font: 11px var(--term-font-mono);
-  }
-  .range-buttons { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-  .range-buttons button { padding: 5px 8px; text-transform: uppercase; }
 
   .tracking-strip,
   .metric-grid {
@@ -794,11 +819,9 @@
 
   @media (max-width: 760px) {
     .wasm-monitor { padding: 16px 0 40px; }
-    .command-head,
-    .control-strip { align-items: flex-start; flex-direction: column; }
+    .command-head { align-items: flex-start; flex-direction: column; }
     .command-actions { width: 100%; justify-content: space-between; }
     h1 { font-size: 24px; }
-    .range-buttons { justify-content: flex-start; }
     .chart-grid,
     .detail-grid { grid-template-columns: 1fr; }
     .chart-shell,

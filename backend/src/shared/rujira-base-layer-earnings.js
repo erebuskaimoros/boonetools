@@ -43,6 +43,7 @@ with canonical_events as (
   ) ranked
   where canonical_rank = 1
 )`;
+const COMPLETED_DAY_RECONCILIATION_LAG_MS = 15 * 60 * 1000;
 
 let seedPromise;
 
@@ -328,6 +329,77 @@ async function getReservePayouts(client, from, to) {
   };
 }
 
+export async function reconcileCompletedRujiraBaseLayerEarnings(client, beforeDay) {
+  const day = dateKey(beforeDay);
+  if (!day) throw new Error('Invalid Base Layer earnings reconciliation boundary');
+
+  const { rows } = await client.query(
+    `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE},
+     reserve_by_day as (
+       select date_trunc('day', block_time at time zone 'UTC')::date as day_start,
+              coalesce(sum(amount_rune), 0) as amount_rune,
+              coalesce(sum(amount_usd), 0) as amount_usd
+       from canonical_events
+       where block_time < $1::date
+       group by 1
+     )
+     select earnings.day_start, earnings.by_denom, earnings.inventory_delta_usd,
+            earnings.reserve_payout_rune, earnings.reserve_payout_usd,
+            coalesce(reserve.amount_rune, 0) as current_reserve_payout_rune,
+            coalesce(reserve.amount_usd, 0) as current_reserve_payout_usd
+     from rujira_base_layer_earnings_daily earnings
+     left join reserve_by_day reserve using (day_start)
+     where earnings.day_start < $1::date
+     order by earnings.day_start asc`,
+    [day]
+  );
+
+  const stats = {
+    before_day: day,
+    checked_days: rows.length,
+    reconciled_days: 0,
+    reserve_payout_rune_delta: 0,
+    reserve_payout_usd_delta: 0,
+    inflow_usd_delta: 0
+  };
+
+  for (const row of rows) {
+    const storedRune = safeNumber(row.reserve_payout_rune);
+    const storedUsd = safeNumber(row.reserve_payout_usd);
+    const currentRune = safeNumber(row.current_reserve_payout_rune);
+    const currentUsd = safeNumber(row.current_reserve_payout_usd);
+    const runeDelta = currentRune - storedRune;
+    const usdDelta = currentUsd - storedUsd;
+    if (Math.abs(runeDelta) < 1e-8 && Math.abs(usdDelta) < 1e-8) continue;
+
+    const byDenom = { ...(row.by_denom || {}) };
+    const rune = { ...(byDenom.rune || { amount: 0, usd: 0 }) };
+    rune.amount = safeNumber(rune.amount) + runeDelta;
+    rune.usd = safeNumber(rune.usd) + usdDelta;
+    byDenom.rune = rune;
+    const previousInflowUsd = safeNumber(row.inventory_delta_usd) + storedUsd;
+    const inflowUsd = safeNumber(row.inventory_delta_usd) + currentUsd;
+
+    await client.query(
+      `update rujira_base_layer_earnings_daily
+       set by_denom = $2,
+           reserve_payout_rune = $3,
+           reserve_payout_usd = $4,
+           inflow_usd = $5,
+           updated_at = now()
+       where day_start = $1`,
+      [dateKey(row.day_start), byDenom, currentRune, currentUsd, inflowUsd]
+    );
+
+    stats.reconciled_days += 1;
+    stats.reserve_payout_rune_delta += runeDelta;
+    stats.reserve_payout_usd_delta += usdDelta;
+    stats.inflow_usd_delta += inflowUsd - previousInflowUsd;
+  }
+
+  return stats;
+}
+
 export async function refreshRujiraBaseLayerEarnings(livePayload) {
   return withAdvisoryLock(LOCK_KEY, async (client) => {
     // fetched_at is written after all balance/config requests complete, so it
@@ -357,6 +429,13 @@ export async function refreshRujiraBaseLayerEarnings(livePayload) {
     }
     const dayStart = dateKey(observedAt);
     const dayEnd = dateKey(addDays(new Date(`${dayStart}T00:00:00Z`), 1));
+    const reconciliationBeforeDay = dateKey(
+      new Date(observedAt.getTime() - COMPLETED_DAY_RECONCILIATION_LAG_MS)
+    );
+    const reconciliation = await reconcileCompletedRujiraBaseLayerEarnings(
+      client,
+      reconciliationBeforeDay
+    );
     const routeScopes = deriveRujiraBaseLayerRouteScopes(livePayload);
     if (routeScopes.length !== ROUTE_COLLECTORS.length) {
       throw new Error('Current collector configuration does not expose the full Base Layer route');
@@ -429,7 +508,8 @@ export async function refreshRujiraBaseLayerEarnings(livePayload) {
       snapshot_time: observedAt.toISOString(),
       baseline_height: safeNumber(baseline.snapshot_height),
       inflow_usd: result.inflowUsd,
-      denom_change_count: result.denomChangeCount
+      denom_change_count: result.denomChangeCount,
+      reconciliation
     };
   });
 }

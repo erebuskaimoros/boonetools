@@ -179,11 +179,39 @@ test('saveParsedRujiraBaseFeeBlock skips empty websocket blocks by default', asy
   assert.equal(queries.length, 0);
 });
 
-test('generated-fee action ingestion refreshes the head without disturbing historical backfill', async () => {
+test('JSON-RPC block batches preserve requested height order and isolate item errors', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { parseRujiraBaseFeeRpcBatchResponse } = await import('../src/shared/rujira-base-fees.js');
+  const rows = parseRujiraBaseFeeRpcBatchResponse([
+    { jsonrpc: '2.0', id: '102', result: { height: '102', txs_results: [] } },
+    { jsonrpc: '2.0', id: '101', error: { code: -32603, message: 'height unavailable' } }
+  ], [101, 102, 103]);
+
+  assert.deepEqual(rows.map((row) => row.height), [101, 102, 103]);
+  assert.match(rows[0].error.message, /height unavailable/);
+  assert.equal(rows[1].payload.result.height, '102');
+  assert.match(rows[2].error.message, /missing height 103/);
+});
+
+test('a one-height JSON-RPC batch accepts the server single-response shape', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { parseRujiraBaseFeeRpcBatchResponse } = await import('../src/shared/rujira-base-fees.js');
+  const rows = parseRujiraBaseFeeRpcBatchResponse({
+    jsonrpc: '2.0',
+    id: '201',
+    result: { height: '201', txs_results: [] }
+  }, [201]);
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].height, 201);
+  assert.equal(rows[0].payload.result.height, '201');
+});
+
+test('generated-fee action ingestion scans forward from a durable floor without disturbing historical backfill', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
   const client = createActionIngestClient({
-    maxHeight: 100,
+    maxHeight: 300,
     syncState: {
       next_page_token: 'history-cursor',
       complete: false,
@@ -191,39 +219,50 @@ test('generated-fee action ingestion refreshes the head without disturbing histo
       stats_json: {}
     }
   });
-  const requestedTokens = [];
-  const pages = new Map([
-    ['', { actions: [midgardAction(300)], meta: { nextPageToken: 'head-cursor' } }],
-    ['head-cursor', { actions: [midgardAction(200)], meta: { nextPageToken: 'head-next' } }],
-    ['history-cursor', { actions: [midgardAction(50)], meta: { nextPageToken: 'history-next' } }]
-  ]);
+  const forwardRequests = [];
+  const historyRequests = [];
 
   const result = await ingestRujiraBaseFeeActionPages(client, {
     maxPages: 1,
-    headMaxPages: 1,
+    headMaxPages: 2,
+    headLookbackBlocks: 200,
     requestDelayMs: 0,
+    fetchForwardPage: async (request) => {
+      forwardRequests.push(request);
+      if (request.fromHeight === 100) {
+        return {
+          actions: [midgardAction(200), midgardAction(150)],
+          meta: { prevPageToken: 'forward-cursor' }
+        };
+      }
+      return { actions: [], meta: { prevPageToken: '' } };
+    },
     fetchPage: async (token) => {
-      requestedTokens.push(token);
-      return pages.get(token);
+      historyRequests.push(token);
+      return {
+        actions: [midgardAction(50)],
+        meta: { nextPageToken: 'history-next' }
+      };
     }
   });
 
-  assert.deepEqual(requestedTokens, ['', 'head-cursor', 'history-cursor']);
-  assert.equal(result.head_refresh.max_height, 300);
+  assert.deepEqual(forwardRequests, [
+    { fromHeight: 100 },
+    { prevPageToken: 'forward-cursor' }
+  ]);
+  assert.deepEqual(historyRequests, ['history-cursor']);
+  assert.equal(result.head_refresh.max_height, 200);
   assert.equal(result.head_catchup.floor_height, 100);
-  assert.equal(result.head_catchup.next_page_token, 'head-next');
-  assert.equal(result.head_catchup.complete, false);
+  assert.equal(result.head_catchup.watermark_height, 200);
+  assert.equal(result.head_catchup.next_page_token, '');
+  assert.equal(result.head_catchup.complete, true);
   assert.equal(result.next_page_token, 'history-next');
   assert.equal(result.mode, 'backfill');
-  assert.equal(client.savedStates[0].next_page_token, 'history-next');
-  assert.equal(client.savedStates[0].stats_json.head_catchup.next_page_token, 'head-next');
-  const queuedHeights = client.queries
-    .filter(({ sql }) => sql.includes('insert into "rujira_base_fee_blocks"'))
-    .map(({ params }) => Number(params[0]));
-  assert.deepEqual(queuedHeights, [300, 200, 50]);
+  assert.equal(client.savedStates.at(-1).next_page_token, 'history-next');
+  assert.equal(client.savedStates.at(-1).stats_json.head_catchup.watermark_height, 200);
 });
 
-test('generated-fee head catch-up resumes its own cursor until it reaches the known floor', async () => {
+test('generated-fee head catch-up resumes its forward cursor and advances the watermark only on completion', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
   const client = createActionIngestClient({
@@ -234,38 +273,41 @@ test('generated-fee head catch-up resumes its own cursor until it reaches the kn
       rate_limited_until: null,
       stats_json: {
         head_catchup: {
-          next_page_token: 'saved-head-cursor',
+          direction: 'forward',
+          next_page_token: 'saved-forward-cursor',
           floor_height: 100,
+          watermark_height: 80,
+          max_height: 200,
           complete: false
         }
       }
     }
   });
-  const requestedTokens = [];
-  const pages = new Map([
-    ['', { actions: [midgardAction(320)], meta: { nextPageToken: 'new-head-cursor' } }],
-    ['saved-head-cursor', { actions: [midgardAction(90)], meta: { nextPageToken: 'older-head-cursor' } }]
-  ]);
+  const forwardRequests = [];
 
   const result = await ingestRujiraBaseFeeActionPages(client, {
     maxPages: 0,
     headMaxPages: 1,
     requestDelayMs: 0,
-    fetchPage: async (token) => {
-      requestedTokens.push(token);
-      return pages.get(token);
+    fetchForwardPage: async (request) => {
+      forwardRequests.push(request);
+      return {
+        actions: [midgardAction(250)],
+        meta: { prevPageToken: '' }
+      };
     }
   });
 
-  assert.deepEqual(requestedTokens, ['', 'saved-head-cursor']);
+  assert.deepEqual(forwardRequests, [{ prevPageToken: 'saved-forward-cursor' }]);
   assert.equal(result.head_catchup.floor_height, 100);
   assert.equal(result.head_catchup.next_page_token, '');
   assert.equal(result.head_catchup.complete, true);
+  assert.equal(result.head_catchup.watermark_height, 250);
   assert.equal(result.next_page_token, 'history-cursor');
-  assert.equal(client.savedStates[0].next_page_token, 'history-cursor');
+  assert.equal(client.savedStates.at(-1).next_page_token, 'history-cursor');
 });
 
-test('generated-fee first run reuses the head page as historical page one', async () => {
+test('generated-fee first run starts historical reverse paging independently', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
   const client = createActionIngestClient();
@@ -288,42 +330,89 @@ test('generated-fee first run reuses the head page as historical page one', asyn
   assert.deepEqual(requestedTokens, ['', 'page-2']);
   assert.equal(result.pages, 2);
   assert.equal(result.backfill.pages, 2);
-  assert.equal(result.backfill.reused_head_page, true);
+  assert.equal(result.backfill.reused_head_page, false);
   assert.equal(result.next_page_token, 'page-3');
 });
 
-test('generated-fee head refresh failure preserves both cursors', async () => {
+test('generated-fee forward refresh failure preserves both cursors and does not starve later job lanes', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
   const syncState = {
     next_page_token: 'history-cursor',
     complete: false,
     rate_limited_until: null,
-    stats_json: {
-      head_catchup: {
-        next_page_token: 'head-cursor',
-        floor_height: 100,
-        complete: false
+      stats_json: {
+        head_catchup: {
+          direction: 'forward',
+          next_page_token: 'forward-cursor',
+          floor_height: 100,
+          watermark_height: 90,
+          complete: false
+        }
       }
-    }
   };
   const client = createActionIngestClient({ syncState, maxHeight: 200 });
 
-  await assert.rejects(
-    () => ingestRujiraBaseFeeActionPages(client, {
-      maxPages: 1,
-      headMaxPages: 1,
-      requestDelayMs: 0,
-      fetchPage: async () => {
-        throw new Error('head unavailable');
-      }
-    }),
-    /head unavailable/
-  );
+  const result = await ingestRujiraBaseFeeActionPages(client, {
+    maxPages: 1,
+    headMaxPages: 1,
+    requestDelayMs: 0,
+    fetchForwardPage: async () => {
+      throw new Error('head unavailable');
+    },
+    fetchPage: async () => {
+      throw new Error('historical paging should be skipped after the head failure');
+    }
+  });
 
-  assert.equal(client.savedStates.length, 0);
-  assert.equal(syncState.next_page_token, 'history-cursor');
-  assert.equal(syncState.stats_json.head_catchup.next_page_token, 'head-cursor');
+  assert.equal(result.head_catchup.error, 'head unavailable');
+  assert.equal(result.next_page_token, 'history-cursor');
+  assert.equal(client.savedStates.length, 1);
+  assert.equal(client.savedStates[0].next_page_token, 'history-cursor');
+  assert.equal(client.savedStates[0].stats_json.head_catchup.next_page_token, 'forward-cursor');
+  assert.equal(client.savedStates[0].stats_json.head_catchup.watermark_height, 90);
+});
+
+test('generated-fee historical page failure preserves completed forward progress', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
+  const client = createActionIngestClient({
+    maxHeight: 300,
+    syncState: {
+      next_page_token: 'history-cursor',
+      complete: false,
+      rate_limited_until: null,
+      stats_json: {
+        head_catchup: {
+          direction: 'forward',
+          next_page_token: '',
+          floor_height: 250,
+          watermark_height: 250,
+          max_height: 250,
+          complete: true
+        }
+      }
+    }
+  });
+
+  const result = await ingestRujiraBaseFeeActionPages(client, {
+    maxPages: 1,
+    headMaxPages: 1,
+    requestDelayMs: 0,
+    fetchForwardPage: async () => ({
+      actions: [midgardAction(300)],
+      meta: { prevPageToken: '' }
+    }),
+    fetchPage: async () => {
+      throw new Error('old page timed out');
+    }
+  });
+
+  assert.equal(result.head_catchup.complete, true);
+  assert.equal(result.head_catchup.watermark_height, 300);
+  assert.equal(result.backfill.error, 'old page timed out');
+  assert.equal(result.next_page_token, 'history-cursor');
+  assert.equal(client.savedStates.at(-1).stats_json.head_catchup.watermark_height, 300);
 });
 
 test('buildRujiraBaseFeeRowsFromDune normalizes Dune generated-fee rows', async () => {
@@ -559,12 +648,15 @@ test('dashboard provenance reflects persisted Dune and legacy rows instead of th
               dune_query_id: '7620091',
               dune_execution_id: 'execution-1',
               head_catchup: {
+                direction: 'forward',
                 complete: false,
                 floor_height: 100,
+                watermark_height: 90,
                 min_height: 150,
                 max_height: 200,
                 pages: 4,
-                next_page_token: 'head-next'
+                next_page_token: 'head-next',
+                error: 'temporary timeout'
               }
             }
           }]
@@ -583,11 +675,14 @@ test('dashboard provenance reflects persisted Dune and legacy rows instead of th
   assert.deepEqual(payload.meta.sourceProviders, ['dune', 'legacy']);
   assert.match(payload.meta.method, /Canonical swap identities prevent/i);
   assert.deepEqual(payload.meta.headCatchup, {
+    direction: 'forward',
     complete: false,
     floorHeight: 100,
+    watermarkHeight: 90,
     minHeight: 150,
     maxHeight: 200,
     pages: 4,
-    nextPageToken: 'head-next'
+    nextPageToken: 'head-next',
+    error: 'temporary timeout'
   });
 });

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  aggregateWasmArbEconomicsBuckets,
   compactWasmArbMonitoringRows,
   compareWasmArbEqualWindows,
   normalizeWasmArbEconomicsBucket,
@@ -206,4 +207,57 @@ test('monitoring compaction preserves corrected accounting while bounding the pu
     Number(compactSummary.finRangeFeeUsd.toFixed(6)),
     Number(sourceSummary.finRangeFeeUsd.toFixed(6))
   );
+});
+
+test('chart aggregation preserves additive totals and recomputes value density at every grain', () => {
+  const start = Date.parse('2026-07-27T00:00:00Z') / 1000;
+  const sourceRows = distributedRows(start, 2 * 24 * 12, afterTotals, { mimirValue: 0 });
+  const sourceSummary = summarizeWasmArbWindow(sourceRows);
+  const expectedBucketCounts = new Map([
+    [60 * 60, 48],
+    [24 * 60 * 60, 2],
+    [7 * 24 * 60 * 60, 1]
+  ]);
+
+  for (const grainSeconds of [60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60]) {
+    const buckets = aggregateWasmArbEconomicsBuckets(sourceRows, grainSeconds);
+    const bucketSummary = summarizeWasmArbWindow(buckets);
+
+    assert.equal(buckets.length, expectedBucketCounts.get(grainSeconds));
+    assert.equal(
+      Number(bucketSummary.tcLinkedValueUsd.toFixed(6)),
+      Number(sourceSummary.tcLinkedValueUsd.toFixed(6))
+    );
+    assert.equal(
+      Number(bucketSummary.wasmLegVolumeUsd.toFixed(4)),
+      Number(sourceSummary.wasmLegVolumeUsd.toFixed(4))
+    );
+    assert.equal(
+      Number(bucketSummary.tcPerMillionWasmVolumeUsd.toFixed(6)),
+      Number(sourceSummary.tcPerMillionWasmVolumeUsd.toFixed(6))
+    );
+  }
+
+  const [weeklyBucket] = aggregateWasmArbEconomicsBuckets(
+    sourceRows,
+    7 * 24 * 60 * 60
+  );
+  assert.equal(weeklyBucket.bucketStart, '2026-07-27T00:00:00.000Z');
+});
+
+test('hourly charts retain compacted daily rows at their honest source grain', () => {
+  const [dailyRow] = distributedRows(
+    Date.parse('2026-06-23T00:00:00Z') / 1000,
+    1,
+    afterTotals,
+    { mimirValue: 0 }
+  );
+  dailyRow.bucketSeconds = 24 * 60 * 60;
+
+  const [bucket] = aggregateWasmArbEconomicsBuckets([dailyRow], 60 * 60);
+
+  assert.equal(bucket.bucketSeconds, 24 * 60 * 60);
+  assert.equal(bucket.observedSeconds, 24 * 60 * 60);
+  assert.equal(bucket.partial, false);
+  assert.equal(Number(bucket.tcLinkedValueUsd.toFixed(6)), 181.838045);
 });

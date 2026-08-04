@@ -25,6 +25,9 @@ function providerServicePath(base) {
     const pathname = new URL(String(base || '')).pathname
       .replace(/\/+$/, '')
       .toLowerCase();
+    if (/^\/api=[^/]+/i.test(pathname)) {
+      return '/api=dedicated';
+    }
     const liquifyService = pathname.match(/^\/chain\/[^/]+/i)?.[0];
     return liquifyService || pathname;
   } catch {
@@ -35,13 +38,17 @@ function providerServicePath(base) {
 export function providerCooldownKeys(base, options = {}) {
   const hostname = providerHostname(base);
   if (!hostname) return { global: '', service: '' };
+  const servicePath = providerServicePath(base);
+  const gatewayScope = servicePath === '/api=dedicated'
+    ? servicePath
+    : '';
   const scope = String(options.scope || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, '-');
   return {
-    global: `global:${hostname}`,
-    service: `service:${hostname}${providerServicePath(base)}${scope ? `:${scope}` : ''}`
+    global: `global:${hostname}${gatewayScope}`,
+    service: `service:${hostname}${servicePath}${scope ? `:${scope}` : ''}`
   };
 }
 

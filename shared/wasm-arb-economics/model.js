@@ -1,4 +1,5 @@
 const FIVE_MINUTES_SECONDS = 300;
+const DAY_SECONDS = 24 * 60 * 60;
 const BASIS_POINTS = 10_000;
 const MILLION = 1_000_000;
 
@@ -719,26 +720,37 @@ export function aggregateWasmArbEconomicsBuckets(rows = [], grainSeconds = 60 * 
   const groups = new Map();
 
   for (const row of normalized) {
-    const start = Math.floor(row.startSeconds / size) * size;
-    const group = groups.get(start) || [];
-    group.push(row);
-    groups.set(start, group);
+    // Monitoring history is compacted from hourly to daily source rows over time.
+    // Never present a coarse source row as if it were a finer observation: preserve
+    // its native duration when the requested chart grain is smaller.
+    const effectiveSize = Math.max(size, row.bucketSeconds);
+    const weekOffset = effectiveSize === 7 * DAY_SECONDS ? 4 * DAY_SECONDS : 0;
+    const start = Math.floor((row.startSeconds - weekOffset) / effectiveSize)
+      * effectiveSize + weekOffset;
+    const key = `${start}:${effectiveSize}`;
+    const group = groups.get(key) || {
+      startSeconds: start,
+      bucketSeconds: effectiveSize,
+      rows: []
+    };
+    group.rows.push(row);
+    groups.set(key, group);
   }
 
-  return [...groups.entries()]
-    .sort(([left], [right]) => left - right)
-    .map(([startSeconds, group]) => {
-      const observedSeconds = group.reduce(
+  return [...groups.values()]
+    .sort((left, right) => left.startSeconds - right.startSeconds)
+    .map((group) => {
+      const observedSeconds = group.rows.reduce(
         (total, row) => total + finiteNumber(row.bucketSeconds),
         0
       );
       return {
-        bucketStart: new Date(startSeconds * 1000).toISOString(),
-        startSeconds,
-        bucketSeconds: size,
+        bucketStart: new Date(group.startSeconds * 1000).toISOString(),
+        startSeconds: group.startSeconds,
+        bucketSeconds: group.bucketSeconds,
         observedSeconds,
-        partial: observedSeconds < size,
-        ...summarizeWasmArbWindow(group)
+        partial: observedSeconds < group.bucketSeconds,
+        ...summarizeWasmArbWindow(group.rows)
       };
     });
 }

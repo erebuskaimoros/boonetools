@@ -54,6 +54,25 @@ test('provider cooldown reserves the gateway-wide lane for 429 or Retry-After re
   assert.equal(queries[0].params[0], 'global:gateway.liquify.com');
 });
 
+test('provider cooldown isolates dedicated Liquify endpoints without persisting API keys', async () => {
+  const base = 'https://gateway.liquify.com/api=test-secret-value';
+  const keys = providerCooldownKeys(base);
+  assert.deepEqual(keys, {
+    global: 'global:gateway.liquify.com/api=dedicated',
+    service: 'service:gateway.liquify.com/api=dedicated'
+  });
+  assert.equal(JSON.stringify(keys).includes('test-secret-value'), false);
+
+  const queries = [];
+  const client = { query: async (sql, params) => (queries.push({ sql, params }), { rows: [] }) };
+  await recordProviderFailure(
+    base,
+    Object.assign(new Error('Too many requests'), { status: 429 }),
+    { client, enabled: true }
+  );
+  assert.equal(queries[0].params[0], 'global:gateway.liquify.com/api=dedicated');
+});
+
 test('provider cooldown does not open a breaker for endpoint-specific 404 responses', async () => {
   let queries = 0;
   await recordProviderFailure(

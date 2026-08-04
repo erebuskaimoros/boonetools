@@ -9,6 +9,7 @@ import { fetchMidgard, isMidgardRateLimitError } from './midgard.js';
 const ACTION_SYNC_KEY = 'rujira-thorchain-swap-actions:v1';
 const ACTION_PAGE_LIMIT = 50;
 const RPC_REQUEST_TIMEOUT_MS = 10000;
+const HISTORICAL_ACTION_RETRY_MS = 60 * 60 * 1000;
 
 export const BASE_LAYER_REVENUE_COLLECTOR =
   'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
@@ -733,6 +734,24 @@ async function fetchRujiraSwapActionPage(nextPageToken = '') {
   });
 }
 
+async function fetchRujiraSwapActionForwardPage({ fromHeight = 0, prevPageToken = '' } = {}) {
+  const params = new URLSearchParams({
+    address: RUJIRA_THORCHAIN_SWAP_CONTRACT,
+    type: 'swap',
+    limit: String(ACTION_PAGE_LIMIT)
+  });
+  if (prevPageToken) {
+    params.set('prevPageToken', prevPageToken);
+  } else {
+    params.set('fromHeight', String(Math.max(1, Math.trunc(Number(fromHeight) || 1))));
+  }
+
+  return fetchMidgard(`/actions?${params.toString()}`, {
+    bases: config.rujiraBaseFeesMidgardUrls,
+    validateResponse: (_path, data) => !Array.isArray(data?.actions)
+  });
+}
+
 function createHttpError(message, details = {}) {
   const error = new Error(message);
   error.status = details.status || 0;
@@ -762,7 +781,10 @@ async function fetchJsonFromBases(bases, pathname, params = {}) {
 
     try {
       const response = await fetch(url, {
-        headers: { Accept: 'application/json' },
+        headers: {
+          Accept: 'application/json',
+          ...(config.providerClientId ? { 'x-client-id': config.providerClientId } : {})
+        },
         signal: controller.signal
       });
       const text = await response.text();
@@ -796,6 +818,104 @@ export async function fetchRujiraBaseFeeRpcBlockResults(height) {
   return fetchJsonFromBases(config.rujiraBaseFeesRpcUrls, '/block_results', {
     height: String(height)
   });
+}
+
+export function parseRujiraBaseFeeRpcBatchResponse(payload, heights) {
+  const entries = Array.isArray(payload)
+    ? payload
+    : heights.length === 1 && payload && typeof payload === 'object'
+      ? [payload]
+      : null;
+  if (!entries) {
+    throw createHttpError('Invalid JSON-RPC batch response: expected an array');
+  }
+
+  const responses = new Map(entries.map((entry) => [String(entry?.id || ''), entry]));
+  return heights.map((value) => {
+    const height = Math.max(1, Math.trunc(Number(value) || 1));
+    const response = responses.get(String(height));
+    if (!response) {
+      return {
+        height,
+        error: createHttpError(`RPC batch response is missing height ${height}`)
+      };
+    }
+    if (response.error || !response.result) {
+      const message = response.error?.message || 'missing result';
+      return {
+        height,
+        error: createHttpError(`RPC batch error for height ${height}: ${message}`, {
+          body: JSON.stringify(response.error || {}).slice(0, 240)
+        })
+      };
+    }
+    return { height, payload: response };
+  });
+}
+
+export async function fetchRujiraBaseFeeRpcBlockResultsBatch(heights) {
+  const normalizedHeights = [...new Set(
+    (Array.isArray(heights) ? heights : [])
+      .map((height) => Math.max(0, Math.trunc(Number(height) || 0)))
+      .filter((height) => height > 0)
+  )];
+  if (!normalizedHeights.length) return [];
+
+  const requests = normalizedHeights.map((height) => ({
+    jsonrpc: '2.0',
+    id: String(height),
+    method: 'block_results',
+    params: { height: String(height) }
+  }));
+  let lastError = null;
+
+  for (const base of config.rujiraBaseFeesRpcUrls) {
+    const url = String(base || '').replace(/\/$/, '');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), RPC_REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          ...(config.providerClientId ? { 'x-client-id': config.providerClientId } : {})
+        },
+        body: JSON.stringify(requests),
+        signal: controller.signal
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw createHttpError(
+          `RPC batch error: ${response.status} ${response.statusText} for ${normalizedHeights.length} heights`,
+          {
+            status: response.status,
+            url,
+            body: text.slice(0, 240)
+          }
+        );
+      }
+
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        throw createHttpError(`Invalid JSON batch response from ${url}`, {
+          url,
+          body: text.slice(0, 240)
+        });
+      }
+      return parseRujiraBaseFeeRpcBatchResponse(payload, normalizedHeights);
+    } catch (error) {
+      lastError = error;
+      if (isRujiraBaseFeeProviderRateLimit(error)) throw error;
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  throw lastError || new Error('Unable to fetch RPC block-results batch');
 }
 
 async function loadActionSyncState(client) {
@@ -911,21 +1031,39 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
     0,
     Number(options.headMaxPages ?? config.rujiraBaseFeesMidgardHeadMaxPages) || 0
   );
+  const headLookbackBlocks = Math.max(
+    1,
+    Number(
+      options.headLookbackBlocks ?? config.rujiraBaseFeesMidgardHeadLookbackBlocks
+    ) || 1
+  );
   const fetchPage = options.fetchPage || fetchRujiraSwapActionPage;
+  const fetchForwardPage = options.fetchForwardPage || fetchRujiraSwapActionForwardPage;
   const sleepFn = options.sleepFn || sleep;
   const requestDelayMs = Math.max(
     0,
     Number(options.requestDelayMs ?? config.rujiraBaseFeesRequestDelayMs) || 0
   );
   const knownMaxHeight = await loadKnownCoverageHeight(client);
-  // The historical backfill may be months behind. Preserve a separate head cursor so
-  // each run can discover current actions and still walk through any recent outage gap.
+  // Midgard can traverse forward from a height with fromHeight/prevPageToken. Keep a
+  // durable forward watermark that is independent of websocket-written max heights,
+  // otherwise a listener restart can advance the DB tip past an unseen outage gap.
   const previousHeadCatchup = syncState?.stats_json?.head_catchup || {};
-  const previousHeadCatchupToken = String(previousHeadCatchup.next_page_token || '');
-  const previousHeadCatchupFloor = Math.max(
-    0,
-    Number(previousHeadCatchup.floor_height) || knownMaxHeight
-  );
+  const hasForwardState = previousHeadCatchup.direction === 'forward';
+  const previousHeadCatchupToken = hasForwardState
+    ? String(previousHeadCatchup.next_page_token || '')
+    : '';
+  const previousHeadWatermark = hasForwardState
+    ? Math.max(0, Number(previousHeadCatchup.watermark_height) || 0)
+    : 0;
+  const previousHeadCatchupFloor = hasForwardState
+    ? Math.max(0, Number(previousHeadCatchup.floor_height) || previousHeadWatermark)
+    : Math.max(0, knownMaxHeight - headLookbackBlocks);
+  const previousHeadCatchupMax = hasForwardState
+    ? Math.max(previousHeadWatermark, Number(previousHeadCatchup.max_height) || 0)
+    : previousHeadWatermark;
+  const previousBackfill = syncState?.stats_json?.backfill || {};
+  const previousBackfillRetryAt = Date.parse(String(previousBackfill.retry_after || ''));
   const stats = {
     pages: 0,
     actions: 0,
@@ -938,16 +1076,19 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
       max_height: 0
     },
     head_catchup: {
+      direction: 'forward',
       pages: 0,
       actions: 0,
       heights: 0,
       min_height: 0,
-      max_height: 0,
+      max_height: previousHeadCatchupMax,
       floor_height: previousHeadCatchupToken
         ? previousHeadCatchupFloor
-        : knownMaxHeight,
+        : previousHeadWatermark || previousHeadCatchupFloor,
+      watermark_height: previousHeadWatermark,
       next_page_token: previousHeadCatchupToken,
-      complete: false
+      complete: false,
+      error: ''
     },
     backfill: {
       pages: 0,
@@ -955,17 +1096,22 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
       heights: 0,
       min_height: 0,
       max_height: 0,
-      reused_head_page: false
+      reused_head_page: false,
+      retry_after: Number.isFinite(previousBackfillRetryAt)
+        ? new Date(previousBackfillRetryAt).toISOString()
+        : '',
+      error: '',
+      skipped: ''
     },
     next_page_token: nextPageToken,
     complete
   };
 
-  async function ingestPage(pageToken, bucket) {
+  async function ingestPage(pageToken, bucket, pageFetcher = fetchPage) {
     if (stats.pages > 0 && requestDelayMs > 0) {
       await sleepFn(requestDelayMs);
     }
-    const payload = await fetchPage(pageToken);
+    const payload = await pageFetcher(pageToken);
     const actions = Array.isArray(payload?.actions) ? payload.actions : [];
     const inserted = await upsertActionsAndBlocks(client, actions);
     stats.pages += 1;
@@ -983,62 +1129,119 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
     bucket.max_height = Math.max(bucket.max_height || 0, range.max);
     return {
       nextPageToken: String(payload?.meta?.nextPageToken || ''),
+      payload,
       range,
       inserted
     };
   }
 
-  const headPage = await ingestPage('', stats.head_refresh);
-  let headCatchupToken = previousHeadCatchupToken || headPage.nextPageToken;
-  const headCatchupFloor = stats.head_catchup.floor_height;
+  let headCatchupToken = previousHeadCatchupToken;
   let headCatchupComplete = false;
-
-  if (!previousHeadCatchupToken) {
-    headCatchupComplete = !headCatchupToken || (
-      headCatchupFloor > 0 &&
-      headPage.range.min > 0 &&
-      headPage.range.min <= headCatchupFloor
-    );
-    if (headCatchupComplete) {
-      headCatchupToken = '';
-    }
-  }
-
-  for (let page = 0; page < headMaxPages && headCatchupToken && !headCatchupComplete; page += 1) {
-    const catchupPage = await ingestPage(headCatchupToken, stats.head_catchup);
-    const reachedFloor = headCatchupFloor > 0 &&
-      catchupPage.range.min > 0 &&
-      catchupPage.range.min <= headCatchupFloor;
-    headCatchupToken = catchupPage.nextPageToken;
-    headCatchupComplete = reachedFloor || !headCatchupToken;
-    if (headCatchupComplete) {
-      headCatchupToken = '';
+  let headError = null;
+  for (let page = 0; page < headMaxPages && !headCatchupComplete; page += 1) {
+    try {
+      const request = headCatchupToken
+        ? { prevPageToken: headCatchupToken }
+        : { fromHeight: stats.head_catchup.floor_height };
+      const catchupPage = await ingestPage(request, stats.head_catchup, fetchForwardPage);
+      if (page === 0) {
+        stats.head_refresh = {
+          pages: 1,
+          actions: catchupPage.inserted.actions,
+          heights: catchupPage.inserted.heights,
+          min_height: catchupPage.range.min,
+          max_height: catchupPage.range.max
+        };
+      }
+      headCatchupToken = String(catchupPage.payload?.meta?.prevPageToken || '');
+      headCatchupComplete = catchupPage.inserted.actions === 0 || !headCatchupToken;
+      if (headCatchupComplete) headCatchupToken = '';
+    } catch (error) {
+      headError = error;
+      stats.head_catchup.error = String(error?.message || error).slice(0, 500);
+      break;
     }
   }
 
   stats.head_catchup.next_page_token = headCatchupToken;
   stats.head_catchup.complete = headCatchupComplete;
-
-  let backfillPage = 0;
-  if (!alreadyComplete && maxPages > 0 && !nextPageToken) {
-    stats.backfill.pages = 1;
-    stats.backfill.actions = headPage.inserted.actions;
-    stats.backfill.heights = headPage.inserted.heights;
-    stats.backfill.min_height = headPage.range.min;
-    stats.backfill.max_height = headPage.range.max;
-    stats.backfill.reused_head_page = true;
-    nextPageToken = headPage.nextPageToken;
-    complete = !nextPageToken;
-    backfillPage = 1;
+  if (headCatchupComplete) {
+    stats.head_catchup.watermark_height = Math.max(
+      previousHeadWatermark,
+      stats.head_catchup.max_height
+    );
   }
 
-  for (; backfillPage < maxPages && !complete; backfillPage += 1) {
-    const backfillResult = await ingestPage(nextPageToken, stats.backfill);
-    nextPageToken = backfillResult.nextPageToken;
+  // Persist head progress before touching the unrelated historical cursor. A slow
+  // old Midgard page must not discard recent outage recovery or starve RPC blocks.
+  await saveActionSyncState(client, {
+    next_page_token: alreadyComplete ? '' : nextPageToken,
+    complete,
+    rate_limited_until: null,
+    stats_json: {
+      ...stats,
+      next_page_token: alreadyComplete ? '' : nextPageToken,
+      complete,
+      mode: alreadyComplete ? 'head_refresh' : 'backfill'
+    }
+  });
 
-    if (!nextPageToken) {
-      complete = true;
-      break;
+  if (headError) {
+    if (isRujiraBaseFeeProviderRateLimit(headError)) throw headError;
+    return {
+      ...stats,
+      next_page_token: alreadyComplete ? '' : nextPageToken,
+      complete,
+      mode: alreadyComplete ? 'head_refresh' : 'backfill'
+    };
+  }
+
+  if (headMaxPages > 0 && !headCatchupComplete) {
+    stats.backfill.skipped = 'head_catchup_incomplete';
+    return {
+      ...stats,
+      next_page_token: alreadyComplete ? '' : nextPageToken,
+      complete,
+      mode: alreadyComplete ? 'head_refresh' : 'backfill'
+    };
+  }
+
+  const historicalRetryActive = Number.isFinite(previousBackfillRetryAt)
+    && previousBackfillRetryAt > Date.now();
+  if (!alreadyComplete && maxPages > 0 && historicalRetryActive) {
+    stats.backfill.skipped = 'provider_retry_cooldown';
+  }
+
+  let backfillPage = 0;
+  if (!alreadyComplete && maxPages > 0 && !historicalRetryActive && !nextPageToken) {
+    try {
+      const firstBackfillPage = await ingestPage('', stats.backfill);
+      nextPageToken = firstBackfillPage.nextPageToken;
+      complete = !nextPageToken;
+      backfillPage = 1;
+    } catch (error) {
+      stats.backfill.error = String(error?.message || error).slice(0, 500);
+      stats.backfill.retry_after = new Date(Date.now() + HISTORICAL_ACTION_RETRY_MS).toISOString();
+      if (isRujiraBaseFeeProviderRateLimit(error)) throw error;
+    }
+  }
+
+  if (!historicalRetryActive && !stats.backfill.error) {
+    for (; backfillPage < maxPages && !complete; backfillPage += 1) {
+      try {
+        const backfillResult = await ingestPage(nextPageToken, stats.backfill);
+        nextPageToken = backfillResult.nextPageToken;
+
+        if (!nextPageToken) {
+          complete = true;
+          break;
+        }
+      } catch (error) {
+        stats.backfill.error = String(error?.message || error).slice(0, 500);
+        stats.backfill.retry_after = new Date(Date.now() + HISTORICAL_ACTION_RETRY_MS).toISOString();
+        if (isRujiraBaseFeeProviderRateLimit(error)) throw error;
+        break;
+      }
     }
   }
 
@@ -1630,8 +1833,14 @@ export async function processRujiraBaseFeeBlocks(client, options = {}) {
   }
 
   const blocks = await loadPendingBlocks(client, limit);
+  const batchSize = Math.max(
+    1,
+    Math.trunc(Number(options.batchSize ?? config.rujiraBaseFeesRpcBatchSize) || 1)
+  );
+  const fetchBatch = options.fetchBatch || fetchRujiraBaseFeeRpcBlockResultsBatch;
   const stats = {
     selected: blocks.length,
+    batches: 0,
     fetched: 0,
     errored: 0,
     events: 0,
@@ -1639,27 +1848,51 @@ export async function processRujiraBaseFeeBlocks(client, options = {}) {
     excluded_events: 0
   };
 
-  for (const row of blocks) {
+  const batches = chunkArray(blocks, batchSize);
+  for (const [batchIndex, batch] of batches.entries()) {
+    let results;
     try {
-      const payload = await fetchRujiraBaseFeeRpcBlockResults(row.height);
-      const parsed = parseRujiraBaseFeeBlock(Number(row.height), payload, {
-        blockTime: row.block_time ? new Date(row.block_time).toISOString() : null
-      });
-      await saveParsedBlock(client, row, payload, parsed);
-      stats.fetched += 1;
-      stats.events += parsed.events.length;
-      stats.included_events += parsed.events.filter((event) => event.included).length;
-      stats.excluded_events += parsed.events.filter((event) => !event.included).length;
+      results = await fetchBatch(batch.map((row) => Number(row.height)));
+      stats.batches += 1;
     } catch (error) {
-      stats.errored += 1;
       if (isRujiraBaseFeeProviderRateLimit(error)) {
         await putActionSyncCooldown(client, error);
         throw error;
       }
-      await markBlockError(client, row, error);
+      for (const row of batch) {
+        await markBlockError(client, row, error);
+        stats.errored += 1;
+      }
+      results = [];
     }
 
-    if (config.rujiraBaseFeesRequestDelayMs > 0) {
+    const byHeight = new Map(results.map((entry) => [Number(entry.height), entry]));
+    for (const row of batch) {
+      const result = byHeight.get(Number(row.height));
+      if (!result || result.error) {
+        if (result?.error) {
+          await markBlockError(client, row, result.error);
+          stats.errored += 1;
+        }
+        continue;
+      }
+
+      try {
+        const parsed = parseRujiraBaseFeeBlock(Number(row.height), result.payload, {
+          blockTime: row.block_time ? new Date(row.block_time).toISOString() : null
+        });
+        await saveParsedBlock(client, row, result.payload, parsed);
+        stats.fetched += 1;
+        stats.events += parsed.events.length;
+        stats.included_events += parsed.events.filter((event) => event.included).length;
+        stats.excluded_events += parsed.events.filter((event) => !event.included).length;
+      } catch (error) {
+        await markBlockError(client, row, error);
+        stats.errored += 1;
+      }
+    }
+
+    if (batchIndex < batches.length - 1 && config.rujiraBaseFeesRequestDelayMs > 0) {
       await sleep(config.rujiraBaseFeesRequestDelayMs);
     }
   }
@@ -1974,12 +2207,15 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
       nextPageToken: sync.next_page_token || '',
       headCatchup: sync.stats_json?.head_catchup
         ? {
+            direction: String(sync.stats_json.head_catchup.direction || ''),
             complete: Boolean(sync.stats_json.head_catchup.complete),
             floorHeight: Number(sync.stats_json.head_catchup.floor_height) || 0,
+            watermarkHeight: Number(sync.stats_json.head_catchup.watermark_height) || 0,
             minHeight: Number(sync.stats_json.head_catchup.min_height) || 0,
             maxHeight: Number(sync.stats_json.head_catchup.max_height) || 0,
             pages: Number(sync.stats_json.head_catchup.pages) || 0,
-            nextPageToken: String(sync.stats_json.head_catchup.next_page_token || '')
+            nextPageToken: String(sync.stats_json.head_catchup.next_page_token || ''),
+            error: String(sync.stats_json.head_catchup.error || '')
           }
         : null,
       rateLimitedUntil: toIsoString(sync.rate_limited_until),

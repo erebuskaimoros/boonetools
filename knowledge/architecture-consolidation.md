@@ -53,7 +53,10 @@ are monotonic under replay and concurrent writers.
 - Hierarchical provider circuit breakers live in Postgres, making cooldowns
   effective across systemd oneshot processes. Ordinary failures are scoped to
   a configured service base; confirmed 429/`Retry-After` responses alone use a
-  hostname-wide breaker. App Layer static routes use a slower
+  hostname-wide breaker for public routes. Authenticated Liquify `/api=...`
+  routes use a separate redacted `api=dedicated` breaker scope so a public
+  gateway quota cannot disable the dedicated endpoint or persist its API key.
+  App Layer static routes use a slower
   persistent refresh and bounded concurrency; stuck-transaction status/details
   reuse is keyed by transaction plus queue fingerprint.
 - Historical THORChain pool/Oracle acquisition is persisted by height in

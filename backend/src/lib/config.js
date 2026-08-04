@@ -119,8 +119,13 @@ export const config = Object.freeze({
     rpcFallbackRestUrl
   ]),
   rujiraBaseFeesMidgardHeadMaxPages: readInt('RUJIRA_BASE_FEES_MIDGARD_HEAD_MAX_PAGES', 10),
+  rujiraBaseFeesMidgardHeadLookbackBlocks: readInt(
+    'RUJIRA_BASE_FEES_MIDGARD_HEAD_LOOKBACK_BLOCKS',
+    50_000
+  ),
   rujiraBaseFeesMidgardMaxPages: readInt('RUJIRA_BASE_FEES_MIDGARD_MAX_PAGES', 10),
   rujiraBaseFeesBlockMaxHeights: readInt('RUJIRA_BASE_FEES_BLOCK_MAX_HEIGHTS', 75),
+  rujiraBaseFeesRpcBatchSize: readInt('RUJIRA_BASE_FEES_RPC_BATCH_SIZE', 10),
   rujiraBaseFeesRequestDelayMs: readInt('RUJIRA_BASE_FEES_REQUEST_DELAY_MS', 250),
   rujiraBaseFeesRateLimitCooldownMs: readInt('RUJIRA_BASE_FEES_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000,
   rujiraBaseFeesDuneQueryId: optional(process.env.RUJIRA_BASE_FEES_DUNE_QUERY_ID) || '7620091',

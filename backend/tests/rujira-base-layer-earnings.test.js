@@ -8,6 +8,7 @@ const {
   buildWeightedRoutableBalances,
   calculateRujiraBaseLayerEarningsDay,
   deriveRujiraBaseLayerRouteScopes,
+  reconcileCompletedRujiraBaseLayerEarnings,
   serializeRujiraBaseLayerEarningsJson
 } = await import('../src/shared/rujira-base-layer-earnings.js');
 
@@ -124,6 +125,62 @@ test('conversion inventory changes and Reserve payouts cancel while fresh fees r
     prices: { 'THOR.RUNE': 2 }
   });
   assert.equal(freshFees.inflowUsd, 20);
+});
+
+test('completed earnings days reconcile late Reserve events and final daily pricing', async () => {
+  const updates = [];
+  const client = {
+    query: async (sql, params = []) => {
+      if (sql.includes('left join reserve_by_day')) {
+        assert.deepEqual(params, ['2026-08-03']);
+        return {
+          rows: [
+            {
+              day_start: '2026-08-01',
+              by_denom: {
+                rune: { amount: 111.14919798, usd: 44.64732547 },
+                'thor.auto': { amount: -34.22644417, usd: 0 }
+              },
+              inventory_delta_usd: -290.47172936,
+              reserve_payout_rune: 792.09114,
+              reserve_payout_usd: 342.17258198,
+              current_reserve_payout_rune: 797.96198,
+              current_reserve_payout_usd: 348.53964426
+            },
+            {
+              day_start: '2026-08-02',
+              by_denom: { rune: { amount: 20, usd: 8 } },
+              inventory_delta_usd: -2,
+              reserve_payout_rune: 10,
+              reserve_payout_usd: 4,
+              current_reserve_payout_rune: 10,
+              current_reserve_payout_usd: 4
+            }
+          ]
+        };
+      }
+      if (sql.includes('update rujira_base_layer_earnings_daily')) {
+        updates.push(params);
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`Unexpected query: ${sql}`);
+    }
+  };
+
+  const stats = await reconcileCompletedRujiraBaseLayerEarnings(client, '2026-08-03');
+
+  assert.equal(stats.checked_days, 2);
+  assert.equal(stats.reconciled_days, 1);
+  assert.ok(Math.abs(stats.reserve_payout_rune_delta - 5.87084) < 1e-8);
+  assert.ok(Math.abs(stats.reserve_payout_usd_delta - 6.36706228) < 1e-8);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0][0], '2026-08-01');
+  assert.ok(Math.abs(updates[0][1].rune.amount - 117.02003798) < 1e-8);
+  assert.ok(Math.abs(updates[0][1].rune.usd - 51.01438775) < 1e-8);
+  assert.equal(updates[0][1]['thor.auto'].amount, -34.22644417);
+  assert.equal(updates[0][2], 797.96198);
+  assert.equal(updates[0][3], 348.53964426);
+  assert.ok(Math.abs(updates[0][4] - 58.0679149) < 1e-8);
 });
 
 test('dashboard payload replaces static days with DB snapshots and rebuilds totals', () => {
