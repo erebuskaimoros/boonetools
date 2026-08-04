@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   buildBlockProductionChartScale,
+  findNearestBlockProductionPointIndex,
   projectBlockProductionChartY
 } from '../src/lib/status/block-production-chart.js';
 
@@ -45,4 +46,17 @@ test('block production projection keeps equal seconds-per-pixel without centerin
   assert.ok(Math.abs((sixSeconds - sevenSeconds) - (sevenSeconds - eightSeconds)) < 1e-9);
   assert.equal(projectBlockProductionChartY(chart.max, chart), chart.top);
   assert.equal(projectBlockProductionChartY(chart.min, chart), chart.bottom);
+});
+
+test('block production chart-wide hover selects the sample nearest the pointer time', () => {
+  const points = [
+    { timestamp: 1_000 },
+    { timestamp: 2_000 },
+    { timestamp: 5_000 }
+  ];
+
+  assert.equal(findNearestBlockProductionPointIndex(points, 1_100), 0);
+  assert.equal(findNearestBlockProductionPointIndex(points, 3_600), 2);
+  assert.equal(findNearestBlockProductionPointIndex(points, 5_000), 2);
+  assert.equal(findNearestBlockProductionPointIndex([], 3_600), null);
 });

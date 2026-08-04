@@ -1,6 +1,7 @@
 <script>
   import {
     buildBlockProductionChartScale,
+    findNearestBlockProductionPointIndex,
     projectBlockProductionChartY
   } from './block-production-chart.js';
 
@@ -33,6 +34,7 @@
   /** @type {number | null} */
   let selectionEndX = null;
   let selecting = false;
+  let chartElement;
 
   $: historyPoints = history?.points || [];
   $: allPoints = historyPoints
@@ -167,10 +169,29 @@
   }
 
   function pointerChartX(event) {
-    const svg = event.currentTarget.ownerSVGElement;
+    const svg = event.currentTarget.ownerSVGElement || event.currentTarget;
     const bounds = svg.getBoundingClientRect();
+    if (!bounds.width) return LEFT;
     const x = ((event.clientX - bounds.left) / bounds.width) * WIDTH;
     return Math.max(LEFT, Math.min(WIDTH - RIGHT, x));
+  }
+
+  function updateChartTooltip(event) {
+    if (selecting) return;
+    const nearestIndex = findNearestBlockProductionPointIndex(
+      points,
+      timestampAtX(pointerChartX(event))
+    );
+    activePointIndex = nearestIndex;
+  }
+
+  function hideChartTooltip() {
+    if (!selecting) activePointIndex = null;
+  }
+
+  function handleWindowMouseMove(event) {
+    if (activePointIndex === null || selecting || chartElement?.contains(event.target)) return;
+    hideChartTooltip();
   }
 
   function timestampAtX(x) {
@@ -250,6 +271,8 @@
   }
 </script>
 
+<svelte:window on:mousemove={handleWindowMouseMove} />
+
 <section class="block block-production" aria-labelledby="block-production-title">
   <div class="block-title">
     <h2 id="block-production-title"><span>▌</span> Block Production Time</h2>
@@ -270,7 +293,13 @@
 
   {#if points.length > 1}
     <div class="chart-scroll">
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} role="img" aria-label="Average seconds per THORChain block. Drag across the plot to highlight and zoom into a time range.">
+      <svg
+        bind:this={chartElement}
+        viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
+        role="img"
+        aria-label="Average seconds per THORChain block. Hover anywhere on the chart for the nearest sample. Drag across the plot to highlight and zoom into a time range."
+        on:mousemove={updateChartTooltip}
+      >
         {#each yTicks as tick}
           <line class="grid-line" x1={LEFT} x2={WIDTH - RIGHT} y1={chartY(tick, yScale)} y2={chartY(tick, yScale)} />
           <text class="axis-label y-label" x={LEFT - 9} y={chartY(tick, yScale) + 3}>{formatAxisSeconds(tick)}</text>
@@ -309,8 +338,6 @@
             role="button"
             tabindex="0"
             aria-label={formatTooltip(point)}
-            on:mouseenter={() => showTooltip(index)}
-            on:mouseleave={() => hideTooltip(index)}
             on:focus={() => showTooltip(index)}
             on:blur={() => hideTooltip(index)}
             on:click={() => showTooltip(index)}

@@ -50,3 +50,24 @@ export function projectBlockProductionChartY(value, options = {}) {
   const bounded = Math.max(min, Math.min(max, numeric));
   return top + (((max - bounded) / (max - min)) * (bottom - top));
 }
+
+export function findNearestBlockProductionPointIndex(points = [], timestamp) {
+  const targetTimestamp = finiteNumber(timestamp);
+  if (!Array.isArray(points) || points.length === 0 || targetTimestamp === null) return null;
+
+  let nearestIndex = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  points.forEach((point, index) => {
+    const pointTimestamp = finiteNumber(point?.timestamp);
+    if (pointTimestamp === null) return;
+
+    const distance = Math.abs(pointTimestamp - targetTimestamp);
+    if (distance < nearestDistance) {
+      nearestIndex = index;
+      nearestDistance = distance;
+    }
+  });
+
+  return nearestIndex;
+}
