@@ -196,7 +196,7 @@ test('first-run broad LP fallback collapses to active pools and failed rediscove
   });
 
   const first = await buildTreasurySnapshot({ providers: fallbackProviders, now: () => NOW });
-  assert.equal(memberCalls, 4);
+  assert.equal(memberCalls, 3);
   assert.equal(lpCalls, 16);
   assert.deepEqual(first.control.lpDiscovery['active:Treasury Vultisig'].assets, ['BTC.BTC']);
   assert.deepEqual(first.control.lpDiscovery['active:Treasury Test'].assets, []);
@@ -210,7 +210,7 @@ test('first-run broad LP fallback collapses to active pools and failed rediscove
     providers: fallbackProviders,
     now: () => new Date(NOW.getTime() + 5 * 60 * 1000)
   });
-  assert.equal(memberCalls, 4);
+  assert.equal(memberCalls, 3);
   assert.equal(lpCalls, 17);
 
   const due = await buildTreasurySnapshot({
@@ -218,8 +218,8 @@ test('first-run broad LP fallback collapses to active pools and failed rediscove
     providers: fallbackProviders,
     now: () => new Date(NOW.getTime() + TREASURY_LP_DISCOVERY_TTL_MS + 1)
   });
-  assert.equal(memberCalls, 8);
-  assert.equal(lpCalls, 18);
+  assert.equal(memberCalls, 6);
+  assert.equal(lpCalls, 22);
   assert.ok(due.control.lpDiscovery['active:Treasury Vultisig'].nextAttemptAt);
 
   await buildTreasurySnapshot({
@@ -227,6 +227,51 @@ test('first-run broad LP fallback collapses to active pools and failed rediscove
     providers: fallbackProviders,
     now: () => new Date(NOW.getTime() + TREASURY_LP_DISCOVERY_TTL_MS + 5 * 60 * 1000)
   });
-  assert.equal(memberCalls, 8);
-  assert.equal(lpCalls, 19);
+  assert.equal(memberCalls, 6);
+  assert.equal(lpCalls, 23);
+});
+
+test('Treasury module repeats broad LP discovery when Midgard has no module member record', async () => {
+  let moduleHasPosition = false;
+  let moduleLpCalls = 0;
+  const moduleProviders = providers({
+    fetchMemberPoolAssets: async (address) => {
+      if (address.startsWith('thor1module')) {
+        throw new Error('Midgard module member not found');
+      }
+      return [];
+    },
+    fetchLiquidityProvider: async (asset, address) => {
+      if (!address.startsWith('thor1module')) return null;
+      moduleLpCalls += 1;
+      if (!moduleHasPosition || asset !== 'ETH.ETH') return null;
+      return {
+        asset,
+        units: '10',
+        asset_redeem_value: '100000000',
+        rune_redeem_value: '200000000'
+      };
+    }
+  });
+
+  const first = await buildTreasurySnapshot({ providers: moduleProviders, now: () => NOW });
+  assert.deepEqual(first.control.lpDiscovery['original:Treasury Module (locked)'].assets, []);
+
+  moduleHasPosition = true;
+  moduleLpCalls = 0;
+  const refreshed = await buildTreasurySnapshot({
+    previousSnapshot: first,
+    providers: moduleProviders,
+    now: () => new Date(NOW.getTime() + TREASURY_LP_DISCOVERY_TTL_MS + 1)
+  });
+
+  assert.equal(moduleLpCalls, corePayload().pools.value.length);
+  assert.deepEqual(
+    refreshed.control.lpDiscovery['original:Treasury Module (locked)'].assets,
+    ['ETH.ETH']
+  );
+  assert.deepEqual(
+    refreshed.sections[0].entries[0].lpPositions.map((position) => position.fullPool),
+    ['ETH.ETH']
+  );
 });

@@ -114,9 +114,9 @@ function repriceLpPosition(position, assetPrices, runePrice) {
   };
 }
 
-function isDiscoveryDue(record, nowMs) {
+function isDiscoveryDue(record, nowMs, { respectRetryBackoff = true } = {}) {
   const nextAttemptAt = Date.parse(record?.nextAttemptAt || '');
-  if (Number.isFinite(nextAttemptAt) && nowMs < nextAttemptAt) return false;
+  if (respectRetryBackoff && Number.isFinite(nextAttemptAt) && nowMs < nextAttemptAt) return false;
   const discoveredAt = Date.parse(record?.discoveredAt || '');
   return !Number.isFinite(discoveredAt) || nowMs - discoveredAt >= TREASURY_LP_DISCOVERY_TTL_MS;
 }
@@ -127,9 +127,19 @@ async function resolveLpDiscovery(entries, previousDiscovery, fallbackAssets, op
   const resolved = {};
   await mapWithConcurrency(entries, LP_DISCOVERY_CONCURRENCY, async ({ entry, key }) => {
     const previous = previousDiscovery?.[key];
-    if (!isDiscoveryDue(previous, nowMs)) {
+    const scansAvailablePools = entry.addressSource === 'treasury-module';
+    if (!isDiscoveryDue(previous, nowMs, { respectRetryBackoff: !scansAvailablePools })) {
       resolved[key] = previous;
       states[`lp-discovery:${key}`] = { status: 'reused', reason: 'not_due' };
+      return;
+    }
+
+    // Midgard's member index does not include module-owned LP records. Scan the
+    // bounded current pool set on the slower discovery cadence, then collapse
+    // it back to pools with active or last-good positions below.
+    if (scansAvailablePools) {
+      resolved[key] = { assets: fallbackAssets, discoveredAt: nowIso, broadScan: true };
+      states[`lp-discovery:${key}`] = { status: 'fresh', reason: 'scheduled_pool_scan' };
       return;
     }
 
@@ -206,9 +216,9 @@ async function loadLpPositions(entries, discovery, previousEntries, assetPrices,
   return { positionsByEntry: byEntry, activeAssetsByEntry };
 }
 
-function narrowBroadFallbackDiscovery(discovery, activeAssetsByEntry, previousEntries, nowIso) {
+function narrowBroadDiscovery(discovery, activeAssetsByEntry, previousEntries, nowIso) {
   return Object.fromEntries(Object.entries(discovery).map(([key, record]) => {
-    if (!record?.broadFallback) return [key, record];
+    if (!record?.broadFallback && !record?.broadScan) return [key, record];
     const knownAssets = new Set([
       ...(activeAssetsByEntry.get(key) || []),
       ...((previousEntries.get(key)?.lpPositions || []).map((position) => position.fullPool))
@@ -217,7 +227,6 @@ function narrowBroadFallbackDiscovery(discovery, activeAssetsByEntry, previousEn
       ...record,
       assets: [...knownAssets].filter(Boolean),
       discoveredAt: record.discoveredAt || nowIso,
-      broadFallback: true,
       broadScanCompletedAt: record.broadScanCompletedAt || nowIso
     }];
   }));
@@ -439,7 +448,7 @@ export async function buildTreasurySnapshot(options = {}) {
     warnings,
     segmentStates
   );
-  const normalizedLpDiscovery = narrowBroadFallbackDiscovery(
+  const normalizedLpDiscovery = narrowBroadDiscovery(
     lpDiscovery,
     lpResult.activeAssetsByEntry,
     previousEntries,
