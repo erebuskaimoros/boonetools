@@ -1,4 +1,5 @@
 import { fetchThorchainRpc } from './rpc.js';
+import { pruneChainHeaders } from './chain-headers.js';
 
 export const BLOCK_PRODUCTION_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const BLOCK_PRODUCTION_SAMPLE_MS = 5 * 60 * 1000;
@@ -291,7 +292,29 @@ async function appendLiveSample(client, head) {
 export async function loadBlockProductionHistory(client, options = {}) {
   const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
   const cutoff = new Date(nowMs - BLOCK_PRODUCTION_WINDOW_MS).toISOString();
-  const result = await client.query(
+  const headerResult = await client.query(
+    `with buckets as (
+       select floor(extract(epoch from block_time) / 300)::bigint as bucket,
+              max(block_time) as sample_time,
+              max(height) as end_height,
+              count(*)::integer as block_count,
+              avg(interval_ms)::double precision / 1000 as seconds_per_block
+       from chain_block_headers
+       where block_time >= $1
+         and interval_ms is not null
+         and interval_ms > 0
+       group by floor(extract(epoch from block_time) / 300)::bigint
+     )
+     select sample_time, end_height, block_count, seconds_per_block,
+            'liquify-header-5m-rollup'::text as source
+     from buckets
+     order by sample_time asc
+     limit $2`,
+    [cutoff, BLOCK_PRODUCTION_MAX_POINTS]
+  );
+  const result = headerResult.rows.length > 0
+    ? headerResult
+    : await client.query(
     `select sample_time, end_height, block_count, seconds_per_block, source
      from block_production_samples
      where sample_time >= $1 and block_count > 0 and seconds_per_block > 0
@@ -311,20 +334,19 @@ export async function loadBlockProductionHistory(client, options = {}) {
     live_interval_minutes: BLOCK_PRODUCTION_SAMPLE_MS / 60_000,
     points,
     as_of: points.at(-1)?.time || null,
-    source: 'thorchain-rpc-block-headers'
+    source: headerResult.rows.length > 0
+      ? 'liquify-thorchain-block-headers'
+      : 'thorchain-rpc-block-headers'
   };
 }
 
 export async function refreshBlockProductionHistory(client, options = {}) {
-  const head = await fetchBlockProductionHead(options);
-  const bootstrapped = await bootstrapHistory(client, head, options);
-  const appended = await appendLiveSample(client, head);
+  const nowMs = Number.isFinite(Number(options.nowMs)) ? Number(options.nowMs) : Date.now();
+  const prunedHeaders = await pruneChainHeaders(client, { nowMs });
   await client.query(
     `delete from block_production_samples where sample_time < $1`,
-    [new Date(Date.parse(head.blockTime) - BLOCK_PRODUCTION_RETENTION_MS).toISOString()]
+    [new Date(nowMs - BLOCK_PRODUCTION_RETENTION_MS).toISOString()]
   );
-  const history = await loadBlockProductionHistory(client, {
-    nowMs: Date.parse(head.blockTime)
-  });
-  return { ...history, bootstrapped, appended };
+  const history = await loadBlockProductionHistory(client, { nowMs });
+  return { ...history, pruned_headers: prunedHeaders, bootstrapped: 0, appended: false };
 }

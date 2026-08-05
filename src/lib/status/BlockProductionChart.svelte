@@ -1,7 +1,13 @@
 <script>
+  import { onDestroy, onMount } from 'svelte';
+  import { subscribeChainHeads } from '../api/chain-stream.js';
+  import { fetchBlockIntervals } from './api.js';
   import {
     buildBlockProductionChartScale,
+    chainHeadToBlockIntervalPoint,
+    decodeBlockIntervalPayload,
     findNearestBlockProductionPointIndex,
+    mergeBlockIntervalPoints,
     projectBlockProductionChartY
   } from './block-production-chart.js';
 
@@ -22,6 +28,7 @@
   const Y_TICK_INTERVALS = 4;
   const TOOLTIP_WIDTH = 290;
   const TOOLTIP_HEIGHT = 72;
+  const RECONCILE_INTERVAL_MS = 15_000;
 
   /** @type {number | null} */
   let activePointIndex = null;
@@ -35,8 +42,27 @@
   let selectionEndX = null;
   let selecting = false;
   let chartElement;
+  let rawPoints = [];
+  let rawWarning = '';
+  let rawHasGaps = false;
+  let rawRequestActive = false;
+  let chainStreamConnected = false;
+  let chainSubscription = null;
+  let reconcileTimer = null;
+  let requestController = null;
 
-  $: historyPoints = history?.points || [];
+  $: displayHistory = rawPoints.length > 1
+    ? {
+        points: rawPoints,
+        live_interval_minutes: 0,
+        warning: rawWarning,
+        source: 'liquify-thorchain-block-headers'
+      }
+    : {
+        ...(history || {}),
+        warning: rawWarning || history?.warning || ''
+      };
+  $: historyPoints = displayHistory?.points || [];
   $: allPoints = historyPoints
     .map((point) => ({
       ...point,
@@ -89,6 +115,56 @@
     ? 0
     : Math.abs(selectionEndX - selectionStartX);
 
+  onMount(() => {
+    requestController = new AbortController();
+    loadRawIntervals({ full: true });
+    chainSubscription = subscribeChainHeads({
+      onOpen: () => { chainStreamConnected = true; },
+      onError: () => { chainStreamConnected = false; },
+      onHead: (head) => {
+        chainStreamConnected = true;
+        const point = chainHeadToBlockIntervalPoint(head);
+        if (!point) return;
+        rawPoints = mergeBlockIntervalPoints(rawPoints, [point]);
+      }
+    });
+    reconcileTimer = setInterval(() => loadRawIntervals({ full: rawHasGaps }), RECONCILE_INTERVAL_MS);
+  });
+
+  onDestroy(() => {
+    requestController?.abort();
+    chainSubscription?.close();
+    clearInterval(reconcileTimer);
+  });
+
+  async function loadRawIntervals({ full = false } = {}) {
+    if (rawRequestActive) return;
+    rawRequestActive = true;
+    const afterHeight = full ? 0 : Number(rawPoints.at(-1)?.height || 0);
+    try {
+      const payload = await fetchBlockIntervals({
+        hours: 24,
+        afterHeight,
+        signal: requestController?.signal
+      });
+      const incoming = decodeBlockIntervalPayload(payload);
+      // Preserve a head received over SSE while a full replay request is in flight.
+      rawPoints = mergeBlockIntervalPoints(rawPoints, incoming);
+      rawHasGaps = Array.isArray(payload?.gaps) && payload.gaps.length > 0;
+      rawWarning = rawHasGaps
+        ? `Header repair is filling ${payload.gaps.length} gap${payload.gaps.length === 1 ? '' : 's'} in this window`
+        : '';
+    } catch (error) {
+      if (error?.name !== 'AbortError') {
+        rawWarning = rawPoints.length
+          ? 'Live replay is reconnecting; showing the last received headers'
+          : 'Per-block history is warming up; showing five-minute fallback samples';
+      }
+    } finally {
+      rawRequestActive = false;
+    }
+  }
+
   function chartX(point, index) {
     const plotWidth = WIDTH - LEFT - RIGHT;
     if (endTime <= startTime) return LEFT + (plotWidth * (index / Math.max(1, points.length - 1)));
@@ -139,7 +215,7 @@
 
   function formatTooltip(point) {
     const date = new Date(point.timestamp);
-    return `${date.toLocaleString('en-US')} · ${formatSeconds(point.seconds)} per block · ${point.blocks} blocks · height ${Number(point.height || 0).toLocaleString('en-US')}`;
+    return `${date.toLocaleString('en-US')} · ${formatSeconds(point.seconds)} interval · block ${Number(point.height || 0).toLocaleString('en-US')}`;
   }
 
   function formatTooltipTime(point) {
@@ -149,23 +225,6 @@
       hour: 'numeric',
       minute: '2-digit'
     });
-  }
-
-  function showTooltip(index) {
-    activePointIndex = index;
-  }
-
-  function hideTooltip(index) {
-    if (activePointIndex === index) activePointIndex = null;
-  }
-
-  function handleTooltipKeydown(event, index) {
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      showTooltip(index);
-    } else if (event.key === 'Escape') {
-      hideTooltip(index);
-    }
   }
 
   function pointerChartX(event) {
@@ -275,7 +334,7 @@
 
 <section class="block block-production" aria-labelledby="block-production-title">
   <div class="block-title">
-    <h2 id="block-production-title"><span>▌</span> Block Production Time</h2>
+    <h2 id="block-production-title"><span>▌</span> Block Interval</h2>
     <div class="window-actions">
       <span class="window-label">{zoomStart === null ? '[LAST 24H]' : `[ZOOMED ${formatWindowDuration()}]`}</span>
       {#if zoomStart !== null}
@@ -284,7 +343,7 @@
     </div>
   </div>
 
-  <div class="chart-summary" aria-label="Block production summary">
+  <div class="chart-summary" aria-label="Block interval summary">
     <div><span>LATEST</span><strong>{formatSeconds(latestSeconds)}</strong></div>
     <div><span>WEIGHTED AVG</span><strong>{formatSeconds(weightedAverage)}</strong></div>
     <div><span>MAX</span><strong>{formatSeconds(maxSeconds)}</strong></div>
@@ -297,7 +356,7 @@
         bind:this={chartElement}
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
         role="img"
-        aria-label="Average seconds per THORChain block. Hover anywhere on the chart for the nearest sample. Drag across the plot to highlight and zoom into a time range."
+        aria-label="Every THORChain block interval in the last 24 hours. Hover anywhere for the nearest block or drag to zoom."
         on:mousemove={updateChartTooltip}
       >
         {#each yTicks as tick}
@@ -324,29 +383,12 @@
           width={WIDTH - LEFT - RIGHT}
           height={BOTTOM - TOP}
           role="application"
-          aria-label="Drag across this plot area to highlight and zoom into a time range"
+          aria-label="Drag to zoom into a block interval range"
           on:pointerdown={startZoomSelection}
           on:pointermove={updateZoomSelection}
           on:pointerup={finishZoomSelection}
           on:pointercancel={cancelZoomSelection}
         ></rect>
-
-        {#each points as point, index}
-          <g
-            class="point-target"
-            class:active={activePointIndex === index}
-            role="button"
-            tabindex="0"
-            aria-label={formatTooltip(point)}
-            on:focus={() => showTooltip(index)}
-            on:blur={() => hideTooltip(index)}
-            on:click={() => showTooltip(index)}
-            on:keydown={(event) => handleTooltipKeydown(event, index)}
-          >
-            <circle class="point-hit" cx={chartX(point, index)} cy={chartY(point.seconds, yScale)} r="11"></circle>
-            <circle class="series-point" cx={chartX(point, index)} cy={chartY(point.seconds, yScale)} r="2.4"></circle>
-          </g>
-        {/each}
 
         {#if selecting && selectionWidth > 0}
           <g class="zoom-selection" aria-hidden="true">
@@ -366,28 +408,28 @@
             <rect width={TOOLTIP_WIDTH} height={TOOLTIP_HEIGHT}></rect>
             <text class="tooltip-time" x="10" y="18">{formatTooltipTime(activePoint)}</text>
             <line x1="10" x2={TOOLTIP_WIDTH - 10} y1="28" y2="28"></line>
-            <text class="tooltip-key" x="10" y="44">BLOCK TIME</text>
+            <text class="tooltip-key" x="10" y="44">INTERVAL</text>
             <text class="tooltip-value accent" x="10" y="63">{formatSeconds(activePoint.seconds)}</text>
-            <text class="tooltip-key" x="108" y="44">OBSERVED</text>
-            <text class="tooltip-value" x="108" y="63">{activePoint.blocks.toLocaleString('en-US')} blocks</text>
-            <text class="tooltip-key" x="205" y="44">HEIGHT</text>
-            <text class="tooltip-value" x="205" y="63">{Number(activePoint.height || 0).toLocaleString('en-US')}</text>
+            <text class="tooltip-key" x="108" y="44">BLOCK</text>
+            <text class="tooltip-value" x="108" y="63">{Number(activePoint.height || 0).toLocaleString('en-US')}</text>
+            <text class="tooltip-key" x="205" y="44">SOURCE</text>
+            <text class="tooltip-value" x="205" y="63">header</text>
           </g>
         {/if}
 
       </svg>
     </div>
   {:else}
-    <div class="empty-chart"><span>▓░░░░</span> Collecting block-header samples...</div>
+    <div class="empty-chart"><span>▓░░░░</span> Collecting block headers...</div>
   {/if}
 
   <div class="chart-source">
-    <span>THORChain RPC block headers</span>
-    <em>drag to highlight + zoom · {history?.live_interval_minutes || 5}m live averages</em>
+    <span>Liquify / THORChain block headers</span>
+    <em>drag to highlight + zoom · {rawPoints.length > 1 ? 'every block' : `${history?.live_interval_minutes || 5}m fallback`} · {chainStreamConnected ? 'live' : 'reconnecting'}</em>
   </div>
 
-  {#if history?.warning}
-    <div class="chart-warning"><span>WRN</span>{history.warning}</div>
+  {#if displayHistory?.warning}
+    <div class="chart-warning"><span>WRN</span>{displayHistory.warning}</div>
   {/if}
 </section>
 
@@ -475,17 +517,11 @@
   .series-area { fill: rgba(0, 204, 102, .045); }
   .series-line { fill: none; stroke: #00cc66; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
   .series-area, .series-line, .grid-line, .target-line, .target-label { pointer-events: none; }
-  .zoom-capture { fill: transparent; cursor: zoom-in; touch-action: pan-y; }
+  .zoom-capture { fill: transparent; touch-action: pan-y; }
   .zoom-selection { pointer-events: none; }
   .zoom-selection rect { fill: rgba(0, 204, 102, .1); stroke: rgba(0, 204, 102, .45); stroke-width: 1; vector-effect: non-scaling-stroke; }
   .zoom-selection line { stroke: #00cc66; stroke-width: 1; vector-effect: non-scaling-stroke; }
   .zoom-selection text { fill: #00cc66; font: 700 11px 'JetBrains Mono', monospace; letter-spacing: .08em; text-anchor: middle; }
-  .series-point { fill: #080808; stroke: #00cc66; stroke-width: 1.2; vector-effect: non-scaling-stroke; }
-  .point-target { cursor: crosshair; outline: none; }
-  .point-hit { fill: transparent; stroke: none; }
-  .point-target:hover .series-point,
-  .point-target:focus .series-point,
-  .point-target.active .series-point { fill: #00cc66; stroke: #f5f5f5; stroke-width: 1.5; }
   .tooltip-guide { stroke: #333; stroke-width: 1; stroke-dasharray: 2 3; vector-effect: non-scaling-stroke; pointer-events: none; }
   .tooltip-anchor { fill: #00cc66; stroke: #f5f5f5; stroke-width: 1.25; vector-effect: non-scaling-stroke; pointer-events: none; }
   .chart-tooltip { pointer-events: none; }

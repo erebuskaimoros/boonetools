@@ -10,12 +10,14 @@ import {
   sendResponse
 } from './lib/http.js';
 import { createConcurrencyLimiter, createFixedWindowRateLimiter } from './lib/rate-limit.js';
-import { closePool, query } from './db/pool.js';
+import { createChainEventBroker } from './lib/chain-event-broker.js';
+import { closePool, getClient, query } from './db/pool.js';
 import { handleAppLayerBaseLayerEarnings } from './handlers/app-layer-base-layer-earnings.js';
 import { handleAppLayerBaseFees } from './handlers/app-layer-base-fees.js';
 import { handleAppLayerLiveState } from './handlers/app-layer-live-state.js';
 import { handleAppLayerReservePayments } from './handlers/app-layer-reserve-payments.js';
 import { handleBondHistory } from './handlers/bond-history.js';
+import { handleBlockProduction } from './handlers/block-production.js';
 import { handleDynamicFeeAffiliateVolume } from './handlers/dynamic-fee-affiliate-volume.js';
 import { handleDynamicFeeTransactions } from './handlers/dynamic-fee-transactions.js';
 import { handleHealth } from './handlers/health.js';
@@ -44,6 +46,10 @@ function route(handler, cost = 1, maxConcurrent = 8) {
   return { auth: 'none', handler, cost, maxConcurrent };
 }
 
+function streamRoute(cost = 1, maxConcurrent = 100) {
+  return { auth: 'none', stream: true, cost, maxConcurrent };
+}
+
 const routes = new Map([
   ['/', route(handleHealth, 0, 100)],
   ['/health', route(handleHealth, 0, 100)],
@@ -64,6 +70,8 @@ const routes = new Map([
   ['/rapid-swaps-summary', route(handleRapidSwapsSummary, 1, 64)],
   ['/rapid-swaps-swap-history', route(handleRapidSwapsSwapHistory, 1, 64)],
   ['/bond-history', route(handleBondHistory, 4, 3)],
+  ['/block-production', route(handleBlockProduction, 1, 64)],
+  ['/chain-events', streamRoute(1, 100)],
   ['/dynamic-fee-affiliate-volume', route(handleDynamicFeeAffiliateVolume, 5, 2)],
   ['/dynamic-fee-transactions', route(handleDynamicFeeTransactions, 5, 2)],
   ['/app-layer-base-layer-earnings', route(handleAppLayerBaseLayerEarnings, 1, 64)],
@@ -78,6 +86,10 @@ const routes = new Map([
 
 const checkRateLimit = createFixedWindowRateLimiter();
 const acquireConcurrency = createConcurrencyLimiter();
+const chainEventBroker = createChainEventBroker({
+  getClient,
+  log: (message) => console.error(JSON.stringify({ type: 'chain_event_broker', message }))
+});
 
 const server = http.createServer(async (request, response) => {
   const startedAt = performance.now();
@@ -150,6 +162,25 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  if (route.stream) {
+    const streamStartedAt = performance.now();
+    chainEventBroker.subscribe(request, response, () => {
+      concurrency.release();
+      console.log(JSON.stringify({
+        type: 'sse_disconnect',
+        path: pathname,
+        duration_ms: Number((performance.now() - streamStartedAt).toFixed(1))
+      }));
+    });
+    console.log(JSON.stringify({
+      type: 'sse_connect',
+      path: pathname,
+      clients: chainEventBroker.getClientCount(),
+      rate_limit_cost: rateLimitCost
+    }));
+    return;
+  }
+
   try {
     const result = await route.handler(request, url);
     respond(applyApiContract(result, {
@@ -170,6 +201,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 await query('select 1');
+await chainEventBroker.start();
 
 server.listen(config.port, '127.0.0.1', () => {
   console.log(`BooneTools backend listening on 127.0.0.1:${config.port}`);
@@ -177,6 +209,7 @@ server.listen(config.port, '127.0.0.1', () => {
 
 async function shutdown(signal) {
   console.log(`Received ${signal}, shutting down backend...`);
+  await chainEventBroker.stop().catch(() => {});
   server.close(async () => {
     await closePool().catch(() => {});
     process.exit(0);

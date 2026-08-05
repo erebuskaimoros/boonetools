@@ -21,6 +21,21 @@ import {
   upsertNodeVotes,
   writeNodeVoteListenerHeartbeat
 } from './shared/node-votes.js';
+import {
+  notifyChainHead,
+  repairChainHeaderGaps,
+  saveChainStreamState,
+  upsertChainHeader
+} from './shared/chain-headers.js';
+import { parseConsolidatedChainBlock } from './shared/chain-stream.js';
+import {
+  saveParsedRujiraBaseFeeBlock,
+  writeRujiraBaseFeeListenerHeartbeat
+} from './shared/rujira-base-fees.js';
+import {
+  saveParsedRujiraReservePaymentBlock,
+  writeRujiraReservePaymentListenerHeartbeat
+} from './shared/rujira-reserve-payments.js';
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
@@ -28,6 +43,7 @@ const PING_INTERVAL_MS = 30000;
 const PRICE_INDEX_TTL_MS = 60000;
 const HEARTBEAT_INTERVAL_MS = 60000;
 const STALL_CHECK_INTERVAL_MS = 30000;
+const HEADER_REPAIR_INTERVAL_MS = 5 * 60 * 1000;
 
 let cachedPriceIndex = null;
 let cachedPriceIndexAt = 0;
@@ -51,6 +67,18 @@ let lastCandidateAt = 0;
 let nodeVoteEventsSeen = 0;
 let nodeVoteEventsUpserted = 0;
 let lastNodeVoteAt = 0;
+let headerRepairTimer = null;
+let headerRepairStartTimer = null;
+let headerRepairInFlight = null;
+let chainProcessQueue = Promise.resolve();
+let queuedChainBlocks = 0;
+let persistedHeaders = 0;
+let reserveEventsSeen = 0;
+let baseFeeEventsSeen = 0;
+let lastChainError = '';
+let lastRepairAt = null;
+let lastRepairStats = null;
+const recentBlockTimes = new Map();
 
 async function getCachedPriceIndex() {
   const now = Date.now();
@@ -118,6 +146,36 @@ async function sendHeartbeat() {
       uptime_seconds: Math.floor(process.uptime())
     }
   }).catch(() => {});
+
+  const sharedStats = {
+    last_block: lastBlockHeight,
+    last_block_received_at: lastBlockReceivedAt > 0 ? new Date(lastBlockReceivedAt).toISOString() : null,
+    block_stall_seconds: blockStallSeconds,
+    stream_status: streamStatus,
+    blocks_processed: blocksProcessed,
+    queued_blocks: queuedChainBlocks,
+    persisted_headers: persistedHeaders,
+    reserve_events_seen: reserveEventsSeen,
+    base_fee_events_seen: baseFeeEventsSeen,
+    last_repair_at: lastRepairAt,
+    last_repair: lastRepairStats,
+    last_error: lastChainError || null,
+    uptime_seconds: Math.floor(process.uptime())
+  };
+  await Promise.all([
+    writeRujiraReservePaymentListenerHeartbeat({
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      status: 'running',
+      stats_json: sharedStats
+    }),
+    writeRujiraBaseFeeListenerHeartbeat({
+      started_at: new Date().toISOString(),
+      finished_at: new Date().toISOString(),
+      status: 'running',
+      stats_json: sharedStats
+    })
+  ]).catch(() => {});
 }
 
 function startHeartbeat() {
@@ -156,6 +214,46 @@ function startStallWatchdog() {
 
 function stopStallWatchdog() {
   clearInterval(stallCheckTimer);
+}
+
+async function runHeaderRepair() {
+  if (headerRepairInFlight) return headerRepairInFlight;
+  headerRepairInFlight = (async () => {
+    let client;
+    try {
+      client = await getClient();
+      const result = await repairChainHeaderGaps(client);
+      lastRepairAt = new Date().toISOString();
+      lastRepairStats = result;
+      if (result.repairedHeaders > 0 || result.failedRanges.length > 0) {
+        log(`Header repair: ${result.repairedHeaders} headers restored across ${result.requestedRanges} ranges; ${result.failedRanges.length} ranges deferred`);
+      }
+      return result;
+    } catch (error) {
+      lastChainError = `header repair: ${error.message}`;
+      log(`Header repair failed: ${error.message}`);
+      return null;
+    } finally {
+      client?.release();
+    }
+  })().finally(() => {
+    headerRepairInFlight = null;
+  });
+  return headerRepairInFlight;
+}
+
+function startHeaderRepair() {
+  clearTimeout(headerRepairStartTimer);
+  clearInterval(headerRepairTimer);
+  headerRepairStartTimer = setTimeout(runHeaderRepair, 1000);
+  headerRepairTimer = setInterval(runHeaderRepair, HEADER_REPAIR_INTERVAL_MS);
+}
+
+function stopHeaderRepair() {
+  clearTimeout(headerRepairStartTimer);
+  clearInterval(headerRepairTimer);
+  headerRepairStartTimer = null;
+  headerRepairTimer = null;
 }
 
 function tryDecode(value) {
@@ -305,6 +403,70 @@ async function processNodeVotes(rows) {
   }
 }
 
+async function processConsolidatedBlock(data) {
+  const parsed = parseConsolidatedChainBlock({ data });
+  if (!parsed) return;
+
+  const client = await getClient();
+  try {
+    const storedHeader = await upsertChainHeader(client, parsed.header);
+    if (!storedHeader) throw new Error(`Unable to persist block header ${parsed.header.height}`);
+    persistedHeaders += 1;
+    await saveChainStreamState(client, {
+      lastSeenHeight: storedHeader.height,
+      lastSeenBlockTime: storedHeader.blockTime,
+      stats: {
+        queued_blocks: queuedChainBlocks,
+        persisted_headers: persistedHeaders
+      }
+    });
+    await notifyChainHead(client, storedHeader);
+
+    if (parsed.reservePayments.events.length > 0) {
+      await saveParsedRujiraReservePaymentBlock(client, storedHeader.height, data, {
+        blockTime: storedHeader.blockTime,
+        source: 'liquify-ws'
+      });
+      reserveEventsSeen += parsed.reservePayments.events.length;
+      const totalRune = parsed.reservePayments.events.reduce(
+        (sum, event) => sum + event.amount_rune,
+        0
+      );
+      log(`Reserve payment detected: ${parsed.reservePayments.events.length} event(s), ${totalRune.toFixed(8)} RUNE at block ${storedHeader.height}`);
+    }
+
+    if (parsed.baseFees.events.length > 0) {
+      await saveParsedRujiraBaseFeeBlock(client, storedHeader.height, parsed.baseFeePayload, {
+        parsed: parsed.baseFees,
+        blockTime: storedHeader.blockTime,
+        source: 'liquify-ws',
+        persistEmpty: false
+      });
+      baseFeeEventsSeen += parsed.baseFees.events.length;
+      const includedEvents = parsed.baseFees.events.filter((event) => event.included);
+      const totalRune = includedEvents.reduce((sum, event) => sum + event.liquidity_fee_rune, 0);
+      log(`Generated base-fee event(s): ${parsed.baseFees.events.length} total, ${includedEvents.length} included, ${totalRune.toFixed(8)} RUNE at block ${storedHeader.height}`);
+    }
+    lastChainError = '';
+  } finally {
+    client.release();
+  }
+}
+
+function enqueueConsolidatedBlock(data, blockHeight) {
+  queuedChainBlocks += 1;
+  chainProcessQueue = chainProcessQueue
+    .catch(() => {})
+    .then(() => processConsolidatedBlock(data))
+    .catch((error) => {
+      lastChainError = `block ${blockHeight}: ${error.message}`;
+      log(`Error processing consolidated block ${blockHeight}: ${error.message}`);
+    })
+    .finally(() => {
+      queuedChainBlocks = Math.max(0, queuedChainBlocks - 1);
+    });
+}
+
 function parseNodeVotesFromTxMessage(message, data) {
   const value = data?.TxResult || data?.tx_result || data;
   const txResult = value?.result || value?.tx_result || value?.txResult || value;
@@ -322,7 +484,7 @@ function parseNodeVotesFromTxMessage(message, data) {
     txId,
     txIndex,
     height,
-    blockTime: new Date().toISOString(),
+    blockTime: recentBlockTimes.get(height) || new Date().toISOString(),
     source: 'ws'
   });
 }
@@ -355,6 +517,11 @@ function handleMessage(message) {
     lastBlockHeight = blockHeight;
     lastBlockReceivedAt = Date.now();
     blocksProcessed += 1;
+    if (blockTime && Number.isFinite(Date.parse(blockTime))) {
+      recentBlockTimes.set(blockHeight, new Date(blockTime).toISOString());
+      while (recentBlockTimes.size > 128) recentBlockTimes.delete(recentBlockTimes.keys().next().value);
+    }
+    enqueueConsolidatedBlock(data, blockHeight);
   }
 
   const events = data.result_finalize_block?.events || data.result_end_block?.events || [];
@@ -507,6 +674,7 @@ export function shutdownRapidSwapListener(signal) {
   clearInterval(pingTimer);
   stopHeartbeat();
   stopStallWatchdog();
+  stopHeaderRepair();
   if (ws) {
     ws.removeAllListeners();
     ws.close();
@@ -523,10 +691,15 @@ export function startRapidSwapListener() {
     process.exit(0);
   });
 
-  log('Rapid Swap WebSocket Listener starting');
+  log('Consolidated THORChain WebSocket Listener starting');
   log(`RPC URLs: ${getRpcWsUrls().join(', ')}`);
   log(`Midgard delay: ${config.midgardDelayMs}ms`);
   log(`Rapid swap WebSocket ingestion: ${config.rapidSwapsWsIngestionEnabled ? 'enabled' : 'disabled'}`);
   log(`Node vote WebSocket ingestion: ${config.nodeVotesWsIngestionEnabled ? 'enabled' : 'disabled'}`);
+  log('Durable lanes: block headers, Rujira reserve payments, Rujira generated base fees');
+  startHeaderRepair();
   connect();
 }
+
+export const startChainStreamListener = startRapidSwapListener;
+export const shutdownChainStreamListener = shutdownRapidSwapListener;

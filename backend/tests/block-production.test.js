@@ -4,8 +4,10 @@ import test from 'node:test';
 import {
   backfillBlockProductionRange,
   buildBlockProductionBuckets,
+  loadBlockProductionHistory,
   parseBlockProductionHead,
   parseBlockRangeHeaders,
+  refreshBlockProductionHistory,
   summarizeBlockRange
 } from '../src/shared/block-production.js';
 
@@ -120,4 +122,45 @@ test('backfillBlockProductionRange pages every header and replaces overlapping h
   assert.equal(result.removedHourlySamples, 2);
   assert.equal(queries.filter(({ sql }) => sql.trim().startsWith('delete')).length, 1);
   assert.equal(queries.filter(({ sql }) => sql.trim().startsWith('insert')).length, 1);
+});
+
+test('status block production rolls up durable headers without polling RPC status', async () => {
+  const queries = [];
+  const client = {
+    async query(sql, params) {
+      queries.push({ sql, params });
+      if (sql.includes('with buckets as')) {
+        return {
+          rows: [{
+            sample_time: '2026-08-05T12:00:00Z',
+            end_height: '12345',
+            block_count: '49',
+            seconds_per_block: '6.1254',
+            source: 'liquify-header-5m-rollup'
+          }]
+        };
+      }
+      return { rows: [], rowCount: sql.includes('chain_block_headers') ? 3 : 0 };
+    }
+  };
+  let rpcCalls = 0;
+  const history = await refreshBlockProductionHistory(client, {
+    nowMs: Date.parse('2026-08-05T12:01:00Z'),
+    fetchRpc: async () => {
+      rpcCalls += 1;
+      throw new Error('RPC should not be called');
+    }
+  });
+
+  assert.equal(rpcCalls, 0);
+  assert.equal(history.source, 'liquify-thorchain-block-headers');
+  assert.equal(history.points[0].seconds_per_block, 6.125);
+  assert.equal(history.points[0].block_count, 49);
+  assert.equal(history.pruned_headers, 3);
+  assert.ok(queries.some(({ sql }) => sql.includes('delete from chain_block_headers')));
+
+  const direct = await loadBlockProductionHistory(client, {
+    nowMs: Date.parse('2026-08-05T12:01:00Z')
+  });
+  assert.equal(direct.points[0].height, 12345);
 });

@@ -337,23 +337,10 @@ refresh_core_and_app_layer_models() {
 start_persistent_services() {
   local persistent=(
     boonetools-api.service
-    boonetools-rujira-reserve-listener.service
-    boonetools-rujira-base-fees-listener.service
+    boonetools-chain-stream-listener.service
   )
   systemctl enable "${persistent[@]}" >/dev/null
   systemctl restart "${persistent[@]}"
-
-  local rapid_enabled node_votes_enabled
-  rapid_enabled="$(env_value RAPID_SWAPS_WS_INGESTION_ENABLED)"
-  node_votes_enabled="$(env_value NODE_VOTES_WS_INGESTION_ENABLED)"
-  rapid_enabled="${rapid_enabled:-false}"
-  node_votes_enabled="${node_votes_enabled:-true}"
-  if [[ "$rapid_enabled" == true || "$node_votes_enabled" == true ]]; then
-    systemctl enable rapid-swap-listener.service >/dev/null
-    systemctl restart rapid-swap-listener.service
-  else
-    systemctl disable --now rapid-swap-listener.service >/dev/null 2>&1 || true
-  fi
 }
 
 prime_read_models() {

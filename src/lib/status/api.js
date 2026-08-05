@@ -25,6 +25,20 @@ export async function fetchStatusLive(options = {}) {
   });
 }
 
+export async function fetchBlockIntervals(options = {}) {
+  return booneToolsApi.get('/block-production', {
+    cache: 'no-store',
+    query: {
+      hours: options.hours || 24,
+      after_height: options.afterHeight || undefined,
+      limit: options.limit || undefined
+    },
+    signal: options.signal,
+    errorMessage: ({ response }) => `Block interval history failed (${response.status})`,
+    challengeMessage: 'Block interval backend returned a challenge response'
+  });
+}
+
 export async function fetchStuckTransactions(options = {}) {
   return booneToolsApi.get('/stuck-transactions', {
     forceRefresh: options.forceRefresh,

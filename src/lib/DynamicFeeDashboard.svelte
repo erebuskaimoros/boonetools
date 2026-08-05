@@ -5,6 +5,7 @@
   import { INTERACTIVE_CHART_LEGEND } from '$lib/charts/terminal.js';
   import { fetchJSONWithFallback, MIDGARD_ENDPOINTS } from '$lib/utils/api';
   import { booneToolsApi } from '$lib/api/boonetools.js';
+  import { subscribeChainHeads } from '$lib/api/chain-stream.js';
   import {
     buildAffiliateMidgardSeries,
     buildAffiliateTransactionView,
@@ -36,9 +37,6 @@
     text: '#c8c8c8',
     legend: '#e8e8e8'
   };
-  const RPC_WS_URLS = ['wss://gateway.liquify.com/chain/thorchain_rpc/websocket'];
-  const RECONNECT_BASE_MS = 1_000;
-  const RECONNECT_MAX_MS = 30_000;
   const EPOCH_REFRESH_DEBOUNCE_MS = 2_500;
   const AFFILIATE_TIMEFRAMES = [
     { id: '7d', label: '1W', count: 7 },
@@ -100,15 +98,11 @@
   let activeAffiliateTransactionRequestKey = '';
   let runePriceHistoryPromise = null;
   let detailCache = {};
-  let rpcWs = null;
+  let chainHeadSubscription = null;
   let rpcConnected = false;
   let rpcStatus = 'idle';
   let rpcLastBlock = 0;
-  let rpcReconnectAttempt = 0;
-  let rpcUrlIndex = 0;
-  let rpcReconnectTimer = null;
   let epochRefreshTimer = null;
-  let shuttingDownRpc = false;
   let selectedEpoch = null;
   let epochTransactions = [];
   let epochTransactionsCache = {};
@@ -161,12 +155,12 @@
         ? 'reconnecting'
         : 'block socket';
   $: socketTitle = rpcConnected
-    ? `THORChain RPC WebSocket connected${socketBlockHeight ? `; latest block ${formatNumber(socketBlockHeight, 0)}` : ''}`
+    ? `BooneTools chain stream connected${socketBlockHeight ? `; latest block ${formatNumber(socketBlockHeight, 0)}` : ''}`
     : rpcStatus === 'connecting'
-      ? `Connecting to THORChain RPC WebSocket${socketBlockHeight ? `; latest block ${formatNumber(socketBlockHeight, 0)}` : ''}`
+      ? `Connecting to BooneTools chain stream${socketBlockHeight ? `; latest block ${formatNumber(socketBlockHeight, 0)}` : ''}`
       : rpcStatus === 'closed' || rpcStatus === 'error'
-        ? `THORChain RPC WebSocket reconnecting; countdown is using the last known block${socketBlockHeight ? `; latest block ${formatNumber(socketBlockHeight, 0)}` : ''}`
-        : `THORChain RPC WebSocket not connected${socketBlockHeight ? `; latest block ${formatNumber(socketBlockHeight, 0)}` : ''}`;
+        ? `BooneTools chain stream reconnecting; countdown is using the last known block${socketBlockHeight ? `; latest block ${formatNumber(socketBlockHeight, 0)}` : ''}`
+        : `BooneTools chain stream not connected${socketBlockHeight ? `; latest block ${formatNumber(socketBlockHeight, 0)}` : ''}`;
   $: chartKey = selectedRecord
     ? `${selectedRecord.id}:${selectedRecord.history.length}:${selectedRecord.dynamicBps}:${selectedRecord.currentFeesUsd}`
     : 'empty';
@@ -195,13 +189,13 @@
 
   onMount(() => {
     loadData();
-    connectRpcWs();
+    connectChainHeadStream();
   });
 
   onDestroy(() => {
     chartInstance?.destroy();
     affiliateChartInstance?.destroy();
-    disconnectRpcWs();
+    disconnectChainHeadStream();
     clearTimeout(epochRefreshTimer);
   });
 
@@ -347,77 +341,34 @@
     }
   }
 
-  function connectRpcWs() {
-    if (typeof WebSocket === 'undefined') return;
-
-    clearTimeout(rpcReconnectTimer);
-    shuttingDownRpc = false;
+  function connectChainHeadStream() {
+    disconnectChainHeadStream();
     rpcStatus = 'connecting';
-
-    const ws = new WebSocket(RPC_WS_URLS[rpcUrlIndex % RPC_WS_URLS.length]);
-    rpcWs = ws;
-
-    ws.onopen = () => {
-      if (rpcWs !== ws) return;
-      rpcConnected = true;
-      rpcStatus = 'open';
-      rpcReconnectAttempt = 0;
-      ws.send(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'subscribe',
-        id: 1,
-        params: { query: "tm.event='NewBlock'" }
-      }));
-    };
-
-    ws.onmessage = (event) => {
-      if (rpcWs !== ws) return;
-      handleRpcMessage(event.data);
-    };
-
-    ws.onerror = () => {
-      if (rpcWs !== ws) return;
-      rpcConnected = false;
-      rpcStatus = 'error';
-      ws.close();
-    };
-
-    ws.onclose = () => {
-      if (rpcWs !== ws) return;
-      rpcWs = null;
-      rpcConnected = false;
-      rpcStatus = 'closed';
-      scheduleRpcReconnect();
-    };
+    chainHeadSubscription = subscribeChainHeads({
+      onOpen: () => {
+        rpcConnected = true;
+        rpcStatus = 'open';
+      },
+      onHead: (head) => {
+        rpcConnected = true;
+        rpcStatus = 'open';
+        applyLiveBlockHeight(head.height);
+      },
+      onError: () => {
+        rpcConnected = false;
+        rpcStatus = 'error';
+      },
+      onUnavailable: () => {
+        rpcConnected = false;
+        rpcStatus = 'closed';
+      }
+    });
   }
 
-  function disconnectRpcWs() {
-    shuttingDownRpc = true;
-    clearTimeout(rpcReconnectTimer);
-    rpcReconnectTimer = null;
-    if (rpcWs) {
-      rpcWs.onclose = null;
-      rpcWs.close();
-      rpcWs = null;
-    }
+  function disconnectChainHeadStream() {
+    chainHeadSubscription?.close();
+    chainHeadSubscription = null;
     rpcConnected = false;
-  }
-
-  function scheduleRpcReconnect() {
-    if (shuttingDownRpc) return;
-    clearTimeout(rpcReconnectTimer);
-    const delay = Math.min(RECONNECT_BASE_MS * 2 ** rpcReconnectAttempt, RECONNECT_MAX_MS);
-    rpcReconnectAttempt += 1;
-    rpcUrlIndex = (rpcUrlIndex + 1) % RPC_WS_URLS.length;
-    rpcReconnectTimer = setTimeout(connectRpcWs, delay);
-  }
-
-  function handleRpcMessage(raw) {
-    try {
-      const message = JSON.parse(raw);
-      const height = message.result?.data?.value?.block?.header?.height;
-      if (height) applyLiveBlockHeight(height);
-    } catch (_) {}
   }
 
   function applyLiveBlockHeight(value) {

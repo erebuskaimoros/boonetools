@@ -28,20 +28,24 @@ querying THORNode once per unchanged queued transaction.
 
 `/functions/v1/node-votes` supplies timestamped effective operational Mimir changes and current economic vote progress. The status page translates effective halt, resume, signing, and LP changes into plain language, while retaining the raw Mimir key/value and linking the transaction to `thorchain.net`.
 
-Block-production history is part of the materialized status read model rather
-than a browser-side provider call. The status scheduler samples canonical
-THORChain RPC block-header timestamps, bootstraps the last 24 hours with hourly
-20-block windows, and then appends five-minute live averages. Samples are
-retained for 48 hours in `block_production_samples`; the public contract
-downsamples to at most 150 points while preserving the full 24-hour span. A
-block-header failure leaves the rest of the status dashboard usable and gives
-the chart its own warning/collection state.
+Block intervals come from the durable consolidated chain stream rather than a
+browser-side provider call or a one-minute status-job RPC poll. Every Liquify
+`NewBlock` header is stored by height in `chain_block_headers`; the interval at
+height `H` is its timestamp minus `H - 1`. Raw headers are retained for 48
+hours. The listener bootstraps roughly 24 hours and repairs missing heights in
+bounded RPC pages every five minutes.
 
-Short historical gaps can be replaced with canonical five-minute buckets by
-running `node src/backfill-block-production.js <start-height> <end-height>` in
-the backend runtime. The backfill fetches every header in bounded 20-block RPC
-pages, rejects incomplete ranges, and removes overlapping hourly bootstrap
-samples before inserting the non-overlapping five-minute series.
+The chart initially replays up to 24 hours from
+`/functions/v1/block-production`, then appends committed heads from the
+same-origin `/functions/v1/chain-events` stream and incrementally reconciles
+after its latest height. It renders the roughly 14,400 daily points as one SVG
+path plus one active marker, so every block remains hoverable and zoomable
+without a DOM node per sample. The one-minute status read model keeps a bounded
+five-minute rollup as a fallback while the raw header lane warms up.
+
+The legacy `backfill-block-production.js` command remains available for the old
+five-minute sample table. Normal raw-header recovery is automatic and keyed by
+missing height; it does not interpolate or summarize across a gap.
 
 The full explorer remains the detail surface:
 

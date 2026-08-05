@@ -68,7 +68,7 @@ export async function buildStatusDashboardSnapshot(options = {}) {
     loadBlockProduction().catch((error) => ({
       points: [],
       as_of: null,
-      source: 'thorchain-rpc-block-headers',
+      source: 'liquify-thorchain-block-headers',
       warning: error?.message || 'Block-production history is unavailable'
     }))
   ]);

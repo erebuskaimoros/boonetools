@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { fade, fly } from 'svelte/transition';
   import { thornode } from './api/thornode.js';
+  import { subscribeChainHeads } from './api/chain-stream.js';
   import {
     fetchDashboard,
     fetchPairOrders,
@@ -113,33 +114,24 @@
   // Polling
   let pollInterval;
   const POLL_INTERVAL_MS = 20000;
-  const RPC_WS_URL = 'wss://gateway.liquify.com/chain/thorchain_rpc/websocket';
-  const RPC_RECONNECT_BASE_MS = 2000;
-  const RPC_RECONNECT_MAX_MS = 30000;
   const REALTIME_REFRESH_DEBOUNCE_MS = 2500;
-  let rpcWs = null;
-  let rpcReconnectAttempt = 0;
-  let rpcReconnectTimer = null;
+  let chainHeadSubscription = null;
   let realtimeRefreshTimer = null;
-  let allowRpcReconnect = true;
   let rpcLastBlock = 0;
 
   onMount(async () => {
-    allowRpcReconnect = true;
     await loadData();
     loadMemolessAssets();
     pollInterval = setInterval(() => loadData(true), POLL_INTERVAL_MS);
-    connectRpcWs();
+    connectChainHeadStream();
   });
 
   onDestroy(() => {
-    allowRpcReconnect = false;
     if (pollInterval) clearInterval(pollInterval);
     if (toastTimer) clearTimeout(toastTimer);
     if (marketQuoteTimer) clearTimeout(marketQuoteTimer);
     if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
-    if (rpcReconnectTimer) clearTimeout(rpcReconnectTimer);
-    disconnectRpcWs();
+    disconnectChainHeadStream();
   });
 
   async function loadData(silent = false) {
@@ -275,23 +267,11 @@
     }
   }
 
-  function checkBlockForMarketRefresh(msg) {
-    try {
-      const data = msg.result?.data?.value;
-      if (!data) return;
-
-      const blockHeight = Number(data.block?.header?.height) || 0;
-      if (!(blockHeight > 0) || blockHeight === rpcLastBlock) return;
-      rpcLastBlock = blockHeight;
-
-      const events = data.result_finalize_block?.events || data.result_end_block?.events || [];
-      for (const event of events) {
-        if (event?.type === 'swap' || event?.type === 'streaming_swap') {
-          scheduleRealtimeRefresh();
-          return;
-        }
-      }
-    } catch (_) {}
+  function checkChainHeadForMarketRefresh(head) {
+    const blockHeight = Number(head?.height) || 0;
+    if (!(blockHeight > 0) || blockHeight <= rpcLastBlock) return;
+    rpcLastBlock = blockHeight;
+    if (head?.has_swap_events) scheduleRealtimeRefresh();
   }
 
   function scheduleRealtimeRefresh() {
@@ -301,51 +281,16 @@
     }, REALTIME_REFRESH_DEBOUNCE_MS);
   }
 
-  function connectRpcWs() {
-    if (!allowRpcReconnect) return;
-
-    try {
-      rpcWs = new WebSocket(RPC_WS_URL);
-      rpcWs.onopen = () => {
-        rpcReconnectAttempt = 0;
-        rpcWs.send(JSON.stringify({
-          jsonrpc: '2.0',
-          method: 'subscribe',
-          id: 1,
-          params: { query: "tm.event='NewBlock'" }
-        }));
-      };
-      rpcWs.onmessage = (event) => {
-        try {
-          checkBlockForMarketRefresh(JSON.parse(event.data));
-        } catch (_) {}
-      };
-      rpcWs.onclose = () => {
-        rpcWs = null;
-        reconnectRpcWs();
-      };
-      rpcWs.onerror = () => {};
-    } catch (_) {
-      reconnectRpcWs();
-    }
+  function connectChainHeadStream() {
+    disconnectChainHeadStream();
+    chainHeadSubscription = subscribeChainHeads({
+      onHead: checkChainHeadForMarketRefresh
+    });
   }
 
-  function reconnectRpcWs() {
-    if (!allowRpcReconnect) return;
-
-    const delay = Math.min(RPC_RECONNECT_BASE_MS * (2 ** rpcReconnectAttempt), RPC_RECONNECT_MAX_MS);
-    rpcReconnectAttempt += 1;
-
-    if (rpcReconnectTimer) clearTimeout(rpcReconnectTimer);
-    rpcReconnectTimer = setTimeout(connectRpcWs, delay);
-  }
-
-  function disconnectRpcWs() {
-    if (rpcWs) {
-      rpcWs.onclose = null;
-      rpcWs.close();
-      rpcWs = null;
-    }
+  function disconnectChainHeadStream() {
+    chainHeadSubscription?.close();
+    chainHeadSubscription = null;
   }
 
   function isConnectedWalletOrder(order) {

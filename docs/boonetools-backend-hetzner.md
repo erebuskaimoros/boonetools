@@ -351,10 +351,19 @@ Midgard missing-depth-pool 400s are stored in `api_response_cache` for 24 hours
 under `wasm-arb:missing-price-pool:*`; expiration safely re-probes for newly
 available pools.
 
-Rapid-Swap websocket ingestion is disabled by default in the shared
-`rapid-swap-listener.service`, while Node-Vote websocket ingestion remains
-enabled. The deploy keeps that shared process running whenever either lane is
-enabled; the Rapid scheduler/live tail remains its normal fresh-data path.
+`boonetools-chain-stream-listener.service` is the single persistent THORChain
+websocket process. It stores every block header, parses Rujira Reserve and
+generated-base-fee events directly from the full `NewBlock` payload, retains
+the existing Rapid Swap hint parser, and keeps the narrow Node-Vote transaction
+subscription. Rapid-Swap websocket ingestion remains disabled by default and
+its scheduler/live tail remains the normal canonical fresh-data path.
+
+Migration `043_chain_block_headers.sql` owns the 48-hour raw header store and
+durable stream cursor. The listener automatically bootstraps approximately 24
+hours and repairs retained gaps every five minutes through the configured
+Liquify RPC endpoint. The API exposes compact replay at `/block-production`
+and relays committed heads at `/chain-events`; the latter uses PostgreSQL
+`LISTEN/NOTIFY`, SSE keepalives, and automatic client reconnection.
 
 The host-wide `/etc/caddy/Caddyfile` is owned and deployed independently by Web
 Ops because it also serves MemeMap, The AI Guys, webmail, traffic reports, and
