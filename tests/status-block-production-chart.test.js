@@ -65,6 +65,17 @@ test('block production chart-wide hover selects the sample nearest the pointer t
   assert.equal(findNearestBlockProductionPointIndex([], 3_600), null);
 });
 
+test('block production hover converts browser coordinates through the rendered SVG transform', () => {
+  const component = readFileSync(
+    new URL('../src/lib/status/BlockProductionChart.svelte', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(component, /createSVGPoint\(\)/);
+  assert.match(component, /getScreenCTM\(\)/);
+  assert.match(component, /matrixTransform\(/);
+});
+
 test('compact per-block tuples decode and merge by height for replay plus live updates', () => {
   const decoded = decodeBlockIntervalPayload({
     columns: ['height', 'time_ms', 'interval_ms', 'has_swap_events'],

@@ -229,6 +229,21 @@
 
   function pointerChartX(event) {
     const svg = event.currentTarget.ownerSVGElement || event.currentTarget;
+    try {
+      const screenTransform = svg.getScreenCTM();
+      if (screenTransform) {
+        const pointer = svg.createSVGPoint();
+        pointer.x = event.clientX;
+        pointer.y = event.clientY;
+        const chartPointer = pointer.matrixTransform(screenTransform.inverse());
+        if (Number.isFinite(chartPointer.x)) {
+          return Math.max(LEFT, Math.min(WIDTH - RIGHT, chartPointer.x));
+        }
+      }
+    } catch {
+      // Fall back to bounding-box projection when the SVG transform is unavailable.
+    }
+
     const bounds = svg.getBoundingClientRect();
     if (!bounds.width) return LEFT;
     const x = ((event.clientX - bounds.left) / bounds.width) * WIDTH;
