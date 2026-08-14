@@ -5,6 +5,7 @@
     fetchNodeVoteNodeDetails,
     fetchNodeVotesDashboard
   } from './node-votes/api.js';
+  import { mergeNodeVotesDashboard } from './node-votes/dashboard-state.js';
   import { findMissingVoters } from './node-votes/missing-voters.js';
   import { formatNumber } from '$lib/utils/formatting';
 
@@ -27,6 +28,7 @@
   let voteDetailErrors = {};
   let nodeDetailLoading = {};
   let nodeDetailErrors = {};
+  let dashboardRequestId = 0;
 
   $: stats = dashboard?.stats || {};
   $: categoryStats = stats.categories || {};
@@ -57,10 +59,12 @@
   });
 
   onDestroy(() => {
+    dashboardRequestId += 1;
     clearInterval(refreshTimer);
   });
 
   async function loadDashboard(options = {}) {
+    const requestId = ++dashboardRequestId;
     if (!options.silent) {
       loading = !dashboard;
       refreshing = Boolean(dashboard);
@@ -68,12 +72,17 @@
     error = '';
 
     try {
-      dashboard = await fetchNodeVotesDashboard({ forceRefresh: !options.silent });
+      const refreshedDashboard = await fetchNodeVotesDashboard({ forceRefresh: !options.silent });
+      if (requestId !== dashboardRequestId) return;
+      dashboard = mergeNodeVotesDashboard(dashboard, refreshedDashboard);
     } catch (loadError) {
+      if (requestId !== dashboardRequestId) return;
       error = loadError.message || String(loadError);
     } finally {
-      loading = false;
-      refreshing = false;
+      if (requestId === dashboardRequestId) {
+        loading = false;
+        refreshing = false;
+      }
     }
   }
 
