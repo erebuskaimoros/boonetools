@@ -161,6 +161,86 @@ export function pickAggRows(source, grain) {
   return { rows: normalizeBuckets(weekly, 'weekly'), grain: 'weekly' };
 }
 
+function bucketKey(row, grain) {
+  return row?.[grain === 'weekly' ? 'week_start' : 'day_start'] ?? row?.bucket_start;
+}
+
+function indexPolSettlements(rows, grain) {
+  const buckets = new Map();
+  for (const row of rows || []) {
+    const key = bucketKey(row, grain);
+    if (!key) continue;
+    const current = buckets.get(key) || { polUsd: 0, cumulativePolUsd: null };
+    current.polUsd += finiteNumber(row.pol_usd);
+    const explicitCumulative = row.cumulative_pol_usd;
+    if (explicitCumulative !== null && explicitCumulative !== undefined && explicitCumulative !== '') {
+      const numericCumulative = Number(explicitCumulative);
+      if (Number.isFinite(numericCumulative)) current.cumulativePolUsd = numericCumulative;
+    }
+    buckets.set(key, current);
+  }
+
+  let cumulativePolUsd = 0;
+  return [...buckets.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, bucket]) => {
+      cumulativePolUsd = bucket.cumulativePolUsd ?? cumulativePolUsd + bucket.polUsd;
+      return { key, polUsd: bucket.polUsd, cumulativePolUsd };
+    });
+}
+
+function excludePolFromRows(rows, settlementRows, grain) {
+  const polSettlements = indexPolSettlements(settlementRows, grain);
+  const polByBucket = new Map(polSettlements.map((row) => [row.key, row]));
+
+  return (rows || []).map((row) => {
+    const key = bucketKey(row, grain);
+    const settlement = polByBucket.get(key);
+    let cumulativePolUsd = 0;
+    for (const candidate of polSettlements) {
+      if (candidate.key > key) break;
+      cumulativePolUsd = candidate.cumulativePolUsd;
+    }
+    const grossInflowUsd = finiteNumber(row.inflow_usd);
+    const polUsdExcluded = settlement?.polUsd || 0;
+
+    return {
+      ...row,
+      inflow_usd: grossInflowUsd - polUsdExcluded,
+      cumulative_usd: finiteNumber(row.cumulative_usd) - cumulativePolUsd,
+      gross_inflow_usd: grossInflowUsd,
+      pol_usd_excluded: polUsdExcluded
+    };
+  });
+}
+
+/**
+ * Removes observed POL settlements from the gross Base Layer conservation
+ * series. Gross inflow includes inventory change plus Reserve and POL
+ * outflows, so subtracting the POL leg leaves inventory change plus Reserve.
+ *
+ * @param {{ meta?: object, daily?: object[], weekly?: object[], [key: string]: any } | null} inflows
+ * @param {{ meta?: object, daily?: object[], weekly?: object[] } | null} settlements
+ */
+export function excludePolFromAccruals(inflows, settlements) {
+  if (!inflows) return inflows;
+
+  const daily = excludePolFromRows(inflows.daily, settlements?.daily, 'daily');
+  const weekly = excludePolFromRows(inflows.weekly, settlements?.weekly, 'weekly');
+  const dailyPol = indexPolSettlements(settlements?.daily, 'daily').at(-1)?.cumulativePolUsd || 0;
+  const weeklyPol = indexPolSettlements(settlements?.weekly, 'weekly').at(-1)?.cumulativePolUsd || 0;
+  const metaPol = finiteNumber(settlements?.meta?.totalPolUsd);
+  const totalPolUsd = Math.max(metaPol, dailyPol, weeklyPol);
+  const meta = { ...(inflows.meta || {}), polExcludedUsd: totalPolUsd };
+  const totalInflowUsd = Number(inflows.meta?.totalInflowUsd);
+  const netNewInflowUsd = Number(inflows.meta?.netNewInflowUsd);
+
+  if (Number.isFinite(totalInflowUsd)) meta.totalInflowUsd = totalInflowUsd - totalPolUsd;
+  if (Number.isFinite(netNewInflowUsd)) meta.netNewInflowUsd = netNewInflowUsd - totalPolUsd;
+
+  return { ...inflows, meta, daily, weekly };
+}
+
 export function pickAccruedValueRows(inflows, generatedFees, grain) {
   const availableFor = (source, candidate) => source?.[candidate]?.length;
   let selectedGrain = grain;
