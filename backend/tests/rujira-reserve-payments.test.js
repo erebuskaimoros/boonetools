@@ -71,6 +71,92 @@ test('parseRujiraReservePaymentBlock reads Base Layer collector transfer events'
   assert.equal(parsed.scan.unmatched_transfer_event_count, 0);
 });
 
+test('parseRujiraReservePaymentBlock records the post-cutover Reserve and POL split', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    BASE_LAYER_REVENUE_COLLECTOR,
+    TC_RESERVE_MODULE,
+    parseRujiraReservePaymentBlock
+  } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const thorchainPolFund = 'thor1glpfjhxzjdtnz4wy3hv4ywl65y9w84l6efgen';
+  const parsed = parseRujiraReservePaymentBlock(27410412, {
+    result: {
+      finalize_block_events: [
+        event('transfer', {
+          amount: '390154666rune',
+          sender: BASE_LAYER_REVENUE_COLLECTOR,
+          recipient: TC_RESERVE_MODULE,
+          mode: 'EndBlock'
+        }),
+        event('reserve', {
+          amount: '390154666',
+          coin: '390154666 THOR.RUNE',
+          from: BASE_LAYER_REVENUE_COLLECTOR,
+          to: TC_RESERVE_MODULE,
+          memo: 'RESERVE',
+          id: 'POSTCUTOVER',
+          mode: 'EndBlock'
+        }),
+        event('transfer', {
+          amount: '195077334rune',
+          sender: BASE_LAYER_REVENUE_COLLECTOR,
+          recipient: thorchainPolFund,
+          mode: 'EndBlock'
+        })
+      ]
+    }
+  }, {
+    blockTime: '2026-08-13T12:27:11.22025798Z',
+    source: 'test'
+  });
+
+  assert.deepEqual(parsed.events.map((row) => ({
+    paymentType: row.payment_type,
+    recipient: row.recipient,
+    amountBase: row.amount_base
+  })), [
+    {
+      paymentType: 'reserve',
+      recipient: TC_RESERVE_MODULE,
+      amountBase: '390154666'
+    },
+    {
+      paymentType: 'pol',
+      recipient: thorchainPolFund,
+      amountBase: '195077334'
+    }
+  ]);
+  assert.equal(parsed.scan.pol_transfer_event_count, 1);
+});
+
+test('parseRujiraReservePaymentBlock does not classify POL transfers before the cutover', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    BASE_LAYER_REVENUE_COLLECTOR,
+    parseRujiraReservePaymentBlock
+  } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const parsed = parseRujiraReservePaymentBlock(27410411, {
+    result: {
+      finalize_block_events: [
+        event('transfer', {
+          amount: '195077334rune',
+          sender: BASE_LAYER_REVENUE_COLLECTOR,
+          recipient: 'thor1glpfjhxzjdtnz4wy3hv4ywl65y9w84l6efgen',
+          mode: 'EndBlock'
+        })
+      ]
+    }
+  }, {
+    blockTime: '2026-08-13T12:26:59Z',
+    source: 'test'
+  });
+
+  assert.equal(parsed.events.length, 0);
+  assert.equal(parsed.scan.pol_transfer_event_count, 0);
+});
+
 test('parseRujiraReservePaymentBlock falls back to reserve event when transfer is absent', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const {
@@ -257,4 +343,31 @@ test('live scheduler phase recovers the July 26 heights missed by the fixed phas
   assert.equal(heights.includes(27173769), true);
   assert.equal(heights.includes(27160076), false);
   assert.equal((27160134 - 25982820) % 101, 58);
+});
+
+test('successful Dune Reserve ingestion still runs the scheduled settlement scanner', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { runRujiraReservePaymentsIngestion } = await import('../src/shared/rujira-reserve-payments.js');
+  const calls = [];
+  const duneSource = { source: 'dune', upserted: 12 };
+
+  const result = await runRujiraReservePaymentsIngestion({}, {
+    runDune: async () => {
+      calls.push('dune');
+      return duneSource;
+    },
+    runScheduledSettlements: async (_client, initialStats) => {
+      calls.push('scheduled-settlements');
+      assert.equal(initialStats.dune_source, duneSource);
+      return { ...initialStats, block_scan: { events: 2 } };
+    },
+    runLegacy: async () => {
+      calls.push('legacy');
+      return {};
+    }
+  });
+
+  assert.deepEqual(calls, ['dune', 'scheduled-settlements']);
+  assert.equal(result.dune_source, duneSource);
+  assert.equal(result.block_scan.events, 2);
 });

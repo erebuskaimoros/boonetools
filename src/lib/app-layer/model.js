@@ -34,7 +34,19 @@ export function parseCsv(text) {
     'rune_price_usd',
     'payment_usd',
     'cumulative_rune',
-    'cumulative_usd'
+    'cumulative_usd',
+    'pol_payments',
+    'pol_rune',
+    'pol_usd',
+    'settlement_events',
+    'settlement_payments',
+    'settlement_rune',
+    'settlement_rune_price_usd',
+    'settlement_usd',
+    'cumulative_pol_rune',
+    'cumulative_pol_usd',
+    'cumulative_settlement_rune',
+    'cumulative_settlement_usd'
   ]);
   return lines.map((line) => {
     const values = line.split(',');
@@ -57,6 +69,64 @@ export function startOfUtcWeek(date) {
 export function normalizeBuckets(rows, grain) {
   const startKey = grain === 'weekly' ? 'week_start' : 'day_start';
   return rows.map((row) => ({ ...row, bucket_start: row[startKey] }));
+}
+
+function finiteNumber(...values) {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue;
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) return numeric;
+  }
+  return 0;
+}
+
+export function normalizeSettlementBucket(row, grain) {
+  const startKey = grain === 'weekly' ? 'week_start' : 'day_start';
+  const payments = finiteNumber(row.payments, row.reserve_payments);
+  const paymentRune = finiteNumber(row.payment_rune, row.reserve_rune);
+  const paymentUsd = finiteNumber(row.payment_usd, row.reserve_usd);
+  const cumulativeRune = finiteNumber(row.cumulative_rune, row.cumulative_reserve_rune);
+  const cumulativeUsd = finiteNumber(row.cumulative_usd, row.cumulative_reserve_usd);
+  const polPayments = finiteNumber(row.pol_payments, row.pol_events);
+  const polRune = finiteNumber(row.pol_rune);
+  const polUsd = finiteNumber(row.pol_usd);
+  const cumulativePolRune = finiteNumber(row.cumulative_pol_rune);
+  const cumulativePolUsd = finiteNumber(row.cumulative_pol_usd);
+
+  return {
+    ...row,
+    bucket_start: row[startKey] ?? row.bucket_start,
+    payments,
+    payment_rune: paymentRune,
+    payment_usd: paymentUsd,
+    cumulative_rune: cumulativeRune,
+    cumulative_usd: cumulativeUsd,
+    pol_payments: polPayments,
+    pol_rune: polRune,
+    pol_usd: polUsd,
+    settlement_events: finiteNumber(
+      row.settlement_events,
+      row.settlement_payments,
+      payments + polPayments
+    ),
+    settlement_rune: finiteNumber(row.settlement_rune, paymentRune + polRune),
+    settlement_rune_price_usd: finiteNumber(row.settlement_rune_price_usd, row.rune_price_usd),
+    settlement_usd: finiteNumber(row.settlement_usd, paymentUsd + polUsd),
+    cumulative_pol_rune: cumulativePolRune,
+    cumulative_pol_usd: cumulativePolUsd,
+    cumulative_settlement_rune: finiteNumber(
+      row.cumulative_settlement_rune,
+      cumulativeRune + cumulativePolRune
+    ),
+    cumulative_settlement_usd: finiteNumber(
+      row.cumulative_settlement_usd,
+      cumulativeUsd + cumulativePolUsd
+    )
+  };
+}
+
+export function normalizeSettlementBuckets(rows, grain) {
+  return (rows || []).map((row) => normalizeSettlementBucket(row, grain));
 }
 
 export function pickAggRows(source, grain) {
@@ -132,13 +202,30 @@ export function bucketReserveEvents(events, grain) {
       payments: 0,
       payment_rune: 0,
       payment_usd: 0,
+      pol_payments: 0,
+      pol_rune: 0,
+      pol_usd: 0,
+      settlement_events: 0,
+      settlement_rune: 0,
+      settlement_usd: 0,
       priceNum: 0,
       priceDen: 0
     };
     const amountRune = Number(event.amountRune) || 0;
-    row.payments += 1;
-    row.payment_rune += amountRune;
-    row.payment_usd += Number(event.amountUsd) || 0;
+    const amountUsd = Number(event.amountUsd) || 0;
+    const paymentType = String(event.paymentType ?? event.payment_type ?? 'reserve').toLowerCase();
+    if (paymentType === 'pol') {
+      row.pol_payments += 1;
+      row.pol_rune += amountRune;
+      row.pol_usd += amountUsd;
+    } else {
+      row.payments += 1;
+      row.payment_rune += amountRune;
+      row.payment_usd += amountUsd;
+    }
+    row.settlement_events += 1;
+    row.settlement_rune += amountRune;
+    row.settlement_usd += amountUsd;
     row.priceNum += (Number(event.runePriceUsd) || 0) * amountRune;
     row.priceDen += amountRune;
     buckets.set(key, row);
@@ -146,35 +233,53 @@ export function bucketReserveEvents(events, grain) {
 
   let cumulativeUsd = 0;
   let cumulativeRune = 0;
+  let cumulativePolUsd = 0;
+  let cumulativePolRune = 0;
+  let cumulativeSettlementUsd = 0;
+  let cumulativeSettlementRune = 0;
   return [...buckets.values()]
     .sort((left, right) => left.bucket_start.localeCompare(right.bucket_start))
     .map((row) => {
       cumulativeUsd += row.payment_usd;
       cumulativeRune += row.payment_rune;
+      cumulativePolUsd += row.pol_usd;
+      cumulativePolRune += row.pol_rune;
+      cumulativeSettlementUsd += row.settlement_usd;
+      cumulativeSettlementRune += row.settlement_rune;
       return {
         bucket_start: row.bucket_start,
         payments: row.payments,
         payment_rune: row.payment_rune,
         payment_usd: row.payment_usd,
+        pol_payments: row.pol_payments,
+        pol_rune: row.pol_rune,
+        pol_usd: row.pol_usd,
+        settlement_events: row.settlement_events,
+        settlement_rune: row.settlement_rune,
+        settlement_usd: row.settlement_usd,
         rune_price_usd: row.priceDen > 0 ? row.priceNum / row.priceDen : 0,
         cumulative_usd: cumulativeUsd,
-        cumulative_rune: cumulativeRune
+        cumulative_rune: cumulativeRune,
+        cumulative_pol_rune: cumulativePolRune,
+        cumulative_pol_usd: cumulativePolUsd,
+        cumulative_settlement_rune: cumulativeSettlementRune,
+        cumulative_settlement_usd: cumulativeSettlementUsd
       };
     });
 }
 
 export function pickPaidRows(events, weeklyFallback, grain, dailyFallback = []) {
   if (grain === 'daily' && dailyFallback?.length) {
-    return { rows: normalizeBuckets(dailyFallback, 'daily'), grain: 'daily' };
+    return { rows: normalizeSettlementBuckets(dailyFallback, 'daily'), grain: 'daily' };
   }
   if (grain === 'weekly' && weeklyFallback?.length) {
-    return { rows: normalizeBuckets(weeklyFallback, 'weekly'), grain: 'weekly' };
+    return { rows: normalizeSettlementBuckets(weeklyFallback, 'weekly'), grain: 'weekly' };
   }
   if (dailyFallback?.length) {
-    return { rows: normalizeBuckets(dailyFallback, 'daily'), grain: 'daily' };
+    return { rows: normalizeSettlementBuckets(dailyFallback, 'daily'), grain: 'daily' };
   }
   if (weeklyFallback?.length) {
-    return { rows: normalizeBuckets(weeklyFallback, 'weekly'), grain: 'weekly' };
+    return { rows: normalizeSettlementBuckets(weeklyFallback, 'weekly'), grain: 'weekly' };
   }
   if (events?.length) return { rows: bucketReserveEvents(events, grain), grain };
   return { rows: [], grain };
@@ -228,11 +333,12 @@ export function normalizeReserveEvent(event, priceRows = []) {
     event.runePriceUsd ?? event.rune_price_usd ?? reservePriceForDate(event.date, priceRows)
   );
   const amountUsd = Number(event.amountUsd ?? event.amount_usd ?? amountRune * runePriceUsd);
-  return { ...event, amountRune, runePriceUsd, amountUsd };
+  const paymentType = String(event.paymentType ?? event.payment_type ?? 'reserve').toLowerCase();
+  return { ...event, paymentType, amountRune, runePriceUsd, amountUsd };
 }
 
-export function getWeeklyPriceRange(rows) {
-  const prices = (rows || []).map((row) => Number(row.rune_price_usd || 0)).filter((price) => price > 0);
+export function getWeeklyPriceRange(rows, field = 'rune_price_usd') {
+  const prices = (rows || []).map((row) => Number(row[field] || 0)).filter((price) => price > 0);
   if (!prices.length) return '';
   const low = Math.min(...prices);
   const high = Math.max(...prices);
@@ -347,6 +453,7 @@ export function formatDataSource(source) {
   const value = String(source || '').trim();
   if (!value) return 'fallback artifact';
   if (value.includes('mixed')) return 'Dune + RPC/Midgard Postgres';
+  if (value.includes('dune-and-rpc')) return 'Dune + RPC-backed Postgres';
   if (value.includes('dune')) return 'Dune-backed Postgres';
   if (value.includes('postgres')) return 'RPC/Midgard-backed Postgres';
   if (value.includes('backend-chain-state')) return 'two-minute backend chain snapshots';

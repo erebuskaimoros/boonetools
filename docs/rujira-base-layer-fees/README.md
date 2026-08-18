@@ -1,6 +1,6 @@
 # Rujira Base Layer Fee-Share Chart
 
-This standalone artifact tracks observed final reserve deposits from the Rujira Base Layer revenue collector.
+This standalone artifact tracks observed direct Reserve deposits from the Rujira Base Layer revenue collector. The production dashboard additionally tracks the POL settlement branch introduced on 2026-08-13.
 
 ## Mechanism
 
@@ -8,7 +8,8 @@ The Rujira repo uses the generic `rujira-revenue` contract to route collected re
 
 - RUJI Trade and Other Core Apps allocate eligible target-denom distributions 1:1 between the RUJI Swap collector and the Base Layer collector. RUJI Index routes its eligible target denoms to the RUJI Swap collector.
 - The Base Layer collector is `thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr`.
-- That collector targets `rune` and sends only RUNE, subject to its configured rate limit, to the THORChain reserve module with `/types.MsgDeposit` and memo `RESERVE`.
+- Through 2026-08-13, that collector sent its distributable RUNE to the THORChain Reserve. Its current targets split RUNE with weight 2 to the TC Reserve and weight 1 to the THORChain POL Fund. The first distribution under that configuration was height `27410412`.
+- The RUJI Swap collector changed at the same configuration height: weight 2 to the RUJI staker collector and weight 1 to the Rujira Ecosystem Fund.
 - A target address is an allocation for its configured target denoms, not proof that every balance held by a collector is transferable. Non-target inventory needs a configured conversion action or remains stranded.
 - The collector contract itself was created at THORChain height `21359953` on 2025-06-02. The currently observed final reserve-deposit events in this artifact start on 2026-04-30, so this should be read as the final Base Layer payment path, not proof of all historical Rujira revenue accrual.
 
@@ -43,14 +44,14 @@ Other Core Apps, and 100% of the Base Layer Collector. Swap and Index are
 excluded because their configured targets do not route to the Base Layer.
 
 Each period records newly earned value. Transfers within the boundary and
-final Reserve payouts cancel rather than create new earnings. The cumulative
+final Reserve/POL settlement cancel rather than create new earnings. The cumulative
 view is an optional rollup of those period rows and overlaps 02; it is never
-added to the Reserve-payment total.
+added to the settlement total.
 
 `boonetools-app-layer-live-state.timer` refreshes current balances, route
 configs, conversion actions, and prices every two minutes. The same run
 recomputes the current UTC day from a persisted midnight balance baseline and
-canonical Reserve-payment add-backs, then replaces that day's Postgres row.
+canonical Reserve/POL settlement add-backs, then replaces that day's Postgres row.
 The frontend refetches on the same cadence.
 
 `scripts/rujira-base-layer-inflows.mjs` still generates the checked-in

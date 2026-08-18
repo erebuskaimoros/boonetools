@@ -143,24 +143,34 @@ test('Reserve payment history uses an opaque bounded cursor', async () => {
 
 test('Reserve summary uses all-history aggregates and keeps its bounded compatibility events chronological', async () => {
   const recentRows = [
-    { event_key: 'new', height: 2, block_time: '2026-07-18T00:00:00Z', tx_id: 'new', amount_base: 2, amount_rune: 2, rune_price_usd: 2, amount_usd: 4, source: 'dune' },
-    { event_key: 'old', height: 1, block_time: '2026-07-17T00:00:00Z', tx_id: 'old', amount_base: 1, amount_rune: 1, rune_price_usd: 2, amount_usd: 2, source: 'dune' }
+    { event_key: 'new', height: 2, block_time: '2026-07-18T00:00:00Z', tx_id: '', payment_type: 'pol', recipient: 'thor1pol', memo: 'POL', amount_base: 1, amount_rune: 1, rune_price_usd: 2, amount_usd: 2, source: 'scheduled-cadence' },
+    { event_key: 'old', height: 1, block_time: '2026-07-17T00:00:00Z', tx_id: 'old', payment_type: 'reserve', recipient: 'thor1reserve', memo: 'RESERVE', amount_base: 2, amount_rune: 2, rune_price_usd: 2, amount_usd: 4, source: 'dune' }
   ];
   const client = {
     async query(sql) {
-      if (sql.includes("date_trunc('week'")) return { rows: [{ week_start: '2026-07-13', payments: 2, payment_rune: 3, payment_usd: 6, rune_price_usd: 2 }] };
+      if (sql.includes("date_trunc('week'")) return { rows: [{ week_start: '2026-07-13', payments: 1, payment_rune: 2, payment_usd: 4, rune_price_usd: 2, pol_payments: 1, pol_rune: 1, pol_usd: 2, settlement_payments: 2, settlement_rune: 3, settlement_usd: 6, settlement_rune_price_usd: 2 }] };
       if (sql.includes("date_trunc('day'")) return { rows: [
-        { day_start: '2026-07-17', payments: 1, payment_rune: 1, payment_usd: 2, rune_price_usd: 2 },
-        { day_start: '2026-07-18', payments: 1, payment_rune: 2, payment_usd: 4, rune_price_usd: 2 }
+        { day_start: '2026-07-17', payments: 1, payment_rune: 2, payment_usd: 4, rune_price_usd: 2, pol_payments: 0, pol_rune: 0, pol_usd: 0, settlement_payments: 1, settlement_rune: 2, settlement_usd: 4, settlement_rune_price_usd: 2 },
+        { day_start: '2026-07-18', payments: 0, payment_rune: 0, payment_usd: 0, rune_price_usd: 0, pol_payments: 1, pol_rune: 1, pol_usd: 2, settlement_payments: 1, settlement_rune: 1, settlement_usd: 2, settlement_rune_price_usd: 2 }
       ] };
       if (sql.includes('select event_key, height')) return { rows: recentRows };
-      if (sql.includes('event_count')) return { rows: [{ event_count: 2000, active_heights: 2000, payment_rune: 3, payment_usd: 6, min_height: 1, max_height: 2, first_payment_at: '2026-01-01T00:00:00Z', latest_payment_at: '2026-07-18T00:00:00Z', updated_at: '2026-07-18T00:01:00Z' }] };
+      if (sql.includes('event_count')) return { rows: [{ event_count: 2000, reserve_event_count: 1200, pol_event_count: 800, active_heights: 1200, settlement_active_heights: 1200, payment_rune: 2, payment_usd: 4, pol_rune: 1, pol_usd: 2, settlement_rune: 3, settlement_usd: 6, min_height: 1, max_height: 2, first_payment_at: '2026-01-01T00:00:00Z', latest_payment_at: '2026-07-18T00:00:00Z', first_settlement_at: '2026-01-01T00:00:00Z', latest_settlement_at: '2026-07-18T00:00:00Z', updated_at: '2026-07-18T00:01:00Z' }] };
       return { rows: [] };
     }
   };
   const payload = await getRujiraReservePaymentsDashboardPayload(client, { eventLimit: 100 });
   assert.equal(payload.daily.length, 2);
-  assert.equal(payload.daily.at(-1).cumulative_usd, 6);
+  assert.equal(payload.daily.at(-1).cumulative_usd, 4);
+  assert.equal(payload.daily.at(-1).cumulative_pol_usd, 2);
+  assert.equal(payload.daily.at(-1).cumulative_settlement_usd, 6);
+  assert.equal(payload.meta.eventCount, 1200);
+  assert.equal(payload.meta.polEventCount, 800);
+  assert.equal(payload.meta.settlementEventCount, 2000);
+  assert.equal(payload.meta.totalPaymentUsd, 4);
+  assert.equal(payload.meta.totalPolUsd, 2);
+  assert.equal(payload.meta.totalPolPaymentUsd, 2);
+  assert.equal(payload.meta.totalSettlementUsd, 6);
+  assert.equal(payload.recent_events[0].paymentType, 'pol');
   assert.deepEqual(payload.events.map((row) => row.event_key), ['old', 'new']);
   assert.deepEqual(payload.recent_events.map((row) => row.event_key), ['new', 'old']);
   assert.equal(payload.events_page.scope, 'latest');

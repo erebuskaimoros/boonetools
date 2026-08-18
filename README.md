@@ -40,7 +40,7 @@ Analytics service aggregates the fixed page slugs into the protected
 - Limit Orders
 - App Layer to Base Layer dashboard at `/app-layer-base-layer`
 
-The App Layer dashboard tracks Rujira App Layer fee-share configuration and final transfers into the THORChain Base Layer. Lane 01 is served by the backend from two-minute collector-state snapshots, with the checked-in earnings artifact used only as its historical bootstrap and outage fallback. Dune is the preferred historical source for Reserve payments and app-attributed THORChain liquidity fees; the API reports when it has fallen back to RPC/Midgard. Generated static artifacts live under `public/data/rujira-base-layer-fees/`, and the page links collector addresses and txs to `thorchain.net`.
+The App Layer dashboard tracks Rujira App Layer fee-share configuration and final settlement into the THORChain Base Layer. Since the 2026-08-13 target update, the Base Layer collector routes two-thirds to the TC Reserve and one-third to the THORChain POL Fund; the RUJI Swap collector routes two-thirds to RUJI stakers and one-third to the Rujira Ecosystem Fund. Lane 01 is served by the backend from two-minute collector-state snapshots, with the checked-in earnings artifact used only as its historical bootstrap and outage fallback. Dune is the preferred historical source for direct Reserve payments and app-attributed THORChain liquidity fees; the scheduler/RPC lane records POL transfers and the API reports provider fallback state. Generated static artifacts live under `public/data/rujira-base-layer-fees/`, and the page links collector addresses and txs to `thorchain.net`.
 
 ## Local Development
 
@@ -141,14 +141,14 @@ Current Dune source queries:
 - Rapid Swaps canonical rows: `7619996`
 - Rapid Swaps market-history denominator: `7620035`
 - App Layer generated base-layer fees: `7620091`
-- App Layer explicit Reserve payments: `7620011`
+- App Layer explicit Base Layer settlement: `7620011`
 - Bond Tracker bond/unbond tx discovery: `7620042`
 
 TC Fee Dash uses THORChain daily earnings from `thorchain.defi_daily_earnings`, CMC historical global market volume for the CEX/global leg, and Dune-indexed DEX exchange volume from `dex.trades`. It no longer fans out to Midgard or DeFiLlama for that daily series.
 
 ## Generated Rujira Data
 
-Refresh observed Base Layer Reserve payments:
+Refresh the dated observed Base Layer Reserve-payment fallback:
 
 ```bash
 node scripts/rujira-base-layer-fees.mjs

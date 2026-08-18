@@ -314,7 +314,7 @@ async function ensureDayBaseline(client, dayStart) {
   return rows[0];
 }
 
-async function getReservePayouts(client, from, to) {
+async function getSettlementPayouts(client, from, to) {
   const { rows } = await client.query(
     `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE}
      select coalesce(sum(amount_rune), 0) as amount_rune,
@@ -335,7 +335,7 @@ export async function reconcileCompletedRujiraBaseLayerEarnings(client, beforeDa
 
   const { rows } = await client.query(
     `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE},
-     reserve_by_day as (
+     settlement_by_day as (
        select date_trunc('day', block_time at time zone 'UTC')::date as day_start,
               coalesce(sum(amount_rune), 0) as amount_rune,
               coalesce(sum(amount_usd), 0) as amount_usd
@@ -348,7 +348,7 @@ export async function reconcileCompletedRujiraBaseLayerEarnings(client, beforeDa
             coalesce(reserve.amount_rune, 0) as current_reserve_payout_rune,
             coalesce(reserve.amount_usd, 0) as current_reserve_payout_usd
      from rujira_base_layer_earnings_daily earnings
-     left join reserve_by_day reserve using (day_start)
+     left join settlement_by_day reserve using (day_start)
      where earnings.day_start < $1::date
      order by earnings.day_start asc`,
     [day]
@@ -403,7 +403,7 @@ export async function reconcileCompletedRujiraBaseLayerEarnings(client, beforeDa
 export async function refreshRujiraBaseLayerEarnings(livePayload) {
   return withAdvisoryLock(LOCK_KEY, async (client) => {
     // fetched_at is written after all balance/config requests complete, so it
-    // is the safest upper bound for Reserve events paired with this snapshot.
+    // is the safest upper bound for settlement events paired with this snapshot.
     const observedAt = new Date(livePayload?.fetched_at || livePayload?.as_of || Date.now());
     if (!Number.isFinite(observedAt.getTime())) throw new Error('Invalid App Layer live-state timestamp');
     const requiredKeys = new Set(ROUTE_COLLECTORS.map((collector) => collector.key));
@@ -442,7 +442,9 @@ export async function refreshRujiraBaseLayerEarnings(livePayload) {
     }
 
     const baseline = await ensureDayBaseline(client, dayStart);
-    const reserve = await getReservePayouts(
+    // The legacy reserve_payout columns hold all Base collector settlement
+    // outflows (Reserve plus post-cutover POL) for conservation accounting.
+    const settlement = await getSettlementPayouts(
       client,
       `${dayStart}T00:00:00Z`,
       observedAt.toISOString()
@@ -452,8 +454,8 @@ export async function refreshRujiraBaseLayerEarnings(livePayload) {
       currentBalances: livePayload.collector_balances,
       routeScopes,
       prices: buildPrices(livePayload),
-      reservePayoutRune: reserve.amountRune,
-      reservePayoutUsd: reserve.amountUsd
+      reservePayoutRune: settlement.amountRune,
+      reservePayoutUsd: settlement.amountUsd
     });
 
     const routeScopeMeta = routeScopes.map((scope) => ({

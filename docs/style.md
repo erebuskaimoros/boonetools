@@ -230,7 +230,7 @@ Flush, indexed, hoverable.
   <article class="metric">
     <div class="metric-head">
       <span class="metric-idx">01</span>
-      <span class="metric-label">paid to tc reserve</span>
+      <span class="metric-label">base layer settlement</span>
     </div>
     <strong class="metric-value">$1,638.65</strong>
     <small class="metric-foot">2,970.39 RUNE observed</small>

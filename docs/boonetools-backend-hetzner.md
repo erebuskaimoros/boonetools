@@ -365,6 +365,15 @@ Liquify RPC endpoint. The API exposes compact replay at `/block-production`
 and relays committed heads at `/chain-events`; the latter uses PostgreSQL
 `LISTEN/NOTIFY`, SSE keepalives, and automatic client reconnection.
 
+Migration `044_rujira_fee_share_settlements.sql` extends the App Layer payment
+ledger with typed `reserve` and `pol` settlement rows. It preserves the direct
+Reserve compatibility series, reparses scheduled blocks from the first split
+payout at height `27410412`, and rewinds the cadence cursor so deployments fill
+the post-cutover POL branch. The Reserve scheduler must continue its bounded
+RPC block scan even after a successful Dune run because Dune query `7620011`
+provides the Reserve branch, while scheduled block results provide POL-fund
+transfers. Lane 01 conservation adds back both destinations.
+
 The host-wide `/etc/caddy/Caddyfile` is owned and deployed independently by Web
 Ops because it also serves MemeMap, The AI Guys, webmail, traffic reports, and
 Landlord. BooneTools application deploys do not modify or reload Caddy. They

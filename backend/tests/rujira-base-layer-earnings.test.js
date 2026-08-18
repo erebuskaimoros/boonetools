@@ -127,11 +127,11 @@ test('conversion inventory changes and Reserve payouts cancel while fresh fees r
   assert.equal(freshFees.inflowUsd, 20);
 });
 
-test('completed earnings days reconcile late Reserve events and final daily pricing', async () => {
+test('completed earnings days reconcile late Reserve/POL settlements and final daily pricing', async () => {
   const updates = [];
   const client = {
     query: async (sql, params = []) => {
-      if (sql.includes('left join reserve_by_day')) {
+      if (sql.includes('left join settlement_by_day')) {
         assert.deepEqual(params, ['2026-08-03']);
         return {
           rows: [

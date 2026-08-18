@@ -46,9 +46,9 @@
     "netNewInflowUsd": 13665.173493258186,
     "totalPaidUsd": 18226.565783260005,
     "inventoryNowUsd": 13599.681792643656,
-    "priceBasis": "per-denom daily change in weighted routable inventory × Midgard daily USD price (RUNE history, pool depth assetPriceUSD, stables at $1), with Reserve payouts added back at deposit-day price solely to cancel value leaving the accounting boundary",
-    "scope": "App-layer earnings allocated to the Base Layer: 100% of routable Base Layer Collector inventory plus the configured Base Layer share of routable RUJI Trade and Other Core Apps inventory. Daily and weekly rows record newly earned value for the period; transfers between scoped collectors and final Reserve payouts do not create new earnings. Swap and Index are excluded because their configured targets do not route to the Base Layer.",
-    "caveat": "01 is an accrual series and overlaps 02: cumulative app-layer earnings ≈ cumulative Reserve payouts + current base-layer-bound inventory, up to intraday price movement. Do not add 01 to 02."
+    "priceBasis": "per-denom daily change in weighted routable inventory × Midgard daily USD price (RUNE history, pool depth assetPriceUSD, stables at $1), with Base Layer settlement added back at dispersal-day price solely to cancel value leaving the accounting boundary",
+    "scope": "App-layer earnings allocated to the Base Layer: 100% of routable Base Layer Collector inventory plus the configured Base Layer share of routable RUJI Trade and Other Core Apps inventory. Daily and weekly rows record newly earned value for the period; transfers between scoped collectors and final settlement to the TC Reserve and, after the 2026-08-13 cutover, the THORChain POL Fund do not create new earnings. Swap and Index are excluded because their configured targets do not route to the Base Layer.",
+    "caveat": "01 is an accrual series and overlaps 02: cumulative app-layer earnings ≈ cumulative Base Layer settlement (Reserve plus post-cutover POL) + current base-layer-bound inventory, up to intraday price movement. Do not add 01 to 02."
   },
   "weekly": [
     {

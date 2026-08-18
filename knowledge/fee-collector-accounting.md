@@ -108,10 +108,14 @@ routable Base Layer Collector inventory. RUJI Swap and RUJI Index are outside
 the boundary because their configured targets do not lead to the Base Layer.
 
 This makes each daily or weekly row an accrual metric. A Trade/Core → Base
-Collector transfer cancels within the boundary, and a final Reserve payout is
-added back only to cancel the balance leaving the boundary. Neither movement
-creates new earnings. A cumulative view may be derived from the period rows,
-but 01 still overlaps final Reserve payments and must not be added to 02.
+Collector transfer cancels within the boundary, and final settlement leaving
+the collector is added back only to cancel the balance leaving the boundary.
+Before the 2026-08-13 target update that settlement was entirely a Reserve
+deposit. Beginning with height `27410412`, it is the sum of the direct TC
+Reserve branch (weight 2) and the THORChain POL Fund branch (weight 1). Neither
+movement creates new earnings. A cumulative view may be derived from the
+period rows, but 01 still overlaps final Base Layer settlement and must not be
+added to 02.
 
 ## Implementation notes
 

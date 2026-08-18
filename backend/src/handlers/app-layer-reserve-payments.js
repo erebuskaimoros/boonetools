@@ -44,7 +44,7 @@ export async function handleAppLayerReservePayments(request, url) {
   const model = await getReadModel(APP_LAYER_RESERVE_PAYMENTS_READ_MODEL_KEY);
   if (!model) {
     return json({
-      error: 'App Layer Reserve snapshot is warming',
+      error: 'App Layer settlement snapshot is warming',
       retryable: true,
       model_key: APP_LAYER_RESERVE_PAYMENTS_READ_MODEL_KEY
     }, 503, {
@@ -66,7 +66,7 @@ export async function handleAppLayerReservePayments(request, url) {
     meta: {
       ...(model.payload?.meta || {}),
       stale: true,
-      warning: model.payload?.meta?.warning || 'Serving the last successful Reserve-payment snapshot'
+      warning: model.payload?.meta?.warning || 'Serving the last successful app-layer settlement snapshot'
     }
   } : model.payload, 200, headers);
 }

@@ -211,9 +211,9 @@ async function loadWebsiteEnv() {
   }
 }
 
-// Reserve payments give both the payout series and dense (height, time)
-// anchors for the day→height mapping. Prefer the live API; fall back to the
-// static artifact.
+// Base Layer settlement events (Reserve plus post-cutover POL) give both the
+// payout series and dense (height, time) anchors for the day→height mapping.
+// Prefer the live API; the static artifact is a Reserve-only fallback.
 async function fetchReserveEvents() {
   const env = await loadWebsiteEnv();
   const apiBase = (
@@ -239,7 +239,7 @@ async function fetchReserveEvents() {
         }))
         .filter((event) => event.height > 0 && Number.isFinite(event.timeMs));
       if (events.length) {
-        process.stderr.write(`reserve events: ${events.length} from API\n`);
+        process.stderr.write(`settlement events: ${events.length} from API\n`);
         return events.sort((a, b) => a.height - b.height);
       }
     } catch (err) {
@@ -665,7 +665,7 @@ async function main() {
     scope:
       "App-layer earnings allocated to the Base Layer: 100% of routable Base Layer Collector inventory plus the configured Base Layer share of routable RUJI Trade and Other Core Apps inventory. Daily and weekly rows record newly earned value for the period; transfers between scoped collectors and final Reserve payouts do not create new earnings. Swap and Index are excluded because their configured targets do not route to the Base Layer.",
     caveat:
-      "01 is an accrual series and overlaps 02: cumulative app-layer earnings ≈ cumulative Reserve payouts + current base-layer-bound inventory, up to intraday price movement. Do not add 01 to 02.",
+      "01 is an accrual series and overlaps 02: cumulative app-layer earnings ≈ cumulative Base Layer settlement (Reserve plus post-cutover POL) + current base-layer-bound inventory, up to intraday price movement. Do not add 01 to 02.",
   };
 
   const artifact = {

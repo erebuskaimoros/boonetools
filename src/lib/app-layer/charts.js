@@ -46,6 +46,12 @@ export const APP_LAYER_SERIES = Object.freeze({
     faint: 'rgba(0, 167, 85, 0.09)',
     chrome: TERMINAL_CHART_PALETTE.accent
   },
+  pol: {
+    mark: '#d4a017',
+    fill: 'rgba(212, 160, 23, 0.5)',
+    faint: 'rgba(212, 160, 23, 0.09)',
+    chrome: TERMINAL_CHART_PALETTE.amber
+  },
   generated: {
     mark: '#2f7fd6',
     fill: 'rgba(47, 127, 214, 0.5)',

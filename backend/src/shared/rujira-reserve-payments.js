@@ -36,6 +36,11 @@ export const BASE_LAYER_REVENUE_COLLECTOR =
   'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
 export const TC_RESERVE_MODULE =
   'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
+export const THORCHAIN_POL_FUND =
+  'thor1glpfjhxzjdtnz4wy3hv4ywl65y9w84l6efgen';
+export const RUJIRA_FEE_SHARE_CONFIG_HEIGHT = 27410382;
+export const RUJIRA_FEE_SHARE_FIRST_PAYMENT_HEIGHT = 27410412;
+export const RUJIRA_FEE_SHARE_CHANGED_AT = '2026-08-13T12:24:04.000Z';
 
 function reservePaymentSource(row) {
   return choosePreferredSource('', row?.source || 'unknown');
@@ -268,10 +273,19 @@ function getBlockTime(payload, fallbackTime = null) {
   return date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
-function isTargetTransfer(attrs) {
+function isTargetReserveTransfer(attrs) {
   return (
     attrs.sender === BASE_LAYER_REVENUE_COLLECTOR &&
     attrs.recipient === TC_RESERVE_MODULE &&
+    Boolean(parseExplicitRuneAmount(attrs.amount))
+  );
+}
+
+function isTargetPolTransfer(attrs, height) {
+  return (
+    Number(height) >= RUJIRA_FEE_SHARE_FIRST_PAYMENT_HEIGHT &&
+    attrs.sender === BASE_LAYER_REVENUE_COLLECTOR &&
+    attrs.recipient === THORCHAIN_POL_FUND &&
     Boolean(parseExplicitRuneAmount(attrs.amount))
   );
 }
@@ -294,8 +308,11 @@ function takeMatchingReserve(reserveRows, amountBase) {
   return reserveRows[index];
 }
 
-function buildEventKey({ height, index, txId, amountBase }) {
-  return sha256([height, index, txId || '', amountBase, BASE_LAYER_REVENUE_COLLECTOR, TC_RESERVE_MODULE].join('|'));
+function buildEventKey({ height, index, txId, amountBase, recipient, paymentType }) {
+  // Keep the original Reserve identity stable across reparses so existing
+  // cursors and source observations do not churn during the POL backfill.
+  const target = paymentType === 'reserve' ? TC_RESERVE_MODULE : recipient;
+  return sha256([height, index, txId || '', amountBase, BASE_LAYER_REVENUE_COLLECTOR, target].join('|'));
 }
 
 function normalizePaymentEvent({ height, blockTime, index, amountBase, transfer, reserve, source }) {
@@ -307,10 +324,18 @@ function normalizePaymentEvent({ height, blockTime, index, amountBase, transfer,
 
   const txId = reserveAttrs.id || '';
   return {
-    event_key: buildEventKey({ height, index, txId, amountBase }),
+    event_key: buildEventKey({
+      height,
+      index,
+      txId,
+      amountBase,
+      recipient: TC_RESERVE_MODULE,
+      paymentType: 'reserve'
+    }),
     height,
     block_time: blockTime,
     tx_id: txId,
+    payment_type: 'reserve',
     sender: BASE_LAYER_REVENUE_COLLECTOR,
     recipient: TC_RESERVE_MODULE,
     memo: reserveAttrs.memo,
@@ -327,18 +352,51 @@ function normalizePaymentEvent({ height, blockTime, index, amountBase, transfer,
   };
 }
 
+function normalizePolPaymentEvent({ height, blockTime, index, amountBase, transfer, source }) {
+  return {
+    event_key: buildEventKey({
+      height,
+      index,
+      txId: '',
+      amountBase,
+      recipient: THORCHAIN_POL_FUND,
+      paymentType: 'pol'
+    }),
+    height,
+    block_time: blockTime,
+    tx_id: '',
+    payment_type: 'pol',
+    sender: BASE_LAYER_REVENUE_COLLECTOR,
+    recipient: THORCHAIN_POL_FUND,
+    memo: 'POL',
+    amount_base: amountBase,
+    amount_rune: baseRuneToNumber(amountBase),
+    rune_price_usd: 0,
+    amount_usd: 0,
+    coin: `${amountBase} THOR.RUNE`,
+    source: source || 'unknown',
+    raw_event: {
+      transfer: transfer?.event ? compactEvent(transfer.event) : null,
+      reserve: null
+    }
+  };
+}
+
 export function parseRujiraReservePaymentBlock(height, blockPayload, options = {}) {
   const events = extractFinalizeEvents(blockPayload);
   const blockHeight = getBlockHeight(blockPayload, height);
   const blockTime = getBlockTime(blockPayload, options.blockTime);
   const source = options.source || 'rpc';
   const transfers = [];
+  const polTransfers = [];
   const reserves = [];
 
   for (const [index, event] of events.entries()) {
     const attrs = attrsToObject(event);
-    if (event?.type === 'transfer' && isTargetTransfer(attrs)) {
+    if (event?.type === 'transfer' && isTargetReserveTransfer(attrs)) {
       transfers.push({ index, attrs, event, amountBase: parseExplicitRuneAmount(attrs.amount) });
+    } else if (event?.type === 'transfer' && isTargetPolTransfer(attrs, blockHeight)) {
+      polTransfers.push({ index, attrs, event, amountBase: parseExplicitRuneAmount(attrs.amount) });
     } else if (event?.type === 'reserve' && isTargetReserve(attrs)) {
       reserves.push({ index, attrs, event, amountBase: parseReserveRuneAmount(attrs), used: false });
     }
@@ -393,6 +451,17 @@ export function parseRujiraReservePaymentBlock(height, blockPayload, options = {
     parsedEvents.push(payment);
   }
 
+  for (const transfer of polTransfers) {
+    parsedEvents.push(normalizePolPaymentEvent({
+      height: blockHeight,
+      blockTime,
+      index: transfer.index,
+      amountBase: transfer.amountBase,
+      transfer,
+      source
+    }));
+  }
+
   return {
     events: parsedEvents.filter((event) => event.height > 0 && event.block_time && event.amount_rune > 0),
     scan: {
@@ -402,6 +471,7 @@ export function parseRujiraReservePaymentBlock(height, blockPayload, options = {
       matched_transfer_event_count: matchedTransferCount,
       unmatched_transfer_event_count: transfers.length - matchedTransferCount,
       reserve_only_event_count: reserveOnlyEventCount,
+      pol_transfer_event_count: polTransfers.length,
       matched_event_count: parsedEvents.length,
       source
     }
@@ -1113,6 +1183,7 @@ export async function refreshRujiraReservePaymentPrices(client) {
          updated_at = now()
      from rujira_reserve_payment_rune_price_days price
      where event.block_time is not null
+       and event.source <> 'dune'
        and date_trunc('day', event.block_time at time zone 'UTC')::date = price.day_start`
   );
 
@@ -1125,11 +1196,27 @@ export async function refreshRujiraReservePaymentPrices(client) {
 function normalizeWeeklyRows(rows) {
   let cumulativeRune = 0;
   let cumulativeUsd = 0;
+  let cumulativePolRune = 0;
+  let cumulativePolUsd = 0;
+  let cumulativeSettlementRune = 0;
+  let cumulativeSettlementUsd = 0;
   return rows.map((row) => {
     const paymentRune = Number(row.payment_rune) || 0;
     const paymentUsd = Number(row.payment_usd) || 0;
+    const polRune = Number(row.pol_rune) || 0;
+    const polUsd = Number(row.pol_usd) || 0;
+    const settlementRune = row.settlement_rune == null
+      ? paymentRune + polRune
+      : Number(row.settlement_rune) || 0;
+    const settlementUsd = row.settlement_usd == null
+      ? paymentUsd + polUsd
+      : Number(row.settlement_usd) || 0;
     cumulativeRune += paymentRune;
     cumulativeUsd += paymentUsd;
+    cumulativePolRune += polRune;
+    cumulativePolUsd += polUsd;
+    cumulativeSettlementRune += settlementRune;
+    cumulativeSettlementUsd += settlementUsd;
     const weekStart = dateKey(row.week_start);
     return {
       week_start: weekStart,
@@ -1139,7 +1226,20 @@ function normalizeWeeklyRows(rows) {
       rune_price_usd: Number(row.rune_price_usd) || 0,
       payment_usd: roundNumber(paymentUsd, 8),
       cumulative_rune: roundNumber(cumulativeRune, 8),
-      cumulative_usd: roundNumber(cumulativeUsd, 8)
+      cumulative_usd: roundNumber(cumulativeUsd, 8),
+      pol_payments: Number(row.pol_payments) || 0,
+      pol_rune: roundNumber(polRune, 8),
+      pol_usd: roundNumber(polUsd, 8),
+      cumulative_pol_rune: roundNumber(cumulativePolRune, 8),
+      cumulative_pol_usd: roundNumber(cumulativePolUsd, 8),
+      settlement_payments: row.settlement_payments == null
+        ? (Number(row.payments) || 0) + (Number(row.pol_payments) || 0)
+        : Number(row.settlement_payments) || 0,
+      settlement_rune: roundNumber(settlementRune, 8),
+      settlement_rune_price_usd: Number(row.settlement_rune_price_usd) || Number(row.rune_price_usd) || 0,
+      settlement_usd: roundNumber(settlementUsd, 8),
+      cumulative_settlement_rune: roundNumber(cumulativeSettlementRune, 8),
+      cumulative_settlement_usd: roundNumber(cumulativeSettlementUsd, 8)
     };
   });
 }
@@ -1147,11 +1247,27 @@ function normalizeWeeklyRows(rows) {
 function normalizeDailyPaymentRows(rows) {
   let cumulativeRune = 0;
   let cumulativeUsd = 0;
+  let cumulativePolRune = 0;
+  let cumulativePolUsd = 0;
+  let cumulativeSettlementRune = 0;
+  let cumulativeSettlementUsd = 0;
   return rows.map((row) => {
     const paymentRune = Number(row.payment_rune) || 0;
     const paymentUsd = Number(row.payment_usd) || 0;
+    const polRune = Number(row.pol_rune) || 0;
+    const polUsd = Number(row.pol_usd) || 0;
+    const settlementRune = row.settlement_rune == null
+      ? paymentRune + polRune
+      : Number(row.settlement_rune) || 0;
+    const settlementUsd = row.settlement_usd == null
+      ? paymentUsd + polUsd
+      : Number(row.settlement_usd) || 0;
     cumulativeRune += paymentRune;
     cumulativeUsd += paymentUsd;
+    cumulativePolRune += polRune;
+    cumulativePolUsd += polUsd;
+    cumulativeSettlementRune += settlementRune;
+    cumulativeSettlementUsd += settlementUsd;
     const dayStart = dateKey(row.day_start);
     return {
       day_start: dayStart,
@@ -1161,7 +1277,20 @@ function normalizeDailyPaymentRows(rows) {
       rune_price_usd: Number(row.rune_price_usd) || 0,
       payment_usd: roundNumber(paymentUsd, 8),
       cumulative_rune: roundNumber(cumulativeRune, 8),
-      cumulative_usd: roundNumber(cumulativeUsd, 8)
+      cumulative_usd: roundNumber(cumulativeUsd, 8),
+      pol_payments: Number(row.pol_payments) || 0,
+      pol_rune: roundNumber(polRune, 8),
+      pol_usd: roundNumber(polUsd, 8),
+      cumulative_pol_rune: roundNumber(cumulativePolRune, 8),
+      cumulative_pol_usd: roundNumber(cumulativePolUsd, 8),
+      settlement_payments: row.settlement_payments == null
+        ? (Number(row.payments) || 0) + (Number(row.pol_payments) || 0)
+        : Number(row.settlement_payments) || 0,
+      settlement_rune: roundNumber(settlementRune, 8),
+      settlement_rune_price_usd: Number(row.settlement_rune_price_usd) || Number(row.rune_price_usd) || 0,
+      settlement_usd: roundNumber(settlementUsd, 8),
+      cumulative_settlement_rune: roundNumber(cumulativeSettlementRune, 8),
+      cumulative_settlement_usd: roundNumber(cumulativeSettlementUsd, 8)
     };
   });
 }
@@ -1176,13 +1305,22 @@ async function fetchDashboardStats(client) {
     client.query(
       `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE}
        select count(*)::bigint as event_count,
-              count(distinct height)::bigint as active_heights,
-              coalesce(sum(amount_rune), 0) as payment_rune,
-              coalesce(sum(amount_usd), 0) as payment_usd,
-              min(height)::bigint as min_height,
-              max(height)::bigint as max_height,
-              min(block_time) as first_payment_at,
-              max(block_time) as latest_payment_at,
+              count(*) filter (where payment_type = 'reserve') as reserve_event_count,
+              count(*) filter (where payment_type = 'pol') as pol_event_count,
+              count(distinct height) filter (where payment_type = 'reserve') as active_heights,
+              count(distinct height)::bigint as settlement_active_heights,
+              coalesce(sum(amount_rune) filter (where payment_type = 'reserve'), 0) as payment_rune,
+              coalesce(sum(amount_usd) filter (where payment_type = 'reserve'), 0) as payment_usd,
+              coalesce(sum(amount_rune) filter (where payment_type = 'pol'), 0) as pol_rune,
+              coalesce(sum(amount_usd) filter (where payment_type = 'pol'), 0) as pol_usd,
+              coalesce(sum(amount_rune), 0) as settlement_rune,
+              coalesce(sum(amount_usd), 0) as settlement_usd,
+              min(height) filter (where payment_type = 'reserve') as min_height,
+              max(height) filter (where payment_type = 'reserve') as max_height,
+              min(block_time) filter (where payment_type = 'reserve') as first_payment_at,
+              max(block_time) filter (where payment_type = 'reserve') as latest_payment_at,
+              min(block_time) as first_settlement_at,
+              max(block_time) as latest_settlement_at,
               max(updated_at) as updated_at
        from canonical_events`
     ),
@@ -1224,6 +1362,10 @@ function normalizeReservePaymentDashboardEvent(row) {
     height: Number(row.height) || 0,
     date: toIsoString(row.block_time),
     id: String(row.tx_id || ''),
+    paymentType: String(row.payment_type || 'reserve'),
+    sender: String(row.sender || BASE_LAYER_REVENUE_COLLECTOR),
+    recipient: String(row.recipient || TC_RESERVE_MODULE),
+    memo: String(row.memo || (row.payment_type === 'pol' ? 'POL' : 'RESERVE')),
     amountBase: Number(row.amount_base) || 0,
     amountRune: roundNumber(row.amount_rune, 8),
     runePriceUsd: roundNumber(row.rune_price_usd, 8),
@@ -1279,7 +1421,7 @@ export async function getRujiraReservePaymentEventPage(client = { query }, optio
   const result = await client.query(
     `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE}
      select event_key, height, block_time, tx_id, amount_base, amount_rune,
-            rune_price_usd, amount_usd, coin, source
+            payment_type, sender, recipient, memo, rune_price_usd, amount_usd, coin, source
      from canonical_events
      ${cursorSql}
      order by block_time desc, height desc, event_key desc
@@ -1290,7 +1432,7 @@ export async function getRujiraReservePaymentEventPage(client = { query }, optio
   const hasNext = result.rows.length > limit;
   const pageRows = result.rows.slice(0, limit);
   return {
-    schema_version: 3,
+    schema_version: 4,
     events: pageRows.map(normalizeReservePaymentDashboardEvent),
     pagination: {
       limit,
@@ -1313,14 +1455,26 @@ export async function getRujiraReservePaymentsDashboardPayload(client = { query 
     client.query(
       `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE}
        select date_trunc('week', block_time at time zone 'UTC')::date as week_start,
-              count(*)::bigint as payments,
-              coalesce(sum(amount_rune), 0) as payment_rune,
-              coalesce(sum(amount_usd), 0) as payment_usd,
+              count(*) filter (where payment_type = 'reserve') as payments,
+              coalesce(sum(amount_rune) filter (where payment_type = 'reserve'), 0) as payment_rune,
+              coalesce(sum(amount_usd) filter (where payment_type = 'reserve'), 0) as payment_usd,
+              count(*) filter (where payment_type = 'pol') as pol_payments,
+              coalesce(sum(amount_rune) filter (where payment_type = 'pol'), 0) as pol_rune,
+              coalesce(sum(amount_usd) filter (where payment_type = 'pol'), 0) as pol_usd,
+              count(*)::bigint as settlement_payments,
+              coalesce(sum(amount_rune), 0) as settlement_rune,
+              coalesce(sum(amount_usd), 0) as settlement_usd,
+              case
+                when coalesce(sum(amount_rune) filter (where payment_type = 'reserve'), 0) > 0
+                  then coalesce(sum(amount_usd) filter (where payment_type = 'reserve'), 0)
+                    / (sum(amount_rune) filter (where payment_type = 'reserve'))
+                else coalesce(avg(nullif(rune_price_usd, 0)) filter (where payment_type = 'reserve'), 0)
+              end as rune_price_usd,
               case
                 when coalesce(sum(amount_rune), 0) > 0
                   then coalesce(sum(amount_usd), 0) / sum(amount_rune)
                 else coalesce(avg(nullif(rune_price_usd, 0)), 0)
-              end as rune_price_usd
+              end as settlement_rune_price_usd
        from canonical_events
        where block_time is not null
        group by 1
@@ -1329,14 +1483,26 @@ export async function getRujiraReservePaymentsDashboardPayload(client = { query 
     client.query(
       `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE}
        select date_trunc('day', block_time at time zone 'UTC')::date as day_start,
-              count(*)::bigint as payments,
-              coalesce(sum(amount_rune), 0) as payment_rune,
-              coalesce(sum(amount_usd), 0) as payment_usd,
+              count(*) filter (where payment_type = 'reserve') as payments,
+              coalesce(sum(amount_rune) filter (where payment_type = 'reserve'), 0) as payment_rune,
+              coalesce(sum(amount_usd) filter (where payment_type = 'reserve'), 0) as payment_usd,
+              count(*) filter (where payment_type = 'pol') as pol_payments,
+              coalesce(sum(amount_rune) filter (where payment_type = 'pol'), 0) as pol_rune,
+              coalesce(sum(amount_usd) filter (where payment_type = 'pol'), 0) as pol_usd,
+              count(*)::bigint as settlement_payments,
+              coalesce(sum(amount_rune), 0) as settlement_rune,
+              coalesce(sum(amount_usd), 0) as settlement_usd,
+              case
+                when coalesce(sum(amount_rune) filter (where payment_type = 'reserve'), 0) > 0
+                  then coalesce(sum(amount_usd) filter (where payment_type = 'reserve'), 0)
+                    / (sum(amount_rune) filter (where payment_type = 'reserve'))
+                else coalesce(avg(nullif(rune_price_usd, 0)) filter (where payment_type = 'reserve'), 0)
+              end as rune_price_usd,
               case
                 when coalesce(sum(amount_rune), 0) > 0
                   then coalesce(sum(amount_usd), 0) / sum(amount_rune)
                 else coalesce(avg(nullif(rune_price_usd, 0)), 0)
-              end as rune_price_usd
+              end as settlement_rune_price_usd
        from canonical_events
        where block_time is not null
        group by 1
@@ -1344,7 +1510,8 @@ export async function getRujiraReservePaymentsDashboardPayload(client = { query 
     ),
     client.query(
       `${CANONICAL_RESERVE_PAYMENT_EVENTS_CTE}
-       select event_key, height, block_time, tx_id, amount_base, amount_rune, rune_price_usd, amount_usd, coin, source
+       select event_key, height, block_time, tx_id, payment_type, sender, recipient, memo,
+              amount_base, amount_rune, rune_price_usd, amount_usd, coin, source
        from canonical_events
        order by block_time ${includeAllEvents ? 'asc' : 'desc'}, height ${includeAllEvents ? 'asc' : 'desc'}, event_key ${includeAllEvents ? 'asc' : 'desc'}
        ${eventLimit == null ? '' : 'limit $1'}`,
@@ -1368,40 +1535,54 @@ export async function getRujiraReservePaymentsDashboardPayload(client = { query 
     : fetchedEvents;
 
   return {
-    schema_version: 2,
+    schema_version: 4,
     meta: {
       generatedAt: new Date().toISOString(),
-      source: sourceProvider === 'dune' ? 'dune-query-backed-postgres' : 'boonetools-postgres',
-      scope: 'DB-backed explicit Rujira Base Layer collector transfers into the TC Reserve module.',
+      source: sourceProvider === 'dune' ? 'dune-and-rpc-backed-postgres' : 'boonetools-postgres',
+      scope: 'DB-backed explicit Rujira Base Layer collector settlements into the TC Reserve and THORChain POL fund.',
       method: sourceProvider === 'dune'
-        ? 'Execute the BooneTools Rujira Reserve Payments Dune source query over thorchain.defi_reserve_events, then upsert explicit Base Layer collector -> TC Reserve RESERVE events into the local dashboard cache.'
-        : 'Listen to THORChain NewBlock websocket events and upsert Base Layer collector -> TC Reserve transfer events. Price each event with Midgard daily RUNE/USD for the deposit block time. Scheduled/Midgard backfill only queues missed candidate heights, then RPC block_results confirms the same transfer event.',
+        ? 'Upsert Base Layer collector -> TC Reserve events from the BooneTools Dune query, and independently scan scheduled THORChain block results for both Reserve and post-cutover POL-fund transfers.'
+        : 'Listen to THORChain NewBlock websocket events and scan scheduled block results for explicit Base Layer collector settlements into the TC Reserve and, from the fee-share cutover, the THORChain POL fund.',
       caveat:
-        'This tracks explicit app-layer revenue-share distributions into the TC Reserve. USD totals are historical value at dispersal time, not current mark-to-market RUNE value. It is separate from generated base-layer swap fees and from Midgard system income.',
+        'This tracks explicit app-layer revenue-share settlements into the TC Reserve and THORChain POL fund. USD totals are historical value at dispersal time, not current mark-to-market RUNE value. It is separate from generated base-layer swap fees and from Midgard system income.',
       priceBasis: sourceProvider === 'dune'
-        ? 'amount_rune × Dune thorchain.defi_daily_pool_stats daily RUNE/USD for each Reserve deposit block_time'
-        : 'amount_rune × Midgard daily RUNE/USD for each Reserve deposit block_time',
+        ? 'Reserve rows use Dune thorchain.defi_daily_pool_stats daily RUNE/USD; scheduled RPC settlement rows use the shared Midgard daily RUNE/USD price cache for each block_time.'
+        : 'amount_rune × Midgard daily RUNE/USD for each Reserve or POL settlement block_time',
       reserveCollector: BASE_LAYER_REVENUE_COLLECTOR,
       reserveTarget: TC_RESERVE_MODULE,
-      eventCount: Number(eventStats.event_count) || 0,
+      polTarget: THORCHAIN_POL_FUND,
+      feeShareConfigHeight: RUJIRA_FEE_SHARE_CONFIG_HEIGHT,
+      feeShareFirstPaymentHeight: RUJIRA_FEE_SHARE_FIRST_PAYMENT_HEIGHT,
+      feeShareChangedAt: RUJIRA_FEE_SHARE_CHANGED_AT,
+      eventCount: Number(eventStats.reserve_event_count ?? eventStats.event_count) || 0,
+      reserveEventCount: Number(eventStats.reserve_event_count ?? eventStats.event_count) || 0,
+      polEventCount: Number(eventStats.pol_event_count) || 0,
+      settlementEventCount: Number(eventStats.event_count) || 0,
       activeHeightCount: Number(eventStats.active_heights) || 0,
+      settlementActiveHeightCount: Number(eventStats.settlement_active_heights ?? eventStats.active_heights) || 0,
       actionCount: Number(stats.actionSync?.stats_json?.actions || 0),
       blockCount: totalBlocks,
       pendingBlockCount,
       fetchedBlockCount: blockCounts.fetched || 0,
       errorBlockCount,
-      backfillComplete: sourceProvider === 'dune'
-        ? true
-        : Boolean(stats.scheduleSync?.complete) && pendingBlockCount === 0 && errorBlockCount === 0,
+      backfillComplete: Boolean(stats.scheduleSync?.complete) && pendingBlockCount === 0 && errorBlockCount === 0,
       nextScheduledHeight: Number(stats.scheduleSync?.next_scheduled_height) || 0,
       nextPageToken: stats.actionSync?.next_page_token || '',
       rateLimitedUntil: toIsoString(stats.actionSync?.rate_limited_until),
       totalPaymentRune: roundNumber(eventStats.payment_rune, 8),
       totalPaymentUsd: roundNumber(eventStats.payment_usd, 8),
+      totalPolPaymentRune: roundNumber(eventStats.pol_rune, 8),
+      totalPolPaymentUsd: roundNumber(eventStats.pol_usd, 8),
+      totalPolRune: roundNumber(eventStats.pol_rune, 8),
+      totalPolUsd: roundNumber(eventStats.pol_usd, 8),
+      totalSettlementRune: roundNumber(eventStats.settlement_rune ?? eventStats.payment_rune, 8),
+      totalSettlementUsd: roundNumber(eventStats.settlement_usd ?? eventStats.payment_usd, 8),
       firstHeight: Number(eventStats.min_height) || 0,
       latestHeight: Number(eventStats.max_height) || 0,
       firstPaymentAt: toIsoString(eventStats.first_payment_at),
       latestPaymentAt: toIsoString(eventStats.latest_payment_at),
+      firstSettlementAt: toIsoString(eventStats.first_settlement_at || eventStats.first_payment_at),
+      latestSettlementAt: toIsoString(eventStats.latest_settlement_at || eventStats.latest_payment_at),
       updatedAt: toIsoString(eventStats.updated_at || stats.scheduleSync?.updated_at || stats.actionSync?.updated_at),
       wsListener: stats.listener
         ? {
@@ -1484,6 +1665,7 @@ function normalizeDuneReservePaymentRow(row) {
     height,
     block_time: blockTime,
     tx_id: String(row?.tx_id || ''),
+    payment_type: 'reserve',
     sender,
     recipient,
     memo,
@@ -1621,25 +1803,52 @@ async function runRujiraReservePaymentsLegacyIngestion(client, initialStats = {}
   return stats;
 }
 
-export async function runRujiraReservePaymentsIngestion(client) {
-  if (config.rujiraReservePaymentsDuneQueryId) {
-    try {
-      const duneSource = await runRujiraReservePaymentsDuneIngestion(client);
-      if (!duneSource?.skipped) {
-        return {
-          dune_source: duneSource,
-          provider_cooldown: false
-        };
-      }
+async function runRujiraReservePaymentsScheduledSettlementIngestion(client, initialStats = {}) {
+  const stats = {
+    ...initialStats,
+    scheduled_candidates: null,
+    block_scan: null,
+    pricing: null,
+    provider_cooldown: Boolean(initialStats.provider_cooldown)
+  };
 
-      return runRujiraReservePaymentsLegacyIngestion(client, {
-        dune_source: duneSource,
-        fallback_source: 'legacy',
-        fallback_reason: duneSource.reason || 'dune_skipped'
-      });
+  try {
+    stats.scheduled_candidates = await ingestRujiraReservePaymentScheduledCandidates(client);
+  } catch (error) {
+    if (!isProviderRateLimit(error)) throw error;
+    stats.provider_cooldown = true;
+    stats.scheduled_candidates = {
+      error: error.message,
+      rate_limited_until: await putCooldown(client, SCHEDULE_SYNC_KEY, error)
+    };
+  }
+
+  try {
+    stats.block_scan = await processRujiraReservePaymentBlocks(client);
+  } catch (error) {
+    if (!isProviderRateLimit(error)) throw error;
+    stats.provider_cooldown = true;
+    stats.block_scan = {
+      error: error.message,
+      rate_limited_until: await putCooldown(client, ACTION_SYNC_KEY, error)
+    };
+  }
+
+  stats.pricing = await refreshRujiraReservePaymentPrices(client);
+  return stats;
+}
+
+export async function runRujiraReservePaymentsIngestion(client, options = {}) {
+  const runDune = options.runDune || runRujiraReservePaymentsDuneIngestion;
+  const runLegacy = options.runLegacy || runRujiraReservePaymentsLegacyIngestion;
+  const runScheduledSettlements = options.runScheduledSettlements || runRujiraReservePaymentsScheduledSettlementIngestion;
+  if (config.rujiraReservePaymentsDuneQueryId) {
+    let duneSource;
+    try {
+      duneSource = await runDune(client);
     } catch (error) {
       const duneError = summarizeDuneError(error);
-      return runRujiraReservePaymentsLegacyIngestion(client, {
+      return runLegacy(client, {
         dune_source: {
           source: 'dune',
           status: 'error',
@@ -1650,9 +1859,21 @@ export async function runRujiraReservePaymentsIngestion(client) {
         fallback_reason: 'dune_error'
       });
     }
+
+    if (!duneSource?.skipped) {
+      return runScheduledSettlements(client, {
+        dune_source: duneSource
+      });
+    }
+
+    return runLegacy(client, {
+      dune_source: duneSource,
+      fallback_source: 'legacy',
+      fallback_reason: duneSource.reason || 'dune_skipped'
+    });
   }
 
-  return runRujiraReservePaymentsLegacyIngestion(client);
+  return runLegacy(client);
 }
 
 export function normalizeRujiraReservePaymentNumber(value) {

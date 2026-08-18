@@ -32,6 +32,73 @@ test('app-layer CSV and reserve event normalization remain deterministic', () =>
   assert.equal(buckets[0].rune_price_usd, 10 / 3);
 });
 
+test('app-layer settlement buckets keep Reserve history and add post-cutover POL payments', () => {
+  const buckets = bucketReserveEvents([
+    {
+      date: '2026-08-13T12:27:11Z',
+      paymentType: 'reserve',
+      amountRune: 4,
+      runePriceUsd: 3,
+      amountUsd: 12
+    },
+    {
+      date: '2026-08-13T12:27:11Z',
+      payment_type: 'pol',
+      amountRune: 2,
+      runePriceUsd: 3,
+      amountUsd: 6
+    }
+  ], 'daily');
+
+  assert.deepEqual(buckets, [{
+    bucket_start: '2026-08-13',
+    payments: 1,
+    payment_rune: 4,
+    payment_usd: 12,
+    pol_payments: 1,
+    pol_rune: 2,
+    pol_usd: 6,
+    settlement_events: 2,
+    settlement_rune: 6,
+    settlement_usd: 18,
+    rune_price_usd: 3,
+    cumulative_rune: 4,
+    cumulative_usd: 12,
+    cumulative_pol_rune: 2,
+    cumulative_pol_usd: 6,
+    cumulative_settlement_rune: 6,
+    cumulative_settlement_usd: 18
+  }]);
+});
+
+test('app-layer paid aggregates gracefully promote legacy Reserve-only rows to settlement totals', () => {
+  const weekly = [{
+    week_start: '2026-08-10',
+    payments: 2,
+    payment_rune: 9,
+    payment_usd: 27,
+    cumulative_rune: 20,
+    cumulative_usd: 60
+  }];
+
+  const picked = pickPaidRows([], weekly, 'weekly');
+  assert.deepEqual(picked.rows[0], {
+    ...weekly[0],
+    bucket_start: '2026-08-10',
+    pol_payments: 0,
+    pol_rune: 0,
+    pol_usd: 0,
+    settlement_events: 2,
+    settlement_rune: 9,
+    settlement_rune_price_usd: 0,
+    settlement_usd: 27,
+    cumulative_pol_rune: 0,
+    cumulative_pol_usd: 0,
+    cumulative_settlement_rune: 20,
+    cumulative_settlement_usd: 60
+  });
+});
+
 test('app-layer paid charts use durable full-history aggregates before bounded events', () => {
   const events = [
     { date: '2026-07-18T01:00:00Z', amountRune: 1, runePriceUsd: 2, amountUsd: 2 }
@@ -45,14 +112,29 @@ test('app-layer paid charts use durable full-history aggregates before bounded e
     { week_start: '2026-07-13', payment_usd: 2, cumulative_usd: 7 }
   ];
 
-  assert.deepEqual(pickPaidRows(events, weekly, 'daily', daily), {
-    rows: daily.map((row) => ({ ...row, bucket_start: row.day_start })),
-    grain: 'daily'
-  });
-  assert.deepEqual(pickPaidRows(events, weekly, 'weekly', daily), {
-    rows: weekly.map((row) => ({ ...row, bucket_start: row.week_start })),
-    grain: 'weekly'
-  });
+  const dailyPick = pickPaidRows(events, weekly, 'daily', daily);
+  assert.equal(dailyPick.grain, 'daily');
+  assert.deepEqual(dailyPick.rows.map((row) => ({
+    bucket_start: row.bucket_start,
+    payment_usd: row.payment_usd,
+    settlement_usd: row.settlement_usd,
+    cumulative_settlement_usd: row.cumulative_settlement_usd
+  })), [
+    { bucket_start: '2026-01-01', payment_usd: 5, settlement_usd: 5, cumulative_settlement_usd: 5 },
+    { bucket_start: '2026-07-18', payment_usd: 2, settlement_usd: 2, cumulative_settlement_usd: 7 }
+  ]);
+
+  const weeklyPick = pickPaidRows(events, weekly, 'weekly', daily);
+  assert.equal(weeklyPick.grain, 'weekly');
+  assert.deepEqual(weeklyPick.rows.map((row) => ({
+    bucket_start: row.bucket_start,
+    payment_usd: row.payment_usd,
+    settlement_usd: row.settlement_usd,
+    cumulative_settlement_usd: row.cumulative_settlement_usd
+  })), [
+    { bucket_start: '2025-12-29', payment_usd: 5, settlement_usd: 5, cumulative_settlement_usd: 5 },
+    { bucket_start: '2026-07-13', payment_usd: 2, settlement_usd: 2, cumulative_settlement_usd: 7 }
+  ]);
 });
 
 test('app-layer chart model keeps scheduler gaps visible', () => {
