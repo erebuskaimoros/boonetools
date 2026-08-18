@@ -3,6 +3,11 @@ import zoomPlugin from 'chartjs-plugin-zoom';
 import { INTERACTIVE_CHART_LEGEND, TERMINAL_CHART_PALETTE } from '../charts/terminal.js';
 import { denomLabel, fillBucketGaps, formatWeekLabel } from './model.js';
 
+export {
+  buildAccruedValueTooltipDetails,
+  buildPolAccrualTooltipDetails
+} from './chart-tooltips.js';
+
 Chart.register(zoomPlugin);
 
 const usd0 = new Intl.NumberFormat('en-US', {

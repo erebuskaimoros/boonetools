@@ -38,6 +38,8 @@
   } from './app-layer/model.js';
   import {
     APP_LAYER_SERIES,
+    buildAccruedValueTooltipDetails,
+    buildPolAccrualTooltipDetails,
     collectedFlowTooltip,
     renderAppLayerSeriesChart
   } from './app-layer/charts.js';
@@ -478,10 +480,7 @@
         }
       ],
       cumulativeLabel: 'Cumulative TC-retained value (01 + 03)',
-      afterBody: (row) => [
-        `TC-retained 01: ${usd2.format(row.inflow_usd || 0)}`,
-        `TC-retained 01 + 03: ${usd2.format(row.accrued_value_usd || 0)}`
-      ]
+      afterBody: buildAccruedValueTooltipDetails
     });
   }
 
@@ -536,13 +535,7 @@
       cumulativeField: 'cumulative_pol_accrued_usd',
       barLabel: 'THORChain POL accrual USD',
       cumulativeLabel: 'Cumulative THORChain POL accrual USD',
-      afterBody: (row) => [
-        ...(pick.grain === 'weekly'
-          ? [`Post-cutover gross in this week: ${usd2.format(row.post_cutover_gross_usd || 0)}`]
-          : []),
-        `POL share accrued: ${usd2.format(row.pol_accrued_usd || 0)}`,
-        `Allocation: ${row.bucket_start >= '2026-08-13' || row.post_cutover_gross_usd ? '1/3 of post-cutover accrual' : 'pre-cutover · no POL'}`
-      ]
+      afterBody: (row) => buildPolAccrualTooltipDetails(row, pick.grain)
     });
   }
 
