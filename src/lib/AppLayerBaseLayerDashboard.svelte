@@ -495,12 +495,7 @@
       cumulativeField: 'cumulative_usd',
       barLabel: 'App-layer earnings retained for TC (2/3 since cutover)',
       cumulativeLabel: 'Cumulative app-layer earnings retained for TC',
-      afterBody: (row) => [
-        ...collectedFlowTooltip(row, pick.grain),
-        `Gross 01 accrual: ${usd2.format(row.gross_inflow_usd || 0)}`,
-        `TC-retained share: ${usd2.format(row.inflow_usd || 0)}`,
-        `POL accrued separately: ${usd2.format(row.pol_accrued_usd || 0)}`
-      ]
+      afterBody: (row) => collectedFlowTooltip(row, pick.grain)
     });
   }
 
