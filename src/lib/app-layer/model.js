@@ -129,6 +129,29 @@ export function normalizeSettlementBuckets(rows, grain) {
   return (rows || []).map((row) => normalizeSettlementBucket(row, grain));
 }
 
+/**
+ * @param {{ reserveUsd?: number, polUsd?: number, liquidityFeeUsd?: number }} [value]
+ */
+export function summarizeAppLayerValue(value = {}) {
+  const { reserveUsd, polUsd, liquidityFeeUsd } = value;
+  const normalizedReserveUsd = finiteNumber(reserveUsd);
+  const normalizedPolUsd = finiteNumber(polUsd);
+  const normalizedLiquidityFeeUsd = finiteNumber(liquidityFeeUsd);
+  const realizedTcUsd = normalizedReserveUsd + normalizedLiquidityFeeUsd;
+
+  return {
+    reserveUsd: normalizedReserveUsd,
+    polAllocatedUsd: normalizedPolUsd,
+    liquidityFeeUsd: normalizedLiquidityFeeUsd,
+    realizedTcUsd,
+    totalTrackedUsd: realizedTcUsd + normalizedPolUsd,
+    reserveShare: realizedTcUsd > 0 ? normalizedReserveUsd / realizedTcUsd * 100 : 0,
+    liquidityFeeShare: realizedTcUsd > 0
+      ? normalizedLiquidityFeeUsd / realizedTcUsd * 100
+      : 0
+  };
+}
+
 export function pickAggRows(source, grain) {
   const daily = source?.daily || [];
   const weekly = source?.weekly || [];

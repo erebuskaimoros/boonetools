@@ -8,6 +8,7 @@ import {
   parseCsv,
   pickAccruedValueRows,
   pickPaidRows,
+  summarizeAppLayerValue,
   summarizeCollectorInventory
 } from '../src/lib/app-layer/model.js';
 
@@ -198,6 +199,22 @@ test('accrued TC value aligns 01 and 03 without double-counting 02', () => {
         liquidity_fee_usd: 4
       }
     ]
+  });
+});
+
+test('top-level value separates POL capital from realized value to THORChain', () => {
+  assert.deepEqual(summarizeAppLayerValue({
+    reserveUsd: 60,
+    polUsd: 30,
+    liquidityFeeUsd: 10
+  }), {
+    reserveUsd: 60,
+    polAllocatedUsd: 30,
+    liquidityFeeUsd: 10,
+    realizedTcUsd: 70,
+    totalTrackedUsd: 100,
+    reserveShare: 60 / 70 * 100,
+    liquidityFeeShare: 10 / 70 * 100
   });
 });
 
