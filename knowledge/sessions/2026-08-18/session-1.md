@@ -19,9 +19,10 @@ BooneTools now models the 2026-08-13 Rujira target changes as typed Base Layer s
 - Added typed `reserve` and `pol` canonical events while retaining the original Reserve identity and API fields.
 - Kept the scheduled RPC settlement scan active after successful Dune Reserve ingestion.
 - Added migration 044 to constrain settlement destinations, requeue affected blocks, and rewind the cadence cursor.
+- Verified the first split payout against the live Base collector config, corrected the full POL-fund target, and added forward migration 045 to safely reparse post-cutover blocks.
 - Updated lane 01 conservation to add back both Base Layer settlement destinations.
 - Updated live/fallback route maps, total benefit, lane 02 charts and tables, recent events, timeline, labels, and documentation.
-- Verified 266 backend tests, 197 frontend tests, zero Svelte errors, the frontend surface/boundary checks, and a production build.
+- Verified the complete backend and frontend suites, zero Svelte errors, the frontend surface/boundary checks, and a production build.
 
 ## Discoveries
 
@@ -29,12 +30,14 @@ BooneTools now models the 2026-08-13 Rujira target changes as typed Base Layer s
 - Dune query `7620011` remains a direct Reserve source. POL settlement must come from scheduled block-result parsing, so a successful Dune run cannot short-circuit the RPC lane.
 - Historical compatibility requires `payment_*` and `eventCount` to remain Reserve-only; additive `pol_*` and `settlement_*` fields carry the new accounting.
 - Lane 01 conservation treats Reserve and POL outflows alike because both are settlement of value already accrued inside the weighted Base Layer boundary.
+- The POL-fund role cannot be identified safely from its `...fgen` suffix alone; the complete target must be resolved from the live contract config or an observed distribution event.
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
 | `backend/migrations/044_rujira_fee_share_settlements.sql` | Adds typed settlement storage and post-cutover reparse state |
+| `backend/migrations/045_correct_rujira_pol_fund.sql` | Corrects the full POL-fund target and safely repeats the post-cutover scan |
 | `backend/src/shared/rujira-reserve-payments.js` | Parses, prices, stores, and aggregates Reserve/POL settlement |
 | `backend/src/shared/rujira-base-layer-earnings.js` | Conserves both settlement destinations in lane 01 |
 | `backend/src/handlers/app-layer-reserve-payments.js` | Uses settlement terminology in warming/stale responses |
@@ -48,11 +51,11 @@ BooneTools now models the 2026-08-13 Rujira target changes as typed Base Layer s
 
 ## In Progress
 
-None - implementation and local verification are complete; release verification is owned by the canonical deployment scripts after this commit.
+None - implementation, local verification, and the corrective release are complete.
 
 ## Next Steps
 
-- [ ] Confirm migration 044 completes the post-cutover scheduled-block reparse.
+- [ ] Confirm migration 045 completes the post-cutover scheduled-block reparse.
 - [ ] Verify the live dashboard shows Reserve, POL, and combined settlement totals.
 - [ ] Monitor settlement pricing and scheduler freshness after deployment.
 - [ ] Regenerate the dated static Reserve fallback if fresher outage coverage is required.

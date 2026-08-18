@@ -374,6 +374,10 @@ RPC block scan even after a successful Dune run because Dune query `7620011`
 provides the Reserve branch, while scheduled block results provide POL-fund
 transfers. Lane 01 conservation adds back both destinations.
 
+Migration `045_correct_rujira_pol_fund.sql` corrects the full POL-fund target,
+removes any rows associated with the incomplete target from migration 044, and
+safely repeats the scheduled scan from height `27410412`.
+
 The host-wide `/etc/caddy/Caddyfile` is owned and deployed independently by Web
 Ops because it also serves MemeMap, The AI Guys, webmail, traffic reports, and
 Landlord. BooneTools application deploys do not modify or reload Caddy. They

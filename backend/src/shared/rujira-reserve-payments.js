@@ -37,7 +37,7 @@ export const BASE_LAYER_REVENUE_COLLECTOR =
 export const TC_RESERVE_MODULE =
   'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
 export const THORCHAIN_POL_FUND =
-  'thor1glpfjhxzjdtnz4wy3hv4ywl65y9w84l6efgen';
+  'thor1glpf75rxtuu0mahvf0cqg27ek22x9w0uc5rkpcf9g0d9499pqcdql3fgen';
 export const RUJIRA_FEE_SHARE_CONFIG_HEIGHT = 27410382;
 export const RUJIRA_FEE_SHARE_FIRST_PAYMENT_HEIGHT = 27410412;
 export const RUJIRA_FEE_SHARE_CHANGED_AT = '2026-08-13T12:24:04.000Z';

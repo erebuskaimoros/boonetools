@@ -45,7 +45,7 @@
   const BASE_LAYER_COLLECTOR =
     'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
   const RESERVE_MODULE = 'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
-  const THORCHAIN_POL_FUND = 'thor1glpfjhxzjdtnz4wy3hv4ywl65y9w84l6efgen';
+  const THORCHAIN_POL_FUND = 'thor1glpf75rxtuu0mahvf0cqg27ek22x9w0uc5rkpcf9g0d9499pqcdql3fgen';
   const RUJI_STAKER_COLLECTOR =
     'thor13g83nn5ef4qzqeafp0508dnvkvm0zqr3sj7eefcn5umu65gqluusrml5cr';
   const RUJIRA_ECOSYSTEM_FUND =
