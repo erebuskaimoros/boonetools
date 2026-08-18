@@ -48,6 +48,13 @@ final Reserve/POL settlement cancel rather than create new earnings. The cumulat
 view is an optional rollup of those period rows and overlaps 02; it is never
 added to the settlement total.
 
+The dashboard applies the destination split on the accrual date rather than the
+later payout date. Lane 01 retains 100% through the 2026-08-12 UTC bucket and
+two-thirds beginning with the 2026-08-13 bucket; the remaining one-third is the
+POL accrual series. Mixed cutover weeks are aggregated from daily rows.
+Observed POL transfers remain a separate settlement ledger, and pre-cutover
+inventory paid after the target change is not presented as newly earned POL.
+
 `boonetools-app-layer-live-state.timer` refreshes current balances, route
 configs, conversion actions, and prices every two minutes. The same run
 recomputes the current UTC day from a persisted midnight balance baseline and

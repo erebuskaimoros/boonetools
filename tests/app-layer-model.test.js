@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  allocatePolAccruals,
   bucketReserveEvents,
-  excludePolFromAccruals,
   fillBucketGaps,
   getTargetsForConfig,
   parseCsv,
@@ -203,81 +203,77 @@ test('accrued TC value aligns 01 and 03 without double-counting 02', () => {
   });
 });
 
-test('the first two chart lanes exclude value settled to POL', () => {
-  const adjusted = excludePolFromAccruals({
+test('the first two chart lanes allocate POL when value is earned, not when it settles', () => {
+  const adjusted = allocatePolAccruals({
     meta: {
-      totalInflowUsd: 125,
-      netNewInflowUsd: 75
+      baselineInventoryUsd: 100,
+      totalInflowUsd: 228.15494792232852,
+      netNewInflowUsd: 128.15494792232852
     },
     daily: [
       { day_start: '2026-08-12', inflow_usd: 30, cumulative_usd: 100 },
       { day_start: '2026-08-13', inflow_usd: 15, cumulative_usd: 115 },
       { day_start: '2026-08-14', inflow_usd: 10, cumulative_usd: 125 },
-      { day_start: '2026-08-15', inflow_usd: 0, cumulative_usd: 125 }
+      {
+        day_start: '2026-08-15',
+        inflow_usd: 73.15494792232852,
+        cumulative_usd: 198.15494792232852
+      }
     ],
     weekly: [
-      { week_start: '2026-08-10', inflow_usd: 55, cumulative_usd: 125 },
-      { week_start: '2026-08-17', inflow_usd: 0, cumulative_usd: 125 }
-    ]
-  }, {
-    meta: { totalPolUsd: 8 },
-    daily: [
-      { day_start: '2026-08-13', pol_usd: 5, cumulative_pol_usd: 5 },
-      { day_start: '2026-08-14', pol_usd: 3, cumulative_pol_usd: 8 }
-    ],
-    weekly: [
-      { week_start: '2026-08-10', pol_usd: 8, cumulative_pol_usd: 8 }
+      { week_start: '2026-08-10', inflow_usd: 128.15494792232852, cumulative_usd: 228.15494792232852 }
     ]
   });
 
-  assert.deepEqual(adjusted.daily, [
+  assert.deepEqual(adjusted.daily.map((row) => ({
+    day_start: row.day_start,
+    gross: row.gross_inflow_usd,
+    retained: row.inflow_usd,
+    polAccrued: row.pol_accrued_usd,
+    cumulativeRetained: row.cumulative_usd,
+    cumulativePol: row.cumulative_pol_accrued_usd
+  })), [
     {
       day_start: '2026-08-12',
-      inflow_usd: 30,
-      cumulative_usd: 100,
-      gross_inflow_usd: 30,
-      pol_usd_excluded: 0
+      gross: 30,
+      retained: 30,
+      polAccrued: 0,
+      cumulativeRetained: 130,
+      cumulativePol: 0
     },
     {
       day_start: '2026-08-13',
-      inflow_usd: 10,
-      cumulative_usd: 110,
-      gross_inflow_usd: 15,
-      pol_usd_excluded: 5
+      gross: 15,
+      retained: 10,
+      polAccrued: 5,
+      cumulativeRetained: 140,
+      cumulativePol: 5
     },
     {
       day_start: '2026-08-14',
-      inflow_usd: 7,
-      cumulative_usd: 117,
-      gross_inflow_usd: 10,
-      pol_usd_excluded: 3
+      gross: 10,
+      retained: 20 / 3,
+      polAccrued: 10 / 3,
+      cumulativeRetained: 440 / 3,
+      cumulativePol: 25 / 3
     },
     {
       day_start: '2026-08-15',
-      inflow_usd: 0,
-      cumulative_usd: 117,
-      gross_inflow_usd: 0,
-      pol_usd_excluded: 0
+      gross: 73.15494792232852,
+      retained: 73.15494792232852 * 2 / 3,
+      polAccrued: 73.15494792232852 / 3,
+      cumulativeRetained: 440 / 3 + 73.15494792232852 * 2 / 3,
+      cumulativePol: 25 / 3 + 73.15494792232852 / 3
     }
   ]);
-  assert.deepEqual(adjusted.weekly, [
-    {
-      week_start: '2026-08-10',
-      inflow_usd: 47,
-      cumulative_usd: 117,
-      gross_inflow_usd: 55,
-      pol_usd_excluded: 8
-    },
-    {
-      week_start: '2026-08-17',
-      inflow_usd: 0,
-      cumulative_usd: 117,
-      gross_inflow_usd: 0,
-      pol_usd_excluded: 0
-    }
-  ]);
-  assert.equal(adjusted.meta.totalInflowUsd, 117);
-  assert.equal(adjusted.meta.netNewInflowUsd, 67);
+  assert.equal(adjusted.weekly.length, 1);
+  assert.equal(adjusted.weekly[0].inflow_usd, 30 + (15 + 10 + 73.15494792232852) * 2 / 3);
+  assert.equal(adjusted.weekly[0].pol_accrued_usd, (15 + 10 + 73.15494792232852) / 3);
+  assert.equal(adjusted.meta.polAccruedUsd, (15 + 10 + 73.15494792232852) / 3);
+  assert.equal(adjusted.meta.totalInflowUsd, adjusted.daily.at(-1).cumulative_usd);
+  assert.equal(adjusted.meta.netNewInflowUsd, adjusted.meta.totalInflowUsd - 100);
+  assert.equal(Number(adjusted.daily.at(-1).inflow_usd.toFixed(2)), 48.77);
+  assert.equal(Number(adjusted.daily.at(-1).pol_accrued_usd.toFixed(2)), 24.38);
 });
 
 test('top-level value separates POL capital from realized value to THORChain', () => {

@@ -9,12 +9,11 @@
   import { TerminalAlert } from '$lib/components/terminal';
   import {
     EMPTY_INVENTORY,
+    allocatePolAccruals,
     amountFromBase,
-    bucketReserveEvents,
     buildPoolPrices,
     denomLabel,
     estimateUsd as estimateBalanceUsd,
-    excludePolFromAccruals,
     formatAddress,
     formatAssetAmount,
     formatDataSource,
@@ -355,30 +354,15 @@
     liquidityFeeUsd: totalGeneratedFeeUsd
   });
   $: totalRealizedTcUsd = appLayerValue.realizedTcUsd;
-  $: totalTrackedValueUsd = appLayerValue.totalTrackedUsd;
+  $: totalObservedOutputUsd = appLayerValue.totalTrackedUsd;
   $: benefitReserveShare = appLayerValue.reserveShare;
   $: benefitLpShare = appLayerValue.liquidityFeeShare;
   $: topTotalsLoading =
     (reservePaymentsLoading && !weeklyRows.length) ||
     (generatedFeesLoading && !generatedFeeRows.length);
 
-  $: accrualSettlementRows = {
-    meta: reservePaymentMeta,
-    daily: reserveDailyRows.length
-      ? reserveDailyRows
-      : reserveEvents.length
-        ? bucketReserveEvents(reserveEvents, 'daily')
-        : [],
-    weekly: weeklyRows.length
-      ? weeklyRows
-      : reserveEvents.length
-        ? bucketReserveEvents(reserveEvents, 'weekly')
-        : []
-  };
-  $: tcInflows = excludePolFromAccruals(inflows, accrualSettlementRows);
-  $: settlementAccrualLoading =
-    reservePaymentsLoading && !weeklyRows.length && !reserveEvents.length;
-  $: tcInflowsLoading = inflowsLoading || settlementAccrualLoading;
+  $: tcInflows = allocatePolAccruals(inflows);
+  $: tcInflowsLoading = inflowsLoading;
   $: inflowRows = tcInflows?.weekly || [];
   $: inflowMeta = tcInflows?.meta || null;
   $: inflowDenomTotals = (inflows?.denomTotals || [])
@@ -390,13 +374,25 @@
   );
   $: inflowOpeningUsd = Number(inflowMeta?.baselineInventoryUsd || 0);
   $: inflowNetNewUsd = Number(inflowMeta?.netNewInflowUsd || 0);
-  $: inflowPolExcludedUsd = Number(inflowMeta?.polExcludedUsd || 0);
+  $: totalPolAccruedUsd = Number(
+    inflowMeta?.polAccruedUsd ?? inflowRows.at(-1)?.cumulative_pol_accrued_usd ?? 0
+  );
   $: inflowDayCount = Number(inflowMeta?.dayCount || 0);
   $: totalAccruedValueUsd = totalInflowUsd + totalGeneratedFeeUsd;
   $: accruedValueLoading =
     (tcInflowsLoading && !inflowRows.length) ||
-    settlementAccrualLoading ||
     (generatedFeesLoading && !generatedFeeRows.length);
+  $: polAccrualWeeklyRows = inflowRows.map((row) => {
+    const settlement = settlementWeeklyRows.find(
+      (candidate) => candidate.week_start === row.week_start
+    );
+    return {
+      ...row,
+      observed_pol_payments: settlement?.pol_payments || 0,
+      observed_pol_rune: settlement?.pol_rune || 0,
+      observed_pol_usd: settlement?.pol_usd || 0
+    };
+  });
 
   $: collectorInventories = Object.fromEntries(
     collectors.map((collector) => [
@@ -434,6 +430,8 @@
     return sum + routableUsd * ((baseShares[key] || 0) / 100);
   }, 0);
   $: pendingKnownUsd = baseRoutableInventoryUsd + upstreamBaseBoundUsd;
+  $: pendingTcRetainedUsd = pendingKnownUsd * 2 / 3;
+  $: pendingPolAccruedUsd = pendingKnownUsd / 3;
   $: historyLabels = Object.fromEntries(
     collectors.map((collector) => [
       collector.key,
@@ -469,7 +467,7 @@
       barLabel: 'TC-retained accrued value (01 + 03)',
       barSeries: [
         {
-          label: '01 · Base Layer earnings (POL excluded)',
+          label: '01 · Base Layer earnings (TC-retained share)',
           valueField: 'inflow_usd',
           colors: APP_LAYER_SERIES.collected
         },
@@ -480,7 +478,12 @@
         }
       ],
       cumulativeLabel: 'Cumulative TC-retained value (01 + 03)',
-      afterBody: (row) => [`TC-retained value this bucket: ${usd2.format(row.accrued_value_usd || 0)}`]
+      afterBody: (row) => [
+        `Gross 01 accrual: ${usd2.format(row.gross_inflow_usd || row.inflow_usd || 0)}`,
+        `TC-retained 01: ${usd2.format(row.inflow_usd || 0)}`,
+        `POL accrued separately: ${usd2.format(row.pol_accrued_usd || 0)}`,
+        `TC-retained 01 + 03: ${usd2.format(row.accrued_value_usd || 0)}`
+      ]
     });
   }
 
@@ -493,13 +496,13 @@
       colors: APP_LAYER_SERIES.collected,
       valueField: 'inflow_usd',
       cumulativeField: 'cumulative_usd',
-      barLabel: 'App-layer earnings retained for TC (POL excluded)',
+      barLabel: 'App-layer earnings retained for TC (2/3 since cutover)',
       cumulativeLabel: 'Cumulative app-layer earnings retained for TC',
       afterBody: (row) => [
         ...collectedFlowTooltip(row, pick.grain),
-        ...(row.pol_usd_excluded
-          ? [`${usd2.format(row.pol_usd_excluded)} POL allocation excluded`]
-          : [])
+        `Gross 01 accrual: ${usd2.format(row.gross_inflow_usd || 0)}`,
+        `TC-retained share: ${usd2.format(row.inflow_usd || 0)}`,
+        `POL accrued separately: ${usd2.format(row.pol_accrued_usd || 0)}`
       ]
     });
   }
@@ -524,22 +527,24 @@
     });
   }
 
-  function renderPolPaymentChart(pick, chartView) {
+  function renderPolAccrualChart(pick, chartView) {
     polPaymentChart = renderSeriesChart(polPaymentCanvas, polPaymentChart, {
       zoomKey: 'pol',
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
       colors: APP_LAYER_SERIES.pol,
-      valueField: 'pol_usd',
-      cumulativeField: 'cumulative_pol_usd',
-      barLabel: 'THORChain POL allocation USD',
-      cumulativeLabel: 'Cumulative THORChain POL allocation USD',
+      valueField: 'pol_accrued_usd',
+      cumulativeField: 'cumulative_pol_accrued_usd',
+      barLabel: 'THORChain POL accrual USD',
+      cumulativeLabel: 'Cumulative THORChain POL accrual USD',
       afterBody: (row) => [
-        `${number2.format(row.pol_payments || 0)} POL transfer${row.pol_payments === 1 ? '' : 's'}`,
-        `${number2.format(row.pol_rune || 0)} RUNE allocated to POL`,
-        `${number4.format(row.settlement_rune_price_usd || row.rune_price_usd || 0)} avg historical RUNE/USD`,
-        `${number2.format(row.cumulative_pol_rune || 0)} cumulative POL RUNE`
+        `Gross 01 accrual: ${usd2.format(row.gross_inflow_usd || 0)}`,
+        ...(pick.grain === 'weekly'
+          ? [`Post-cutover gross in this week: ${usd2.format(row.post_cutover_gross_usd || 0)}`]
+          : []),
+        `POL share accrued: ${usd2.format(row.pol_accrued_usd || 0)}`,
+        `Allocation: ${row.bucket_start >= '2026-08-13' || row.post_cutover_gross_usd ? '1/3 of post-cutover accrual' : 'pre-cutover · no POL'}`
       ]
     });
   }
@@ -566,14 +571,14 @@
   $: accruedValuePick = pickAccruedValueRows(tcInflows, generatedFees, granularity.accrued);
   $: collectedPick = pickAggRows(tcInflows, granularity.collected);
   $: paidPick = pickPaidRows(reserveEvents, weeklyRows, granularity.paid, reserveDailyRows);
-  $: polPick = pickPaidRows(reserveEvents, weeklyRows, granularity.pol, reserveDailyRows);
+  $: polPick = pickAggRows(tcInflows, granularity.pol);
   $: generatedPick = pickAggRows(generatedFees, granularity.generated);
 
   $: if (accruedValueCanvas && accruedValuePick.rows.length)
     renderAccruedValueChart(accruedValuePick, view.accrued);
   $: if (collectedCanvas && collectedPick.rows.length) renderCollectedChart(collectedPick, view.collected);
   $: if (paymentCanvas && paidPick.rows.length) renderPaymentChart(paidPick, view.paid);
-  $: if (polPaymentCanvas && polPick.rows.length) renderPolPaymentChart(polPick, view.pol);
+  $: if (polPaymentCanvas && polPick.rows.length) renderPolAccrualChart(polPick, view.pol);
   $: if (generatedFeesCanvas && generatedPick.rows.length)
     renderGeneratedFeesChart(generatedPick, view.generated);
 
@@ -860,8 +865,9 @@
     <h1 class="title">APP LAYER <span class="arrow">→</span> BASE LAYER<span class="cursor">_</span></h1>
     <p class="lede">
       App-layer fees are measured first at the <b class="k-collected">01 TC-retained accrual</b>
-      boundary, with observed POL settlements removed, then shown separately as <b class="k-paid">02 TC Reserve settlement</b>,
-      <b class="k-pol">P POL capital allocation</b>, and <b class="k-generated">03 liquidity fees</b>
+      boundary, using 100% through Aug 12 and the contract's two-thirds share from Aug 13, then shown
+      separately as <b class="k-paid">02 TC Reserve settlement</b>, <b class="k-pol">P POL accrual</b>,
+      and <b class="k-generated">03 liquidity fees</b>
       generated on THORChain pools. <b class="k-benefit">Σ realized value to TC</b> = 02 Reserve + 03
       System Income. POL is reported beside that total, not inside it or either 01 chart.
     </p>
@@ -949,7 +955,7 @@
         <strong class="fnode-name">Base Layer Value for TC</strong>
         <strong class="fnode-fig">{tcInflowsLoading ? '—' : usd2.format(totalInflowUsd)}</strong>
         <p class="fnode-sub">
-          {liveLoading ? '—' : usd2.format(pendingKnownUsd)} remains base-layer-bound · POL excluded
+          {liveLoading ? '—' : usd2.format(pendingTcRetainedUsd)} of current pending value at the 2/3 TC share
         </p>
       </a>
 
@@ -967,10 +973,10 @@
           <p class="fnode-sub">{number2.format(reserveEventCount)} Reserve deposits · realized value to TC</p>
         </a>
         <a class="fnode amber stage" href="#chart-pol">
-          <span class="fnode-kicker"><i>P</i> allocated</span>
-          <strong class="fnode-name">THORChain POL Fund</strong>
-          <strong class="fnode-fig">{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(totalPolPaidUsd)}</strong>
-          <p class="fnode-sub">{number2.format(polEventCount)} POL transfers · tracked separately</p>
+          <span class="fnode-kicker"><i>P</i> accrued</span>
+          <strong class="fnode-name">THORChain POL Allocation</strong>
+          <strong class="fnode-fig">{tcInflowsLoading ? '—' : usd2.format(totalPolAccruedUsd)}</strong>
+          <p class="fnode-sub">{liveLoading ? '—' : usd2.format(pendingPolAccruedUsd)} current POL share of pending inventory · includes inherited backlog</p>
         </a>
       </div>
 
@@ -1002,13 +1008,13 @@
     </div>
 
     <div class="flow-legend">
-      <span><b class="k-collected">01</b> Base Layer share retained for TC after POL exits</span>
+      <span><b class="k-collected">01</b> Base Layer accrual · 100% before cutover, then 2/3 retained for TC</span>
       <span class="legend-arrow">→</span>
       <span>held &amp; converted to RUNE</span>
       <span class="legend-arrow">→</span>
       <span><b class="k-paid">02</b> settles to the TC Reserve</span>
       <span class="legend-sep">│</span>
-      <span><b class="k-pol">P</b> allocates the separate one-third POL leg after Aug 13</span>
+      <span><b class="k-pol">P</b> accrues the separate one-third leg from Aug 13; transfers may settle later</span>
       <span class="legend-sep">│</span>
       <span><b class="k-generated">03</b> pool fees generated along the way flow to System Income</span>
       <span class="legend-sep">│</span>
@@ -1040,9 +1046,9 @@
         <small>{totalRealizedTcUsd > 0 ? `${benefitLpShare.toFixed(0)}% of Σ` : 'liq fees'}</small>
       </div>
       <div class="benefit-hero-leg amber separate">
-        <span>P → pol capital</span>
-        <strong>{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(totalPolPaidUsd)}</strong>
-        <small>outside Σ · {usd2.format(totalTrackedValueUsd)} all tracked outputs</small>
+        <span>P → pol accrued</span>
+        <strong>{tcInflowsLoading ? '—' : usd2.format(totalPolAccruedUsd)}</strong>
+        <small>outside Σ · {topTotalsLoading ? '—' : usd2.format(totalObservedOutputUsd)} total observed paid outputs</small>
       </div>
     </div>
   </article>
@@ -1056,7 +1062,7 @@
       </div>
       <strong class="metric-value">{tcInflowsLoading ? '—' : usd2.format(totalInflowUsd)}</strong>
       <small class="metric-foot">
-        {inflowMeta ? `${usd2.format(inflowOpeningUsd)} opening + ${usd2.format(inflowNetNewUsd)} net new · ${usd2.format(inflowPolExcludedUsd)} POL excluded` : 'earnings data pending'}
+        {inflowMeta ? `${usd2.format(inflowOpeningUsd)} opening + ${usd2.format(inflowNetNewUsd)} retained · ${usd2.format(totalPolAccruedUsd)} accrued to POL` : 'earnings data pending'}
       </small>
     </article>
     <article class="metric">
@@ -1070,10 +1076,10 @@
     <article class="metric">
       <div class="metric-head">
         <span class="metric-idx pol-i">P</span>
-        <span class="metric-label">pol capital allocated</span>
+        <span class="metric-label">pol capital accrued</span>
       </div>
-      <strong class="metric-value">{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(totalPolPaidUsd)}</strong>
-      <small class="metric-foot">{number2.format(totalPolPaidRune)} RUNE · separate from realized value to TC</small>
+      <strong class="metric-value">{tcInflowsLoading ? '—' : usd2.format(totalPolAccruedUsd)}</strong>
+      <small class="metric-foot">1/3 of post-cutover 01 · {usd2.format(totalPolPaidUsd)} settled, including inherited backlog</small>
     </article>
     <article class="metric">
       <div class="metric-head">
@@ -1110,11 +1116,12 @@
       </div>
     </div>
     <p class="block-lede">
-      Each bar combines POL-excluded Base Layer earnings from <b class="k-collected">01</b>
+      Each bar combines TC-retained Base Layer earnings from <b class="k-collected">01</b>
       with non-overlapping TC liquidity fees from <b class="k-generated">03</b> in the same UTC
       bucket. Current cumulative TC-retained value: {accruedValueLoading ? '—' : usd2.format(totalAccruedValueUsd)}.
-      Observed POL payouts are subtracted from 01 by settlement bucket and carried through its
-      cumulative series. POL remains isolated in its own P chart and is not added back here.
+      Lane 01 retains 100% before the Aug 13, 2026 UTC bucket and two-thirds beginning with that
+      daily bucket; the other third accrues to the separate P chart. Settlement timing does not
+      alter either series, and pre-cutover inventory paid later is not recast as new POL accrual.
     </p>
     <div class="chart-frame">
       {#if accruedValueLoading}
@@ -1159,10 +1166,9 @@
       Each daily or weekly bar starts with newly earned app-layer value allocated to the Base Layer: 100%
       of routable Base Collector inventory changes plus the configured Base Layer share of
       routable RUJI Trade and Other Core Apps inventory changes. Internal route transfers,
-      conversions, and Reserve settlement cancel rather than create new earnings. Observed POL
-      settlement is then subtracted from the matching bucket, so POL is absent from both period and
-      cumulative views; cumulative POL is carried through buckets without a settlement. Negative
-      buckets remain visible when POL paid exceeds newly accrued value.
+      conversions, and later settlements do not change the accrual date. This chart retains 100%
+      through Aug 12, 2026 and two-thirds from Aug 13 onward; mixed cutover weeks are summed from
+      their daily allocations. The separate P chart receives the remaining one-third.
       Source: {formatDataSource(inflowMeta?.source)}.
     </p>
 
@@ -1179,7 +1185,7 @@
             <span>no Base Layer earnings rows available</span>
           </div>
         {:else}
-          <canvas bind:this={collectedCanvas} aria-label="Daily, weekly, and cumulative app-layer earnings retained for TC with POL excluded"></canvas>
+          <canvas bind:this={collectedCanvas} aria-label="Daily, weekly, and cumulative app-layer earnings retained for TC using the accrual-date split"></canvas>
         {/if}
       </div>
 
@@ -1187,7 +1193,7 @@
         <div class="side-card">
           <span>cumulative earnings retained for tc</span>
           <strong>{tcInflowsLoading ? '—' : usd2.format(totalInflowUsd)}</strong>
-          <small>{inflowMeta ? `${number2.format(inflowDayCount)} days measured · ${usd2.format(inflowPolExcludedUsd)} POL excluded` : 'earnings data pending'}</small>
+          <small>{inflowMeta ? `${number2.format(inflowDayCount)} days measured · ${usd2.format(totalPolAccruedUsd)} accrued separately to POL` : 'earnings data pending'}</small>
         </div>
         {#if inflowDenomTotals.length}
           <p class="side-table-note">largest gross source asset flows before POL allocation · + received / − converted or paid</p>
@@ -1315,7 +1321,7 @@
     <div class="block-head">
       <div class="block-title">
         <span class="title-marker amber">▌</span>
-        <h2>P · thorchain pol capital allocation</h2>
+        <h2>P · thorchain pol capital accrual</h2>
       </div>
       <div class="chart-controls amber-t">
         <div class="mode-toggle">
@@ -1333,59 +1339,59 @@
       </div>
     </div>
     <p class="block-lede">
-      The POL destination only: the one-third leg transferred from the Base Layer collector to the
-      THORChain POL Fund after the Aug 13, 2026 target change. This is protocol-owned liquidity
-      capital, reported separately from Σ realized value to TC and excluded from both 01 accrual
-      charts. Values use the historical RUNE/USD rate at dispersal. Source in use:
-      {reservePaymentSource} · {reservePaymentBackfillLabel}.
+      The POL destination's accrued value: one-third of gross 01 earnings beginning with the Aug 13,
+      2026 UTC daily bucket, assigned on the earnings date rather than the later transfer date. Mixed
+      cutover weeks are aggregated from those daily allocations. Pre-cutover inventory transferred
+      after the target change remains an observed settlement and is not recast as newly earned POL.
+      POL accrual stays outside Σ; observed on-chain POL settlements remain summarized below.
     </p>
     <div class="chart-frame">
-      {#if reservePaymentsLoading && !weeklyRows.length}
+      {#if tcInflowsLoading}
         <div class="loading-block">
           <span class="loading-marker">▓░░░░</span>
-          <span>loading POL allocation stream</span>
+          <span>loading POL accrual stream</span>
         </div>
-      {:else if !weeklyRows.length}
+      {:else if !polPick.rows.length}
         <div class="loading-block">
           <span class="loading-marker">░░░░░</span>
-          <span>no POL allocation rows available</span>
+          <span>no POL accrual rows available</span>
         </div>
       {:else}
-        <canvas bind:this={polPaymentCanvas} aria-label="Daily, weekly, and cumulative THORChain POL capital allocations"></canvas>
+        <canvas bind:this={polPaymentCanvas} aria-label="Daily, weekly, and cumulative THORChain POL capital accrual"></canvas>
       {/if}
     </div>
-    {#if weeklyRows.length}
+    {#if polAccrualWeeklyRows.length}
       <div class="reserve-price-basis pol-price-basis">
-        <span>POL allocated</span>
+        <span>POL accrued</span>
+        <strong>{usd2.format(totalPolAccruedUsd)}</strong>
+        <span>observed settled</span>
         <strong>{usd2.format(totalPolPaidUsd)} · {number2.format(totalPolPaidRune)} RUNE</strong>
-        <span>observed transfers</span>
-        <strong>{number2.format(polEventCount)}</strong>
-        <span>history coverage</span>
-        <strong>{reservePaymentBackfillLabel}</strong>
+        <span>observed transfers / coverage</span>
+        <strong>{number2.format(polEventCount)} · {reservePaymentBackfillLabel}</strong>
       </div>
       <details class="fold">
-        <summary><span class="fold-marker">+</span> weekly POL breakdown table</summary>
+        <summary><span class="fold-marker">+</span> weekly POL accrual + observed settlement table</summary>
         <div class="table-scroll reserve-weekly-table">
           <table>
             <thead>
               <tr>
                 <th>week</th>
-                <th>pol transfers</th>
-                <th>pol rune</th>
-                <th>avg rune/usd</th>
-                <th>pol usd</th>
-                <th>cumulative pol usd</th>
+                <th>pol accrued</th>
+                <th>cumulative accrued</th>
+                <th>observed transfers</th>
+                <th>observed rune</th>
+                <th>observed settled usd</th>
               </tr>
             </thead>
             <tbody>
-              {#each settlementWeeklyRows as row}
+              {#each polAccrualWeeklyRows as row}
                 <tr>
                   <td class="mono">{formatWeekLabel(row.week_start)} → {formatWeekLabel(row.week_end)}</td>
-                  <td class="num">{number2.format(row.pol_payments || 0)}</td>
-                  <td class="num accent-amber">{number2.format(row.pol_rune || 0)}</td>
-                  <td class="num">{row.settlement_rune_price_usd ? `$${number4.format(row.settlement_rune_price_usd)}` : '—'}</td>
-                  <td class="num accent-amber">{usd2.format(row.pol_usd || 0)}</td>
-                  <td class="num accent-amber">{usd2.format(row.cumulative_pol_usd || 0)}</td>
+                  <td class="num accent-amber">{usd2.format(row.pol_accrued_usd || 0)}</td>
+                  <td class="num accent-amber">{usd2.format(row.cumulative_pol_accrued_usd || 0)}</td>
+                  <td class="num">{number2.format(row.observed_pol_payments || 0)}</td>
+                  <td class="num">{number2.format(row.observed_pol_rune || 0)}</td>
+                  <td class="num">{usd2.format(row.observed_pol_usd || 0)}</td>
                 </tr>
               {/each}
             </tbody>

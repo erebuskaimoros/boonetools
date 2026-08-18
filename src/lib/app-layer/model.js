@@ -161,84 +161,122 @@ export function pickAggRows(source, grain) {
   return { rows: normalizeBuckets(weekly, 'weekly'), grain: 'weekly' };
 }
 
-function bucketKey(row, grain) {
-  return row?.[grain === 'weekly' ? 'week_start' : 'day_start'] ?? row?.bucket_start;
+const POL_ACCRUAL_CUTOVER_DAY = '2026-08-13';
+
+function inferOpeningUsd(inflows) {
+  const explicitOpening = Number(inflows?.meta?.baselineInventoryUsd);
+  if (Number.isFinite(explicitOpening)) return explicitOpening;
+  const first = inflows?.daily?.[0];
+  return first
+    ? finiteNumber(first.cumulative_usd) - finiteNumber(first.inflow_usd)
+    : 0;
 }
 
-function indexPolSettlements(rows, grain) {
-  const buckets = new Map();
-  for (const row of rows || []) {
-    const key = bucketKey(row, grain);
-    if (!key) continue;
-    const current = buckets.get(key) || { polUsd: 0, cumulativePolUsd: null };
-    current.polUsd += finiteNumber(row.pol_usd);
-    const explicitCumulative = row.cumulative_pol_usd;
-    if (explicitCumulative !== null && explicitCumulative !== undefined && explicitCumulative !== '') {
-      const numericCumulative = Number(explicitCumulative);
-      if (Number.isFinite(numericCumulative)) current.cumulativePolUsd = numericCumulative;
-    }
-    buckets.set(key, current);
-  }
+function allocateDailyPolAccruals(rows, openingUsd) {
+  let cumulativeRetainedUsd = openingUsd;
+  let cumulativePolAccruedUsd = 0;
 
-  let cumulativePolUsd = 0;
-  return [...buckets.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, bucket]) => {
-      cumulativePolUsd = bucket.cumulativePolUsd ?? cumulativePolUsd + bucket.polUsd;
-      return { key, polUsd: bucket.polUsd, cumulativePolUsd };
+  return (rows || [])
+    .slice()
+    .sort((left, right) => String(left.day_start).localeCompare(String(right.day_start)))
+    .map((row) => {
+      const grossInflowUsd = finiteNumber(row.gross_inflow_usd, row.inflow_usd);
+      const afterCutover = row.day_start >= POL_ACCRUAL_CUTOVER_DAY;
+      const retainedUsd = afterCutover ? grossInflowUsd * 2 / 3 : grossInflowUsd;
+      const polAccruedUsd = afterCutover ? grossInflowUsd / 3 : 0;
+      cumulativeRetainedUsd += retainedUsd;
+      cumulativePolAccruedUsd += polAccruedUsd;
+
+      return {
+        ...row,
+        gross_inflow_usd: grossInflowUsd,
+        inflow_usd: retainedUsd,
+        pol_accrued_usd: polAccruedUsd,
+        post_cutover_gross_usd: afterCutover ? grossInflowUsd : 0,
+        cumulative_usd: cumulativeRetainedUsd,
+        cumulative_pol_accrued_usd: cumulativePolAccruedUsd
+      };
     });
 }
 
-function excludePolFromRows(rows, settlementRows, grain) {
-  const polSettlements = indexPolSettlements(settlementRows, grain);
-  const polByBucket = new Map(polSettlements.map((row) => [row.key, row]));
+function aggregateAllocatedWeeks(daily, sourceWeekly) {
+  const sourceByWeek = new Map(
+    (sourceWeekly || []).map((row) => [row.week_start ?? row.bucket_start, row])
+  );
+  const buckets = new Map();
 
-  return (rows || []).map((row) => {
-    const key = bucketKey(row, grain);
-    const settlement = polByBucket.get(key);
-    let cumulativePolUsd = 0;
-    for (const candidate of polSettlements) {
-      if (candidate.key > key) break;
-      cumulativePolUsd = candidate.cumulativePolUsd;
-    }
-    const grossInflowUsd = finiteNumber(row.inflow_usd);
-    const polUsdExcluded = settlement?.polUsd || 0;
-
-    return {
-      ...row,
-      inflow_usd: grossInflowUsd - polUsdExcluded,
-      cumulative_usd: finiteNumber(row.cumulative_usd) - cumulativePolUsd,
-      gross_inflow_usd: grossInflowUsd,
-      pol_usd_excluded: polUsdExcluded
+  for (const row of daily) {
+    const weekStart = startOfUtcWeek(new Date(`${row.day_start}T00:00:00Z`))
+      .toISOString()
+      .slice(0, 10);
+    const bucket = buckets.get(weekStart) || {
+      preCutoverGrossUsd: 0,
+      postCutoverGrossUsd: 0,
+      lastDaily: row
     };
-  });
+    if (row.day_start < POL_ACCRUAL_CUTOVER_DAY) {
+      bucket.preCutoverGrossUsd += row.gross_inflow_usd;
+    } else {
+      bucket.postCutoverGrossUsd += row.gross_inflow_usd;
+    }
+    bucket.lastDaily = row;
+    buckets.set(weekStart, bucket);
+  }
+
+  return [...buckets.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([weekStart, bucket]) => {
+      const weekEnd = new Date(`${weekStart}T00:00:00Z`);
+      weekEnd.setUTCDate(weekEnd.getUTCDate() + 7);
+      return {
+        ...(sourceByWeek.get(weekStart) || {}),
+        week_start: weekStart,
+        week_end: sourceByWeek.get(weekStart)?.week_end || weekEnd.toISOString().slice(0, 10),
+        gross_inflow_usd: bucket.preCutoverGrossUsd + bucket.postCutoverGrossUsd,
+        post_cutover_gross_usd: bucket.postCutoverGrossUsd,
+        inflow_usd: bucket.preCutoverGrossUsd + bucket.postCutoverGrossUsd * 2 / 3,
+        pol_accrued_usd: bucket.postCutoverGrossUsd / 3,
+        cumulative_usd: bucket.lastDaily.cumulative_usd,
+        cumulative_pol_accrued_usd: bucket.lastDaily.cumulative_pol_accrued_usd
+      };
+    });
 }
 
 /**
- * Removes observed POL settlements from the gross Base Layer conservation
- * series. Gross inflow includes inventory change plus Reserve and POL
- * outflows, so subtracting the POL leg leaves inventory change plus Reserve.
+ * Allocates gross Base Layer accrual at the contract's effective destination
+ * split: 100% retained for TC before 2026-08-13, then 2/3 retained for TC and
+ * 1/3 accrued to POL. Weekly cutover buckets are always rebuilt from daily
+ * rows so the pre/post-cutover portions are not assigned one blanket ratio.
  *
  * @param {{ meta?: object, daily?: object[], weekly?: object[], [key: string]: any } | null} inflows
- * @param {{ meta?: object, daily?: object[], weekly?: object[] } | null} settlements
  */
-export function excludePolFromAccruals(inflows, settlements) {
+export function allocatePolAccruals(inflows) {
   if (!inflows) return inflows;
 
-  const daily = excludePolFromRows(inflows.daily, settlements?.daily, 'daily');
-  const weekly = excludePolFromRows(inflows.weekly, settlements?.weekly, 'weekly');
-  const dailyPol = indexPolSettlements(settlements?.daily, 'daily').at(-1)?.cumulativePolUsd || 0;
-  const weeklyPol = indexPolSettlements(settlements?.weekly, 'weekly').at(-1)?.cumulativePolUsd || 0;
-  const metaPol = finiteNumber(settlements?.meta?.totalPolUsd);
-  const totalPolUsd = Math.max(metaPol, dailyPol, weeklyPol);
-  const meta = { ...(inflows.meta || {}), polExcludedUsd: totalPolUsd };
-  const totalInflowUsd = Number(inflows.meta?.totalInflowUsd);
-  const netNewInflowUsd = Number(inflows.meta?.netNewInflowUsd);
+  const openingUsd = inferOpeningUsd(inflows);
+  const daily = allocateDailyPolAccruals(inflows.daily, openingUsd);
+  const weekly = aggregateAllocatedWeeks(daily, inflows.weekly);
+  const grossAccruedUsd = daily.reduce((sum, row) => sum + row.gross_inflow_usd, 0);
+  const postCutoverGrossUsd = daily.reduce(
+    (sum, row) => sum + (row.day_start >= POL_ACCRUAL_CUTOVER_DAY ? row.gross_inflow_usd : 0),
+    0
+  );
+  const polAccruedUsd = postCutoverGrossUsd / 3;
+  const totalInflowUsd = daily.at(-1)?.cumulative_usd ?? openingUsd;
 
-  if (Number.isFinite(totalInflowUsd)) meta.totalInflowUsd = totalInflowUsd - totalPolUsd;
-  if (Number.isFinite(netNewInflowUsd)) meta.netNewInflowUsd = netNewInflowUsd - totalPolUsd;
-
-  return { ...inflows, meta, daily, weekly };
+  return {
+    ...inflows,
+    meta: {
+      ...(inflows.meta || {}),
+      baselineInventoryUsd: openingUsd,
+      grossAccruedUsd,
+      polAccruedUsd,
+      totalInflowUsd,
+      netNewInflowUsd: totalInflowUsd - openingUsd
+    },
+    daily,
+    weekly
+  };
 }
 
 export function pickAccruedValueRows(inflows, generatedFees, grain) {
@@ -279,12 +317,21 @@ export function pickAccruedValueRows(inflows, generatedFees, grain) {
       generatedFeeCumulativeUsd = nextGeneratedFeeCumulativeUsd;
     }
 
+    const allocation = inflow && Object.prototype.hasOwnProperty.call(inflow, 'pol_accrued_usd')
+      ? {
+          gross_inflow_usd: finiteNumber(inflow.gross_inflow_usd, inflow.inflow_usd),
+          pol_accrued_usd: finiteNumber(inflow.pol_accrued_usd),
+          cumulative_pol_accrued_usd: finiteNumber(inflow.cumulative_pol_accrued_usd)
+        }
+      : {};
+
     return {
       bucket_start: bucketStart,
       accrued_value_usd: inflowUsd + generatedFeeUsd,
       cumulative_usd: inflowCumulativeUsd + generatedFeeCumulativeUsd,
       inflow_usd: inflowUsd,
-      liquidity_fee_usd: generatedFeeUsd
+      liquidity_fee_usd: generatedFeeUsd,
+      ...allocation
     };
   });
 

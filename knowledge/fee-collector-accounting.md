@@ -117,6 +117,16 @@ movement creates new earnings. A cumulative view may be derived from the
 period rows, but 01 still overlaps final Base Layer settlement and must not be
 added to 02.
 
+Destination presentation should allocate that gross accrual when it is earned,
+not when the collector later pays it. At the dashboard's daily resolution, 01
+is 100% TC-retained through the 2026-08-12 UTC bucket; beginning with the
+2026-08-13 bucket, two-thirds is TC-retained and one-third is POL accrual.
+Mixed cutover weeks must be rebuilt from those daily allocations. Observed POL
+transfers remain a separate settlement series. Existing inventory that became
+POL-routable at the target change may settle after the cutover, but it is not
+recast as newly earned POL; consequently accrued, currently pending, and paid
+POL are related but distinct measures.
+
 ## Implementation notes
 
 - Needs daily (or whatever bucket granularity you're reporting) historical
