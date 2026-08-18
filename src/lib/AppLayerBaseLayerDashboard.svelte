@@ -479,9 +479,7 @@
       ],
       cumulativeLabel: 'Cumulative TC-retained value (01 + 03)',
       afterBody: (row) => [
-        `Gross 01 accrual: ${usd2.format(row.gross_inflow_usd || row.inflow_usd || 0)}`,
         `TC-retained 01: ${usd2.format(row.inflow_usd || 0)}`,
-        `POL accrued separately: ${usd2.format(row.pol_accrued_usd || 0)}`,
         `TC-retained 01 + 03: ${usd2.format(row.accrued_value_usd || 0)}`
       ]
     });
@@ -539,7 +537,6 @@
       barLabel: 'THORChain POL accrual USD',
       cumulativeLabel: 'Cumulative THORChain POL accrual USD',
       afterBody: (row) => [
-        `Gross 01 accrual: ${usd2.format(row.gross_inflow_usd || 0)}`,
         ...(pick.grain === 'weekly'
           ? [`Post-cutover gross in this week: ${usd2.format(row.post_cutover_gross_usd || 0)}`]
           : []),
