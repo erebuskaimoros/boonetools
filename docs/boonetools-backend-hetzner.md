@@ -283,8 +283,8 @@ Migration `027_api_read_models.sql` adds the shared `api_read_models` snapshot
 store and bounded publisher-run history. Migration
 `028_analytics_read_paths.sql` adds the ordered/cursor indexes used by compact
 summary and drill-down routes. The additive public routes are
-`/status-live`, `/status-dashboard`, `/treasury-snapshot`, `/node-votes-summary`, and
-`/rapid-swaps-summary`; the established Node/Rapid routes remain compatibility
+`/status-live`, `/status-dashboard`, `/treasury-snapshot`, `/node-votes-summary`,
+`/rapid-swaps-summary`, and `/pol-tracker`; the established Node/Rapid routes remain compatibility
 surfaces during frontend rollout but never contact providers on a GET.
 
 `boonetools-thornode-core-snapshot.timer` publishes the canonical mixed-cadence
@@ -316,6 +316,23 @@ because the public Spot archive has no historical best-bid/best-ask stream.
 It writes in bounded transactions, preserves any live row at a conflicting
 timestamp, verifies every planned bucket, and refreshes the public read model.
 It has no timer and does not run automatically during future deploys.
+
+Migration `046_pol_tracker.sql` adds daily and per-pool POL Tracker history.
+The `boonetools-pol-tracker.timer` samples the latest completed UTC day at
+00:10 UTC and republishes `/pol-tracker`. Configure `POL_TRACKER_THORNODE_URLS`
+with a historical-height THORNode endpoint and `POL_TRACKER_RPC_URLS` with an
+archive RPC before starting the one-time February 2025 backfill:
+
+```bash
+systemctl start --no-block boonetools-pol-tracker-backfill.service
+journalctl -fu boonetools-pol-tracker-backfill.service
+```
+
+The backfill is resumable by date and never interpolates a failed lane. Its
+public RUNEPool series contains only `runepool.reserve.value`; provider-owned
+RUNEPool value remains a private database reconciliation field. The gross
+legacy Reserve POL lane comes from `runepool.pol.value`, so those two series
+overlap and must not be added together.
 
 Migration `042_pool_dislocation_binance_usdt_to_usd.sql` corrects the Pool
 Dislocation Binance unit contract. Binance spot markets provide `XUSDT`, so

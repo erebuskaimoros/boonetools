@@ -41,12 +41,21 @@ presentation-only field.
 | `/app-layer-reserve-payments` | `app-layer-reserve-payments:v1` | `boonetools-analytics-read-models` | 1m / 330s |
 | `/tc-fee-dash` | `tc-fee-dash:v1` | `boonetools-analytics-read-models` | 1m / 15m |
 | `/pool-dislocation` | `pool-dislocation-summary:v1` | `boonetools-pool-dislocation` | exact 5m UTC / 15m |
+| `/pol-tracker` | `pol-tracker:v1` | `boonetools-pol-tracker` | daily at 00:10 UTC / 36h |
 
 The operator-triggered Pool Dislocation backfill populates canonical
 observations before the live sampler's first point and then invokes the normal
 publisher. It never runs on a public request path. Reconstructed THORChain pool
 and oracle prices share one historical height; reconstructed Binance prices
 are provenance-labeled five-minute kline closes rather than live BBO midpoints.
+
+POL Tracker uses migration `046_pol_tracker.sql` for one same-height snapshot
+per completed UTC day plus its per-pool inputs. The scheduled job revisits the
+latest seven days, atomically replaces each day, and publishes one bounded
+read model; the manual resumable backfill begins on 2025-02-01. Public GETs
+never query historical THORNode or RPC providers. The public RUNEPool lane is
+the Reserve-owned share only. Provider-owned RUNEPool value is retained in the
+daily table solely for reconciliation and is not selected into the read model.
 
 The core publisher is the sole scheduled owner of reusable current THORNode
 state. It refreshes `lastblock` every 15 seconds; inbound addresses, Mimir, and

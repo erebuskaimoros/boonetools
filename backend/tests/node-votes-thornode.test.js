@@ -22,6 +22,7 @@ function createJsonResponse(data, status = 200, headers = {}) {
 test('node-vote historical metadata uses the canonical THORNode archive fallback', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   process.env.NODE_VOTES_REQUEST_DELAY_MS = '0';
+  process.env.THORNODE_ARCHIVE_URL = 'https://thornode-archive.example';
 
   const [nodeVotes, thornode] = await Promise.all([
     import('../src/shared/node-votes.js'),

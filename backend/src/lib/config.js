@@ -35,7 +35,7 @@ function readList(name, fallback = []) {
 }
 
 const thornodePrimaryUrl = optional(process.env.THORNODE_PRIMARY_URL) || 'https://gateway.liquify.com/chain/thorchain_api';
-const thornodeArchiveUrl = optional(process.env.THORNODE_ARCHIVE_URL) || 'https://thornode-archive.ninerealms.com';
+const thornodeArchiveUrl = optional(process.env.THORNODE_ARCHIVE_URL) || thornodePrimaryUrl;
 const thornodeFallbackUrl = '';
 const midgardUrl = optional(process.env.MIDGARD_URL) || 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
 const midgardFallbackUrl = '';
@@ -190,6 +190,23 @@ export const config = Object.freeze({
   poolDislocationRepairRetryAttempts: readInt('POOL_DISLOCATION_REPAIR_RETRY_ATTEMPTS', 4),
   poolDislocationRepairRetryBaseDelayMs: readInt('POOL_DISLOCATION_REPAIR_RETRY_BASE_DELAY_MS', 500),
   poolDislocationRepairRetryMaxDelayMs: readInt('POOL_DISLOCATION_REPAIR_RETRY_MAX_DELAY_MS', 10_000),
+  polTrackerStartDate: optional(process.env.POL_TRACKER_START_DATE) || '2025-02-01',
+  polTrackerThornodeUrls: readList('POL_TRACKER_THORNODE_URLS', [
+    thornodeArchiveUrl,
+    thornodePrimaryUrl
+  ]),
+  polTrackerRpcUrls: readList('POL_TRACKER_RPC_URLS', [
+    rpcArchiveRestUrl,
+    rpcRestUrl
+  ]),
+  polTrackerLpConcurrency: readInt('POL_TRACKER_LP_CONCURRENCY', 4),
+  polTrackerRequestDelayMs: readInt('POL_TRACKER_REQUEST_DELAY_MS', 75),
+  polTrackerTimeoutMs: readInt('POL_TRACKER_TIMEOUT_MS', 12_000),
+  polTrackerAnchorBatchDays: readInt('POL_TRACKER_ANCHOR_BATCH_DAYS', 31),
+  polTrackerRecentLookbackDays: readInt('POL_TRACKER_RECENT_LOOKBACK_DAYS', 7),
+  polTrackerRetryAttempts: readInt('POL_TRACKER_RETRY_ATTEMPTS', 4),
+  polTrackerRetryBaseDelayMs: readInt('POL_TRACKER_RETRY_BASE_DELAY_MS', 1000),
+  polTrackerRetryMaxDelayMs: readInt('POL_TRACKER_RETRY_MAX_DELAY_MS', 30_000),
   dunePerformance: optional(process.env.DUNE_PERFORMANCE) || 'small',
   duneExecutionPollMs: readInt('DUNE_EXECUTION_POLL_MS', 5000),
   duneExecutionTimeoutMs: readInt('DUNE_EXECUTION_TIMEOUT_MS', 10 * 60 * 1000),

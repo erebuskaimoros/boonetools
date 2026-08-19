@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  THORNODE_ARCHIVE,
   THORNODE_PRIMARY,
   fetchThorchain
 } from '../src/shared/thornode.js';
@@ -29,7 +28,7 @@ function createJsonResponse(data, status = 200, statusText = 'OK', headers = {})
   };
 }
 
-test('fetchThorchain falls back to the archive endpoint on historical requests when the primary is rate-limited', async () => {
+test('fetchThorchain uses an explicitly configured historical fallback when the primary is rate-limited', async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
 
@@ -40,7 +39,7 @@ test('fetchThorchain falls back to the archive endpoint on historical requests w
       return createJsonResponse({ error: 'rate limited' }, 429, 'Too Many Requests');
     }
 
-    if (url === `${THORNODE_ARCHIVE}/thorchain/network?height=25573978`) {
+    if (url === `${TEST_THORNODE_FALLBACK}/thorchain/network?height=25573978`) {
       return createJsonResponse({ rune_price_in_tor: '41152196' });
     }
 
@@ -49,13 +48,14 @@ test('fetchThorchain falls back to the archive endpoint on historical requests w
 
   try {
     const payload = await fetchThorchain('/thorchain/network?height=25573978', {
-      historical: true
+      historical: true,
+      bases: [THORNODE_PRIMARY, TEST_THORNODE_FALLBACK]
     });
 
     assert.equal(payload.rune_price_in_tor, '41152196');
     assert.deepEqual(calls, [
       `${THORNODE_PRIMARY}/thorchain/network?height=25573978`,
-      `${THORNODE_ARCHIVE}/thorchain/network?height=25573978`
+      `${TEST_THORNODE_FALLBACK}/thorchain/network?height=25573978`
     ]);
   } finally {
     globalThis.fetch = originalFetch;

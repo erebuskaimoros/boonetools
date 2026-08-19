@@ -158,7 +158,7 @@ export function poolDislocationHistoricalRpcUrls(options = {}) {
 async function defaultFetchRpcStatus(options = {}) {
   return fetchThorchainRpc('/status', {}, {
     cooldownClient: options.client,
-    cooldownScope: 'market-snapshots',
+    cooldownScope: options.cooldownScope || 'market-snapshots',
     sharedCooldown: true,
     rpcUrls: poolDislocationHistoricalRpcUrls(options),
     timeoutMs: options.timeoutMs
@@ -168,7 +168,7 @@ async function defaultFetchRpcStatus(options = {}) {
 async function defaultFetchRpcBlock(height, options = {}) {
   return fetchThorchainRpc('/block', { height }, {
     cooldownClient: options.client,
-    cooldownScope: 'market-snapshots',
+    cooldownScope: options.cooldownScope || 'market-snapshots',
     sharedCooldown: true,
     rpcUrls: poolDislocationHistoricalRpcUrls(options),
     timeoutMs: options.timeoutMs

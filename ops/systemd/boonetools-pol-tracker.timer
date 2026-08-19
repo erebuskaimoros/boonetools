@@ -1,0 +1,11 @@
+[Unit]
+Description=Sample the completed THORChain POL day after UTC midnight
+
+[Timer]
+OnCalendar=*-*-* 00:10:00 UTC
+AccuracySec=1m
+Persistent=true
+Unit=boonetools-pol-tracker.service
+
+[Install]
+WantedBy=timers.target
