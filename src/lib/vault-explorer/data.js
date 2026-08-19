@@ -132,17 +132,8 @@ export async function fetchVaultExplorerData() {
   // and secured inventory as pooled.
   const poolMap = buildPooledBalanceMap(poolsData, prices, vaultInventoryMap, activeVaults.length);
 
-  // RUNE amounts from real API data, valued at effectiveRunePrice for consistency
-  // Pool ratio: RUNE per unit of asset in each pool (for deriving trade/secured RUNE)
-  const poolRuneRatio = {};
-  for (const pool of poolsData) {
-    const balAsset = fromBaseUnit(pool.balance_asset);
-    const balRune = fromBaseUnit(pool.balance_rune);
-    if (balAsset > 0) poolRuneRatio[pool.asset] = balRune / balAsset;
-  }
-
-  // Pooled RUNE uses the same pool rows as pooled exogenous assets. This keeps
-  // the two sides in identical scope and preserves the AMM's 2x relationship.
+  // Pooled RUNE comes directly from pool state and uses the same pool rows as
+  // pooled exogenous assets, keeping both sides in identical scope.
   const pooledRuneAmount = getPooledRuneAmount(poolsData);
   if (pooledRuneAmount > 0 && activeVaults.length > 0) {
     const perVault = pooledRuneAmount / activeVaults.length;
@@ -151,36 +142,6 @@ export async function fetchVaultExplorerData() {
     for (let vi = 0; vi < activeVaults.length; vi++) {
       poolMap['THOR.RUNE'][vi] = { amount: perVault, valueUSD: perVaultUSD };
     }
-  }
-
-  // Trade-backing RUNE: RUNE equivalent of trade positions via pool ratios
-  let tradeRuneAmount = 0;
-  for (const tu of tradeUnits) {
-    const depth = fromBaseUnit(tu.depth);
-    if (depth <= 0) continue;
-    const norm = normalizeAsset(tu.asset);
-    const poolAsset = normalizedToPool[norm];
-    if (poolAsset && poolRuneRatio[poolAsset]) {
-      tradeRuneAmount += depth * poolRuneRatio[poolAsset];
-    }
-  }
-  if (tradeRuneAmount > 0) {
-    tradeByPool['THOR.RUNE'] = { amount: tradeRuneAmount, valueUSD: tradeRuneAmount * effectiveRunePrice };
-  }
-
-  // Secured-backing RUNE: RUNE equivalent of secured positions via pool ratios
-  let securedRuneAmount = 0;
-  for (const sa of securedAssets) {
-    const depth = fromBaseUnit(sa.depth);
-    if (depth <= 0) continue;
-    const norm = normalizeAsset(sa.asset);
-    const poolAsset = normalizedToPool[norm];
-    if (poolAsset && poolRuneRatio[poolAsset]) {
-      securedRuneAmount += depth * poolRuneRatio[poolAsset];
-    }
-  }
-  if (securedRuneAmount > 0) {
-    securedByPool['THOR.RUNE'] = { amount: securedRuneAmount, valueUSD: securedRuneAmount * effectiveRunePrice };
   }
 
   const TYPE_META = {

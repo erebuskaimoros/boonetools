@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import {
   buildCustodiedAssetRows,
@@ -7,6 +8,16 @@ import {
   getPooledRuneAmount,
   summarizeCustodiedAssetRows
 } from '../src/lib/vault-explorer/assets.js';
+
+test('does not invent trade or secured THOR.RUNE balances from pool ratios', async () => {
+  const source = await readFile(
+    new URL('../src/lib/vault-explorer/data.js', import.meta.url),
+    'utf8'
+  );
+
+  assert.doesNotMatch(source, /tradeByPool\[['"]THOR\.RUNE['"]\]/);
+  assert.doesNotMatch(source, /securedByPool\[['"]THOR\.RUNE['"]\]/);
+});
 
 test('uses pool depth for pooled balances and vault inventory only for distribution', () => {
   const pooled = buildPooledBalanceMap(
