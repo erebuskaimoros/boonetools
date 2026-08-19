@@ -198,11 +198,12 @@ test('migration, jobs, route, timer, and deployment encode the POL Tracker produ
   assert.match(deploy, /boonetools-pol-tracker\.service/);
 });
 
-test('scheduled and manual POL jobs own one lock and publish after bounded ingestion', async () => {
+test('scheduled and manual POL jobs lag archive ingestion by one completed UTC day', async () => {
   const calls = [];
   const client = { id: 'db' };
   const common = {
     now: new Date('2026-08-19T12:00:00Z'),
+    headLagDays: 1,
     lockRunner: async (key, callback) => {
       calls.push({ type: 'lock', key });
       return callback(client);
@@ -222,7 +223,7 @@ test('scheduled and manual POL jobs own one lock and publish after bounded inges
   assert.equal(scheduled.published, true);
   assert.deepEqual(calls.slice(0, 3), [
     { type: 'lock', key: 'boonetools:pol-tracker' },
-    { type: 'ingest', startDate: '2026-08-12', endDate: '2026-08-18' },
+    { type: 'ingest', startDate: '2026-08-11', endDate: '2026-08-17' },
     { type: 'publish', key: 'pol-tracker:v1' }
   ]);
 
@@ -231,6 +232,6 @@ test('scheduled and manual POL jobs own one lock and publish after bounded inges
   assert.deepEqual(calls[1], {
     type: 'ingest',
     startDate: '2025-02-01',
-    endDate: '2026-08-18'
+    endDate: '2026-08-17'
   });
 });

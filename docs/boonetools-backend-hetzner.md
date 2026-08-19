@@ -334,6 +334,10 @@ RUNEPool value remains a private database reconciliation field. The gross
 legacy Reserve POL lane comes from `runepool.pol.value`, so those two series
 overlap and must not be added together.
 
+Both scheduled and default backfill runs use `POL_TRACKER_HEAD_LAG_DAYS=1`, so
+the archive provider has a full extra UTC day to reach each requested day-end
+height. An explicit backfill end date still overrides that safety lag.
+
 Migration `042_pool_dislocation_binance_usdt_to_usd.sql` corrects the Pool
 Dislocation Binance unit contract. Binance spot markets provide `XUSDT`, so
 the writer and historical repair multiply each raw quote by the same-snapshot

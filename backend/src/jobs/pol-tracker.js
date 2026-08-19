@@ -26,6 +26,14 @@ function readModelClock(value) {
   return undefined;
 }
 
+function resolvedEndDate(options = {}) {
+  if (options.endDate) return options.endDate;
+  const headLagDays = Math.max(0, Math.trunc(Number(
+    options.headLagDays ?? config.polTrackerHeadLagDays
+  )) || 0);
+  return shiftUtcDay(lastCompletedUtcDay(resolvedNow(options.now)), -headLagDays);
+}
+
 async function ingestAndPublish(client, options = {}) {
   const ingestion = await (options.ingest || ingestPolTrackerHistory)(client, options);
   const publish = options.publish || buildAndPublishReadModel;
@@ -41,7 +49,7 @@ async function ingestAndPublish(client, options = {}) {
 }
 
 export async function runPolTrackerBackfill(options = {}) {
-  const endDate = options.endDate || lastCompletedUtcDay(resolvedNow(options.now));
+  const endDate = resolvedEndDate(options);
   const lockRunner = options.lockRunner || withAdvisoryLock;
   return lockRunner(LOCK_KEY, (client) => ingestAndPublish(client, {
     ...options,
@@ -52,7 +60,7 @@ export async function runPolTrackerBackfill(options = {}) {
 }
 
 export async function runPolTrackerScheduler(options = {}) {
-  const endDate = options.endDate || lastCompletedUtcDay(resolvedNow(options.now));
+  const endDate = resolvedEndDate(options);
   const lookback = Math.max(1, Number(options.lookbackDays || config.polTrackerRecentLookbackDays));
   const startDate = options.startDate || maxDay(
     config.polTrackerStartDate,
