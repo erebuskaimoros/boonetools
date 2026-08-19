@@ -1,4 +1,4 @@
-export const POL_TRACKER_SCHEMA_VERSION = 1;
+export const POL_TRACKER_SCHEMA_VERSION = 2;
 export const POL_TRACKER_START_DATE = '2025-02-01';
 export const POL_TRACKER_TREASURY_MODULE = 'thor1vmafl8f3s6uuzwnxkqz0eza47v6ecn0t086r2p';
 
@@ -58,7 +58,6 @@ export function buildPolTrackerObservation(input = {}) {
 
   const treasuryErrors = Array.isArray(input.treasuryErrors) ? input.treasuryErrors : [];
   const treasuryErrorAssets = new Set(treasuryErrors.map((entry) => normalizedAsset(entry?.asset)));
-  let saversComplete = true;
   let synthComplete = true;
   let treasuryAssetComplete = treasuryErrors.length === 0;
   let treasuryRuneComplete = treasuryErrors.length === 0;
@@ -66,7 +65,6 @@ export function buildPolTrackerObservation(input = {}) {
   const poolRows = pools.map((pool) => {
     const asset = normalizedAsset(pool.asset);
     const price = positive(pool.asset_tor_price);
-    const saversDepth = positive(pool.savers_depth);
     const synthUnits = positive(pool.synth_units);
     const lp = lpForAsset(input.treasuryLps, asset);
     const treasuryLookupComplete = !treasuryErrorAssets.has(asset);
@@ -74,11 +72,9 @@ export function buildPolTrackerObservation(input = {}) {
     const assetRedeem = positive(lp?.asset_redeem_value);
     const runeRedeem = positive(lp?.rune_redeem_value);
 
-    if (saversDepth > 0n && price === 0n) saversComplete = false;
     if (synthUnits > 0n && (price === 0n || positive(pool.pool_units) === 0n)) synthComplete = false;
     if ((treasuryUnits > 0n || assetRedeem > 0n) && price === 0n) treasuryAssetComplete = false;
 
-    const saversUsd = price > 0n ? e8Product(saversDepth, price) : null;
     const synthBackingUsd = price > 0n && (synthUnits === 0n || positive(pool.pool_units) > 0n)
       ? synthBackingValue(pool)
       : null;
@@ -99,9 +95,6 @@ export function buildPolTrackerObservation(input = {}) {
       lp_units: positive(pool.LP_units).toString(),
       synth_units: synthUnits.toString(),
       synth_supply_e8: positive(pool.synth_supply).toString(),
-      savers_depth_e8: saversDepth.toString(),
-      savers_units: positive(pool.savers_units).toString(),
-      savers_usd_e8: saversUsd?.toString() ?? null,
       synth_backing_usd_e8: synthBackingUsd?.toString() ?? null,
       synth_face_usd_e8: synthFaceUsd?.toString() ?? null,
       treasury_lp_units: treasuryLookupComplete ? treasuryUnits.toString() : null,
@@ -129,7 +122,6 @@ export function buildPolTrackerObservation(input = {}) {
       ? `${treasuryErrors.length} Treasury LP lookup(s) were incomplete`
       : 'One or more Treasury asset legs lacked a same-height price';
   const laneStatus = {
-    savers: lane(saversComplete ? 'complete' : 'partial', saversComplete ? '' : 'One or more Saver pools lacked a same-height price'),
     synth: lane(synthComplete ? 'complete' : 'partial', synthComplete ? '' : 'One or more synth pools lacked same-height units or price data'),
     treasury: lane(treasuryComplete ? 'complete' : 'partial', treasuryWarning),
     reserve_pol: lane(runepoolAvailable ? 'complete' : 'unavailable', input.runepoolError || ''),
@@ -145,7 +137,6 @@ export function buildPolTrackerObservation(input = {}) {
       anchor_block_time: input.anchor?.blockTime || null,
       treasury_module_address: input.moduleAddress || POL_TRACKER_TREASURY_MODULE,
       rune_price_usd_e8: runePrice.toString(),
-      savers_usd_e8: totalOrNull(poolRows.map((row) => row.savers_usd_e8), saversComplete),
       synth_backing_usd_e8: totalOrNull(poolRows.map((row) => row.synth_backing_usd_e8), synthComplete),
       synth_face_usd_e8: totalOrNull(poolRows.map((row) => row.synth_face_usd_e8), synthComplete),
       treasury_asset_usd_e8: totalOrNull(poolRows.map((row) => row.treasury_asset_usd_e8), treasuryAssetComplete),

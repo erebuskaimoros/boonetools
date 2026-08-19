@@ -10,11 +10,17 @@ import {
   loadPolTrackerStoredDays
 } from './pol-tracker-store.js';
 
-export const POL_TRACKER_MODEL_KEY = 'pol-tracker:v1';
+export const POL_TRACKER_MODEL_KEY = 'pol-tracker:v2';
 export const POL_TRACKER_TTL_MS = 36 * 60 * 60 * 1000;
 export { POL_TRACKER_SCHEMA_VERSION };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const PUBLIC_LANES = Object.freeze([
+  'synth',
+  'treasury',
+  'reserve_pol',
+  'runepool_reserve'
+]);
 
 function dateString(value) {
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
@@ -45,6 +51,24 @@ export function lastCompletedUtcDay(now = new Date()) {
   return new Date(midnight - DAY_MS).toISOString().slice(0, 10);
 }
 
+function publicLaneStatus(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(PUBLIC_LANES
+    .filter((key) => value[key] && typeof value[key] === 'object')
+    .map((key) => [key, value[key]]));
+}
+
+function publicLaneWarnings(status) {
+  return [...new Set(Object.values(status)
+    .map((lane) => String(lane?.warning || '').trim())
+    .filter(Boolean))];
+}
+
+function publicRowComplete(row, status) {
+  if (!PUBLIC_LANES.every((key) => status[key])) return Boolean(row.complete);
+  return PUBLIC_LANES.every((key) => status[key].status === 'complete');
+}
+
 function publicDailyRow(row, day) {
   if (!row) {
     return {
@@ -52,7 +76,6 @@ function publicDailyRow(row, day) {
       height: null,
       block_time: null,
       rune_price_usd: null,
-      savers_usd: null,
       synth: { backing_usd: null, face_usd: null },
       treasury_lp: { asset_leg_usd: null, rune_leg_usd: null, total_usd: null },
       reserve_pol: { deployed_rune: null, deployed_usd: null },
@@ -62,12 +85,12 @@ function publicDailyRow(row, day) {
       warnings: ['No completed same-height observation is stored for this UTC day']
     };
   }
+  const status = publicLaneStatus(row.lane_status);
   return {
     day,
     height: Number(row.anchor_height) || null,
     block_time: row.anchor_block_time ? new Date(row.anchor_block_time).toISOString() : null,
     rune_price_usd: e8ToNumber(row.rune_price_usd_e8),
-    savers_usd: e8ToNumber(row.savers_usd_e8),
     synth: {
       backing_usd: e8ToNumber(row.synth_backing_usd_e8),
       face_usd: e8ToNumber(row.synth_face_usd_e8)
@@ -85,9 +108,9 @@ function publicDailyRow(row, day) {
       reserve_owned_rune: e8ToNumber(row.runepool_reserve_owned_rune_e8),
       reserve_owned_usd: e8ToNumber(row.runepool_reserve_owned_usd_e8)
     },
-    complete: Boolean(row.complete),
-    status: row.lane_status || {},
-    warnings: Array.isArray(row.warnings) ? row.warnings : []
+    complete: publicRowComplete(row, status),
+    status,
+    warnings: publicLaneWarnings(status)
   };
 }
 
@@ -97,8 +120,6 @@ function publicPoolRow(row) {
     asset: String(row.asset || ''),
     status: String(row.pool_status || ''),
     asset_price_usd: e8ToNumber(row.asset_price_usd_e8),
-    savers_depth: e8ToNumber(row.savers_depth_e8),
-    savers_usd: e8ToNumber(row.savers_usd_e8),
     synth_units: String(row.synth_units || '0'),
     synth_supply: e8ToNumber(row.synth_supply_e8),
     synth_backing_usd: e8ToNumber(row.synth_backing_usd_e8),
@@ -147,12 +168,11 @@ export function buildPolTrackerPayload(rows = [], poolRows = [], options = {}) {
       sampling: 'Latest finalized THORChain block at or before 23:59:59.999 UTC for each completed day.',
       pricing: 'Same-height THORNode TOR prices; all stored source amounts use 1e8 fixed-point units.',
       treasury: 'Two redeemable legs of locked Treasury module LP positions: asset leg plus RUNE leg.',
-      savers: 'Saver depth valued at the same-height asset/TOR price.',
       synth: 'Synth-unit share of pool liquidity, valued as 2 × asset depth × synth_units / pool_units.',
       reserve_pol: 'Gross value of LP positions held at the legacy Reserve module, from runepool.pol.value.',
       runepool: 'Reserve-owned RUNEPool economic share from runepool.reserve.value.',
       provider_owned_runepool_excluded: true,
-      aggregation: 'Series overlap. Savers, synth backing, Reserve POL, and RUNEPool must not be added into a grand total.'
+      aggregation: 'Series overlap. Treasury total repeats its two legs, and Reserve POL overlaps the RUNEPool Reserve share; do not add the plotted lanes into a grand total.'
     }
   };
 }

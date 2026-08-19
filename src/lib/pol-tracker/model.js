@@ -6,7 +6,6 @@ export const POL_TRACKER_RANGES = Object.freeze([
 ]);
 
 export const POL_TRACKER_SERIES = Object.freeze([
-  { id: 'savers', label: 'SAVERS', group: 'liabilities', color: '#00cc66', value: (row) => row?.saversUsd ?? null },
   { id: 'synth', label: 'SYNTH BACKING', group: 'liabilities', color: '#5588cc', value: (row) => row?.synthBackingUsd ?? null },
   { id: 'treasury_asset', label: 'ASSET LEG', group: 'treasury', color: '#d4a017', value: (row) => row?.treasuryAssetUsd ?? null },
   { id: 'treasury_rune', label: 'RUNE LEG', group: 'treasury', color: '#00cc66', value: (row) => row?.treasuryRuneUsd ?? null },
@@ -18,8 +17,8 @@ export const POL_TRACKER_SERIES = Object.freeze([
 export const POL_TRACKER_GROUPS = Object.freeze([
   {
     id: 'liabilities',
-    title: 'Savers / synth backing',
-    description: 'Two overlapping views of Saver and synth liabilities; not an additive stack.'
+    title: 'Synth backing',
+    description: 'Pool liquidity allocated to outstanding synth units at each completed UTC day end.'
   },
   {
     id: 'treasury',
@@ -50,7 +49,6 @@ export function normalizePolTrackerDailyRow(row = {}) {
     height: finite(row.height),
     blockTime: row.block_time || null,
     runePriceUsd: finite(row.rune_price_usd),
-    saversUsd: finite(row.savers_usd),
     synthBackingUsd: finite(row.synth?.backing_usd),
     synthFaceUsd: finite(row.synth?.face_usd),
     treasuryAssetUsd: finite(row.treasury_lp?.asset_leg_usd),
@@ -84,8 +82,6 @@ export function normalizePolTrackerPayload(payload = {}) {
       asset: String(pool.asset || ''),
       status: String(pool.status || ''),
       assetPriceUsd: finite(pool.asset_price_usd),
-      saversDepth: finite(pool.savers_depth),
-      saversUsd: finite(pool.savers_usd),
       synthUnits: String(pool.synth_units || '0'),
       synthSupply: finite(pool.synth_supply),
       synthBackingUsd: finite(pool.synth_backing_usd),
@@ -165,8 +161,7 @@ export function buildPolTrackerChart(rows = [], groupId, options = {}) {
 
 export function relevantPolTrackerPools(pools = []) {
   return (Array.isArray(pools) ? pools : []).filter((pool) =>
-    (pool.saversUsd || 0) > 0
-    || (pool.synthBackingUsd || 0) > 0
+    (pool.synthBackingUsd || 0) > 0
     || (pool.treasuryTotalUsd || 0) > 0
   );
 }

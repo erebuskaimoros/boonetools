@@ -99,7 +99,7 @@
 
 <svelte:head>
   <title>POL Tracker | BooneTools</title>
-  <meta name="description" content="Daily THORChain Savers, synth backing, locked Treasury LP, Reserve POL, and Reserve-owned RUNEPool history." />
+  <meta name="description" content="Daily THORChain synth backing, locked Treasury LP, Reserve POL, and Reserve-owned RUNEPool history." />
 </svelte:head>
 
 <main class="pol-shell">
@@ -136,11 +136,6 @@
 
   {#if payload}
     <section class="metric-grid" aria-label="Latest POL Tracker values">
-      <article class="metric">
-        <span class="metric-label">SAVERS</span>
-        <strong>{formatPolTrackerUsd(latest?.saversUsd, true)}</strong>
-        <small>same-height depth value</small>
-      </article>
       <article class="metric">
         <span class="metric-label">SYNTH BACKING</span>
         <strong>{formatPolTrackerUsd(latest?.synthBackingUsd, true)}</strong>
@@ -251,7 +246,7 @@
         <div>
           <span class="prompt">$ inspect --latest --by-pool</span>
           <h2>Latest pool breakdown</h2>
-          <p>Only pools with a Saver, synth, or locked Treasury position are shown.</p>
+          <p>Only pools with synth backing or a locked Treasury position are shown.</p>
         </div>
         <span class="row-count">{relevantPools.length} POOLS</span>
       </div>
@@ -260,7 +255,6 @@
           <thead>
             <tr>
               <th>POOL</th>
-              <th>SAVERS</th>
               <th>SYNTH BACKING</th>
               <th>TREASURY ASSET</th>
               <th>TREASURY RUNE</th>
@@ -271,14 +265,13 @@
             {#each relevantPools as pool}
               <tr>
                 <td><strong>{pool.asset}</strong><small>{pool.status}</small></td>
-                <td>{formatPolTrackerUsd(pool.saversUsd, true)}</td>
                 <td>{formatPolTrackerUsd(pool.synthBackingUsd, true)}</td>
                 <td>{formatPolTrackerUsd(pool.treasuryAssetUsd, true)}</td>
                 <td>{formatPolTrackerUsd(pool.treasuryRuneUsd, true)}</td>
                 <td>{formatPolTrackerUsd(pool.treasuryTotalUsd, true)}</td>
               </tr>
             {:else}
-              <tr><td colspan="6" class="empty">No per-pool observation is available yet.</td></tr>
+              <tr><td colspan="5" class="empty">No per-pool observation is available yet.</td></tr>
             {/each}
           </tbody>
         </table>
@@ -288,9 +281,10 @@
     <section class="method-panel">
       <span class="prompt">$ methodology --accounting-boundaries</span>
       <p>
-        All lanes use one historical block per completed UTC day. Savers and synth backing overlap;
-        Reserve POL and the RUNEPool Reserve share overlap. The provider-owned RUNEPool share is
-        intentionally absent. These series must not be summed into a single “POL total.”
+        All lanes use one historical block per completed UTC day. Synth backing is the pool share
+        attributable to outstanding synth units. The Treasury total repeats its asset and RUNE legs,
+        while Reserve POL and the RUNEPool Reserve share overlap. Provider-owned RUNEPool is absent,
+        and the plotted lanes must not be summed into a single “POL total.”
       </p>
       <p class="source-line">TREASURY MODULE · …6r2p &nbsp;|&nbsp; PRICES · SAME-HEIGHT TOR &nbsp;|&nbsp; GAPS · NEVER INTERPOLATED</p>
     </section>

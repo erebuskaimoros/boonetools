@@ -50,9 +50,8 @@ const DAY_INPUT = {
   }
 };
 
-test('same-height formulas preserve separate accounting lanes', () => {
+test('same-height formulas preserve the requested accounting lanes without Savers', () => {
   const observation = buildPolTrackerObservation(DAY_INPUT);
-  assert.equal(e8ToNumber(observation.daily.savers_usd_e8), 20);
   assert.equal(e8ToNumber(observation.daily.synth_backing_usd_e8), 100);
   assert.equal(e8ToNumber(observation.daily.synth_face_usd_e8), 40);
   assert.equal(e8ToNumber(observation.daily.treasury_asset_usd_e8), 8);
@@ -61,12 +60,33 @@ test('same-height formulas preserve separate accounting lanes', () => {
   assert.equal(e8ToNumber(observation.daily.reserve_pol_usd_e8), 300);
   assert.equal(e8ToNumber(observation.daily.runepool_reserve_owned_usd_e8), 180);
   assert.equal(e8ToNumber(observation.daily.runepool_provider_owned_rune_e8), 40);
+  assert.equal(Object.hasOwn(observation.daily, 'savers_usd_e8'), false);
+  assert.equal(Object.hasOwn(observation.daily.lane_status, 'savers'), false);
+  assert.equal(Object.hasOwn(observation.pools[0], 'savers_depth_e8'), false);
+  assert.equal(Object.hasOwn(observation.pools[0], 'savers_units'), false);
+  assert.equal(Object.hasOwn(observation.pools[0], 'savers_usd_e8'), false);
   assert.equal(observation.daily.complete, true);
 });
 
-test('public payload excludes provider-owned RUNEPool values and inserts explicit calendar gaps', () => {
+test('public payload strips legacy Savers and provider-owned RUNEPool values', () => {
   const observation = buildPolTrackerObservation(DAY_INPUT);
-  const payload = buildPolTrackerPayload([observation.daily], observation.pools, {
+  const legacyDaily = {
+    ...observation.daily,
+    savers_usd_e8: '2000000000',
+    complete: false,
+    lane_status: {
+      savers: { status: 'partial', warning: 'Legacy Saver warning' },
+      ...observation.daily.lane_status
+    },
+    warnings: ['Legacy Saver warning']
+  };
+  const legacyPools = observation.pools.map((pool) => ({
+    ...pool,
+    savers_depth_e8: '1000000000',
+    savers_units: '9',
+    savers_usd_e8: '2000000000'
+  }));
+  const payload = buildPolTrackerPayload([legacyDaily], legacyPools, {
     startDate: '2025-02-01',
     endDate: '2025-02-02',
     now: new Date('2025-02-03T00:10:00Z')
@@ -76,6 +96,14 @@ test('public payload excludes provider-owned RUNEPool values and inserts explici
     reserve_owned_usd: 180
   });
   assert.equal(Object.hasOwn(payload.daily[0].runepool, 'provider_owned_rune'), false);
+  assert.equal(Object.hasOwn(payload.daily[0], 'savers_usd'), false);
+  assert.equal(Object.hasOwn(payload.daily[0].status, 'savers'), false);
+  assert.equal(Object.hasOwn(payload.latest_pools[0], 'savers_depth'), false);
+  assert.equal(Object.hasOwn(payload.latest_pools[0], 'savers_usd'), false);
+  assert.equal(Object.hasOwn(payload.methodology, 'savers'), false);
+  assert.equal(payload.daily[0].complete, true);
+  assert.equal(payload.daily[0].warnings.includes('Legacy Saver warning'), false);
+  assert.equal(payload.warnings.includes('Legacy Saver warning'), false);
   assert.equal(payload.daily[1].status.state, 'missing');
   assert.equal(payload.daily[1].runepool.reserve_owned_usd, null);
   assert.equal(payload.coverage.observed_days, 1);
@@ -88,7 +116,7 @@ test('Treasury lookup failures create null Treasury totals without corrupting ot
     treasuryErrors: [{ asset: 'BTC.BTC', error: 'timeout' }]
   });
   assert.equal(observation.daily.treasury_total_usd_e8, null);
-  assert.equal(e8ToNumber(observation.daily.savers_usd_e8), 20);
+  assert.equal(e8ToNumber(observation.daily.synth_backing_usd_e8), 100);
   assert.equal(observation.daily.lane_status.treasury.status, 'partial');
   assert.equal(observation.daily.complete, false);
 });
@@ -224,7 +252,7 @@ test('scheduled and manual POL jobs lag archive ingestion by one completed UTC d
   assert.deepEqual(calls.slice(0, 3), [
     { type: 'lock', key: 'boonetools:pol-tracker' },
     { type: 'ingest', startDate: '2026-08-11', endDate: '2026-08-17' },
-    { type: 'publish', key: 'pol-tracker:v1' }
+    { type: 'publish', key: 'pol-tracker:v2' }
   ]);
 
   calls.length = 0;

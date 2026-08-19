@@ -4,7 +4,6 @@ const DAILY_COLUMNS = [
   'anchor_block_time',
   'treasury_module_address',
   'rune_price_usd_e8',
-  'savers_usd_e8',
   'synth_backing_usd_e8',
   'synth_face_usd_e8',
   'treasury_asset_usd_e8',
@@ -26,7 +25,7 @@ const DAILY_COLUMNS = [
 const POOL_COLUMNS = [
   'day', 'asset', 'pool_status', 'asset_price_usd_e8', 'balance_asset_e8',
   'balance_rune_e8', 'pool_units', 'lp_units', 'synth_units', 'synth_supply_e8',
-  'savers_depth_e8', 'savers_units', 'savers_usd_e8', 'synth_backing_usd_e8',
+  'synth_backing_usd_e8',
   'synth_face_usd_e8', 'treasury_lp_units', 'treasury_asset_redeem_e8',
   'treasury_rune_redeem_e8', 'treasury_asset_usd_e8', 'treasury_rune_usd_e8',
   'treasury_total_usd_e8'
@@ -66,7 +65,6 @@ export async function persistPolTrackerObservation(client, observation) {
            day date, asset text, pool_status text, asset_price_usd_e8 numeric,
            balance_asset_e8 numeric, balance_rune_e8 numeric, pool_units numeric,
            lp_units numeric, synth_units numeric, synth_supply_e8 numeric,
-           savers_depth_e8 numeric, savers_units numeric, savers_usd_e8 numeric,
            synth_backing_usd_e8 numeric, synth_face_usd_e8 numeric,
            treasury_lp_units numeric, treasury_asset_redeem_e8 numeric,
            treasury_rune_redeem_e8 numeric, treasury_asset_usd_e8 numeric,
@@ -85,7 +83,7 @@ export async function persistPolTrackerObservation(client, observation) {
 export async function loadPolTrackerStoredDays(client, startDate, endDate) {
   const { rows } = await client.query(
     `select day, anchor_height, anchor_block_time, treasury_module_address,
-            rune_price_usd_e8, savers_usd_e8, synth_backing_usd_e8,
+            rune_price_usd_e8, synth_backing_usd_e8,
             synth_face_usd_e8, treasury_asset_usd_e8, treasury_rune_usd_e8,
             treasury_total_usd_e8, reserve_pol_rune_e8, reserve_pol_usd_e8,
             runepool_reserve_owned_rune_e8, runepool_reserve_owned_usd_e8,
@@ -113,7 +111,7 @@ export async function loadPolTrackerExistingDays(client, startDate, endDate) {
 export async function loadLatestPolTrackerPools(client) {
   const { rows } = await client.query(
     `select day, asset, pool_status, asset_price_usd_e8, synth_units,
-            synth_supply_e8, savers_depth_e8, savers_usd_e8,
+            synth_supply_e8,
             synth_backing_usd_e8, synth_face_usd_e8, treasury_lp_units,
             treasury_asset_redeem_e8, treasury_rune_redeem_e8,
             treasury_asset_usd_e8, treasury_rune_usd_e8,
@@ -121,7 +119,6 @@ export async function loadLatestPolTrackerPools(client) {
      from pol_tracker_pool_daily
      where day = (select max(day) from pol_tracker_daily)
      order by greatest(
-       coalesce(savers_usd_e8, 0),
        coalesce(synth_backing_usd_e8, 0),
        coalesce(treasury_total_usd_e8, 0)
      ) desc, asset`,

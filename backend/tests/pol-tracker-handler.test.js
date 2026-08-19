@@ -7,8 +7,8 @@ test('POL Tracker handler is cache-only and supports conditional responses', asy
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { handlePolTracker } = await import('../src/handlers/pol-tracker.js');
   const model = {
-    key: 'pol-tracker:v1',
-    schemaVersion: 1,
+    key: 'pol-tracker:v2',
+    schemaVersion: 2,
     payload: {
       as_of: NOW.toISOString(),
       daily: [{

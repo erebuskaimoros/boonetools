@@ -8,7 +8,7 @@ This directory contains website/backend-specific protocol notes and session hist
 - [fee-collector-accounting.md](./fee-collector-accounting.md) — balance-delta method for auditing on-chain fee collectors when senders aren't enumerable or the collector converts assets internally.
 - [wasm-arb-economics.md](./wasm-arb-economics.md) — `/wasm-arb-economics` metric definitions, transaction-scoped Rujira fee attribution, post-change time-series compaction, and monitoring guardrails.
 - [status-dashboard.md](./status-dashboard.md) — `/status` data sources, chain/LP state derivation, historical vote lane, and failure behavior.
-- [pol-tracker.md](./pol-tracker.md) — same-height daily Savers, synth backing, locked Treasury LP legs, Reserve POL, and Reserve-owned RUNEPool accounting.
+- [pol-tracker.md](./pol-tracker.md) — same-height daily synth backing, locked Treasury LP legs, Reserve POL, and Reserve-owned RUNEPool accounting.
 - [architecture-consolidation.md](./architecture-consolidation.md) — runtime ownership, unified API/backend contract, canonical provenance, queued reads, archive policy, and CI ratchets.
 - Use the shared [BooneTools project page](../../../knowledge/projects/boonetools.md) for durable product context.
 - Use the shared [analytics and tooling workstream](../../../knowledge/workstreams/analytics-and-tooling.md) for cross-project relationships.

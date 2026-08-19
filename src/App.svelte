@@ -67,7 +67,7 @@
     component: () => import("./lib/POLTracker.svelte"),
     icon: "≋",
     path: "pol-tracker",
-    description: "Track daily Savers, synth backing, locked Treasury LP legs, Reserve POL, and the Reserve-owned RUNEPool share"
+    description: "Track daily synth backing, locked Treasury LP legs, Reserve POL, and the Reserve-owned RUNEPool share"
   };
 
   const wasmArbEconomicsApp = {

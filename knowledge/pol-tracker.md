@@ -5,7 +5,6 @@
 `/pol-tracker` begins at 2025-02-01 and samples the latest finalized THORChain
 block at or before each completed UTC day end. It tracks:
 
-- Savers depth valued in same-height TOR/USD.
 - Synth-unit backing: `2 * balance_asset * asset_price * synth_units / pool_units`.
 - The locked Treasury module `...6r2p` LP asset and RUNE redeemable legs.
 - Gross legacy Reserve-module LP value from `runepool.pol.value`.
@@ -13,8 +12,13 @@ block at or before each completed UTC day end. It tracks:
 
 Provider-owned RUNEPool value is not a dashboard series or public API field.
 It is stored only as a private reconciliation input. Gross Reserve POL and the
-Reserve-owned RUNEPool share overlap; Savers and synth backing also overlap.
-The dashboard therefore has no grand-total metric.
+Reserve-owned RUNEPool share overlap. The Treasury combined value also repeats
+its asset and RUNE legs. The dashboard therefore has no grand-total metric.
+
+Savers value is intentionally absent from the dashboard, public API, and newly
+collected rows. Migration `046_pol_tracker.sql` retains nullable legacy Saver
+columns for forward-compatible rollback, but the v2 read model never selects or
+publishes them.
 
 ## Data contract
 

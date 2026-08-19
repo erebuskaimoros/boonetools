@@ -41,7 +41,7 @@ presentation-only field.
 | `/app-layer-reserve-payments` | `app-layer-reserve-payments:v1` | `boonetools-analytics-read-models` | 1m / 330s |
 | `/tc-fee-dash` | `tc-fee-dash:v1` | `boonetools-analytics-read-models` | 1m / 15m |
 | `/pool-dislocation` | `pool-dislocation-summary:v1` | `boonetools-pool-dislocation` | exact 5m UTC / 15m |
-| `/pol-tracker` | `pol-tracker:v1` | `boonetools-pol-tracker` | daily at 00:10 UTC / 36h |
+| `/pol-tracker` | `pol-tracker:v2` | `boonetools-pol-tracker` | daily at 00:10 UTC / 36h |
 
 The operator-triggered Pool Dislocation backfill populates canonical
 observations before the live sampler's first point and then invokes the normal
