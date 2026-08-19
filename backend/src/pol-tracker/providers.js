@@ -30,8 +30,7 @@ async function mapWithConcurrency(values, concurrency, operation) {
 
 function validRunepool(payload) {
   return payload && typeof payload === 'object'
-    && payload.pol && typeof payload.pol.value === 'string'
-    && payload.reserve && typeof payload.reserve.value === 'string';
+    && payload.pol && typeof payload.pol.value === 'string';
 }
 
 function validLiquidityPosition(payload) {

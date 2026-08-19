@@ -11,7 +11,8 @@
     formatPolTrackerUsd,
     normalizePolTrackerPayload,
     relevantPolTrackerPools,
-    selectPolTrackerRange
+    selectPolTrackerRange,
+    totalPolTrackerValue
   } from './pol-tracker/model.js';
 
   const REFRESH_MS = 5 * 60 * 1000;
@@ -20,17 +21,16 @@
   let refreshing = false;
   let loadError = '';
   let rangeId = 'all';
-  let hiddenSeries = [];
   let hoverIndex = -1;
   let refreshTimer;
 
   $: dashboard = normalizePolTrackerPayload(payload || {});
   $: rows = selectPolTrackerRange(dashboard.daily, rangeId);
-  $: charts = POL_TRACKER_GROUPS.map((group) => ({
-    ...group,
-    chart: buildPolTrackerChart(rows, group.id, { hiddenSeries })
-  }));
-  $: selected = rows[hoverIndex] || rows.at(-1) || null;
+  $: chartGroup = POL_TRACKER_GROUPS[0];
+  $: chart = buildPolTrackerChart(rows, chartGroup.id);
+  $: hovered = hoverIndex >= 0 ? rows[hoverIndex] || null : null;
+  $: selected = hovered || rows.at(-1) || null;
+  $: displayedTotal = totalPolTrackerValue(hovered);
   $: relevantPools = relevantPolTrackerPools(dashboard.latestPools);
   $: latest = dashboard.latest;
   $: coveragePercent = dashboard.coverage.expected_days
@@ -66,13 +66,7 @@
     hoverIndex = -1;
   }
 
-  function toggleSeries(seriesId) {
-    hiddenSeries = hiddenSeries.includes(seriesId)
-      ? hiddenSeries.filter((id) => id !== seriesId)
-      : [...hiddenSeries, seriesId];
-  }
-
-  function updateHover(event, chart) {
+  function updateHover(event) {
     if (!rows.length) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const relative = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
@@ -92,14 +86,11 @@
     }).format(new Date(`${value}T00:00:00Z`));
   }
 
-  function seriesForGroup(groupId) {
-    return POL_TRACKER_SERIES.filter((series) => series.group === groupId);
-  }
 </script>
 
 <svelte:head>
   <title>POL Tracker | BooneTools</title>
-  <meta name="description" content="Daily THORChain synth backing, locked Treasury LP, Reserve POL, and Reserve-owned RUNEPool history." />
+  <meta name="description" content="Daily THORChain synth backing, locked Treasury LP, and Reserve POL history." />
 </svelte:head>
 
 <main class="pol-shell">
@@ -144,17 +135,12 @@
       <article class="metric">
         <span class="metric-label">TREASURY LOCKED LP</span>
         <strong>{formatPolTrackerUsd(latest?.treasuryTotalUsd, true)}</strong>
-        <small>{formatPolTrackerUsd(latest?.treasuryAssetUsd, true)} asset + {formatPolTrackerUsd(latest?.treasuryRuneUsd, true)} RUNE</small>
+        <small>locked module position</small>
       </article>
       <article class="metric">
         <span class="metric-label">RESERVE POL</span>
         <strong>{formatPolTrackerUsd(latest?.reservePolUsd, true)}</strong>
         <small>{formatPolTrackerRune(latest?.reservePolRune)} legacy-module gross</small>
-      </article>
-      <article class="metric">
-        <span class="metric-label">RUNEPOOL · RESERVE SHARE</span>
-        <strong>{formatPolTrackerUsd(latest?.runepoolReserveUsd, true)}</strong>
-        <small>{formatPolTrackerRune(latest?.runepoolReserveRune)} · providers excluded</small>
       </article>
       <article class="metric">
         <span class="metric-label">LATEST DAY</span>
@@ -181,65 +167,83 @@
       <span class="selected-day">CURSOR {fullDate(selected?.day)}</span>
     </div>
 
-    {#each charts as group}
-      <section class="chart-panel">
-        <div class="panel-heading">
-          <div>
-            <span class="prompt">$ plot</span>
-            <h2>{group.title}</h2>
-            <p>{group.description}</p>
-          </div>
-          <div class="legend" aria-label={`${group.title} series controls`}>
-            {#each seriesForGroup(group.id) as series}
-              <button
-                class:disabled={hiddenSeries.includes(series.id)}
-                on:click={() => toggleSeries(series.id)}
-              >
-                <span class="swatch" style={`--series-color:${series.color}`}></span>
-                {series.label}
-                <b>{formatPolTrackerUsd(series.value(selected), true)}</b>
-              </button>
-            {/each}
-          </div>
+    <section class="chart-panel">
+      <div class="panel-heading">
+        <div>
+          <span class="prompt">$ plot</span>
+          <h2>{chartGroup.title}</h2>
+          <p>{chartGroup.description}</p>
         </div>
+        <div class="legend" aria-label={`${chartGroup.title} series`}>
+          {#each POL_TRACKER_SERIES as series}
+            <span class="legend-item">
+              <span class="swatch" style={`--series-color:${series.color}`}></span>
+              {series.label}
+              <b>{formatPolTrackerUsd(series.value(selected), true)}</b>
+            </span>
+          {/each}
+        </div>
+      </div>
 
-        <div class="chart-wrap">
-          <svg viewBox={`0 0 ${group.chart.width} ${group.chart.height}`} role="img" aria-label={`${group.title} daily USD chart`}>
-            {#each group.chart.yTicks as tick}
-              <line x1={group.chart.plot.left} x2={group.chart.plot.right} y1={tick.y} y2={tick.y} class="grid-line" />
-              <text x={group.chart.plot.left - 10} y={tick.y + 4} text-anchor="end" class="axis-label">
+      <div class="chart-scroll">
+        <div class="chart-canvas">
+          <svg viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={`${chartGroup.title} daily stacked USD area chart`}>
+            {#each chart.yTicks as tick}
+              <line x1={chart.plot.left} x2={chart.plot.right} y1={tick.y} y2={tick.y} class="grid-line" />
+              <text x={chart.plot.left - 10} y={tick.y + 4} text-anchor="end" class="axis-label">
                 {formatPolTrackerUsd(tick.value, true)}
               </text>
             {/each}
-            {#each group.chart.xTicks as tick}
-              <text x={tick.x} y={group.chart.height - 9} text-anchor="middle" class="axis-label">{axisDate(tick.day)}</text>
+            {#each chart.xTicks as tick}
+              <text x={tick.x} y={chart.height - 9} text-anchor="middle" class="axis-label">{axisDate(tick.day)}</text>
             {/each}
-            {#each group.chart.paths as series}
-              <path d={series.path} fill="none" stroke={series.color} stroke-width={series.id === 'treasury_total' ? 2.4 : 1.7} vector-effect="non-scaling-stroke" />
+            {#each chart.paths as series}
+              <path d={series.areaPath} fill={series.color} class="area-fill" />
+              <path d={series.path} fill="none" stroke={series.color} stroke-width="1.4" vector-effect="non-scaling-stroke" />
             {/each}
             {#if hoverIndex >= 0 && rows[hoverIndex]}
               <line
-                x1={group.chart.x(hoverIndex)}
-                x2={group.chart.x(hoverIndex)}
-                y1={group.chart.plot.top}
-                y2={group.chart.plot.bottom}
+                x1={chart.x(hoverIndex)}
+                x2={chart.x(hoverIndex)}
+                y1={chart.plot.top}
+                y2={chart.plot.bottom}
                 class="cursor-line"
               />
             {/if}
             <rect
               role="presentation"
-              x={group.chart.plot.left}
-              y={group.chart.plot.top}
-              width={group.chart.plot.right - group.chart.plot.left}
-              height={group.chart.plot.bottom - group.chart.plot.top}
+              x={chart.plot.left}
+              y={chart.plot.top}
+              width={chart.plot.right - chart.plot.left}
+              height={chart.plot.bottom - chart.plot.top}
               fill="transparent"
-              on:mousemove={(event) => updateHover(event, group.chart)}
+              on:mousemove={updateHover}
               on:mouseleave={() => { hoverIndex = -1; }}
             />
           </svg>
+          {#if hovered}
+            <div
+              class="chart-tooltip"
+              class:align-right={chart.x(hoverIndex) > chart.width * 0.7}
+              style={`--tooltip-x:${(chart.x(hoverIndex) / chart.width) * 100}%`}
+            >
+              <strong>{fullDate(hovered.day)}</strong>
+              {#each POL_TRACKER_SERIES as series}
+                <span class="tooltip-row">
+                  <i style={`--series-color:${series.color}`}></i>
+                  <span>{series.label}</span>
+                  <b>{formatPolTrackerUsd(series.value(hovered), true)}</b>
+                </span>
+              {/each}
+              <span class="tooltip-total">
+                <span>TOTAL</span>
+                <b>{formatPolTrackerUsd(displayedTotal, true)}</b>
+              </span>
+            </div>
+          {/if}
         </div>
-      </section>
-    {/each}
+      </div>
+    </section>
 
     <section class="table-panel">
       <div class="panel-heading">
@@ -256,9 +260,7 @@
             <tr>
               <th>POOL</th>
               <th>SYNTH BACKING</th>
-              <th>TREASURY ASSET</th>
-              <th>TREASURY RUNE</th>
-              <th>TREASURY TOTAL</th>
+              <th>TREASURY LOCKED LP</th>
             </tr>
           </thead>
           <tbody>
@@ -266,12 +268,10 @@
               <tr>
                 <td><strong>{pool.asset}</strong><small>{pool.status}</small></td>
                 <td>{formatPolTrackerUsd(pool.synthBackingUsd, true)}</td>
-                <td>{formatPolTrackerUsd(pool.treasuryAssetUsd, true)}</td>
-                <td>{formatPolTrackerUsd(pool.treasuryRuneUsd, true)}</td>
                 <td>{formatPolTrackerUsd(pool.treasuryTotalUsd, true)}</td>
               </tr>
             {:else}
-              <tr><td colspan="5" class="empty">No per-pool observation is available yet.</td></tr>
+              <tr><td colspan="3" class="empty">No per-pool observation is available yet.</td></tr>
             {/each}
           </tbody>
         </table>
@@ -282,9 +282,9 @@
       <span class="prompt">$ methodology --accounting-boundaries</span>
       <p>
         All lanes use one historical block per completed UTC day. Synth backing is the pool share
-        attributable to outstanding synth units. The Treasury total repeats its asset and RUNE legs,
-        while Reserve POL and the RUNEPool Reserve share overlap. Provider-owned RUNEPool is absent,
-        and the plotted lanes must not be summed into a single “POL total.”
+        attributable to outstanding synth units. The tooltip total is the arithmetic sum of the three
+        shaded areas: synth backing, Treasury locked LP, and Reserve POL. RUNEPool ownership shares
+        are absent.
       </p>
       <p class="source-line">TREASURY MODULE · …6r2p &nbsp;|&nbsp; PRICES · SAME-HEIGHT TOR &nbsp;|&nbsp; GAPS · NEVER INTERPOLATED</p>
     </section>
@@ -300,7 +300,7 @@
     font-family: 'JetBrains Mono', monospace;
   }
 
-  .terminal-header, .panel-heading, .range-bar, .header-state, .legend button {
+  .terminal-header, .panel-heading, .range-bar, .header-state, .legend-item {
     display: flex;
     align-items: center;
   }
@@ -323,7 +323,7 @@
   .state-dot { width: 7px; height: 7px; background: #00cc66; box-shadow: 0 0 8px rgba(0, 204, 102, .5); }
   .state-dot.stale { background: #d4a017; box-shadow: none; }
   button { font: inherit; }
-  .refresh, .range-bar button, .legend button {
+  .refresh, .range-bar button {
     border: 1px solid #333;
     background: #080808;
     color: #c8c8c8;
@@ -352,15 +352,37 @@
   .chart-panel, .table-panel, .method-panel { border: 1px solid #1a1a1a; background: #080808; margin-top: 12px; }
   .panel-heading { justify-content: space-between; gap: 18px; padding: 13px 15px; border-bottom: 1px solid #1a1a1a; }
   .legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-  .legend button { gap: 7px; padding: 6px 8px; font-size: 9px; }
-  .legend button b { color: #e8e8e8; font-weight: 500; }
-  .legend button.disabled { opacity: .35; text-decoration: line-through; }
-  .swatch { width: 14px; height: 2px; background: var(--series-color); }
-  .chart-wrap { padding: 4px 8px 0; overflow: hidden; }
-  svg { display: block; width: 100%; min-width: 680px; }
+  .legend-item { gap: 7px; padding: 6px 8px; border: 1px solid #262626; color: #aaa; font-size: 9px; }
+  .legend-item b { color: #e8e8e8; font-weight: 500; }
+  .swatch { width: 14px; height: 7px; background: var(--series-color); opacity: .72; }
+  .chart-scroll { padding: 4px 8px 0; overflow-x: auto; }
+  .chart-canvas { position: relative; min-width: 680px; }
+  svg { display: block; width: 100%; }
+  .area-fill { opacity: .34; }
   .grid-line { stroke: #171717; stroke-width: 1; vector-effect: non-scaling-stroke; }
   .axis-label { fill: #777; font: 10px 'JetBrains Mono', monospace; }
   .cursor-line { stroke: #555; stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+  .chart-tooltip {
+    position: absolute;
+    z-index: 2;
+    top: 16px;
+    left: var(--tooltip-x);
+    min-width: 238px;
+    padding: 10px;
+    border: 1px solid #3a3a3a;
+    background: rgba(5, 5, 5, .96);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+    transform: translateX(10px);
+    pointer-events: none;
+    font-size: 9px;
+  }
+  .chart-tooltip.align-right { transform: translateX(calc(-100% - 10px)); }
+  .chart-tooltip > strong { display: block; margin-bottom: 7px; color: #fff; font-size: 10px; font-weight: 500; }
+  .tooltip-row, .tooltip-total { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 7px; padding: 3px 0; }
+  .tooltip-row i { width: 7px; height: 7px; background: var(--series-color); }
+  .tooltip-row span { color: #aaa; }
+  .tooltip-row b, .tooltip-total b { color: #fff; font-weight: 500; }
+  .tooltip-total { grid-template-columns: 1fr auto; margin-top: 6px; padding-top: 7px; border-top: 1px solid #333; color: #00cc66; }
 
   .table-scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -382,7 +404,6 @@
     .terminal-header, .panel-heading { align-items: flex-start; flex-direction: column; }
     .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .legend { justify-content: flex-start; }
-    .chart-wrap { overflow-x: auto; }
   }
 
   @media (max-width: 520px) {

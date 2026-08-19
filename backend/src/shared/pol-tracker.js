@@ -18,8 +18,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const PUBLIC_LANES = Object.freeze([
   'synth',
   'treasury',
-  'reserve_pol',
-  'runepool_reserve'
+  'reserve_pol'
 ]);
 
 function dateString(value) {
@@ -77,9 +76,8 @@ function publicDailyRow(row, day) {
       block_time: null,
       rune_price_usd: null,
       synth: { backing_usd: null, face_usd: null },
-      treasury_lp: { asset_leg_usd: null, rune_leg_usd: null, total_usd: null },
+      treasury_lp: { total_usd: null },
       reserve_pol: { deployed_rune: null, deployed_usd: null },
-      runepool: { reserve_owned_rune: null, reserve_owned_usd: null },
       complete: false,
       status: { state: 'missing' },
       warnings: ['No completed same-height observation is stored for this UTC day']
@@ -96,17 +94,11 @@ function publicDailyRow(row, day) {
       face_usd: e8ToNumber(row.synth_face_usd_e8)
     },
     treasury_lp: {
-      asset_leg_usd: e8ToNumber(row.treasury_asset_usd_e8),
-      rune_leg_usd: e8ToNumber(row.treasury_rune_usd_e8),
       total_usd: e8ToNumber(row.treasury_total_usd_e8)
     },
     reserve_pol: {
       deployed_rune: e8ToNumber(row.reserve_pol_rune_e8),
       deployed_usd: e8ToNumber(row.reserve_pol_usd_e8)
-    },
-    runepool: {
-      reserve_owned_rune: e8ToNumber(row.runepool_reserve_owned_rune_e8),
-      reserve_owned_usd: e8ToNumber(row.runepool_reserve_owned_usd_e8)
     },
     complete: publicRowComplete(row, status),
     status,
@@ -125,10 +117,6 @@ function publicPoolRow(row) {
     synth_backing_usd: e8ToNumber(row.synth_backing_usd_e8),
     synth_face_usd: e8ToNumber(row.synth_face_usd_e8),
     treasury_lp_units: String(row.treasury_lp_units || '0'),
-    treasury_asset_redeem: e8ToNumber(row.treasury_asset_redeem_e8),
-    treasury_rune_redeem: e8ToNumber(row.treasury_rune_redeem_e8),
-    treasury_asset_usd: e8ToNumber(row.treasury_asset_usd_e8),
-    treasury_rune_usd: e8ToNumber(row.treasury_rune_usd_e8),
     treasury_total_usd: e8ToNumber(row.treasury_total_usd_e8)
   };
 }
@@ -167,12 +155,11 @@ export function buildPolTrackerPayload(rows = [], poolRows = [], options = {}) {
     methodology: {
       sampling: 'Latest finalized THORChain block at or before 23:59:59.999 UTC for each completed day.',
       pricing: 'Same-height THORNode TOR prices; all stored source amounts use 1e8 fixed-point units.',
-      treasury: 'Two redeemable legs of locked Treasury module LP positions: asset leg plus RUNE leg.',
+      treasury: 'Combined same-height redeemable value of locked Treasury module LP positions.',
       synth: 'Synth-unit share of pool liquidity, valued as 2 × asset depth × synth_units / pool_units.',
       reserve_pol: 'Gross value of LP positions held at the legacy Reserve module, from runepool.pol.value.',
-      runepool: 'Reserve-owned RUNEPool economic share from runepool.reserve.value.',
-      provider_owned_runepool_excluded: true,
-      aggregation: 'Series overlap. Treasury total repeats its two legs, and Reserve POL overlaps the RUNEPool Reserve share; do not add the plotted lanes into a grand total.'
+      runepool_ownership_excluded: true,
+      aggregation: 'The tooltip total is the arithmetic sum of synth backing, Treasury locked LP, and Reserve POL.'
     }
   };
 }

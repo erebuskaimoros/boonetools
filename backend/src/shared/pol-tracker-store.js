@@ -11,8 +11,6 @@ const DAILY_COLUMNS = [
   'treasury_total_usd_e8',
   'reserve_pol_rune_e8',
   'reserve_pol_usd_e8',
-  'runepool_reserve_owned_rune_e8',
-  'runepool_reserve_owned_usd_e8',
   'runepool_provider_owned_rune_e8',
   'pool_count',
   'treasury_pool_count',
@@ -84,9 +82,8 @@ export async function loadPolTrackerStoredDays(client, startDate, endDate) {
   const { rows } = await client.query(
     `select day, anchor_height, anchor_block_time, treasury_module_address,
             rune_price_usd_e8, synth_backing_usd_e8,
-            synth_face_usd_e8, treasury_asset_usd_e8, treasury_rune_usd_e8,
-            treasury_total_usd_e8, reserve_pol_rune_e8, reserve_pol_usd_e8,
-            runepool_reserve_owned_rune_e8, runepool_reserve_owned_usd_e8,
+            synth_face_usd_e8, treasury_total_usd_e8,
+            reserve_pol_rune_e8, reserve_pol_usd_e8,
             pool_count, treasury_pool_count, complete, lane_status, warnings,
             source, updated_at
      from pol_tracker_daily
@@ -113,8 +110,6 @@ export async function loadLatestPolTrackerPools(client) {
     `select day, asset, pool_status, asset_price_usd_e8, synth_units,
             synth_supply_e8,
             synth_backing_usd_e8, synth_face_usd_e8, treasury_lp_units,
-            treasury_asset_redeem_e8, treasury_rune_redeem_e8,
-            treasury_asset_usd_e8, treasury_rune_usd_e8,
             treasury_total_usd_e8
      from pol_tracker_pool_daily
      where day = (select max(day) from pol_tracker_daily)

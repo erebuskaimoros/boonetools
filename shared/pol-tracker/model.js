@@ -110,22 +110,23 @@ export function buildPolTrackerObservation(input = {}) {
 
   const runepoolAvailable = input.runepool && !input.runepoolError;
   const reservePolRune = runepoolAvailable ? positive(input.runepool?.pol?.value) : null;
-  const reserveOwnedRune = runepoolAvailable ? positive(input.runepool?.reserve?.value) : null;
   // Kept only in durable storage for reconciliation. It is deliberately not
   // emitted by the public read-model builder.
-  const providerOwnedRune = runepoolAvailable ? positive(input.runepool?.providers?.value) : null;
+  const providerValue = input.runepool?.providers?.value;
+  const providerOwnedRune = runepoolAvailable && /^\d+$/.test(String(providerValue ?? ''))
+    ? positive(providerValue)
+    : null;
 
   const treasuryComplete = treasuryAssetComplete && treasuryRuneComplete;
   const treasuryWarning = treasuryComplete
     ? ''
     : treasuryErrors.length
       ? `${treasuryErrors.length} Treasury LP lookup(s) were incomplete`
-      : 'One or more Treasury asset legs lacked a same-height price';
+      : 'One or more Treasury positions lacked a same-height asset price';
   const laneStatus = {
     synth: lane(synthComplete ? 'complete' : 'partial', synthComplete ? '' : 'One or more synth pools lacked same-height units or price data'),
     treasury: lane(treasuryComplete ? 'complete' : 'partial', treasuryWarning),
-    reserve_pol: lane(runepoolAvailable ? 'complete' : 'unavailable', input.runepoolError || ''),
-    runepool_reserve: lane(runepoolAvailable ? 'complete' : 'unavailable', input.runepoolError || '')
+    reserve_pol: lane(runepoolAvailable ? 'complete' : 'unavailable', input.runepoolError || '')
   };
   const complete = Object.values(laneStatus).every(({ status }) => status === 'complete');
   const warnings = Object.values(laneStatus).map((item) => item.warning).filter(Boolean);
@@ -144,8 +145,6 @@ export function buildPolTrackerObservation(input = {}) {
       treasury_total_usd_e8: totalOrNull(poolRows.map((row) => row.treasury_total_usd_e8), treasuryComplete),
       reserve_pol_rune_e8: reservePolRune?.toString() ?? null,
       reserve_pol_usd_e8: reservePolRune === null ? null : e8Product(reservePolRune, runePrice).toString(),
-      runepool_reserve_owned_rune_e8: reserveOwnedRune?.toString() ?? null,
-      runepool_reserve_owned_usd_e8: reserveOwnedRune === null ? null : e8Product(reserveOwnedRune, runePrice).toString(),
       runepool_provider_owned_rune_e8: providerOwnedRune?.toString() ?? null,
       pool_count: poolRows.length,
       treasury_pool_count: poolRows.filter((row) => positive(row.treasury_lp_units) > 0n).length,

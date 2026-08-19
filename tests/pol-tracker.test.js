@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
 import {
+  POL_TRACKER_GROUPS,
   POL_TRACKER_SERIES,
   buildPolTrackerChart,
   normalizePolTrackerPayload,
-  selectPolTrackerRange
+  selectPolTrackerRange,
+  totalPolTrackerValue
 } from '../src/lib/pol-tracker/model.js';
 
 test('POL Tracker remains directly routable without appearing in navigation', async () => {
@@ -20,17 +22,18 @@ test('POL Tracker remains directly routable without appearing in navigation', as
   assert.match(appSource, /const hiddenApps = \[wasmArbEconomicsApp, polTrackerApp\];/);
   assert.match(appSource, /return \[\.\.\.apps, \.\.\.hiddenApps\]\.find/);
   assert.doesNotMatch(trackerSource, /SAVERS|Savers|Saver/);
+  assert.doesNotMatch(trackerSource, /ASSET LEG|RUNE LEG|treasuryAssetUsd|treasuryRuneUsd/);
+  assert.doesNotMatch(trackerSource, /RUNEPOOL · RESERVE SHARE|runepoolReserve/);
+  assert.match(trackerSource, />TOTAL</);
 });
 
-test('POL Tracker exposes synth backing and Reserve-owned RUNEPool without Savers or providers', () => {
+test('POL Tracker exposes exactly three consolidated public chart values', () => {
   const ids = POL_TRACKER_SERIES.map(({ id }) => id);
-  assert.ok(ids.includes('synth'));
-  assert.ok(ids.includes('runepool_reserve'));
-  assert.equal(ids.includes('savers'), false);
-  assert.equal(ids.some((id) => id.includes('provider')), false);
+  assert.deepEqual(ids, ['synth', 'treasury_total', 'reserve_pol']);
+  assert.equal(POL_TRACKER_GROUPS.length, 1);
 });
 
-test('POL Tracker normalization ignores Savers and provider-owned transport fields', () => {
+test('POL Tracker normalization ignores Savers, Treasury legs, and RUNEPool ownership', () => {
   const dashboard = normalizePolTrackerPayload({
     daily: [{
       day: '2025-02-01',
@@ -50,24 +53,41 @@ test('POL Tracker normalization ignores Savers and provider-owned transport fiel
       asset: 'BTC.BTC',
       savers_depth: 10,
       savers_usd: 20,
-      synth_backing_usd: 30
+      synth_backing_usd: 30,
+      treasury_asset_usd: 4,
+      treasury_rune_usd: 5,
+      treasury_total_usd: 9
     }]
   });
-  assert.equal(dashboard.daily[0].runepoolReserveUsd, 12);
+  assert.equal(dashboard.daily[0].treasuryTotalUsd, 9);
   assert.equal(Object.hasOwn(dashboard.daily[0], 'saversUsd'), false);
+  assert.equal(Object.hasOwn(dashboard.daily[0], 'treasuryAssetUsd'), false);
+  assert.equal(Object.hasOwn(dashboard.daily[0], 'treasuryRuneUsd'), false);
+  assert.equal(Object.hasOwn(dashboard.daily[0], 'runepoolReserveRune'), false);
+  assert.equal(Object.hasOwn(dashboard.daily[0], 'runepoolReserveUsd'), false);
   assert.equal(Object.keys(dashboard.daily[0]).some((key) => key.includes('provider')), false);
   assert.equal(Object.hasOwn(dashboard.latestPools[0], 'saversDepth'), false);
   assert.equal(Object.hasOwn(dashboard.latestPools[0], 'saversUsd'), false);
+  assert.equal(Object.hasOwn(dashboard.latestPools[0], 'treasuryAssetUsd'), false);
+  assert.equal(Object.hasOwn(dashboard.latestPools[0], 'treasuryRuneUsd'), false);
 });
 
-test('range selection and chart paths preserve null daily gaps', () => {
+test('the consolidated chart stacks three shaded areas and totals their values', () => {
   const rows = Array.from({ length: 40 }, (_, index) => ({
     day: `2025-03-${String(index + 1).padStart(2, '0')}`,
-    synthBackingUsd: index === 20 ? null : index + 2
+    synthBackingUsd: index === 20 ? null : 10,
+    treasuryTotalUsd: 20,
+    reservePolUsd: 30,
+    runepoolReserveUsd: 40
   }));
   const selected = selectPolTrackerRange(rows, '30d');
   assert.equal(selected.length, 30);
-  const chart = buildPolTrackerChart(selected, 'liabilities');
+  const chart = buildPolTrackerChart(selected, 'overview');
+  assert.equal(chart.yMax, 100);
+  assert.equal(chart.paths.length, 3);
+  assert.ok(chart.paths.every(({ areaPath }) => areaPath.includes('Z')));
   const synthPath = chart.paths.find(({ id }) => id === 'synth').path;
   assert.ok((synthPath.match(/M/g) || []).length >= 2);
+  assert.equal(totalPolTrackerValue(rows[0]), 60);
+  assert.equal(totalPolTrackerValue(rows[20]), null);
 });

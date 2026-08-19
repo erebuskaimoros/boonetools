@@ -6,29 +6,16 @@ export const POL_TRACKER_RANGES = Object.freeze([
 ]);
 
 export const POL_TRACKER_SERIES = Object.freeze([
-  { id: 'synth', label: 'SYNTH BACKING', group: 'liabilities', color: '#5588cc', value: (row) => row?.synthBackingUsd ?? null },
-  { id: 'treasury_asset', label: 'ASSET LEG', group: 'treasury', color: '#d4a017', value: (row) => row?.treasuryAssetUsd ?? null },
-  { id: 'treasury_rune', label: 'RUNE LEG', group: 'treasury', color: '#00cc66', value: (row) => row?.treasuryRuneUsd ?? null },
-  { id: 'treasury_total', label: 'LOCKED TOTAL', group: 'treasury', color: '#e8e8e8', value: (row) => row?.treasuryTotalUsd ?? null },
-  { id: 'reserve_pol', label: 'RESERVE POL', group: 'protocol', color: '#5588cc', value: (row) => row?.reservePolUsd ?? null },
-  { id: 'runepool_reserve', label: 'RUNEPOOL RESERVE SHARE', group: 'protocol', color: '#00cc66', value: (row) => row?.runepoolReserveUsd ?? null }
+  { id: 'synth', label: 'SYNTH BACKING', group: 'overview', color: '#5588cc', value: (row) => row?.synthBackingUsd ?? null },
+  { id: 'treasury_total', label: 'TREASURY LOCKED LP', group: 'overview', color: '#d4a017', value: (row) => row?.treasuryTotalUsd ?? null },
+  { id: 'reserve_pol', label: 'RESERVE POL', group: 'overview', color: '#00cc66', value: (row) => row?.reservePolUsd ?? null }
 ]);
 
 export const POL_TRACKER_GROUPS = Object.freeze([
   {
-    id: 'liabilities',
-    title: 'Synth backing',
-    description: 'Pool liquidity allocated to outstanding synth units at each completed UTC day end.'
-  },
-  {
-    id: 'treasury',
-    title: 'Locked Treasury module LP',
-    description: 'Same-height redeemable asset and RUNE legs, with their combined position value.'
-  },
-  {
-    id: 'protocol',
-    title: 'Reserve POL / RUNEPool',
-    description: 'Gross legacy Reserve LP value versus the Reserve-owned RUNEPool share. Provider ownership is excluded.'
+    id: 'overview',
+    title: 'Daily tracked values',
+    description: 'Three same-height values stacked as shaded areas from each completed UTC day end.'
   }
 ]);
 
@@ -51,13 +38,9 @@ export function normalizePolTrackerDailyRow(row = {}) {
     runePriceUsd: finite(row.rune_price_usd),
     synthBackingUsd: finite(row.synth?.backing_usd),
     synthFaceUsd: finite(row.synth?.face_usd),
-    treasuryAssetUsd: finite(row.treasury_lp?.asset_leg_usd),
-    treasuryRuneUsd: finite(row.treasury_lp?.rune_leg_usd),
     treasuryTotalUsd: finite(row.treasury_lp?.total_usd),
     reservePolRune: finite(row.reserve_pol?.deployed_rune),
     reservePolUsd: finite(row.reserve_pol?.deployed_usd),
-    runepoolReserveRune: finite(row.runepool?.reserve_owned_rune),
-    runepoolReserveUsd: finite(row.runepool?.reserve_owned_usd),
     complete: Boolean(row.complete),
     status: row.status && typeof row.status === 'object' ? row.status : {},
     warnings: Array.isArray(row.warnings) ? row.warnings : []
@@ -87,10 +70,6 @@ export function normalizePolTrackerPayload(payload = {}) {
       synthBackingUsd: finite(pool.synth_backing_usd),
       synthFaceUsd: finite(pool.synth_face_usd),
       treasuryLpUnits: String(pool.treasury_lp_units || '0'),
-      treasuryAssetRedeem: finite(pool.treasury_asset_redeem),
-      treasuryRuneRedeem: finite(pool.treasury_rune_redeem),
-      treasuryAssetUsd: finite(pool.treasury_asset_usd),
-      treasuryRuneUsd: finite(pool.treasury_rune_usd),
       treasuryTotalUsd: finite(pool.treasury_total_usd)
     })),
     warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
@@ -114,33 +93,67 @@ function niceCeiling(value) {
   return step * magnitude;
 }
 
+export function totalPolTrackerValue(row) {
+  const values = POL_TRACKER_SERIES.map((series) => series.value(row));
+  if (!values.every((value) => Number.isFinite(value))) return null;
+  return values.reduce((total, value) => total + value, 0);
+}
+
+function buildStackPaths(points, y) {
+  const segments = [];
+  let segment = [];
+  for (const point of points) {
+    if (point) {
+      segment.push(point);
+    } else if (segment.length) {
+      segments.push(segment);
+      segment = [];
+    }
+  }
+  if (segment.length) segments.push(segment);
+
+  return {
+    path: segments.map((pointsInSegment) => pointsInSegment
+      .map((point, index) => `${index ? 'L' : 'M'}${point.x.toFixed(2)},${y(point.upper).toFixed(2)}`)
+      .join(' ')).join(' '),
+    areaPath: segments.map((pointsInSegment) => {
+      const upper = pointsInSegment
+        .map((point, index) => `${index ? 'L' : 'M'}${point.x.toFixed(2)},${y(point.upper).toFixed(2)}`)
+        .join(' ');
+      const lower = [...pointsInSegment].reverse()
+        .map((point) => `L${point.x.toFixed(2)},${y(point.lower).toFixed(2)}`)
+        .join(' ');
+      return `${upper} ${lower} Z`;
+    }).join(' ')
+  };
+}
+
 export function buildPolTrackerChart(rows = [], groupId, options = {}) {
   const width = options.width || 1000;
   const height = options.height || 260;
   const plot = { left: 82, right: width - 16, top: 14, bottom: height - 32 };
-  const hidden = new Set(options.hiddenSeries || []);
-  const series = POL_TRACKER_SERIES.filter((item) => item.group === groupId && !hidden.has(item.id));
-  const values = rows.flatMap((row) => series.map((item) => item.value(row)))
-    .filter((value) => Number.isFinite(value) && value >= 0);
-  const yMax = niceCeiling(Math.max(1, ...values));
+  const series = POL_TRACKER_SERIES.filter((item) => item.group === groupId);
   const spanX = plot.right - plot.left;
-  const spanY = plot.bottom - plot.top;
   const x = (index) => plot.left + (rows.length <= 1 ? 0 : (index / (rows.length - 1)) * spanX);
+  const cumulative = rows.map(() => 0);
+  const stackAvailable = rows.map(() => true);
+  const pointSets = series.map((item) => rows.map((row, index) => {
+    const value = item.value(row);
+    if (!stackAvailable[index] || !Number.isFinite(value) || value < 0) {
+      stackAvailable[index] = false;
+      return null;
+    }
+    const lower = cumulative[index];
+    cumulative[index] += value;
+    return { x: x(index), lower, upper: cumulative[index] };
+  }));
+  const yMax = niceCeiling(Math.max(1, ...cumulative));
+  const spanY = plot.bottom - plot.top;
   const y = (value) => plot.bottom - (Math.max(0, value) / yMax) * spanY;
-  const paths = series.map((item) => {
-    let path = '';
-    let penDown = false;
-    rows.forEach((row, index) => {
-      const value = item.value(row);
-      if (!Number.isFinite(value)) {
-        penDown = false;
-        return;
-      }
-      path += `${penDown ? ' L' : 'M'}${x(index).toFixed(2)},${y(value).toFixed(2)}`;
-      penDown = true;
-    });
-    return { ...item, path };
-  });
+  const paths = series.map((item, index) => ({
+    ...item,
+    ...buildStackPaths(pointSets[index], y)
+  }));
   const tickIndexes = [...new Set(Array.from({ length: Math.min(5, rows.length) }, (_, index) =>
     Math.round((index / Math.max(1, Math.min(5, rows.length) - 1)) * Math.max(0, rows.length - 1))
   ))];

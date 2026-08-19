@@ -13,7 +13,7 @@ test('POL Tracker handler is cache-only and supports conditional responses', asy
       as_of: NOW.toISOString(),
       daily: [{
         day: '2026-08-18',
-        runepool: { reserve_owned_rune: 60, reserve_owned_usd: 180 }
+        reserve_pol: { deployed_rune: 100, deployed_usd: 300 }
       }],
       warnings: []
     },
@@ -28,10 +28,11 @@ test('POL Tracker handler is cache-only and supports conditional responses', asy
     getReadModel: async () => model
   });
   assert.equal(first.status, 200);
-  assert.deepEqual(first.body.daily[0].runepool, {
-    reserve_owned_rune: 60,
-    reserve_owned_usd: 180
+  assert.deepEqual(first.body.daily[0].reserve_pol, {
+    deployed_rune: 100,
+    deployed_usd: 300
   });
+  assert.equal(Object.hasOwn(first.body.daily[0], 'runepool'), false);
   assert.equal(first.headers['X-Boone-Cache'], 'hit');
 
   const second = await handlePolTracker({

@@ -6,14 +6,13 @@
 block at or before each completed UTC day end. It tracks:
 
 - Synth-unit backing: `2 * balance_asset * asset_price * synth_units / pool_units`.
-- The locked Treasury module `...6r2p` LP asset and RUNE redeemable legs.
+- The locked Treasury module `...6r2p` LP total redeemable value.
 - Gross legacy Reserve-module LP value from `runepool.pol.value`.
-- Only the Reserve-owned RUNEPool economic share from `runepool.reserve.value`.
 
-Provider-owned RUNEPool value is not a dashboard series or public API field.
-It is stored only as a private reconciliation input. Gross Reserve POL and the
-Reserve-owned RUNEPool share overlap. The Treasury combined value also repeats
-its asset and RUNE legs. The dashboard therefore has no grand-total metric.
+RUNEPool provider and Reserve ownership shares are not dashboard series or
+public API fields. Provider-owned RUNEPool value is stored only as a private
+reconciliation input. The dashboard combines the three tracked values into one
+stacked area chart. Its hover total is their arithmetic sum.
 
 Savers value is intentionally absent from the dashboard, public API, and newly
 collected rows. Migration `046_pol_tracker.sql` retains nullable legacy Saver

@@ -58,25 +58,30 @@ test('same-height formulas preserve the requested accounting lanes without Saver
   assert.equal(e8ToNumber(observation.daily.treasury_rune_usd_e8), 9);
   assert.equal(e8ToNumber(observation.daily.treasury_total_usd_e8), 17);
   assert.equal(e8ToNumber(observation.daily.reserve_pol_usd_e8), 300);
-  assert.equal(e8ToNumber(observation.daily.runepool_reserve_owned_usd_e8), 180);
   assert.equal(e8ToNumber(observation.daily.runepool_provider_owned_rune_e8), 40);
+  assert.equal(Object.hasOwn(observation.daily, 'runepool_reserve_owned_rune_e8'), false);
+  assert.equal(Object.hasOwn(observation.daily, 'runepool_reserve_owned_usd_e8'), false);
   assert.equal(Object.hasOwn(observation.daily, 'savers_usd_e8'), false);
   assert.equal(Object.hasOwn(observation.daily.lane_status, 'savers'), false);
+  assert.equal(Object.hasOwn(observation.daily.lane_status, 'runepool_reserve'), false);
   assert.equal(Object.hasOwn(observation.pools[0], 'savers_depth_e8'), false);
   assert.equal(Object.hasOwn(observation.pools[0], 'savers_units'), false);
   assert.equal(Object.hasOwn(observation.pools[0], 'savers_usd_e8'), false);
   assert.equal(observation.daily.complete, true);
 });
 
-test('public payload strips legacy Savers and provider-owned RUNEPool values', () => {
+test('public payload strips legacy Savers and all RUNEPool ownership values', () => {
   const observation = buildPolTrackerObservation(DAY_INPUT);
   const legacyDaily = {
     ...observation.daily,
     savers_usd_e8: '2000000000',
+    runepool_reserve_owned_rune_e8: '6000000000',
+    runepool_reserve_owned_usd_e8: '18000000000',
     complete: false,
     lane_status: {
       savers: { status: 'partial', warning: 'Legacy Saver warning' },
-      ...observation.daily.lane_status
+      ...observation.daily.lane_status,
+      runepool_reserve: { status: 'complete', warning: '' }
     },
     warnings: ['Legacy Saver warning']
   };
@@ -91,21 +96,26 @@ test('public payload strips legacy Savers and provider-owned RUNEPool values', (
     endDate: '2025-02-02',
     now: new Date('2025-02-03T00:10:00Z')
   });
-  assert.deepEqual(payload.daily[0].runepool, {
-    reserve_owned_rune: 60,
-    reserve_owned_usd: 180
-  });
-  assert.equal(Object.hasOwn(payload.daily[0].runepool, 'provider_owned_rune'), false);
+  assert.equal(Object.hasOwn(payload.daily[0], 'runepool'), false);
   assert.equal(Object.hasOwn(payload.daily[0], 'savers_usd'), false);
   assert.equal(Object.hasOwn(payload.daily[0].status, 'savers'), false);
+  assert.equal(Object.hasOwn(payload.daily[0].status, 'runepool_reserve'), false);
+  assert.deepEqual(payload.daily[0].treasury_lp, { total_usd: 17 });
+  assert.equal(Object.hasOwn(payload.daily[0].treasury_lp, 'asset_leg_usd'), false);
+  assert.equal(Object.hasOwn(payload.daily[0].treasury_lp, 'rune_leg_usd'), false);
   assert.equal(Object.hasOwn(payload.latest_pools[0], 'savers_depth'), false);
   assert.equal(Object.hasOwn(payload.latest_pools[0], 'savers_usd'), false);
+  assert.equal(Object.hasOwn(payload.latest_pools[0], 'treasury_asset_redeem'), false);
+  assert.equal(Object.hasOwn(payload.latest_pools[0], 'treasury_rune_redeem'), false);
+  assert.equal(Object.hasOwn(payload.latest_pools[0], 'treasury_asset_usd'), false);
+  assert.equal(Object.hasOwn(payload.latest_pools[0], 'treasury_rune_usd'), false);
   assert.equal(Object.hasOwn(payload.methodology, 'savers'), false);
+  assert.equal(Object.hasOwn(payload.methodology, 'runepool'), false);
   assert.equal(payload.daily[0].complete, true);
   assert.equal(payload.daily[0].warnings.includes('Legacy Saver warning'), false);
   assert.equal(payload.warnings.includes('Legacy Saver warning'), false);
   assert.equal(payload.daily[1].status.state, 'missing');
-  assert.equal(payload.daily[1].runepool.reserve_owned_usd, null);
+  assert.equal(Object.hasOwn(payload.daily[1], 'runepool'), false);
   assert.equal(payload.coverage.observed_days, 1);
   assert.equal(payload.coverage.missing_days, 1);
 });
@@ -129,7 +139,7 @@ test('a missing Treasury asset price preserves the independently redeemable RUNE
   assert.equal(observation.daily.treasury_asset_usd_e8, null);
   assert.equal(e8ToNumber(observation.daily.treasury_rune_usd_e8), 9);
   assert.equal(observation.daily.treasury_total_usd_e8, null);
-  assert.match(observation.daily.lane_status.treasury.warning, /asset legs lacked/);
+  assert.match(observation.daily.lane_status.treasury.warning, /positions lacked/);
 });
 
 test('historical provider requests pin every source and LP query to one height', async () => {
@@ -141,7 +151,7 @@ test('historical provider requests pin every source and LP query to one height',
       if (path.startsWith('/thorchain/network')) return { rune_price_in_tor: '300000000' };
       if (path.startsWith('/thorchain/pools')) return [{ asset: 'BTC.BTC' }, { asset: 'ETH.ETH' }];
       if (path.startsWith('/thorchain/runepool')) {
-        return { pol: { value: '1' }, reserve: { value: '1' }, providers: { value: '0' } };
+        return { pol: { value: '1' }, providers: { value: '0' } };
       }
       return { units: '0', asset_redeem_value: '0', rune_redeem_value: '0' };
     }
