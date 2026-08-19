@@ -70,7 +70,9 @@ export function normalizePolTrackerPayload(payload = {}) {
       synthBackingUsd: finite(pool.synth_backing_usd),
       synthFaceUsd: finite(pool.synth_face_usd),
       treasuryLpUnits: String(pool.treasury_lp_units || '0'),
-      treasuryTotalUsd: finite(pool.treasury_total_usd)
+      treasuryTotalUsd: finite(pool.treasury_total_usd),
+      reservePolRune: finite(pool.reserve_pol_rune),
+      reservePolUsd: finite(pool.reserve_pol_usd)
     })),
     warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
     methodology: payload.methodology || {}
@@ -176,6 +178,7 @@ export function relevantPolTrackerPools(pools = []) {
   return (Array.isArray(pools) ? pools : []).filter((pool) =>
     (pool.synthBackingUsd || 0) > 0
     || (pool.treasuryTotalUsd || 0) > 0
+    || (pool.reservePolUsd || 0) > 0
   );
 }
 

@@ -7,6 +7,7 @@ import {
   POL_TRACKER_SERIES,
   buildPolTrackerChart,
   normalizePolTrackerPayload,
+  relevantPolTrackerPools,
   selectPolTrackerRange,
   totalPolTrackerValue
 } from '../src/lib/pol-tracker/model.js';
@@ -25,6 +26,8 @@ test('POL Tracker remains directly routable without appearing in navigation', as
   assert.doesNotMatch(trackerSource, /ASSET LEG|RUNE LEG|treasuryAssetUsd|treasuryRuneUsd/);
   assert.doesNotMatch(trackerSource, /RUNEPOOL · RESERVE SHARE|runepoolReserve/);
   assert.match(trackerSource, />TOTAL</);
+  assert.match(trackerSource, /<th>RESERVE POL<\/th>/);
+  assert.match(trackerSource, /pool\.reservePolUsd/);
 });
 
 test('POL Tracker exposes exactly three consolidated public chart values', () => {
@@ -56,7 +59,9 @@ test('POL Tracker normalization ignores Savers, Treasury legs, and RUNEPool owne
       synth_backing_usd: 30,
       treasury_asset_usd: 4,
       treasury_rune_usd: 5,
-      treasury_total_usd: 9
+      treasury_total_usd: 9,
+      reserve_pol_rune: 10,
+      reserve_pol_usd: 20
     }]
   });
   assert.equal(dashboard.daily[0].treasuryTotalUsd, 9);
@@ -70,6 +75,16 @@ test('POL Tracker normalization ignores Savers, Treasury legs, and RUNEPool owne
   assert.equal(Object.hasOwn(dashboard.latestPools[0], 'saversUsd'), false);
   assert.equal(Object.hasOwn(dashboard.latestPools[0], 'treasuryAssetUsd'), false);
   assert.equal(Object.hasOwn(dashboard.latestPools[0], 'treasuryRuneUsd'), false);
+  assert.equal(dashboard.latestPools[0].reservePolRune, 10);
+  assert.equal(dashboard.latestPools[0].reservePolUsd, 20);
+});
+
+test('the latest-pool table keeps pools whose only tracked value is Reserve POL', () => {
+  const pools = relevantPolTrackerPools([
+    { asset: 'BTC.BTC', synthBackingUsd: 0, treasuryTotalUsd: 0, reservePolUsd: 20 },
+    { asset: 'ETH.ETH', synthBackingUsd: 0, treasuryTotalUsd: 0, reservePolUsd: 0 }
+  ]);
+  assert.deepEqual(pools.map(({ asset }) => asset), ['BTC.BTC']);
 });
 
 test('the consolidated chart stacks three shaded areas and totals their values', () => {

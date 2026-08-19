@@ -22,8 +22,14 @@ publishes them.
 ## Data contract
 
 Every input for a day is fetched with the same `height` parameter. Missing
-prices or failed Treasury LP lookups null the affected aggregate instead of
+prices or failed module LP lookups null the affected breakdown instead of
 creating a partial sum. Missing dates are explicit null chart gaps. Migration
-`046_pol_tracker.sql` owns daily rows, per-pool audit inputs, and resumable sync
-state. The daily timer revisits seven recent days; the manual backfill fills all
-missing or partial dates from February 2025.
+`046_pol_tracker.sql` owns the original daily rows, per-pool audit inputs, and
+resumable sync state. Migration `047_pol_tracker_pool_breakdown.sql` adds the
+legacy Reserve module and its per-pool LP units, gross RUNE value, and USD
+value. Each pool uses the same round-half-up safe-share calculation as
+THORNode: `2 * safeShare(reserve_lp_units, pool_units, balance_rune)`. The
+per-pool RUNE values must reconcile exactly to `runepool.pol.value`; otherwise
+the Reserve lane remains partial and eligible for repair. The daily timer
+revisits seven recent days; the manual backfill fills all missing or partial
+dates from February 2025.

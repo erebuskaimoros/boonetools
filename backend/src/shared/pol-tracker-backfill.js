@@ -120,6 +120,7 @@ export async function collectPolTrackerDay(anchor, options = {}) {
     client: options.client,
     thornodeUrls: options.thornodeUrls || config.polTrackerThornodeUrls,
     moduleAddress: options.moduleAddress,
+    reserveModuleAddress: options.reserveModuleAddress,
     concurrency: options.lpConcurrency,
     requestDelayMs: options.requestDelayMs,
     timeoutMs: options.timeoutMs || config.polTrackerTimeoutMs

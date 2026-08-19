@@ -49,13 +49,16 @@ publisher. It never runs on a public request path. Reconstructed THORChain pool
 and oracle prices share one historical height; reconstructed Binance prices
 are provenance-labeled five-minute kline closes rather than live BBO midpoints.
 
-POL Tracker uses migration `046_pol_tracker.sql` for one same-height snapshot
-per completed UTC day plus its per-pool inputs. The scheduled job revisits the
-latest seven days, atomically replaces each day, and publishes one bounded
-read model; the manual resumable backfill begins on 2025-02-01. Public GETs
-never query historical THORNode or RPC providers. The public RUNEPool lane is
-the Reserve-owned share only. Provider-owned RUNEPool value is retained in the
-daily table solely for reconciliation and is not selected into the read model.
+POL Tracker uses migrations `046_pol_tracker.sql` and
+`047_pol_tracker_pool_breakdown.sql` for one same-height snapshot per completed
+UTC day plus its per-pool inputs. The scheduled job revisits the latest seven
+days, atomically replaces each day, and publishes one bounded read model; the
+manual resumable backfill begins on 2025-02-01. Public GETs never query
+historical THORNode or RPC providers. Savers and RUNEPool ownership shares are
+not public lanes. Provider-owned RUNEPool value is retained in the daily table
+solely for reconciliation and is not selected into the read model. The latest
+pool breakdown derives each legacy Reserve POL value with THORNode's rounded
+safe-share formula and requires the pool sum to equal `runepool.pol.value`.
 
 The core publisher is the sole scheduled owner of reusable current THORNode
 state. It refreshes `lastblock` every 15 seconds; inbound addresses, Mimir, and

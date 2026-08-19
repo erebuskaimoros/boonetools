@@ -4,7 +4,9 @@ import { readFile } from 'node:fs/promises';
 
 import {
   buildPolTrackerObservation,
-  e8ToNumber
+  e8ToNumber,
+  POL_TRACKER_RESERVE_MODULE,
+  POL_TRACKER_TREASURY_MODULE
 } from '../../shared/pol-tracker/model.js';
 import { fetchHistoricalPolTrackerState } from '../src/pol-tracker/providers.js';
 import { runPolTrackerBackfill, runPolTrackerScheduler } from '../src/jobs/pol-tracker.js';
@@ -19,6 +21,7 @@ import {
   resolvePolTrackerAnchors,
   retryPolTrackerOperation
 } from '../src/shared/pol-tracker-backfill.js';
+import { loadPolTrackerExistingDays } from '../src/shared/pol-tracker-store.js';
 
 const DAY_INPUT = {
   day: '2025-02-01',
@@ -43,6 +46,12 @@ const DAY_INPUT = {
     rune_redeem_value: '300000000'
   }]]),
   treasuryErrors: [],
+  reserveLps: new Map([['BTC.BTC', {
+    units: '25',
+    asset_redeem_value: '2500000000',
+    rune_redeem_value: '5000000000'
+  }]]),
+  reserveErrors: [],
   runepool: {
     pol: { value: '10000000000' },
     reserve: { value: '6000000000' },
@@ -58,6 +67,11 @@ test('same-height formulas preserve the requested accounting lanes without Saver
   assert.equal(e8ToNumber(observation.daily.treasury_rune_usd_e8), 9);
   assert.equal(e8ToNumber(observation.daily.treasury_total_usd_e8), 17);
   assert.equal(e8ToNumber(observation.daily.reserve_pol_usd_e8), 300);
+  assert.equal(observation.daily.reserve_module_address, POL_TRACKER_RESERVE_MODULE);
+  assert.equal(observation.daily.reserve_pool_count, 1);
+  assert.equal(observation.pools[0].reserve_pol_lp_units, '25');
+  assert.equal(e8ToNumber(observation.pools[0].reserve_pol_rune_e8), 100);
+  assert.equal(e8ToNumber(observation.pools[0].reserve_pol_usd_e8), 300);
   assert.equal(e8ToNumber(observation.daily.runepool_provider_owned_rune_e8), 40);
   assert.equal(Object.hasOwn(observation.daily, 'runepool_reserve_owned_rune_e8'), false);
   assert.equal(Object.hasOwn(observation.daily, 'runepool_reserve_owned_usd_e8'), false);
@@ -109,6 +123,8 @@ test('public payload strips legacy Savers and all RUNEPool ownership values', ()
   assert.equal(Object.hasOwn(payload.latest_pools[0], 'treasury_rune_redeem'), false);
   assert.equal(Object.hasOwn(payload.latest_pools[0], 'treasury_asset_usd'), false);
   assert.equal(Object.hasOwn(payload.latest_pools[0], 'treasury_rune_usd'), false);
+  assert.equal(payload.latest_pools[0].reserve_pol_rune, 100);
+  assert.equal(payload.latest_pools[0].reserve_pol_usd, 300);
   assert.equal(Object.hasOwn(payload.methodology, 'savers'), false);
   assert.equal(Object.hasOwn(payload.methodology, 'runepool'), false);
   assert.equal(Object.keys(payload.methodology).some((key) => key.includes('runepool')), false);
@@ -130,6 +146,58 @@ test('Treasury lookup failures create null Treasury totals without corrupting ot
   assert.equal(e8ToNumber(observation.daily.synth_backing_usd_e8), 100);
   assert.equal(observation.daily.lane_status.treasury.status, 'partial');
   assert.equal(observation.daily.complete, false);
+});
+
+test('Reserve lookup failures keep the aggregate value but mark its per-pool breakdown partial', () => {
+  const observation = buildPolTrackerObservation({
+    ...DAY_INPUT,
+    reserveErrors: [{ asset: 'BTC.BTC', error: 'timeout' }]
+  });
+  assert.equal(e8ToNumber(observation.daily.reserve_pol_usd_e8), 300);
+  assert.equal(observation.pools[0].reserve_pol_rune_e8, null);
+  assert.equal(observation.pools[0].reserve_pol_usd_e8, null);
+  assert.equal(observation.daily.lane_status.reserve_pol.status, 'partial');
+  assert.match(observation.daily.lane_status.reserve_pol.warning, /Reserve POL LP lookup/);
+  assert.equal(observation.daily.complete, false);
+});
+
+test('per-pool Reserve POL must reconcile exactly to runepool.pol.value', () => {
+  const observation = buildPolTrackerObservation({
+    ...DAY_INPUT,
+    runepool: {
+      ...DAY_INPUT.runepool,
+      pol: { value: '9999999999' }
+    }
+  });
+  assert.equal(observation.daily.lane_status.reserve_pol.status, 'partial');
+  assert.match(observation.daily.lane_status.reserve_pol.warning, /did not reconcile/);
+  assert.equal(observation.daily.complete, false);
+});
+
+test('per-pool Reserve POL mirrors THORNode safe-share rounding instead of LP-query truncation', () => {
+  const observation = buildPolTrackerObservation({
+    ...DAY_INPUT,
+    pools: [{
+      ...DAY_INPUT.pools[0],
+      balance_rune: '5',
+      pool_units: '3',
+      LP_units: '2',
+      synth_units: '1',
+      synth_supply: '0'
+    }],
+    reserveLps: new Map([['BTC.BTC', {
+      units: '1',
+      asset_redeem_value: '0',
+      // The LP response truncates 5 / 3 to one, while GetSafeShare rounds to two.
+      rune_redeem_value: '1'
+    }]]),
+    runepool: {
+      ...DAY_INPUT.runepool,
+      pol: { value: '4' }
+    }
+  });
+  assert.equal(observation.pools[0].reserve_pol_rune_e8, '4');
+  assert.equal(observation.daily.lane_status.reserve_pol.status, 'complete');
 });
 
 test('a missing Treasury asset price preserves the independently redeemable RUNE leg', () => {
@@ -157,10 +225,27 @@ test('historical provider requests pin every source and LP query to one height',
       return { units: '0', asset_redeem_value: '0', rune_redeem_value: '0' };
     }
   });
-  assert.equal(paths.length, 5);
+  assert.equal(paths.length, 7);
   assert.ok(paths.every((path) => path.endsWith('?height=456')));
+  assert.equal(paths.filter((path) => path.includes(POL_TRACKER_TREASURY_MODULE)).length, 2);
+  assert.equal(paths.filter((path) => path.includes(POL_TRACKER_RESERVE_MODULE)).length, 2);
   assert.equal(state.treasuryLps.size, 2);
+  assert.equal(state.reserveLps.size, 2);
+  assert.deepEqual(state.reserveErrors, []);
   assert.equal(state.runepoolError, '');
+});
+
+test('legacy rows without a per-pool Reserve POL value remain eligible for backfill', async () => {
+  let query = '';
+  const rows = await loadPolTrackerExistingDays({
+    query: async (text) => {
+      query = text;
+      return { rows: [{ day: '2025-02-01', complete: false }] };
+    }
+  }, '2025-02-01', '2025-02-01');
+  assert.equal(rows[0].complete, false);
+  assert.match(query, /reserve_module_address is not null/i);
+  assert.match(query, /reserve_pol_rune_e8 is null/i);
 });
 
 test('daily planning uses completed UTC day-end points and resumes missing or partial rows', async () => {
@@ -215,8 +300,9 @@ test('POL Tracker retries transient history failures', async () => {
 });
 
 test('migration, jobs, route, timer, and deployment encode the POL Tracker production contract', async () => {
-  const [migration, runJob, server, timer, service, backfill, deploy] = await Promise.all([
+  const [migration, poolBreakdownMigration, runJob, server, timer, service, backfill, deploy] = await Promise.all([
     readFile(new URL('../migrations/046_pol_tracker.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/047_pol_tracker_pool_breakdown.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pol-tracker.timer', import.meta.url), 'utf8'),
@@ -227,6 +313,10 @@ test('migration, jobs, route, timer, and deployment encode the POL Tracker produ
   assert.match(migration, /create table if not exists public\.pol_tracker_daily/);
   assert.match(migration, /runepool_provider_owned_rune_e8/);
   assert.match(migration, /Never publish this provider-owned RUNEPool value/);
+  assert.match(poolBreakdownMigration, /reserve_module_address/);
+  assert.match(poolBreakdownMigration, /reserve_pol_lp_units/);
+  assert.match(poolBreakdownMigration, /reserve_pol_rune_e8/);
+  assert.match(poolBreakdownMigration, /reserve_pol_usd_e8/);
   assert.match(runJob, /'pol-tracker-backfill': runPolTrackerBackfill/);
   assert.match(runJob, /'pol-tracker-scheduler': runPolTrackerScheduler/);
   assert.match(server, /\['\/pol-tracker', route\(handlePolTracker, 1, 64\)\]/);

@@ -250,7 +250,7 @@
         <div>
           <span class="prompt">$ inspect --latest --by-pool</span>
           <h2>Latest pool breakdown</h2>
-          <p>Only pools with synth backing or a locked Treasury position are shown.</p>
+          <p>Only pools with synth backing, a locked Treasury position, or Reserve POL are shown.</p>
         </div>
         <span class="row-count">{relevantPools.length} POOLS</span>
       </div>
@@ -261,6 +261,7 @@
               <th>POOL</th>
               <th>SYNTH BACKING</th>
               <th>TREASURY LOCKED LP</th>
+              <th>RESERVE POL</th>
             </tr>
           </thead>
           <tbody>
@@ -269,9 +270,13 @@
                 <td><strong>{pool.asset}</strong><small>{pool.status}</small></td>
                 <td>{formatPolTrackerUsd(pool.synthBackingUsd, true)}</td>
                 <td>{formatPolTrackerUsd(pool.treasuryTotalUsd, true)}</td>
+                <td>
+                  {formatPolTrackerUsd(pool.reservePolUsd, true)}
+                  <small>{formatPolTrackerRune(pool.reservePolRune)}</small>
+                </td>
               </tr>
             {:else}
-              <tr><td colspan="3" class="empty">No per-pool observation is available yet.</td></tr>
+              <tr><td colspan="4" class="empty">No per-pool observation is available yet.</td></tr>
             {/each}
           </tbody>
         </table>
@@ -286,7 +291,7 @@
         shaded areas: synth backing, Treasury locked LP, and Reserve POL. RUNEPool ownership shares
         are absent.
       </p>
-      <p class="source-line">TREASURY MODULE · …6r2p &nbsp;|&nbsp; PRICES · SAME-HEIGHT TOR &nbsp;|&nbsp; GAPS · NEVER INTERPOLATED</p>
+      <p class="source-line">TREASURY MODULE · …6r2p &nbsp;|&nbsp; RESERVE MODULE · …xtxt &nbsp;|&nbsp; PRICES · SAME-HEIGHT TOR &nbsp;|&nbsp; GAPS · NEVER INTERPOLATED</p>
     </section>
   {/if}
 </main>

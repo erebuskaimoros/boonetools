@@ -317,7 +317,9 @@ It writes in bounded transactions, preserves any live row at a conflicting
 timestamp, verifies every planned bucket, and refreshes the public read model.
 It has no timer and does not run automatically during future deploys.
 
-Migration `046_pol_tracker.sql` adds daily and per-pool POL Tracker history.
+Migrations `046_pol_tracker.sql` and `047_pol_tracker_pool_breakdown.sql` add
+daily and per-pool POL Tracker history, including the legacy Reserve module's
+gross value in each pool.
 The `boonetools-pol-tracker.timer` samples the latest completed UTC day at
 00:10 UTC and republishes `/pol-tracker`. Configure `POL_TRACKER_THORNODE_URLS`
 with a historical-height THORNode endpoint and `POL_TRACKER_RPC_URLS` with an
@@ -328,11 +330,12 @@ systemctl start --no-block boonetools-pol-tracker-backfill.service
 journalctl -fu boonetools-pol-tracker-backfill.service
 ```
 
-The backfill is resumable by date and never interpolates a failed lane. Its
-public RUNEPool series contains only `runepool.reserve.value`; provider-owned
-RUNEPool value remains a private database reconciliation field. The gross
-legacy Reserve POL lane comes from `runepool.pol.value`, so those two series
-overlap and must not be added together.
+The backfill is resumable by date and never interpolates a failed lane. Savers
+and RUNEPool provider/Reserve ownership shares are excluded from the public
+model. Provider-owned RUNEPool value remains a private database reconciliation
+field. The gross legacy Reserve POL total comes from `runepool.pol.value`; its
+per-pool rows apply THORNode's rounded safe-share calculation to Reserve-module
+LP units and RUNE depth, double the share, and must reconcile to that total.
 
 Both scheduled and default backfill runs use `POL_TRACKER_HEAD_LAG_DAYS=1`, so
 the archive provider has a full extra UTC day to reach each requested day-end

@@ -117,7 +117,9 @@ function publicPoolRow(row) {
     synth_backing_usd: e8ToNumber(row.synth_backing_usd_e8),
     synth_face_usd: e8ToNumber(row.synth_face_usd_e8),
     treasury_lp_units: String(row.treasury_lp_units || '0'),
-    treasury_total_usd: e8ToNumber(row.treasury_total_usd_e8)
+    treasury_total_usd: e8ToNumber(row.treasury_total_usd_e8),
+    reserve_pol_rune: e8ToNumber(row.reserve_pol_rune_e8),
+    reserve_pol_usd: e8ToNumber(row.reserve_pol_usd_e8)
   };
 }
 
@@ -157,7 +159,7 @@ export function buildPolTrackerPayload(rows = [], poolRows = [], options = {}) {
       pricing: 'Same-height THORNode TOR prices; all stored source amounts use 1e8 fixed-point units.',
       treasury: 'Combined same-height redeemable value of locked Treasury module LP positions.',
       synth: 'Synth-unit share of pool liquidity, valued as 2 × asset depth × synth_units / pool_units.',
-      reserve_pol: 'Gross value of LP positions held at the legacy Reserve module, from runepool.pol.value.',
+      reserve_pol: 'Gross value of LP positions held at the legacy Reserve module. The daily total comes from runepool.pol.value; each latest-pool value applies THORNode\'s rounded safe share to the module LP units and same-height RUNE depth, doubles it, and reconciles to the total.',
       aggregation: 'The tooltip total is the arithmetic sum of synth backing, Treasury locked LP, and Reserve POL.'
     }
   };

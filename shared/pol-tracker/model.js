@@ -1,6 +1,7 @@
 export const POL_TRACKER_SCHEMA_VERSION = 2;
 export const POL_TRACKER_START_DATE = '2025-02-01';
 export const POL_TRACKER_TREASURY_MODULE = 'thor1vmafl8f3s6uuzwnxkqz0eza47v6ecn0t086r2p';
+export const POL_TRACKER_RESERVE_MODULE = 'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
 
 const E8 = 100_000_000n;
 
@@ -20,6 +21,17 @@ function e8Product(amount, price) {
   return (positive(amount) * positive(price)) / E8;
 }
 
+// Mirrors THORNode common.GetSafeShare: cap the ownership ratio and round the
+// final positive integer division half up.
+function safeShare(part, total, allocation) {
+  const denominator = positive(total);
+  const depth = positive(allocation);
+  let units = positive(part);
+  if (units === 0n || denominator === 0n || depth === 0n) return 0n;
+  if (units >= denominator) return depth;
+  return ((depth * units) + (denominator / 2n)) / denominator;
+}
+
 function synthBackingValue(pool) {
   const synthUnits = positive(pool?.synth_units);
   const poolUnits = positive(pool?.pool_units);
@@ -36,9 +48,9 @@ function normalizedAsset(value) {
   return String(value || '').trim().toUpperCase();
 }
 
-function lpForAsset(treasuryLps, asset) {
-  if (treasuryLps instanceof Map) return treasuryLps.get(asset) || null;
-  return treasuryLps?.[asset] || null;
+function lpForAsset(positions, asset) {
+  if (positions instanceof Map) return positions.get(asset) || null;
+  return positions?.[asset] || null;
 }
 
 function totalOrNull(values, complete) {
@@ -58,6 +70,8 @@ export function buildPolTrackerObservation(input = {}) {
 
   const treasuryErrors = Array.isArray(input.treasuryErrors) ? input.treasuryErrors : [];
   const treasuryErrorAssets = new Set(treasuryErrors.map((entry) => normalizedAsset(entry?.asset)));
+  const reserveErrors = Array.isArray(input.reserveErrors) ? input.reserveErrors : [];
+  const reserveErrorAssets = new Set(reserveErrors.map((entry) => normalizedAsset(entry?.asset)));
   let synthComplete = true;
   let treasuryAssetComplete = treasuryErrors.length === 0;
   let treasuryRuneComplete = treasuryErrors.length === 0;
@@ -71,6 +85,15 @@ export function buildPolTrackerObservation(input = {}) {
     const treasuryUnits = positive(lp?.units);
     const assetRedeem = positive(lp?.asset_redeem_value);
     const runeRedeem = positive(lp?.rune_redeem_value);
+    const reserveLp = lpForAsset(input.reserveLps, asset);
+    const reserveLookupComplete = !reserveErrorAssets.has(asset);
+    const reserveLpUnits = positive(reserveLp?.units);
+    // runepool.pol.value doubles THORNode's rounded safe share of RUNE depth,
+    // representing the gross value of the Reserve's symmetric LP position.
+    const reservePolRune = reserveLookupComplete
+      ? 2n * safeShare(reserveLpUnits, pool.pool_units, pool.balance_rune)
+      : null;
+    const reservePolUsd = reservePolRune === null ? null : e8Product(reservePolRune, runePrice);
 
     if (synthUnits > 0n && (price === 0n || positive(pool.pool_units) === 0n)) synthComplete = false;
     if ((treasuryUnits > 0n || assetRedeem > 0n) && price === 0n) treasuryAssetComplete = false;
@@ -104,7 +127,10 @@ export function buildPolTrackerObservation(input = {}) {
       treasury_rune_usd_e8: treasuryRuneUsd?.toString() ?? null,
       treasury_total_usd_e8: treasuryAssetUsd === null || treasuryRuneUsd === null
         ? null
-        : (treasuryAssetUsd + treasuryRuneUsd).toString()
+        : (treasuryAssetUsd + treasuryRuneUsd).toString(),
+      reserve_pol_lp_units: reserveLookupComplete ? reserveLpUnits.toString() : null,
+      reserve_pol_rune_e8: reservePolRune?.toString() ?? null,
+      reserve_pol_usd_e8: reservePolUsd?.toString() ?? null
     };
   });
 
@@ -116,6 +142,13 @@ export function buildPolTrackerObservation(input = {}) {
   const providerOwnedRune = runepoolAvailable && /^\d+$/.test(String(providerValue ?? ''))
     ? positive(providerValue)
     : null;
+  const perPoolReservePolRune = totalOrNull(
+    poolRows.map((row) => row.reserve_pol_rune_e8),
+    reserveErrors.length === 0
+  );
+  const reserveReconciles = runepoolAvailable
+    && perPoolReservePolRune !== null
+    && integer(perPoolReservePolRune) === reservePolRune;
 
   const treasuryComplete = treasuryAssetComplete && treasuryRuneComplete;
   const treasuryWarning = treasuryComplete
@@ -123,10 +156,22 @@ export function buildPolTrackerObservation(input = {}) {
     : treasuryErrors.length
       ? `${treasuryErrors.length} Treasury LP lookup(s) were incomplete`
       : 'One or more Treasury positions lacked a same-height asset price';
+  const reserveStatus = !runepoolAvailable
+    ? 'unavailable'
+    : reserveErrors.length > 0 || !reserveReconciles
+      ? 'partial'
+      : 'complete';
+  const reserveWarning = !runepoolAvailable
+    ? input.runepoolError || 'Historical RUNEPool response was unavailable'
+    : reserveErrors.length > 0
+      ? `${reserveErrors.length} Reserve POL LP lookup(s) were incomplete`
+      : !reserveReconciles
+        ? 'Per-pool Reserve POL did not reconcile to runepool.pol.value'
+        : '';
   const laneStatus = {
     synth: lane(synthComplete ? 'complete' : 'partial', synthComplete ? '' : 'One or more synth pools lacked same-height units or price data'),
     treasury: lane(treasuryComplete ? 'complete' : 'partial', treasuryWarning),
-    reserve_pol: lane(runepoolAvailable ? 'complete' : 'unavailable', input.runepoolError || '')
+    reserve_pol: lane(reserveStatus, reserveWarning)
   };
   const complete = Object.values(laneStatus).every(({ status }) => status === 'complete');
   const warnings = Object.values(laneStatus).map((item) => item.warning).filter(Boolean);
@@ -137,6 +182,7 @@ export function buildPolTrackerObservation(input = {}) {
       anchor_height: Number(input.anchor?.height) || 0,
       anchor_block_time: input.anchor?.blockTime || null,
       treasury_module_address: input.moduleAddress || POL_TRACKER_TREASURY_MODULE,
+      reserve_module_address: input.reserveModuleAddress || POL_TRACKER_RESERVE_MODULE,
       rune_price_usd_e8: runePrice.toString(),
       synth_backing_usd_e8: totalOrNull(poolRows.map((row) => row.synth_backing_usd_e8), synthComplete),
       synth_face_usd_e8: totalOrNull(poolRows.map((row) => row.synth_face_usd_e8), synthComplete),
@@ -148,6 +194,7 @@ export function buildPolTrackerObservation(input = {}) {
       runepool_provider_owned_rune_e8: providerOwnedRune?.toString() ?? null,
       pool_count: poolRows.length,
       treasury_pool_count: poolRows.filter((row) => positive(row.treasury_lp_units) > 0n).length,
+      reserve_pool_count: poolRows.filter((row) => positive(row.reserve_pol_lp_units) > 0n).length,
       complete,
       lane_status: laneStatus,
       warnings,

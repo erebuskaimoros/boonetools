@@ -1,6 +1,9 @@
 import { config } from '../lib/config.js';
 import { fetchThorchain } from '../shared/thornode.js';
-import { POL_TRACKER_TREASURY_MODULE } from '../../../shared/pol-tracker/model.js';
+import {
+  POL_TRACKER_RESERVE_MODULE,
+  POL_TRACKER_TREASURY_MODULE
+} from '../../../shared/pol-tracker/model.js';
 
 function sleep(delayMs) {
   return delayMs > 0 ? new Promise((resolve) => setTimeout(resolve, delayMs)) : Promise.resolve();
@@ -74,39 +77,48 @@ export async function fetchHistoricalPolTrackerState(height, options = {}) {
   }
 
   const moduleAddress = options.moduleAddress || POL_TRACKER_TREASURY_MODULE;
+  const reserveModuleAddress = options.reserveModuleAddress || POL_TRACKER_RESERVE_MODULE;
   const poolAssets = [...new Set(pools
     .map((pool) => String(pool?.asset || '').trim().toUpperCase())
     .filter((asset) => asset && !asset.startsWith('THOR.')))];
   const requestDelayMs = Math.max(0, Math.trunc(Number(
     options.requestDelayMs ?? config.polTrackerRequestDelayMs
   )) || 0);
+  const positionRequests = poolAssets.flatMap((asset) => [
+    { asset, owner: 'treasury', label: 'Treasury', address: moduleAddress },
+    { asset, owner: 'reserve', label: 'Reserve POL', address: reserveModuleAddress }
+  ]);
   const results = await mapWithConcurrency(
-    poolAssets,
+    positionRequests,
     options.concurrency || config.polTrackerLpConcurrency,
-    async (asset) => {
+    async ({ asset, owner, label, address }) => {
       try {
         const value = await fetchHistorical(
-          `/thorchain/pool/${encodeURIComponent(asset)}/liquidity_provider/${moduleAddress}`
+          `/thorchain/pool/${encodeURIComponent(asset)}/liquidity_provider/${address}`
         );
         if (!validLiquidityPosition(value)) {
-          throw new Error(`Historical Treasury LP response was invalid for ${asset}`);
+          throw new Error(`Historical ${label} LP response was invalid for ${asset}`);
         }
         await sleep(requestDelayMs);
-        return { asset, value, error: null };
+        return { asset, owner, value, error: null };
       } catch (error) {
         await sleep(requestDelayMs);
         // THORNode uses 404 for an address with no position in a pool.
-        if (Number(error?.status) === 404) return { asset, value: null, error: null };
-        return { asset, value: null, error };
+        if (Number(error?.status) === 404) return { asset, owner, value: null, error: null };
+        return { asset, owner, value: null, error };
       }
     }
   );
 
   const treasuryLps = new Map();
   const treasuryErrors = [];
+  const reserveLps = new Map();
+  const reserveErrors = [];
   for (const result of results) {
-    if (result.value) treasuryLps.set(result.asset, result.value);
-    if (result.error) treasuryErrors.push({
+    const positions = result.owner === 'reserve' ? reserveLps : treasuryLps;
+    const errors = result.owner === 'reserve' ? reserveErrors : treasuryErrors;
+    if (result.value) positions.set(result.asset, result.value);
+    if (result.error) errors.push({
       asset: result.asset,
       error: result.error?.message || String(result.error)
     });
@@ -121,8 +133,11 @@ export async function fetchHistoricalPolTrackerState(height, options = {}) {
     pools,
     treasuryLps,
     treasuryErrors,
+    reserveLps,
+    reserveErrors,
     runepool: runepoolError ? null : runepoolResult.value,
     runepoolError,
-    moduleAddress
+    moduleAddress,
+    reserveModuleAddress
   };
 }
