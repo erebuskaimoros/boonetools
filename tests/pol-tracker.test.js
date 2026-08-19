@@ -12,20 +12,24 @@ import {
   totalPolTrackerValue
 } from '../src/lib/pol-tracker/model.js';
 
-test('POL Tracker remains directly routable without appearing in navigation', async () => {
+test('POL Tracker is directly routable and appears in navigation', async () => {
   const [appSource, trackerSource] = await Promise.all([
     readFile(new URL('../src/App.svelte', import.meta.url), 'utf8'),
     readFile(new URL('../src/lib/POLTracker.svelte', import.meta.url), 'utf8')
   ]);
   const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
 
-  assert.equal(visibleApps.includes('polTrackerApp'), false);
-  assert.match(appSource, /const hiddenApps = \[wasmArbEconomicsApp, polTrackerApp\];/);
+  assert.equal(visibleApps.includes('polTrackerApp'), true);
+  assert.match(appSource, /const hiddenApps = \[wasmArbEconomicsApp\];/);
   assert.match(appSource, /return \[\.\.\.apps, \.\.\.hiddenApps\]\.find/);
   assert.doesNotMatch(trackerSource, /SAVERS|Savers|Saver/);
   assert.doesNotMatch(trackerSource, /ASSET LEG|RUNE LEG|treasuryAssetUsd|treasuryRuneUsd/);
   assert.doesNotMatch(trackerSource, /RUNEPOOL · RESERVE SHARE|runepoolReserve/);
   assert.match(trackerSource, />TOTAL</);
+  assert.match(trackerSource, /class="metric metric--total"/);
+  assert.match(trackerSource, />TOTAL TRACKED VALUE</);
+  assert.match(trackerSource, /formatPolTrackerUsd\(latestTotal, true\)/);
+  assert.match(trackerSource, /\.metric--total\s*\{[\s\S]*?color:\s*#00cc66/);
   assert.match(trackerSource, /<th>RESERVE POL<\/th>/);
   assert.match(trackerSource, /pool\.reservePolUsd/);
 });

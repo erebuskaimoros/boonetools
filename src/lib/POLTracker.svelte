@@ -33,6 +33,7 @@
   $: displayedTotal = totalPolTrackerValue(hovered);
   $: relevantPools = relevantPolTrackerPools(dashboard.latestPools);
   $: latest = dashboard.latest;
+  $: latestTotal = totalPolTrackerValue(latest);
   $: coveragePercent = dashboard.coverage.expected_days
     ? (dashboard.coverage.observed_days / dashboard.coverage.expected_days) * 100
     : 0;
@@ -127,6 +128,11 @@
 
   {#if payload}
     <section class="metric-grid" aria-label="Latest POL Tracker values">
+      <article class="metric metric--total">
+        <span class="metric-label">TOTAL TRACKED VALUE</span>
+        <strong>{formatPolTrackerUsd(latestTotal, true)}</strong>
+        <small>synth backing + Treasury locked LP + Reserve POL</small>
+      </article>
       <article class="metric">
         <span class="metric-label">SYNTH BACKING</span>
         <strong>{formatPolTrackerUsd(latest?.synthBackingUsd, true)}</strong>
@@ -349,6 +355,14 @@
   .metric-label { display: block; color: #888; font-size: 10px; letter-spacing: .08em; }
   .metric strong { display: block; margin: 10px 0 4px; font-size: clamp(19px, 2vw, 28px); font-weight: 500; color: #fff; }
   .metric strong.text-value { font-size: 17px; }
+  .metric--total {
+    border-right-color: rgba(0, 204, 102, .45);
+    border-bottom-color: rgba(0, 204, 102, .45);
+    background: rgba(0, 204, 102, .08);
+    box-shadow: inset 3px 0 0 #00cc66;
+  }
+  .metric--total .metric-label, .metric--total strong { color: #00cc66; }
+  .metric--total small { color: #7fc49f; }
 
   .range-bar { gap: 6px; padding: 10px 0; color: #777; font-size: 10px; }
   .range-bar button { min-width: 48px; padding: 6px 9px; font-size: 10px; }
