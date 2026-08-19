@@ -158,7 +158,6 @@ export function buildPolTrackerPayload(rows = [], poolRows = [], options = {}) {
       treasury: 'Combined same-height redeemable value of locked Treasury module LP positions.',
       synth: 'Synth-unit share of pool liquidity, valued as 2 × asset depth × synth_units / pool_units.',
       reserve_pol: 'Gross value of LP positions held at the legacy Reserve module, from runepool.pol.value.',
-      runepool_ownership_excluded: true,
       aggregation: 'The tooltip total is the arithmetic sum of synth backing, Treasury locked LP, and Reserve POL.'
     }
   };

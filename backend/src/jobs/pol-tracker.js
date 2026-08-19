@@ -37,13 +37,17 @@ function resolvedEndDate(options = {}) {
 async function ingestAndPublish(client, options = {}) {
   const ingestion = await (options.ingest || ingestPolTrackerHistory)(client, options);
   const publish = options.publish || buildAndPublishReadModel;
+  const readModelOptions = {
+    ...options,
+    startDate: options.readModelStartDate || config.polTrackerStartDate
+  };
   const published = await publish({
     modelKey: POL_TRACKER_MODEL_KEY,
     schemaVersion: POL_TRACKER_SCHEMA_VERSION,
     ttlMs: POL_TRACKER_TTL_MS,
     client,
     now: readModelClock(options.now),
-    build: () => (options.buildReadModel || buildPolTrackerReadModel)(client, options)
+    build: () => (options.buildReadModel || buildPolTrackerReadModel)(client, readModelOptions)
   });
   return { ...ingestion, published: Boolean(published?.ok ?? true) };
 }

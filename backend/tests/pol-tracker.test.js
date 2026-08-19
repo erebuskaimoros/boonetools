@@ -111,6 +111,7 @@ test('public payload strips legacy Savers and all RUNEPool ownership values', ()
   assert.equal(Object.hasOwn(payload.latest_pools[0], 'treasury_rune_usd'), false);
   assert.equal(Object.hasOwn(payload.methodology, 'savers'), false);
   assert.equal(Object.hasOwn(payload.methodology, 'runepool'), false);
+  assert.equal(Object.keys(payload.methodology).some((key) => key.includes('runepool')), false);
   assert.equal(payload.daily[0].complete, true);
   assert.equal(payload.daily[0].warnings.includes('Legacy Saver warning'), false);
   assert.equal(payload.warnings.includes('Legacy Saver warning'), false);
@@ -252,16 +253,23 @@ test('scheduled and manual POL jobs lag archive ingestion by one completed UTC d
       return { processed_days: 1 };
     },
     publish: async (options) => {
+      await options.build();
       calls.push({ type: 'publish', key: options.modelKey });
       return { ok: true };
+    },
+    buildReadModel: async (receivedClient, options) => {
+      assert.equal(receivedClient, client);
+      calls.push({ type: 'build', startDate: options.startDate, endDate: options.endDate });
+      return { payload: {} };
     }
   };
 
   const scheduled = await runPolTrackerScheduler(common);
   assert.equal(scheduled.published, true);
-  assert.deepEqual(calls.slice(0, 3), [
+  assert.deepEqual(calls.slice(0, 4), [
     { type: 'lock', key: 'boonetools:pol-tracker' },
     { type: 'ingest', startDate: '2026-08-11', endDate: '2026-08-17' },
+    { type: 'build', startDate: '2025-02-01', endDate: '2026-08-17' },
     { type: 'publish', key: 'pol-tracker:v2' }
   ]);
 
@@ -269,6 +277,11 @@ test('scheduled and manual POL jobs lag archive ingestion by one completed UTC d
   await runPolTrackerBackfill(common);
   assert.deepEqual(calls[1], {
     type: 'ingest',
+    startDate: '2025-02-01',
+    endDate: '2026-08-17'
+  });
+  assert.deepEqual(calls[2], {
+    type: 'build',
     startDate: '2025-02-01',
     endDate: '2026-08-17'
   });
