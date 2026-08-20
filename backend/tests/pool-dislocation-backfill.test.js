@@ -126,6 +126,38 @@ test('height interpolation resolves the latest finalized block at or before each
   assert.ok(requests <= 6);
 });
 
+test('history-bound skipping remains opt-in and never skips points newer than RPC head', async () => {
+  const bounds = {
+    earliestHeight: 100,
+    earliestBlockTime: '2026-08-19T00:00:00.000Z',
+    latestHeight: 200,
+    latestBlockTime: '2026-08-20T00:00:00.000Z'
+  };
+  const options = {
+    requestDelayMs: 0,
+    fetchStatus: async () => bounds,
+    fetchBlock: async (height) => ({
+      height,
+      blockTime: new Date(
+        Date.parse(bounds.earliestBlockTime)
+          + ((height - bounds.earliestHeight) * 14.4 * 60 * 1000)
+      ).toISOString()
+    })
+  };
+
+  await assert.rejects(
+    resolvePoolDislocationBlockAnchors(['2026-08-18T23:59:59.999Z'], options),
+    /outside RPC history bounds/
+  );
+  await assert.rejects(
+    resolvePoolDislocationBlockAnchors(['2026-08-20T00:00:00.000Z'], {
+      ...options,
+      skipPointsBeforeEarliest: true
+    }),
+    /outside RPC history bounds/
+  );
+});
+
 test('historical rows retain same-height THORChain and labelled Binance close provenance', () => {
   const rows = buildHistoricalPoolDislocationRows({
     observedAt: '2026-07-22T12:05:00.000Z',

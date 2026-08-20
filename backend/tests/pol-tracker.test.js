@@ -282,6 +282,27 @@ test('anchor resolution retains the day paired with the finalized historical blo
   });
 });
 
+test('POL Tracker skips completed days outside RPC history without shifting later anchors', async () => {
+  const earliestMs = Date.parse('2026-08-19T00:00:00Z');
+  const latestMs = Date.parse('2026-08-20T12:00:00Z');
+  const anchors = await resolvePolTrackerAnchors(['2026-08-18', '2026-08-19'], {
+    requestDelayMs: 0,
+    fetchStatus: async () => ({
+      earliestHeight: 100,
+      earliestBlockTime: new Date(earliestMs).toISOString(),
+      latestHeight: 200,
+      latestBlockTime: new Date(latestMs).toISOString()
+    }),
+    fetchBlock: async (height) => ({
+      height,
+      blockTime: new Date(earliestMs + ((height - 100) * ((latestMs - earliestMs) / 100))).toISOString()
+    })
+  });
+
+  assert.deepEqual(anchors.map(({ day }) => day), ['2026-08-19']);
+  assert.equal(anchors[0].sampleTime, '2026-08-19T23:59:59.999Z');
+});
+
 test('POL Tracker retries transient history failures', async () => {
   let attempts = 0;
   const delays = [];

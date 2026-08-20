@@ -97,21 +97,29 @@ export async function loadPolTrackerBackfillPlan(client, options = {}) {
 
 export async function resolvePolTrackerAnchors(days, options = {}) {
   const resolveAnchors = options.resolveAnchors || resolvePoolDislocationBlockAnchors;
-  const anchors = await resolveAnchors(days.map(polTrackerSampleTime), {
+  const sampleTimes = days.map(polTrackerSampleTime);
+  const daysBySampleTime = new Map(sampleTimes.map((sampleTime, index) => [sampleTime, days[index]]));
+  const anchors = await resolveAnchors(sampleTimes, {
     rpcUrls: options.rpcUrls || config.polTrackerRpcUrls,
     requestDelayMs: options.requestDelayMs ?? config.polTrackerRequestDelayMs,
     fetchStatus: options.fetchStatus,
     fetchBlock: options.fetchBlock,
     client: options.client,
     timeoutMs: options.timeoutMs || config.polTrackerTimeoutMs,
-    cooldownScope: 'pol-tracker-history'
+    cooldownScope: 'pol-tracker-history',
+    skipPointsBeforeEarliest: true
   });
-  return anchors.map((anchor, index) => ({
-    day: days[index],
-    height: anchor.height,
-    blockTime: anchor.blockTime,
-    sampleTime: anchor.observedAt
-  }));
+  return anchors.map((anchor) => {
+    const sampleTime = new Date(anchor.observedAt).toISOString();
+    const day = daysBySampleTime.get(sampleTime);
+    if (!day) throw new Error(`Resolved POL Tracker anchor does not match a requested sample point: ${sampleTime}`);
+    return {
+      day,
+      height: anchor.height,
+      blockTime: anchor.blockTime,
+      sampleTime: anchor.observedAt
+    };
+  });
 }
 
 export async function collectPolTrackerDay(anchor, options = {}) {
