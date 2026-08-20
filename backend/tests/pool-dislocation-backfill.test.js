@@ -13,7 +13,8 @@ import {
   normalizeBinanceKlineCloses,
   poolDislocationHistoricalRpcUrls,
   retryPoolDislocationBackfillOperation,
-  resolvePoolDislocationBlockAnchors
+  resolvePoolDislocationBlockAnchors,
+  resolvePoolDislocationBlockAnchorsAcrossRpcRanges
 } from '../src/shared/pool-dislocation-backfill.js';
 import { upsertPoolDislocationRows } from '../src/shared/pool-dislocation-store.js';
 
@@ -156,6 +157,45 @@ test('history-bound skipping remains opt-in and never skips points newer than RP
     }),
     /outside RPC history bounds/
   );
+});
+
+test('historical anchor resolution uses the archive when the live RPC has pruned the target', async () => {
+  const ranges = {
+    live: {
+      earliestHeight: 300,
+      earliestBlockTime: '2026-08-19T04:03:18.000Z',
+      latestHeight: 400,
+      latestBlockTime: '2026-08-20T18:00:37.000Z'
+    },
+    archive: {
+      earliestHeight: 100,
+      earliestBlockTime: '2024-09-04T19:40:00.000Z',
+      latestHeight: 200,
+      latestBlockTime: '2026-08-18T16:18:21.000Z'
+    }
+  };
+  const providerKey = (options) => options.rpcUrls[0];
+  const anchors = await resolvePoolDislocationBlockAnchorsAcrossRpcRanges([
+    '2026-08-13T18:10:00.000Z'
+  ], {
+    rpcUrls: ['live', 'archive'],
+    requestDelayMs: 0,
+    fetchStatus: async (options) => ranges[providerKey(options)],
+    fetchBlock: async (height, options) => {
+      const range = ranges[providerKey(options)];
+      const ratio = (height - range.earliestHeight) / (range.latestHeight - range.earliestHeight);
+      return {
+        height,
+        blockTime: new Date(
+          Date.parse(range.earliestBlockTime)
+            + (ratio * (Date.parse(range.latestBlockTime) - Date.parse(range.earliestBlockTime)))
+        ).toISOString()
+      };
+    }
+  });
+
+  assert.equal(anchors.length, 1);
+  assert.equal(anchors[0].observedAt, '2026-08-13T18:10:00.000Z');
 });
 
 test('historical rows retain same-height THORChain and labelled Binance close provenance', () => {

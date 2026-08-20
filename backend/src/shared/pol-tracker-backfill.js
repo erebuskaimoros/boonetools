@@ -1,7 +1,9 @@
 import { config } from '../lib/config.js';
 import { buildPolTrackerObservation } from '../../../shared/pol-tracker/model.js';
 import { fetchHistoricalPolTrackerState } from '../pol-tracker/providers.js';
-import { resolvePoolDislocationBlockAnchors } from './pool-dislocation-backfill.js';
+import {
+  resolvePoolDislocationBlockAnchorsAcrossRpcRanges
+} from './pool-dislocation-backfill.js';
 import {
   loadPolTrackerExistingDays,
   persistPolTrackerObservation,
@@ -96,7 +98,8 @@ export async function loadPolTrackerBackfillPlan(client, options = {}) {
 }
 
 export async function resolvePolTrackerAnchors(days, options = {}) {
-  const resolveAnchors = options.resolveAnchors || resolvePoolDislocationBlockAnchors;
+  const resolveAnchors = options.resolveAnchors
+    || resolvePoolDislocationBlockAnchorsAcrossRpcRanges;
   const sampleTimes = days.map(polTrackerSampleTime);
   const daysBySampleTime = new Map(sampleTimes.map((sampleTime, index) => [sampleTime, days[index]]));
   const rpcUrls = [...new Set((options.rpcUrls || config.polTrackerRpcUrls).filter(Boolean))];
@@ -108,29 +111,10 @@ export async function resolvePolTrackerAnchors(days, options = {}) {
     timeoutMs: options.timeoutMs || config.polTrackerTimeoutMs,
     cooldownScope: 'pol-tracker-history',
     skipPointsBeforeEarliest: true,
-    skipPointsAtOrAfterLatest: true
+    skipPointsAtOrAfterLatest: true,
+    allowUnresolved: true
   };
-  let anchors;
-  if (options.resolveAnchors || rpcUrls.length <= 1) {
-    anchors = await resolveAnchors(sampleTimes, { ...anchorOptions, rpcUrls });
-  } else {
-    const unresolved = new Set(sampleTimes);
-    anchors = [];
-    for (const rpcUrl of rpcUrls) {
-      if (!unresolved.size) break;
-      const providerAnchors = await resolveAnchors([...unresolved], {
-        ...anchorOptions,
-        rpcUrls: [rpcUrl]
-      });
-      for (const anchor of providerAnchors) {
-        const sampleTime = new Date(anchor.observedAt).toISOString();
-        if (!unresolved.delete(sampleTime)) continue;
-        anchors.push(anchor);
-      }
-    }
-    const sampleOrder = new Map(sampleTimes.map((sampleTime, index) => [sampleTime, index]));
-    anchors.sort((left, right) => sampleOrder.get(left.observedAt) - sampleOrder.get(right.observedAt));
-  }
+  const anchors = await resolveAnchors(sampleTimes, { ...anchorOptions, rpcUrls });
   return anchors.map((anchor) => {
     const sampleTime = new Date(anchor.observedAt).toISOString();
     const day = daysBySampleTime.get(sampleTime);

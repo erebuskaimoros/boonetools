@@ -232,6 +232,50 @@ export async function resolvePoolDislocationBlockAnchors(bucketTimes = [], optio
   return anchors;
 }
 
+export async function resolvePoolDislocationBlockAnchorsAcrossRpcRanges(
+  bucketTimes = [],
+  options = {}
+) {
+  const requested = bucketTimes.map(timestamp);
+  if (!requested.length) return [];
+  const rpcUrls = [...new Set(poolDislocationHistoricalRpcUrls(options).filter(Boolean))];
+  if (!rpcUrls.length) throw new Error('No RPC providers configured for historical anchor resolution');
+
+  const unresolved = new Set(requested);
+  const anchors = [];
+  const providerErrors = [];
+  for (const rpcUrl of rpcUrls) {
+    if (!unresolved.size) break;
+    try {
+      const providerAnchors = await resolvePoolDislocationBlockAnchors([...unresolved], {
+        ...options,
+        rpcUrls: [rpcUrl],
+        skipPointsBeforeEarliest: true,
+        skipPointsAtOrAfterLatest: true
+      });
+      for (const anchor of providerAnchors) {
+        const observedAt = timestamp(anchor.observedAt);
+        if (!unresolved.delete(observedAt)) continue;
+        anchors.push({ ...anchor, observedAt });
+      }
+    } catch (error) {
+      providerErrors.push(error);
+    }
+  }
+
+  if (unresolved.size && providerErrors.length) throw providerErrors[0];
+  if (unresolved.size && !options.allowUnresolved) {
+    const first = unresolved.values().next().value;
+    throw new Error(
+      `No configured RPC provider covers ${unresolved.size} historical point(s), starting with ${first}`
+    );
+  }
+
+  const requestedOrder = new Map(requested.map((observedAt, index) => [observedAt, index]));
+  anchors.sort((left, right) => requestedOrder.get(left.observedAt) - requestedOrder.get(right.observedAt));
+  return anchors;
+}
+
 export function normalizeBinanceKlineCloses(rows = []) {
   const closes = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
@@ -519,7 +563,7 @@ export async function runPoolDislocationHistoricalBackfill(client, options = {})
 
   const [anchors, binanceHistory] = await Promise.all([
     retryPoolDislocationBackfillOperation(
-      () => (options.resolveAnchors || resolvePoolDislocationBlockAnchors)(
+      () => (options.resolveAnchors || resolvePoolDislocationBlockAnchorsAcrossRpcRanges)(
         plan.pendingBuckets,
         { ...options, client }
       ),
