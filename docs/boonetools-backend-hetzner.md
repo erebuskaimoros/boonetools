@@ -71,7 +71,12 @@ The public `/functions/v1/node-votes-summary` payload includes one deduplicated
 `active_nodes` roster from the same THORNode state used for current vote
 rollups. The Vote Tracker compares that roster with each key's current voter
 addresses so a consensus shortfall can list active node operators that have no
-current vote without repeating the full roster inside every vote-key row.
+current vote without repeating the full roster inside every vote-key row. The
+same publisher overlays THORNode's live upgrade proposals and active-validator
+approval state, while the listener and hourly backfill retain indexed
+`approve_upgrade` and `reject_upgrade` events as `UPGRADE-*` history. Upgrade
+quorum counts only active approvals; rejects remain visible stances and can
+never become the passing value.
 
 The public `/functions/v1/dynamic-fee-transactions` endpoint powers the
 click-to-inspect ADR26 epoch drawer. Midgard supplies the matching action list,

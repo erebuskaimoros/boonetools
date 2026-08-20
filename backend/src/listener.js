@@ -17,6 +17,7 @@ import { getClient } from './db/pool.js';
 import { getThorNodeCoreSnapshot } from './shared/thornode-core-snapshot.js';
 import {
   enrichRowsWithNodeMetadata,
+  NODE_VOTE_EVENT_QUERIES,
   parseNodeVoteEvents,
   upsertNodeVotes,
   writeNodeVoteListenerHeartbeat
@@ -625,12 +626,14 @@ function connect() {
     }));
 
     if (config.nodeVotesWsIngestionEnabled) {
-      ws.send(JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'subscribe',
-        id: 2,
-        params: { query: "tm.event='Tx' AND set_node_mimir.key EXISTS" }
-      }));
+      Object.values(NODE_VOTE_EVENT_QUERIES).forEach((eventQuery, index) => {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'subscribe',
+          id: index + 2,
+          params: { query: `tm.event='Tx' AND ${eventQuery}` }
+        }));
+      });
     }
 
     startHeartbeat();

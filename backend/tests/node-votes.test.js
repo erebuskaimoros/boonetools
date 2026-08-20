@@ -42,6 +42,53 @@ test('parseNodeVoteEvents extracts set_node_mimir votes', async () => {
   assert.equal(rows[0].source, 'test');
 });
 
+test('parseNodeVoteEvents extracts validator upgrade approval changes', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { parseNodeVoteEvents } = await import('../src/shared/node-votes.js');
+
+  const rows = parseNodeVoteEvents([
+    event('approve_upgrade', {
+      name: '3.20.0',
+      thor_address: 'thor1approverxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+    }),
+    event('reject_upgrade', {
+      name: '3.20.0',
+      thor_address: 'thor1rejecterxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+    })
+  ], {
+    txId: 'upgrade123',
+    txIndex: 2,
+    height: 27500000,
+    blockTime: '2026-08-19T12:00:00.000Z',
+    source: 'test'
+  });
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => row.mimir_key), [
+    'UPGRADE-3.20.0',
+    'UPGRADE-3.20.0'
+  ]);
+  assert.deepEqual(rows.map((row) => row.vote_value), ['approve', 'reject']);
+  assert.equal(rows[0].node_address, 'thor1approverxxxxxxxxxxxxxxxxxxxxxxxxxxxx');
+  assert.equal(rows[1].node_address, 'thor1rejecterxxxxxxxxxxxxxxxxxxxxxxxxxxxx');
+  assert.equal(rows[0].vote_value_numeric, null);
+  assert.equal(rows[0].event_key, 'UPGRADE123:0');
+  assert.equal(rows[1].event_key, 'UPGRADE123:1');
+});
+
+test('upgrade events without a transaction hash retain collision-safe identities', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { parseNodeVoteEvents } = await import('../src/shared/node-votes.js');
+  const rows = parseNodeVoteEvents([
+    event('approve_upgrade', { name: '3.20.0', thor_address: 'thor1approver' }),
+    event('reject_upgrade', { name: '3.20.0', thor_address: 'thor1rejecter' })
+  ], { height: 123, source: 'ws' });
+
+  assert.notEqual(rows[0].event_key, rows[1].event_key);
+  assert.match(rows[0].event_key, /approve_upgrade:thor1approver:3\.20\.0/);
+  assert.match(rows[1].event_key, /reject_upgrade:thor1rejecter:3\.20\.0/);
+});
+
 test('parseNodeVoteTxSearchTx handles tx_search rows', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { parseNodeVoteTxSearchTx } = await import('../src/shared/node-votes.js');
@@ -214,6 +261,21 @@ test('buildValueBreakdown leads with largest vote count, not current value', asy
   assert.equal(values[1].is_active, true);
 });
 
+test('buildValueBreakdown retains every active voter for the status display', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { buildValueBreakdown } = await import('../src/handlers/node-votes.js');
+  const rows = Array.from({ length: 14 }, (_, index) => ({
+    node_address: `thor-node-${index + 1}`,
+    operator_address: `thor-operator-${index + 1}`,
+    vote_value: '1'
+  }));
+
+  const [value] = buildValueBreakdown(rows, '1', 14, 10);
+
+  assert.equal(value.nodes.length, 14);
+  assert.equal(value.operators.length, 14);
+});
+
 test('classifyMimirKey mirrors operational and economic mimir behavior', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { classifyMimirKey } = await import('../src/handlers/node-votes.js');
@@ -309,6 +371,138 @@ test('buildVoteGroups applies operational and economic thresholds separately', a
   assert.equal(economic.mimir_category, 'economic');
   assert.equal(economic.consensus_threshold, 60);
   assert.equal(economic.consensus_ready, false);
+});
+
+test('buildVoteGroups overlays current upgrade proposals and filters churned voters', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    buildNodeGroups,
+    buildVoteGroups,
+    normalizeUpgradeProposalState
+  } = await import('../src/handlers/node-votes.js');
+  const metadata = new Map([
+    ['thor-active-1', { is_active: true, node_status: 'Active' }],
+    ['thor-active-2', { is_active: true, node_status: 'Active' }],
+    ['thor-active-3', { is_active: true, node_status: 'Active' }],
+    ['thor-inactive-1', { is_active: false, node_status: 'Standby' }]
+  ]);
+  const state = normalizeUpgradeProposalState([{
+    name: '3.20.0',
+    height: 27580000,
+    info: 'upgrade info',
+    approved: false,
+    approved_percent: '40.00',
+    validators_to_quorum: 2,
+    approvers: ['thor-active-1', 'thor-active-2', 'thor-inactive-1'],
+    rejecters: ['thor-active-3']
+  }], metadata);
+
+  const [group] = buildVoteGroups([], [], {}, 5, 3, {}, {
+    currentNodeMimirsAvailable: true,
+    currentUpgradeVotesAvailable: true,
+    currentUpgradeVotesByKey: state.votesByKey,
+    currentUpgradeProposalsByKey: state.proposalsByKey,
+    activeNodeAddresses: ['thor-active-1', 'thor-active-2', 'thor-active-3']
+  });
+
+  assert.equal(group.vote_key, 'UPGRADE-3.20.0');
+  assert.equal(group.vote_kind, 'upgrade');
+  assert.equal(group.vote_category, 'upgrade');
+  assert.equal(group.consensus_model, 'upgrade-supermajority');
+  assert.equal(group.consensus_threshold, 4);
+  assert.equal(group.approval_count, 2);
+  assert.equal(group.rejection_count, 1);
+  assert.equal(group.latest_stance_count, 3);
+  assert.equal(group.current_vote_source, 'thornode-upgrade-proposal');
+  assert.equal(group.consensus_ready, false);
+  assert.equal(group.votes_to_consensus, 2);
+  assert.equal(group.proposal.active_approval_count, 2);
+  assert.deepEqual(group.node_votes.map((row) => row.node_address).sort(), [
+    'thor-active-1',
+    'thor-active-2',
+    'thor-active-3'
+  ]);
+  const nodeGroups = buildNodeGroups([], state.votesByKey['UPGRADE-3.20.0'].filter((row) => row.is_active));
+  assert.equal(nodeGroups.length, 3);
+  assert.equal(nodeGroups[0].latest_stance_count, 1);
+  assert.equal(nodeGroups[0].category_counts.upgrade, 1);
+  assert.equal(nodeGroups[0].total_vote_events, 0);
+});
+
+test('expired upgrade history is not presented as current consensus', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { buildVoteGroups } = await import('../src/handlers/node-votes.js');
+  const row = {
+    mimir_key: 'UPGRADE-3.19.0',
+    vote_value: 'approve',
+    node_address: 'thor-active-1',
+    operator_address: 'thor-active-1',
+    block_time: '2026-07-01T00:00:00.000Z',
+    height: 100
+  };
+  const [group] = buildVoteGroups([row], [row], {}, 1, 3, {}, {
+    currentUpgradeVotesAvailable: true,
+    currentUpgradeVotesByKey: {},
+    currentUpgradeProposalsByKey: {},
+    activeNodeAddresses: ['thor-active-1']
+  });
+
+  assert.equal(group.proposal_status, 'historical');
+  assert.equal(group.current_vote_source, 'historical-expired');
+  assert.equal(group.latest_stance_count, 0);
+  assert.equal(group.consensus_ready, false);
+  assert.equal(group.passed_at, '2026-07-01T00:00:00.000+00:00');
+});
+
+test('node vote summary exposes a current proposal without indexed history', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    buildNodeVotesSummaryPayload,
+    normalizeUpgradeProposalState
+  } = await import('../src/handlers/node-votes.js');
+  const activeNodes = [
+    { node_address: 'thor-active-1', operator_address: 'thor-operator-1' },
+    { node_address: 'thor-active-2', operator_address: 'thor-operator-2' },
+    { node_address: 'thor-active-3', operator_address: 'thor-operator-3' }
+  ];
+  const metadata = new Map(activeNodes.map((node) => [node.node_address, {
+    is_active: true,
+    node_status: 'Active',
+    operator_address: node.operator_address
+  }]));
+  const upgradeState = normalizeUpgradeProposalState([{
+    name: '3.20.0',
+    height: 27580000,
+    approved_percent: '66.67',
+    validators_to_quorum: 0,
+    approvers: ['thor-active-1', 'thor-active-2']
+  }], metadata);
+  const client = { query: async () => ({ rows: [] }) };
+  const result = await buildNodeVotesSummaryPayload(client, {
+    now: new Date('2026-08-19T12:00:00Z'),
+    since: '2026-08-01T00:00:00Z',
+    chainState: {
+      currentMimirValues: {},
+      currentNodeMimirsByKey: {},
+      currentNodeMimirsAvailable: true,
+      currentUpgradeVotesByKey: upgradeState.votesByKey,
+      currentUpgradeProposalsByKey: upgradeState.proposalsByKey,
+      currentUpgradeVotesAvailable: true,
+      upgradeProposals: Object.values(upgradeState.proposalsByKey),
+      activeNodeCount: 3,
+      activeNodes,
+      source: 'test'
+    }
+  });
+
+  assert.equal(result.payload.upgrade_proposals[0].name, '3.20.0');
+  assert.equal(result.payload.by_vote[0].vote_key, 'UPGRADE-3.20.0');
+  assert.equal(result.payload.by_vote[0].approval_count, 2);
+  assert.equal(result.payload.by_vote[0].consensus_ready, true);
+  assert.equal(result.payload.by_node.length, 2);
+  assert.equal(result.payload.stats.unique_vote_keys, 1);
+  assert.equal(result.payload.stats.upgrade_vote_keys, 1);
+  assert.equal(result.payload.chain_state.upgrade_proposals_complete, true);
 });
 
 test('buildVoteGroups counts economic consensus from live active node mimirs', async () => {

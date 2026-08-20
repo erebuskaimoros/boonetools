@@ -6,7 +6,7 @@
     fetchNodeVotesDashboard
   } from './node-votes/api.js';
   import { mergeNodeVotesDashboard } from './node-votes/dashboard-state.js';
-  import { findMissingVoters } from './node-votes/missing-voters.js';
+  import { groupActiveVotersByValue } from './node-votes/missing-voters.js';
   import { formatNumber } from '$lib/utils/formatting';
 
   const REFRESH_INTERVAL_MS = 60000;
@@ -18,7 +18,7 @@
   let activeTab = 'vote';
   let categoryFilter = 'all';
   let expandedVoteKey = '';
-  let missingVotersKey = '';
+  let activeVotesKey = '';
   let expandedNodeAddress = '';
   let voteSortMode = 'last-vote';
   let nodeSortMode = 'last-vote';
@@ -37,6 +37,7 @@
   $: activeNodes = dashboard?.active_nodes || [];
   $: nodeRows = dashboard?.by_node || [];
   $: latestEvents = dashboard?.latest_events || [];
+  $: upgradeProposals = currentUpgradeProposals(dashboard, voteRows);
   $: filteredVoteRows = sortVoteRows(filterVoteRows(voteRows, searchTerm, categoryFilter), voteSortMode);
   $: filteredNodeRows = sortNodeRows(filterNodeRows(nodeRows, searchTerm, categoryFilter), nodeSortMode);
   $: avgResponseSortLabel = nodeSortMode === 'avg-response-asc'
@@ -88,7 +89,7 @@
 
   function matchesCategory(row, category) {
     if (category === 'all') return true;
-    return row?.mimir_category === category;
+    return voteCategory(row) === category;
   }
 
   function nodeMatchesCategory(row, category) {
@@ -102,14 +103,14 @@
       if (!matchesCategory(row, category)) return false;
       if (!q) return true;
       return (
-        row.mimir_key.toLowerCase().includes(q) ||
-        row.mimir_category.toLowerCase().includes(q) ||
-        row.consensus_model.toLowerCase().includes(q) ||
-        row.leader_value.toLowerCase().includes(q) ||
-        row.values.some((value) => (
+        String(row.mimir_key || row.vote_key || '').toLowerCase().includes(q) ||
+        voteCategory(row).includes(q) ||
+        String(row.consensus_model || '').toLowerCase().includes(q) ||
+        String(row.leader_value || '').toLowerCase().includes(q) ||
+        (row.values || []).some((value) => (
           String(value.value).toLowerCase().includes(q) ||
-          value.nodes.some((node) => node.toLowerCase().includes(q)) ||
-          value.operators.some((operator) => operator.toLowerCase().includes(q))
+          (value.nodes || []).some((node) => node.toLowerCase().includes(q)) ||
+          (value.operators || []).some((operator) => operator.toLowerCase().includes(q))
         ))
       );
     });
@@ -136,8 +137,8 @@
     }
 
     return sortVoteRowsByLastVote(rows).sort((left, right) => {
-      const leftPassed = left?.consensus_ready ? 1 : 0;
-      const rightPassed = right?.consensus_ready ? 1 : 0;
+      const leftPassed = isVoteApproved(left) ? 1 : 0;
+      const rightPassed = isVoteApproved(right) ? 1 : 0;
       const statusDiff = mode === 'consensus-passed'
         ? rightPassed - leftPassed
         : leftPassed - rightPassed;
@@ -152,9 +153,9 @@
       if (!nodeMatchesCategory(row, category)) return false;
       if (!q) return true;
       return (
-        row.node_address.toLowerCase().includes(q) ||
-        row.operator_address.toLowerCase().includes(q) ||
-        row.node_status.toLowerCase().includes(q)
+        String(row.node_address || '').toLowerCase().includes(q) ||
+        String(row.operator_address || '').toLowerCase().includes(q) ||
+        String(row.node_status || '').toLowerCase().includes(q)
       );
     });
   }
@@ -253,7 +254,7 @@
   }
 
   function consensusTimingLabel(row) {
-    if (row?.mimir_category === 'operational') {
+    if (voteCategory(row) === 'operational') {
       const latestChange = latestEffectiveChangeTime(row);
       return latestChange
         ? `value changed ${durationBetween(latestChange)} ago`
@@ -262,6 +263,12 @@
 
     const firstVote = oldestVoteTime(row);
     if (!firstVote) return '-';
+    if (isUpgradeVote(row) && isVoteApproved(row)) {
+      const firstApproved = oldestEffectiveChangeTime(row);
+      return firstApproved
+        ? `approved in ${durationBetween(firstVote, firstApproved)}`
+        : `first approval ${durationBetween(firstVote)} ago`;
+    }
     if (row?.consensus_ready) {
       const firstPassed = oldestEffectiveChangeTime(row);
       return firstPassed
@@ -285,6 +292,7 @@
   }
 
   function categoryLabel(category) {
+    if (category === 'upgrade') return 'UPGRADE';
     return category === 'operational' ? 'OPERATIONAL' : 'ECONOMIC';
   }
 
@@ -296,6 +304,9 @@
 
   function categoryTooltip(category) {
     const threshold = formatNumber(categoryThreshold(category) || 0);
+    if (category === 'upgrade') {
+      return `Upgrade approval: active validators must approve the named release at the supermajority threshold. Reject votes never approve a proposal. Current threshold: ${threshold} approvals.`;
+    }
     if (category === 'operational') {
       return `Operational Mimir: runtime safety/control keys that pass at the OperationalVotesMin threshold. Current threshold: ${threshold} matching node votes.`;
     }
@@ -380,18 +391,25 @@
     if (!Array.isArray(row?.vote_history)) await loadVoteDetails(key);
   }
 
-  function canInspectMissingVoters(row) {
-    return row?.current_vote_source === 'thornode-active-node-mimir' && activeNodes.length > 0;
+  function canInspectActiveVotes(row) {
+    return (
+      activeNodes.length > 0 &&
+      Array.isArray(row?.values) &&
+      row?.current_vote_source !== 'historical-expired'
+    );
   }
 
-  async function toggleMissingVoters(key) {
-    if (missingVotersKey === key) {
-      missingVotersKey = '';
+  function toggleActiveVotes(key) {
+    if (activeVotesKey === key) {
+      activeVotesKey = '';
       return;
     }
-    missingVotersKey = key;
-    const row = dashboard?.by_vote?.find((candidate) => candidate.mimir_key === key);
-    if (!Array.isArray(row?.node_votes)) await loadVoteDetails(key);
+    activeVotesKey = key;
+  }
+
+  function displayActiveVoteValue(row, value) {
+    if (value == null) return 'NOT VOTED';
+    return isUpgradeVote(row) ? String(value).toUpperCase() : value;
   }
 
   async function loadNodeDetails(address, append = false) {
@@ -456,7 +474,80 @@
   }
 
   function displayNodeVote(vote) {
-    return vote.vote_removed ? 'REMOVED' : (vote.vote_value ?? '-');
+    if (vote.vote_removed) return 'REMOVED';
+    const value = vote.vote_value ?? '-';
+    return isUpgradeVote(vote) ? String(value).toUpperCase() : value;
+  }
+
+  function voteCategory(row) {
+    if (
+      row?.vote_kind === 'upgrade' ||
+      row?.mimir_category === 'upgrade' ||
+      String(row?.mimir_key || row?.vote_key || '').startsWith('UPGRADE-')
+    ) return 'upgrade';
+    return String(row?.vote_category || row?.mimir_category || 'economic').toLowerCase();
+  }
+
+  function isUpgradeVote(row) {
+    return voteCategory(row) === 'upgrade' || String(row?.mimir_key || row?.vote_key || '').startsWith('UPGRADE-');
+  }
+
+  function isVoteApproved(row) {
+    return isUpgradeVote(row)
+      ? Boolean(row?.proposal?.approved ?? row?.approved ?? row?.consensus_ready)
+      : Boolean(row?.consensus_ready);
+  }
+
+  function currentUpgradeProposals(state, rows) {
+    if (Array.isArray(state?.upgrade_proposals)) return state.upgrade_proposals;
+    return (rows || [])
+      .filter((row) => isUpgradeVote(row) && row?.proposal)
+      .map((row) => ({
+        ...row.proposal,
+        vote_key: row.vote_key || row.mimir_key,
+        consensus_threshold: row.consensus_threshold,
+        approval_count: row.approval_count,
+        rejection_count: row.rejection_count,
+        votes_to_consensus: row.votes_to_consensus
+      }));
+  }
+
+  function proposalName(proposal) {
+    const name = proposal?.name || proposal?.upgrade_name;
+    if (name) return name;
+    return String(proposal?.vote_key || proposal?.mimir_key || '').replace(/^UPGRADE-/, '') || '-';
+  }
+
+  function proposalHeight(proposal) {
+    return proposal?.target_height ?? proposal?.height ?? 0;
+  }
+
+  function isProposalApproved(proposal) {
+    return Boolean(proposal?.approved);
+  }
+
+  function proposalApprovalCount(proposal) {
+    return proposal?.active_approval_count
+      ?? proposal?.approval_count
+      ?? proposal?.active_approvers?.length
+      ?? 0;
+  }
+
+  function proposalRejectionCount(proposal) {
+    return proposal?.active_rejection_count
+      ?? proposal?.rejection_count
+      ?? proposal?.active_rejecters?.length
+      ?? 0;
+  }
+
+  function proposalThreshold(proposal) {
+    return proposal?.consensus_threshold ?? proposal?.approval_threshold ?? stats.consensus_threshold ?? 0;
+  }
+
+  function proposalShortfall(proposal) {
+    return proposal?.validators_to_quorum
+      ?? proposal?.votes_to_consensus
+      ?? Math.max(0, Number(proposalThreshold(proposal)) - Number(proposalApprovalCount(proposal)));
   }
 
   function rowTxLabel(txId) {
@@ -473,7 +564,7 @@
   <section class="terminal-header">
     <div class="command-line">
       <span class="prompt">$</span>
-      <span>node-votes --window 6m --source {ingestionSource}</span>
+      <span>validator-votes --window 6m --source {ingestionSource}</span>
       <div class="header-status">
         <span class="status-pill {statusTone(wsStatus)}"><span class="dot"></span> WS {wsStatus}</span>
         <span class="status-pill {statusTone(backfillStatus)}"><span class="dot"></span> BACKFILL {backfillStatus}</span>
@@ -481,8 +572,8 @@
     </div>
     <div class="title-row">
       <div>
-        <h1>NODE VOTE TRACKER<span class="cursor">_</span></h1>
-        <p>Historical THORChain node Mimir votes from the last six months, grouped by vote key and node.</p>
+        <h1>VALIDATOR VOTE TRACKER<span class="cursor">_</span></h1>
+        <p>Live upgrade approvals and six months of THORChain validator Mimir and upgrade vote history, grouped by vote key and node.</p>
       </div>
       <button class="bracket-button" on:click={() => loadDashboard()} disabled={refreshing}>
         <span>[</span>R<span>]</span> {refreshing ? 'refreshing' : 'refresh'}
@@ -495,7 +586,7 @@
   {/if}
 
   {#if loading}
-    <div class="loading-panel">Loading node vote dashboard...</div>
+    <div class="loading-panel">Loading validator vote dashboard...</div>
   {:else if dashboard}
     <section class="metric-grid" aria-label="Node vote metrics">
       <div class="metric">
@@ -508,7 +599,7 @@
         <span class="metric-index">02</span>
         <span class="metric-label">Vote Keys</span>
         <strong>{formatNumber(stats.unique_vote_keys || 0)}</strong>
-        <small>{formatNumber(categoryStats.operational?.vote_keys || 0)} op | {formatNumber(categoryStats.economic?.vote_keys || 0)} econ</small>
+        <small>{formatNumber(categoryStats.operational?.vote_keys || 0)} op | {formatNumber(categoryStats.economic?.vote_keys || 0)} econ | {formatNumber(categoryStats.upgrade?.vote_keys || 0)} upgrade</small>
       </div>
       <div class="metric">
         <span class="metric-index">03</span>
@@ -524,6 +615,48 @@
       </div>
     </section>
 
+    {#if upgradeProposals.length}
+      <section class="table-block upgrade-block" aria-label="Live upgrade proposals">
+        <div class="block-title"><span></span> Live Upgrade Proposals <em>{upgradeProposals.length} active</em></div>
+        <div class="upgrade-grid">
+          {#each upgradeProposals as proposal}
+            <article class="upgrade-proposal">
+              <div class="upgrade-heading">
+                <div>
+                  <span class="type-pill upgrade">UPGRADE</span>
+                  <strong>{proposalName(proposal)}</strong>
+                </div>
+                <span class="proposal-status" class:approved={isProposalApproved(proposal)} class:pending={!isProposalApproved(proposal)}>
+                  <i></i>{isProposalApproved(proposal) ? 'APPROVED' : 'PENDING'}
+                </span>
+              </div>
+              <div class="upgrade-metrics">
+                <div>
+                  <span>Target Height</span>
+                  <strong>{formatNumber(proposalHeight(proposal))}</strong>
+                </div>
+                <div>
+                  <span>Active Approvals</span>
+                  <strong class="approval-count">{formatNumber(proposalApprovalCount(proposal))} / {formatNumber(proposalThreshold(proposal))}</strong>
+                </div>
+                <div>
+                  <span>Shortfall</span>
+                  <strong class:ready={isProposalApproved(proposal)}>{isProposalApproved(proposal) ? 'QUORUM' : formatNumber(proposalShortfall(proposal))}</strong>
+                </div>
+                <div>
+                  <span>Active Rejects</span>
+                  <strong class="rejection-count">{formatNumber(proposalRejectionCount(proposal))}</strong>
+                </div>
+              </div>
+              {#if proposal.info}
+                <p class="upgrade-info"><span>INFO</span>{proposal.info}</p>
+              {/if}
+            </article>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
     <section class="control-row">
       <div class="page-tabs" role="tablist" aria-label="Vote tracker pages">
         <button class:active={activeTab === 'vote'} on:click={() => activeTab = 'vote'}>By Vote</button>
@@ -531,10 +664,11 @@
       </div>
       <label class="type-select">
         <span>Type</span>
-        <select bind:value={categoryFilter} aria-label="Mimir vote type filter">
+        <select bind:value={categoryFilter} aria-label="Validator vote type filter">
           <option value="all">All</option>
           <option value="operational">Operational</option>
           <option value="economic">Economic</option>
+          <option value="upgrade">Upgrade</option>
         </select>
       </label>
       <input bind:value={searchTerm} placeholder="filter key / operator / node / type" aria-label="Filter vote tracker rows" />
@@ -551,7 +685,7 @@
             <thead>
               <tr>
                 <th>Vote Key</th>
-                <th>Leading Value</th>
+                <th>Leading / Target</th>
                 <th>Latest Stance</th>
                 <th>Activity</th>
                 <th>
@@ -561,7 +695,7 @@
                     on:click={toggleConsensusSort}
                     aria-label="Sort vote keys by consensus status"
                   >
-                    <span>Consensus</span>
+                    <span>Threshold</span>
                     <em>{consensusSortLabel()}</em>
                   </button>
                 </th>
@@ -581,19 +715,27 @@
                       <strong>{row.mimir_key}</strong>
                     </button>
                     <span
-                      class="type-pill {row.mimir_category}"
-                      title={categoryTooltip(row.mimir_category)}
-                      aria-label={categoryTooltip(row.mimir_category)}
-                    >{categoryLabel(row.mimir_category)}</span>
-                    <small>current {row.current_value ?? '-'}</small>
+                      class="type-pill {voteCategory(row)}"
+                      title={categoryTooltip(voteCategory(row))}
+                      aria-label={categoryTooltip(voteCategory(row))}
+                    >{categoryLabel(voteCategory(row))}</span>
+                    <small>
+                      {isUpgradeVote(row)
+                        ? (isVoteApproved(row) ? 'proposal approved' : 'proposal pending')
+                        : `current ${row.current_value ?? '-'}`}
+                    </small>
                   </td>
                   <td>
-                    <span class="value-chip">{row.leader_value || '-'}</span>
-                    <small>{formatNumber(row.leader_count || 0)} nodes</small>
+                    <span class="value-chip">{isUpgradeVote(row) ? 'APPROVE' : (row.leader_value || '-')}</span>
+                    <small>{formatNumber(row.leader_count || 0)} {isUpgradeVote(row) ? 'active validators' : 'nodes'}</small>
                   </td>
                   <td class="breakdown-cell">
-                    {#each row.values.slice(0, 4) as value}
-                      <div class="value-bar" class:in-progress={!row.consensus_ready}>
+                    {#each (row.values || []).slice(0, 4) as value}
+                      <div
+                        class="value-bar"
+                        class:in-progress={!isVoteApproved(row) && String(value.value).toLowerCase() !== 'reject'}
+                        class:rejection={isUpgradeVote(row) && String(value.value).toLowerCase() === 'reject'}
+                      >
                         <span>{value.value}</span>
                         <div><i style="width: {consensusProgressPercent(row, value)}%"></i></div>
                         <b>{value.count}</b>
@@ -605,17 +747,23 @@
                     <small>{formatNumber(row.value_change_events ?? 0)} changes | {formatNumber(row.recent_7d_votes || 0)} in 7d</small>
                   </td>
                   <td>
-                    {#if row.consensus_ready}
-                      <strong class="ready">PASSED</strong>
-                    {:else if canInspectMissingVoters(row)}
+                    {#if canInspectActiveVotes(row)}
                       <button
-                        class="shortfall-button"
-                        class:active={missingVotersKey === row.mimir_key}
-                        aria-expanded={missingVotersKey === row.mimir_key}
-                        aria-controls="missing-voters-{row.mimir_key}"
-                        on:click={() => toggleMissingVoters(row.mimir_key)}
-                        title="List active node operators without a current vote"
-                      >{formatNumber(row.votes_to_consensus || 0)} short</button>
+                        class="active-votes-button"
+                        class:ready={isVoteApproved(row)}
+                        class:active={activeVotesKey === row.mimir_key}
+                        aria-expanded={activeVotesKey === row.mimir_key}
+                        aria-controls="active-votes-{row.mimir_key}"
+                        on:click={() => toggleActiveVotes(row.mimir_key)}
+                        title="Show every active validator grouped by its current vote value"
+                      >
+                        <span>{isVoteApproved(row)
+                          ? (isUpgradeVote(row) ? 'APPROVED' : 'PASSED')
+                          : `${formatNumber(row.votes_to_consensus || 0)} short`}</span>
+                        <i aria-hidden="true">{activeVotesKey === row.mimir_key ? '-' : '+'}</i>
+                      </button>
+                    {:else if isVoteApproved(row)}
+                      <strong class="ready">{isUpgradeVote(row) ? 'APPROVED' : 'PASSED'}</strong>
                     {:else}
                       <strong>{formatNumber(row.votes_to_consensus || 0)} short</strong>
                     {/if}
@@ -626,50 +774,55 @@
                     <small>height {formatNumber(row.latest_height || 0)}</small>
                   </td>
                 </tr>
-                {#if missingVotersKey === row.mimir_key}
-                  <tr class="missing-voters-row" id="missing-voters-{row.mimir_key}">
+                {#if activeVotesKey === row.mimir_key}
+                  {@const activeVoteGroups = groupActiveVotersByValue(activeNodes, row.values)}
+                  {@const notVotedCount = activeVoteGroups.find((group) => group.is_missing)?.count || 0}
+                  {@const votedCount = activeNodes.length - notVotedCount}
+                  <tr class="active-votes-row" id="active-votes-{row.mimir_key}">
                     <td colspan="6">
-                      <div class="missing-voters-panel">
-                        {#if voteDetailLoading[row.mimir_key] && !Array.isArray(row.node_votes)}
-                          <div class="empty-detail">Loading complete current-voter details...</div>
-                        {:else if voteDetailErrors[row.mimir_key] && !Array.isArray(row.node_votes)}
-                          <div class="empty-detail err-detail">{voteDetailErrors[row.mimir_key]}</div>
-                        {:else}
-                          {@const missingVoters = findMissingVoters(activeNodes, row.values, row.node_votes)}
-                        <div class="missing-voters-heading">
-                          <strong>Operators without a current vote</strong>
-                          <span>{formatNumber(missingVoters.length)} of {formatNumber(activeNodes.length)} active</span>
+                      <div class="active-votes-panel">
+                        <div class="active-votes-heading">
+                          <strong>Active validator vote status</strong>
+                          <span>{formatNumber(votedCount)} voted · {formatNumber(notVotedCount)} not voted · {formatNumber(activeNodes.length)} active</span>
                         </div>
                         <p>
-                          {formatNumber(row.votes_to_consensus || 0)} more matching <strong>{row.leader_value || 'leader'}</strong> votes are needed.
-                          Operators currently voting another value are not listed.
+                          {#if isVoteApproved(row)}
+                            Consensus has passed. These are the current active validator stances, grouped by value.
+                          {:else}
+                            {formatNumber(row.votes_to_consensus || 0)} more matching <strong>{row.leader_value || 'leader'}</strong> votes are needed. Every active validator remains listed below.
+                          {/if}
                         </p>
-                        {#if missingVoters.length}
-                          <div class="missing-voter-list" aria-label="Node operators without a current vote for {row.mimir_key}">
-                            {#each missingVoters as voter}
-                              <span class="missing-voter" title="Operator {voter.operator_address} · Node {voter.node_address}">
-                                <span>OP</span>
-                                <a
-                                  href="https://thorchain.net/address/{voter.operator_address}"
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  title="View operator {voter.operator_address} on thorchain.net"
-                                >{shortAddress(voter.operator_address)}</a>
-                                <i>·</i>
-                                <span>NODE</span>
-                                <a
-                                  href="https://thorchain.net/node/{voter.node_address}"
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  title="View node {voter.node_address} on thorchain.net"
-                                >{shortAddress(voter.node_address)}</a>
-                              </span>
-                            {/each}
-                          </div>
-                        {:else}
-                          <div class="empty-detail">Every active node has a current vote; the shortfall is caused by split vote values.</div>
-                        {/if}
-                        {/if}
+                        <div class="active-vote-groups" aria-label="Active validator stances for {row.mimir_key}">
+                          {#each activeVoteGroups as group}
+                            <section class:missing={group.is_missing} class="active-vote-group">
+                              <div class="active-vote-group-heading">
+                                <span>{displayActiveVoteValue(row, group.value)}</span>
+                                <strong>{formatNumber(group.count)}</strong>
+                              </div>
+                              <div class="active-voter-list">
+                                {#each group.voters as voter}
+                                  <span class="active-voter" title="Operator {voter.operator_address} · Node {voter.node_address}">
+                                    <span>OP</span>
+                                    <a
+                                      href="https://thorchain.net/address/{voter.operator_address}"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title="View operator {voter.operator_address} on thorchain.net"
+                                    >{shortAddress(voter.operator_address)}</a>
+                                    <i>·</i>
+                                    <span>NODE</span>
+                                    <a
+                                      href="https://thorchain.net/node/{voter.node_address}"
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title="View node {voter.node_address} on thorchain.net"
+                                    >{shortAddress(voter.node_address)}</a>
+                                  </span>
+                                {/each}
+                              </div>
+                            </section>
+                          {/each}
+                        </div>
                       </div>
                     </td>
                   </tr>
@@ -685,7 +838,7 @@
                         {/if}
                         <section class="detail-panel">
                           <div class="detail-title">
-                            <span>Node Votes</span>
+                            <span>{isUpgradeVote(row) ? 'Validator Upgrade Votes' : 'Node Votes'}</span>
                             <em>{formatNumber(row.vote_history?.length || 0)} events</em>
                           </div>
                           {#if row.vote_history?.length}
@@ -762,7 +915,7 @@
 
                         <section class="detail-panel">
                           <div class="detail-title">
-                            <span>Effective Value History</span>
+                            <span>{isUpgradeVote(row) ? 'Approval History' : 'Effective Value History'}</span>
                             <em>{formatNumber(row.effective_history?.length || 0)} changes</em>
                           </div>
                           {#if row.effective_history?.length}
@@ -806,7 +959,9 @@
                               </table>
                             </div>
                           {:else}
-                            <div class="empty-detail">No effective value changes in window.</div>
+                            <div class="empty-detail">
+                              {isUpgradeVote(row) ? 'No approval threshold reached in window.' : 'No effective value changes in window.'}
+                            </div>
                           {/if}
                         </section>
 
@@ -847,7 +1002,7 @@
                     on:click={() => toggleNodeSort('percent-voted')}
                     aria-label="Sort nodes by percent voted"
                   >
-                    <span>% Voted</span>
+                    <span>% Economic Voted</span>
                     <em>{percentVotedSortLabel}</em>
                   </button>
                 </th>
@@ -889,7 +1044,7 @@
                       <div class="node-detail">
                         <section class="detail-panel">
                           <div class="detail-title">
-                            <span>Node Vote History</span>
+                            <span>Validator Vote History</span>
                             <em>{formatNumber(row.vote_history?.length || 0)} events, newest first</em>
                           </div>
                           {#if row.vote_history?.length}
@@ -910,10 +1065,10 @@
                                       <td><strong>{vote.mimir_key}</strong></td>
                                       <td>
                                         <span
-                                          class="type-pill {vote.mimir_category}"
-                                          title={categoryTooltip(vote.mimir_category)}
-                                          aria-label={categoryTooltip(vote.mimir_category)}
-                                        >{categoryLabel(vote.mimir_category)}</span>
+                                          class="type-pill {voteCategory(vote)}"
+                                          title={categoryTooltip(voteCategory(vote))}
+                                          aria-label={categoryTooltip(voteCategory(vote))}
+                                        >{categoryLabel(voteCategory(vote))}</span>
                                       </td>
                                       <td><strong>{displayNodeVote(vote)}</strong></td>
                                       <td>
@@ -966,10 +1121,10 @@
             <span>{formatDateTime(event.block_time)}</span>
             <strong>
               <i
-                class="type-pill {event.mimir_category}"
-                title={categoryTooltip(event.mimir_category)}
-                aria-label={categoryTooltip(event.mimir_category)}
-              >{categoryLabel(event.mimir_category)}</i>{event.mimir_key}={event.vote_value}
+                class="type-pill {voteCategory(event)}"
+                title={categoryTooltip(voteCategory(event))}
+                aria-label={categoryTooltip(voteCategory(event))}
+              >{categoryLabel(voteCategory(event))}</i>{event.mimir_key}={displayNodeVote(event)}
             </strong>
             <em>{shortAddress(event.operator_address)}</em>
           </div>
@@ -1163,6 +1318,138 @@
     margin-top: 4px;
   }
 
+  .upgrade-grid {
+    display: grid;
+  }
+
+  .upgrade-proposal {
+    padding: 14px;
+    border-bottom: 1px solid var(--faint);
+    background: var(--surface);
+  }
+
+  .upgrade-proposal:last-child {
+    border-bottom: 0;
+  }
+
+  .upgrade-heading,
+  .upgrade-heading > div,
+  .proposal-status {
+    display: flex;
+    align-items: center;
+  }
+
+  .upgrade-heading {
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+  }
+
+  .upgrade-heading > div {
+    gap: 9px;
+    min-width: 0;
+  }
+
+  .upgrade-heading .type-pill {
+    margin: 0;
+    cursor: default;
+  }
+
+  .upgrade-heading strong {
+    color: var(--text);
+    font: 800 14px/1.2 'JetBrains Mono', monospace;
+    overflow-wrap: anywhere;
+  }
+
+  .proposal-status {
+    gap: 6px;
+    flex: 0 0 auto;
+    border: 1px solid var(--border);
+    padding: 3px 7px;
+    color: var(--muted);
+    font: 800 10px/1 'JetBrains Mono', monospace;
+    letter-spacing: 0.08em;
+  }
+
+  .proposal-status i {
+    width: 6px;
+    height: 6px;
+    background: currentColor;
+  }
+
+  .proposal-status.approved {
+    border-color: rgba(0, 204, 102, 0.45);
+    color: var(--accent);
+  }
+
+  .proposal-status.pending {
+    border-color: rgba(212, 160, 23, 0.45);
+    color: var(--amber);
+  }
+
+  .upgrade-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border: 1px solid var(--border);
+  }
+
+  .upgrade-metrics > div {
+    min-width: 0;
+    padding: 9px 10px;
+    border-right: 1px solid var(--border);
+    background: #060606;
+  }
+
+  .upgrade-metrics > div:last-child {
+    border-right: 0;
+  }
+
+  .upgrade-metrics span,
+  .upgrade-info {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .upgrade-metrics span {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--dim);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .upgrade-metrics strong {
+    color: var(--text);
+    font: 800 13px/1.2 'JetBrains Mono', monospace;
+  }
+
+  .upgrade-metrics .approval-count {
+    color: var(--accent);
+  }
+
+  .upgrade-metrics .rejection-count {
+    color: var(--err);
+  }
+
+  .upgrade-info {
+    max-width: none;
+    margin-top: 10px;
+    padding: 7px 9px;
+    border-left: 2px solid var(--border);
+    background: #060606;
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
+  .upgrade-info span {
+    margin-right: 8px;
+    color: var(--accent);
+    font-weight: 800;
+  }
+
   .control-row {
     gap: 12px;
     margin-bottom: 18px;
@@ -1303,8 +1590,11 @@
     color: var(--amber);
   }
 
-  .shortfall-button {
-    padding: 0;
+  .active-votes-button {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0 0 2px;
     border: 0;
     border-bottom: 1px dashed rgba(212, 160, 23, 0.7);
     background: transparent;
@@ -1313,12 +1603,28 @@
     cursor: pointer;
   }
 
-  .shortfall-button:hover,
-  .shortfall-button:focus-visible,
-  .shortfall-button.active {
+  .active-votes-button i {
+    color: var(--dim);
+    font-style: normal;
+  }
+
+  .active-votes-button.ready {
+    border-bottom-color: rgba(0, 204, 102, 0.7);
+    color: var(--accent);
+  }
+
+  .active-votes-button:hover,
+  .active-votes-button:focus-visible,
+  .active-votes-button.active {
     border-bottom-color: var(--accent);
     color: var(--accent);
     outline: none;
+  }
+
+  .active-votes-button:hover i,
+  .active-votes-button:focus-visible i,
+  .active-votes-button.active i {
+    color: var(--accent);
   }
 
   td {
@@ -1407,6 +1713,11 @@
     color: var(--amber);
   }
 
+  .type-pill.upgrade {
+    border-color: rgba(85, 136, 204, 0.55);
+    color: #78a8e8;
+  }
+
   .breakdown-cell {
     min-width: 250px;
   }
@@ -1441,6 +1752,10 @@
     background: var(--amber);
   }
 
+  .value-bar.rejection i {
+    background: var(--err);
+  }
+
   .value-bar b {
     width: 28px;
     color: var(--text);
@@ -1452,18 +1767,18 @@
     background: #070707;
   }
 
-  .missing-voters-row > td {
+  .active-votes-row > td {
     padding: 0;
     background: #070907;
   }
 
-  .missing-voters-panel {
+  .active-votes-panel {
     padding: 14px;
     border-top: 1px solid rgba(212, 160, 23, 0.35);
     border-bottom: 1px solid var(--border);
   }
 
-  .missing-voters-heading {
+  .active-votes-heading {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1474,50 +1789,84 @@
     letter-spacing: 0.1em;
   }
 
-  .missing-voters-heading span {
-    color: var(--amber);
+  .active-votes-heading span {
+    color: var(--accent);
     white-space: nowrap;
   }
 
-  .missing-voters-panel p {
+  .active-votes-panel p {
     margin: 8px 0 12px;
     color: var(--dim);
     font: 600 13px/1.5 'JetBrains Mono', monospace;
   }
 
-  .missing-voters-panel p strong {
+  .active-votes-panel p strong {
     color: var(--amber);
   }
 
-  .missing-voter-list {
+  .active-vote-groups {
+    display: grid;
+    gap: 10px;
+  }
+
+  .active-vote-group {
+    border: 1px solid var(--border);
+    background: #050505;
+  }
+
+  .active-vote-group.missing {
+    border-color: rgba(212, 160, 23, 0.32);
+  }
+
+  .active-vote-group-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+    font: 800 11px/1.2 'JetBrains Mono', monospace;
+  }
+
+  .active-vote-group-heading strong {
+    color: var(--text);
+  }
+
+  .active-vote-group.missing .active-vote-group-heading {
+    color: var(--amber);
+  }
+
+  .active-voter-list {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    padding: 9px;
   }
 
-  .missing-voter {
+  .active-voter {
     display: inline-flex;
     align-items: center;
     gap: 5px;
     padding: 5px 7px;
     border: 1px solid var(--border);
-    background: #050505;
+    background: #080808;
     font: 800 11px/1 'JetBrains Mono', monospace;
   }
 
-  .missing-voter > span,
-  .missing-voter > i {
+  .active-voter > span,
+  .active-voter > i {
     color: var(--dim);
     font-style: normal;
   }
 
-  .missing-voter a {
+  .active-voter a {
     color: var(--body);
     text-decoration: none;
   }
 
-  .missing-voter a:hover,
-  .missing-voter a:focus-visible {
+  .active-voter a:hover,
+  .active-voter a:focus-visible {
     color: var(--accent);
     text-decoration: underline;
   }
@@ -1753,6 +2102,18 @@
 
     .metric-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .upgrade-metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .upgrade-metrics > div:nth-child(2) {
+      border-right: 0;
+    }
+
+    .upgrade-metrics > div:nth-child(-n + 2) {
+      border-bottom: 1px solid var(--border);
     }
 
     .detail-grid {

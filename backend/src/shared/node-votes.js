@@ -19,6 +19,13 @@ const THORNODE_TIMEOUT_MS = 8000;
 const TX_SEARCH_MAX_PAGE_SIZE = 100;
 const SYNC_KEY = 'node-votes-backfill';
 
+export const NODE_VOTE_EVENT_QUERIES = Object.freeze({
+  mimir: 'set_node_mimir.key EXISTS',
+  upgradePropose: 'propose_upgrade.name EXISTS',
+  upgradeApprove: 'approve_upgrade.name EXISTS',
+  upgradeReject: 'reject_upgrade.name EXISTS'
+});
+
 const NODE_VOTE_COLUMNS = [
   'event_key',
   'tx_id',
@@ -94,6 +101,14 @@ async function fetchThornodeApi(path, options = {}) {
   });
 }
 
+export async function fetchCurrentUpgradeProposals(options = {}) {
+  const fetcher = options.fetcher || fetchThornodeApi;
+  const payload = await fetcher('/thorchain/upgrade_proposals');
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.upgrade_proposals)) return payload.upgrade_proposals;
+  throw new Error('THORNode returned an invalid upgrade-proposals response');
+}
+
 export function tryDecode(value) {
   if (!value) {
     return '';
@@ -150,7 +165,7 @@ function parseJsonObject(value, fallback = {}) {
   }
 }
 
-function buildEventKey({ txId, height, txIndex, eventIndex, attrs }) {
+function buildEventKey({ txId, height, txIndex, eventIndex, eventType, attrs }) {
   if (txId) {
     return `${txId}:${eventIndex}`;
   }
@@ -159,6 +174,9 @@ function buildEventKey({ txId, height, txIndex, eventIndex, attrs }) {
     height || 0,
     txIndex ?? 'block',
     eventIndex,
+    eventType || '',
+    attrs.thor_address || '',
+    attrs.name || '',
     attrs.address || '',
     attrs.key || '',
     attrs.value || ''
@@ -173,14 +191,24 @@ export function parseNodeVoteEvents(events, envelope = {}) {
   const blockTime = toIsoOrNull(envelope.blockTime) || null;
 
   (events || []).forEach((event, index) => {
-    if (event?.type !== 'set_node_mimir') {
+    const eventType = String(event?.type || '');
+    const isMimirVote = eventType === 'set_node_mimir';
+    const isUpgradeVote = eventType === 'approve_upgrade' || eventType === 'reject_upgrade';
+    if (!isMimirVote && !isUpgradeVote) {
       return;
     }
 
     const attrs = eventAttributes(event);
-    const mimirKey = String(attrs.key || '').trim().toUpperCase();
-    const nodeAddress = String(attrs.address || attrs.signer || '').trim();
-    const voteValue = String(attrs.value ?? '').trim();
+    const upgradeName = isUpgradeVote ? String(attrs.name || '').trim() : '';
+    const mimirKey = isUpgradeVote
+      ? `UPGRADE-${upgradeName}`.toUpperCase()
+      : String(attrs.key || '').trim().toUpperCase();
+    const nodeAddress = String(
+      isUpgradeVote ? (attrs.thor_address || attrs.address || attrs.signer) : (attrs.address || attrs.signer)
+    ).trim();
+    const voteValue = isUpgradeVote
+      ? (eventType === 'approve_upgrade' ? 'approve' : 'reject')
+      : String(attrs.value ?? '').trim();
 
     if (!mimirKey || !nodeAddress) {
       return;
@@ -192,6 +220,7 @@ export function parseNodeVoteEvents(events, envelope = {}) {
         height,
         txIndex,
         eventIndex: index,
+        eventType,
         attrs
       }),
       tx_id: txId,
@@ -206,7 +235,7 @@ export function parseNodeVoteEvents(events, envelope = {}) {
       vote_value_numeric: numericVoteValue(voteValue),
       source: envelope.source || 'backfill',
       raw_event: {
-        type: event.type,
+        type: eventType,
         attributes: attrs,
         tx_index: txIndex
       },
@@ -545,8 +574,8 @@ export async function findNodeVotesStartHeight(startTime, status = null, options
   return low;
 }
 
-async function fetchNodeVoteTxPage({ startHeight, endHeight, page, perPage }) {
-  const queryText = `tx.height>=${startHeight} AND tx.height<=${endHeight} AND set_node_mimir.key EXISTS`;
+async function fetchNodeVoteTxPage({ startHeight, endHeight, page, perPage, eventQuery }) {
+  const queryText = `tx.height>=${startHeight} AND tx.height<=${endHeight} AND ${eventQuery}`;
   const payload = await fetchNodeVotesRpc('/tx_search', {
     query: `"${queryText}"`,
     page,
@@ -564,37 +593,46 @@ async function fetchNodeVoteTxPage({ startHeight, endHeight, page, perPage }) {
   };
 }
 
-export async function fetchNodeVoteTxs({ startHeight, endHeight }) {
+export async function fetchNodeVoteTxs({ startHeight, endHeight }, options = {}) {
   const perPage = Math.min(
     TX_SEARCH_MAX_PAGE_SIZE,
     Math.max(1, Number(config.nodeVotesTxSearchPageSize || TX_SEARCH_MAX_PAGE_SIZE))
   );
-  const all = [];
+  const eventQueries = options.eventQueries || [NODE_VOTE_EVENT_QUERIES.mimir];
+  const byHash = new Map();
   let total = 0;
 
-  for (let page = 1; ; page += 1) {
-    const result = await fetchNodeVoteTxPage({
-      startHeight,
-      endHeight,
-      page,
-      perPage
-    });
+  for (const eventQuery of eventQueries) {
+    let queryRows = 0;
+    for (let page = 1; ; page += 1) {
+      const result = await fetchNodeVoteTxPage({
+        startHeight,
+        endHeight,
+        page,
+        perPage,
+        eventQuery
+      });
 
-    total = result.total;
-    all.push(...result.txs);
+      total += page === 1 ? result.total : 0;
+      queryRows += result.txs.length;
+      for (const tx of result.txs) {
+        const identity = String(tx?.hash || `${tx?.height || 0}:${tx?.index || 0}`).toUpperCase();
+        byHash.set(identity, tx);
+      }
 
-    if (all.length >= total || result.txs.length === 0) {
-      break;
-    }
+      if (queryRows >= result.total || result.txs.length === 0) {
+        break;
+      }
 
-    if (config.nodeVotesRequestDelayMs > 0) {
-      await sleep(config.nodeVotesRequestDelayMs);
+      if (config.nodeVotesRequestDelayMs > 0) {
+        await sleep(config.nodeVotesRequestDelayMs);
+      }
     }
   }
 
   return {
     total,
-    txs: all
+    txs: [...byHash.values()]
   };
 }
 
@@ -690,6 +728,34 @@ async function fetchNodeVoteRowsFromRpc(startTime, endTime) {
   };
 }
 
+async function fetchNodeUpgradeRowsFromRpc(startTime, endTime) {
+  const { startHeight, endHeight } = await resolveNodeVoteHeightRange(startTime, endTime);
+  const txResult = await fetchNodeVoteTxs(
+    { startHeight, endHeight },
+    {
+      // CometBFT's event query grammar does not provide a portable OR form.
+      // Search proposal, approval, and rejection attributes independently,
+      // then de-dupe transaction hashes before parsing complete event sets.
+      eventQueries: [
+        NODE_VOTE_EVENT_QUERIES.upgradePropose,
+        NODE_VOTE_EVENT_QUERIES.upgradeApprove,
+        NODE_VOTE_EVENT_QUERIES.upgradeReject
+      ]
+    }
+  );
+  const heights = [...new Set(
+    txResult.txs
+      .map((tx) => Number(tx?.height || 0))
+      .filter((height) => height > 0)
+  )];
+  const blockTimes = await fetchBlockTimesForHeights(heights);
+  const rows = txResult.txs.flatMap((tx) => (
+    parseNodeVoteTxSearchTx(tx, blockTimes.get(Number(tx?.height || 0)) || null)
+  )).filter((row) => row.mimir_key.startsWith('UPGRADE-'));
+
+  return { startHeight, endHeight, total: txResult.total, txs: txResult.txs, rows };
+}
+
 async function fetchBlockTimesForHeights(heights) {
   const times = new Map();
 
@@ -773,6 +839,9 @@ export async function runNodeVoteBackfill(client, options = {}) {
   let cosmosRestError = '';
   let txSearchTotal = 0;
   let txCount = 0;
+  let upgradeTxSearchTotal = 0;
+  let upgradeTxCount = 0;
+  let upgradeError = '';
 
   if (config.duneApiKey && config.nodeVotesDuneQueryId) {
     try {
@@ -809,6 +878,33 @@ export async function runNodeVoteBackfill(client, options = {}) {
     }
   }
 
+  // Dune query 7619989 only contains set_node_mimir events. Upgrade stance
+  // changes must therefore be searched independently even when Dune returns a
+  // healthy, non-empty result. Separate proposal/approval/rejection searches
+  // avoid relying on a non-portable OR expression in CometBFT's query grammar.
+  let upgradeRows = [];
+  try {
+    const upgradeResult = await fetchNodeUpgradeRowsFromRpc(startTime, latestTime);
+    upgradeRows = upgradeResult.rows;
+    upgradeTxSearchTotal = upgradeResult.total;
+    upgradeTxCount = upgradeResult.txs.length;
+    startHeight = startHeight || upgradeResult.startHeight;
+    endHeight = Math.max(endHeight, upgradeResult.endHeight);
+  } catch (error) {
+    // Current upgrade state is independently overlaid from THORNode's
+    // authoritative proposal response. A temporary archive-index failure must
+    // not discard an otherwise healthy Dune/Cosmos Mimir ingestion pass.
+    upgradeError = error?.message || String(error);
+  }
+  const mergedRows = new Map();
+  for (const row of [...rows, ...upgradeRows]) {
+    const identity = row.tx_id
+      ? `${String(row.tx_id).toUpperCase()}:${row.event_index}`
+      : row.event_key;
+    mergedRows.set(identity, row);
+  }
+  rows = [...mergedRows.values()];
+
   rows = await enrichRowsWithNodeMetadata(rows);
 
   const inserted = await upsertNodeVotes(client, rows);
@@ -830,6 +926,11 @@ export async function runNodeVoteBackfill(client, options = {}) {
     end_time: latestTime,
     tx_search_total: txSearchTotal,
     tx_count: txCount,
+    upgrade_tx_search_total: upgradeTxSearchTotal,
+    upgrade_tx_count: upgradeTxCount,
+    upgrade_error: upgradeError,
+    upgrade_history_status: upgradeError ? 'degraded' : 'complete',
+    upgrade_event_count: rows.filter((row) => row.mimir_key.startsWith('UPGRADE-')).length,
     event_count: rows.length,
     upserted: inserted,
     unique_vote_keys: new Set(rows.map((row) => row.mimir_key)).size,

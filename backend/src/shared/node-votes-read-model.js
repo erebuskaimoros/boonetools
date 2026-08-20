@@ -30,10 +30,11 @@ export async function refreshNodeVotesReadModel(options = {}) {
         const liveState = await loadChainState({ client });
         if (
           !liveState.currentNodeMimirsAvailable ||
+          !liveState.currentUpgradeVotesAvailable ||
           !Number.isFinite(Number(liveState.activeNodeCount)) ||
           Number(liveState.activeNodeCount) <= 0
         ) {
-          throw new Error('THORNode returned an incomplete node-vote chain state');
+          throw new Error('THORNode returned an incomplete node-vote or upgrade-proposal chain state');
         }
         chainState = { ...liveState, source: 'thornode-core-snapshot' };
         const observedAt = liveState.sourceUpdatedAt || now().toISOString();
@@ -46,8 +47,8 @@ export async function refreshNodeVotesReadModel(options = {}) {
           metadata: { internal: true }
         });
       }
-      if (!chainState?.currentNodeMimirsAvailable) {
-        throw new Error('No complete node-vote chain state is available');
+      if (!chainState?.currentNodeMimirsAvailable || !chainState?.currentUpgradeVotesAvailable) {
+        throw new Error('No complete node-vote and upgrade-proposal chain state is available');
       }
       // Rejecting the build leaves the previously published summary untouched;
       // old chain state is never republished with a fresh timestamp.

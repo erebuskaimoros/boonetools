@@ -1,7 +1,10 @@
 import { query } from '../db/pool.js';
 import { json, parseIntegerParam } from '../lib/http.js';
 import { toIsoString } from '../lib/utils.js';
-import { NODE_VOTES_SYNC_KEY } from '../shared/node-votes.js';
+import {
+  fetchCurrentUpgradeProposals,
+  NODE_VOTES_SYNC_KEY
+} from '../shared/node-votes.js';
 import { ANALYTICS_READ_MODEL_KEYS } from '../shared/analytics-read-model-keys.js';
 import { getReadModel } from '../shared/read-models.js';
 import {
@@ -78,6 +81,10 @@ function normalizeMimirKey(key) {
   return String(key || '').trim().toUpperCase();
 }
 
+function voteKindForKey(key) {
+  return normalizeMimirKey(key).startsWith('UPGRADE-') ? 'upgrade' : 'mimir';
+}
+
 function isAssetSlipMinBpsMimirKey(normalized) {
   return ASSET_SLIP_MIN_BPS_PREFIXES.some((prefix) => (
     normalized.startsWith(prefix) && normalized.length > prefix.length
@@ -86,12 +93,64 @@ function isAssetSlipMinBpsMimirKey(normalized) {
 
 export function classifyMimirKey(key) {
   const normalized = normalizeMimirKey(key);
+  if (voteKindForKey(normalized) === 'upgrade') return 'upgrade';
   if (OPERATIONAL_EXACT_KEYS.has(normalized)) return 'operational';
   if (ECONOMIC_EXACT_KEYS.has(normalized)) return 'economic';
   if (OPERATIONAL_PREFIX_KEYS.some((prefix) => normalized.startsWith(prefix))) return 'operational';
   if (OPERATIONAL_PARTIAL_KEYS.some((match) => normalized.includes(match))) return 'operational';
   if (normalized.endsWith('SLIPMINBPS') || isAssetSlipMinBpsMimirKey(normalized)) return 'operational';
   return 'economic';
+}
+
+export function normalizeUpgradeProposalState(proposals, nodeMetadataByAddress = new Map()) {
+  const votesByKey = {};
+  const proposalsByKey = {};
+
+  for (const proposal of Array.isArray(proposals) ? proposals : []) {
+    const name = String(proposal?.name || '').trim();
+    if (!name) continue;
+    const voteKey = normalizeMimirKey(`UPGRADE-${name}`);
+    const byNode = new Map();
+    for (const [field, voteValue] of [['approvers', 'approve'], ['rejecters', 'reject']]) {
+      for (const value of Array.isArray(proposal?.[field]) ? proposal[field] : []) {
+        const nodeAddress = String(value || '').trim();
+        if (!nodeAddress) continue;
+        const metadata = nodeMetadataByAddress.get(nodeAddress) || {};
+        byNode.set(nodeAddress, {
+          mimir_key: voteKey,
+          vote_kind: 'upgrade',
+          mimir_category: 'upgrade',
+          vote_category: 'upgrade',
+          node_address: nodeAddress,
+          operator_address: metadata.operator_address || nodeAddress,
+          node_operator_address: metadata.operator_address || nodeAddress,
+          node_status: metadata.node_status || '',
+          is_active: Boolean(metadata.is_active),
+          vote_value: voteValue
+        });
+      }
+    }
+    const proposalVotes = [...byNode.values()];
+    const approvers = proposalVotes.filter((row) => row.vote_value === 'approve');
+    const rejecters = proposalVotes.filter((row) => row.vote_value === 'reject');
+    votesByKey[voteKey] = proposalVotes;
+    proposalsByKey[voteKey] = {
+      name,
+      height: Number(proposal?.height || 0) || 0,
+      info: String(proposal?.info || ''),
+      approved: Boolean(proposal?.approved),
+      approved_percent: Number(proposal?.approved_percent || 0) || 0,
+      validators_to_quorum: Number(proposal?.validators_to_quorum || 0) || 0,
+      approvers: approvers.map((row) => row.node_address),
+      rejecters: rejecters.map((row) => row.node_address),
+      active_approvers: approvers.filter((row) => row.is_active).map((row) => row.node_address),
+      active_rejecters: rejecters.filter((row) => row.is_active).map((row) => row.node_address),
+      active_approval_count: approvers.filter((row) => row.is_active).length,
+      active_rejection_count: rejecters.filter((row) => row.is_active).length
+    };
+  }
+
+  return { votesByKey, proposalsByKey };
 }
 
 function normalizeMimirValues(values) {
@@ -198,6 +257,8 @@ function rowTimeMs(row) {
 function normalizeVoteRow(row) {
   const operator = String(row.node_operator_address || '').trim();
   const mimirKey = normalizeMimirKey(row.mimir_key);
+  const voteKind = voteKindForKey(mimirKey);
+  const voteCategory = classifyMimirKey(mimirKey);
   return {
     event_key: String(row.event_key || ''),
     tx_id: String(row.tx_id || ''),
@@ -209,7 +270,11 @@ function normalizeVoteRow(row) {
     operator_address: operator || String(row.node_address || ''),
     node_status: String(row.node_status || ''),
     mimir_key: mimirKey,
-    mimir_category: classifyMimirKey(mimirKey),
+    vote_key: mimirKey,
+    vote_kind: voteKind,
+    upgrade_name: voteKind === 'upgrade' ? mimirKey.slice('UPGRADE-'.length) : '',
+    mimir_category: voteCategory,
+    vote_category: voteCategory,
     vote_value: String(row.vote_value ?? ''),
     vote_value_numeric: row.vote_value_numeric == null ? null : Number(row.vote_value_numeric),
     source: String(row.source || ''),
@@ -305,8 +370,8 @@ export function buildValueBreakdown(rows, currentValue, activeNodeCount, thresho
         percent,
         is_active: currentValue !== undefined && String(currentValue) === String(value),
         votes_to_consensus: Math.max(0, threshold - count),
-        nodes: [...new Set(valueRows.map((row) => row.node_address))].slice(0, 12),
-        operators: [...new Set(valueRows.map((row) => row.operator_address))].slice(0, 12)
+        nodes: [...new Set(valueRows.map((row) => row.node_address))],
+        operators: [...new Set(valueRows.map((row) => row.operator_address))]
       };
     })
     .sort((left, right) => {
@@ -346,7 +411,13 @@ function voteEventHistoryRows(historicalRows) {
     .sort((left, right) => compareRowsDesc(left, right))
     .map((row) => ({
       mimir_key: row.mimir_key,
+      vote_key: row.mimir_key,
+      vote_kind: row.vote_kind || voteKindForKey(row.mimir_key),
+      upgrade_name: voteKindForKey(row.mimir_key) === 'upgrade'
+        ? normalizeMimirKey(row.mimir_key).slice('UPGRADE-'.length)
+        : '',
       mimir_category: row.mimir_category || classifyMimirKey(row.mimir_key),
+      vote_category: row.vote_category || row.mimir_category || classifyMimirKey(row.mimir_key),
       node_address: row.node_address,
       operator_address: row.operator_address,
       node_status: row.node_status,
@@ -359,12 +430,14 @@ function voteEventHistoryRows(historicalRows) {
     }));
 }
 
-function effectiveValueFromVotes(votes, currentValue, activeNodeCount, threshold) {
+function effectiveValueFromVotes(votes, currentValue, activeNodeCount, threshold, targetValue = null) {
   const breakdown = buildValueBreakdown(votes, currentValue, activeNodeCount, threshold);
-  const leader = breakdown[0] || null;
+  const leader = targetValue == null
+    ? (breakdown[0] || null)
+    : (breakdown.find((row) => row.value === targetValue) || null);
   const leaderTied = Boolean(
     leader &&
-    breakdown[1] &&
+    targetValue == null && breakdown[1] &&
     breakdown[1].count === leader.count
   );
 
@@ -381,6 +454,7 @@ export function buildEffectiveValueHistory(historicalRows, options = {}) {
   const threshold = Number(options.threshold || 0);
   const activeNodeCount = Number(options.activeNodeCount || 0);
   const currentValue = options.currentValue;
+  const targetValue = category === 'upgrade' ? 'approve' : null;
   const activeVotes = new Map();
   const changes = [];
   let lastEffectiveValue = null;
@@ -396,7 +470,8 @@ export function buildEffectiveValueHistory(historicalRows, options = {}) {
       [...activeVotes.values()],
       currentValue,
       activeNodeCount,
-      threshold
+      threshold,
+      targetValue
     );
 
     if (effective.value === null || String(effective.value) === String(lastEffectiveValue)) {
@@ -407,7 +482,11 @@ export function buildEffectiveValueHistory(historicalRows, options = {}) {
     changes.push({
       effective_value: effective.value,
       mimir_category: category,
-      consensus_model: category === 'operational' ? 'operational-min' : 'economic-supermajority',
+      vote_kind: category === 'upgrade' ? 'upgrade' : 'mimir',
+      vote_category: category,
+      consensus_model: category === 'operational'
+        ? 'operational-min'
+        : (category === 'upgrade' ? 'upgrade-supermajority' : 'economic-supermajority'),
       threshold,
       leader_count: effective.leader?.count || 0,
       active_vote_count: [...activeVotes.values()].length,
@@ -522,7 +601,28 @@ function liveActiveNodeMimirRows(rows) {
     .filter((row) => row?.is_active && !isVoteRemoval(row));
 }
 
-function currentConsensusRows({ historicalStances, currentNodeMimirs, currentNodeMimirsAvailable }) {
+function activeRows(rows) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => row?.is_active && !isVoteRemoval(row));
+}
+
+function currentConsensusRows({
+  voteKind,
+  historicalStances,
+  currentNodeMimirs,
+  currentNodeMimirsAvailable,
+  currentUpgradeVotes,
+  currentUpgradeStateAvailable,
+  currentUpgradeProposalAvailable,
+  activeNodeAddresses
+}) {
+  if (voteKind === 'upgrade') {
+    if (currentUpgradeProposalAvailable) return activeRows(currentUpgradeVotes);
+    if (currentUpgradeStateAvailable) return [];
+    if (activeNodeAddresses.size > 0) {
+      return historicalStances.filter((row) => activeNodeAddresses.has(row.node_address));
+    }
+    return historicalStances;
+  }
   if (!currentNodeMimirsAvailable) {
     return historicalStances;
   }
@@ -558,6 +658,10 @@ export function buildVoteGroups(
   const latestByKey = new Map();
   const recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const currentNodeMimirsAvailable = Boolean(options.currentNodeMimirsAvailable);
+  const currentUpgradeVotesAvailable = Boolean(options.currentUpgradeVotesAvailable);
+  const currentUpgradeVotesByKey = options.currentUpgradeVotesByKey || {};
+  const currentUpgradeProposalsByKey = options.currentUpgradeProposalsByKey || {};
+  const activeNodeAddresses = new Set(options.activeNodeAddresses || []);
 
   for (const row of rows) {
     if (!historicalByKey.has(row.mimir_key)) {
@@ -573,31 +677,55 @@ export function buildVoteGroups(
     latestByKey.get(row.mimir_key).push(row);
   }
 
+  for (const mimirKey of Object.keys(currentUpgradeProposalsByKey)) {
+    if (!historicalByKey.has(mimirKey)) historicalByKey.set(mimirKey, []);
+  }
+
   return [...historicalByKey.entries()]
     .map(([mimirKey, historicalRows]) => {
       const category = classifyMimirKey(mimirKey);
+      const voteKind = voteKindForKey(mimirKey);
       const threshold = category === 'operational' ? operationalVotesMin : economicThreshold;
       const stances = latestByKey.get(mimirKey) || [];
       const currentNodeMimirs = currentNodeMimirsByKey[mimirKey] || [];
+      const currentUpgradeVotes = currentUpgradeVotesByKey[mimirKey] || [];
+      const proposal = currentUpgradeProposalsByKey[mimirKey] || null;
       const consensusRows = currentConsensusRows({
+        voteKind,
         historicalStances: stances,
         currentNodeMimirs,
-        currentNodeMimirsAvailable
+        currentNodeMimirsAvailable,
+        currentUpgradeVotes,
+        currentUpgradeStateAvailable: currentUpgradeVotesAvailable,
+        currentUpgradeProposalAvailable: currentUpgradeVotesAvailable && Boolean(proposal),
+        activeNodeAddresses
       });
       const effectiveHistoryRows = economicHistoryRows({
-        category,
+        category: category === 'upgrade' ? 'economic' : category,
         historicalRows,
         currentRows: consensusRows,
-        currentNodeMimirsAvailable
+        currentNodeMimirsAvailable: voteKind === 'upgrade'
+          ? (currentUpgradeVotesAvailable && Boolean(proposal))
+          : currentNodeMimirsAvailable
       });
+      const currentValue = voteKind === 'upgrade'
+        ? (proposal?.approved ? 'approve' : null)
+        : currentMimirValues[mimirKey];
       const valueBreakdown = buildValueBreakdown(
         consensusRows,
-        currentMimirValues[mimirKey],
+        currentValue,
         activeNodeCount,
         threshold
       );
-      const leader = valueBreakdown[0] || null;
+      const approval = voteKind === 'upgrade'
+        ? (valueBreakdown.find((row) => row.value === 'approve') || null)
+        : null;
+      const rejection = voteKind === 'upgrade'
+        ? (valueBreakdown.find((row) => row.value === 'reject') || null)
+        : null;
+      const leader = voteKind === 'upgrade' ? approval : (valueBreakdown[0] || null);
       const leaderTied = Boolean(
+        voteKind !== 'upgrade' &&
         leader &&
         valueBreakdown[1] &&
         valueBreakdown[1].count === leader.count
@@ -611,7 +739,7 @@ export function buildVoteGroups(
         category,
         threshold,
         activeNodeCount,
-        currentValue: currentMimirValues[mimirKey]
+        currentValue
       });
       const currentValueChange = buildCurrentValueChange(historicalRows, {
         category,
@@ -621,16 +749,30 @@ export function buildVoteGroups(
         currentNodeMimirs
       });
       const effectiveHistory = mergeEffectiveHistory(rawEffectiveHistory, currentValueChange);
-      const currentVoteSource = currentNodeMimirsAvailable
-        ? 'thornode-active-node-mimir'
-        : 'stored-latest-stance';
+      const currentVoteSource = voteKind === 'upgrade'
+        ? (currentUpgradeVotesAvailable && proposal
+          ? 'thornode-upgrade-proposal'
+          : (currentUpgradeVotesAvailable
+            ? 'historical-expired'
+            : (activeNodeAddresses.size > 0 ? 'stored-active-latest-stance' : 'stored-latest-stance')))
+        : (currentNodeMimirsAvailable ? 'thornode-active-node-mimir' : 'stored-latest-stance');
 
       return {
         mimir_key: mimirKey,
+        vote_key: mimirKey,
+        vote_kind: voteKind,
+        upgrade_name: voteKind === 'upgrade' ? mimirKey.slice('UPGRADE-'.length) : '',
         mimir_category: category,
-        consensus_model: category === 'operational' ? 'operational-min' : 'economic-supermajority',
+        vote_category: category,
+        consensus_model: category === 'operational'
+          ? 'operational-min'
+          : (voteKind === 'upgrade' ? 'upgrade-supermajority' : 'economic-supermajority'),
         consensus_threshold: threshold,
-        current_value: currentMimirValues[mimirKey] ?? null,
+        current_value: currentValue ?? null,
+        proposal,
+        proposal_status: voteKind !== 'upgrade'
+          ? ''
+          : (proposal ? 'current' : (currentUpgradeVotesAvailable ? 'historical' : 'unknown')),
         historical_vote_events: historicalRows.length,
         latest_stance_count: consensusRows.length,
         stored_latest_stance_count: stances.length,
@@ -638,10 +780,16 @@ export function buildVoteGroups(
         repeated_vote_events: Math.max(0, historicalRows.length - uniqueNodeKeyPairs),
         value_change_events: countValueChanges(historicalRows),
         recent_7d_votes: recentVotes,
-        unique_nodes: uniqueCount(historicalRows, 'node_address'),
-        unique_operators: uniqueCount(historicalRows, 'operator_address'),
+        unique_nodes: uniqueCount(
+          voteKind === 'upgrade' ? [...historicalRows, ...consensusRows] : historicalRows,
+          'node_address'
+        ),
+        unique_operators: uniqueCount(
+          voteKind === 'upgrade' ? [...historicalRows, ...consensusRows] : historicalRows,
+          'operator_address'
+        ),
         first_vote_at: firstVoteTime(historicalRows),
-        passed_at: category === 'economic' ? firstPassedTime(effectiveHistory) : null,
+        passed_at: category === 'operational' ? null : firstPassedTime(effectiveHistory),
         current_value_changed_at: toIsoString(currentValueChange?.block_time),
         latest_vote_at: toIsoString(latestVote?.block_time),
         latest_height: latestVote?.height || 0,
@@ -649,9 +797,13 @@ export function buildVoteGroups(
         leader_count: leader?.count || 0,
         leader_percent: leader?.percent || 0,
         leader_tied: leaderTied,
-        votes_to_consensus: leader ? Math.max(0, threshold - leader.count) : threshold,
+        votes_to_consensus: Math.max(0, threshold - (leader?.count || 0)),
         consensus_ready: Boolean(leader && !leaderTied && threshold > 0 && leader.count >= threshold),
-        node_votes: currentNodeVoteRows(historicalRows),
+        approval_count: approval?.count || 0,
+        rejection_count: rejection?.count || 0,
+        node_votes: voteKind === 'upgrade'
+          ? currentNodeVoteRows(consensusRows)
+          : currentNodeVoteRows(historicalRows),
         vote_history: voteEventHistoryRows(historicalRows),
         effective_history: effectiveHistory,
         values: valueBreakdown
@@ -665,8 +817,8 @@ export function buildVoteGroups(
 }
 
 function categoryCountsForRows(rows) {
-  const categoryCounts = { operational: 0, economic: 0 };
-  const categoryKeys = { operational: new Set(), economic: new Set() };
+  const categoryCounts = { operational: 0, economic: 0, upgrade: 0 };
+  const categoryKeys = { operational: new Set(), economic: new Set(), upgrade: new Set() };
 
   for (const row of rows) {
     const category = row.mimir_category || classifyMimirKey(row.mimir_key);
@@ -679,7 +831,8 @@ function categoryCountsForRows(rows) {
     category_counts: categoryCounts,
     category_key_counts: {
       operational: categoryKeys.operational.size,
-      economic: categoryKeys.economic.size
+      economic: categoryKeys.economic.size,
+      upgrade: categoryKeys.upgrade.size
     }
   };
 }
@@ -736,6 +889,9 @@ export function buildNodeGroups(rows, latestRows) {
   }
 
   for (const row of latestRows) {
+    if (!historicalByNode.has(row.node_address)) {
+      historicalByNode.set(row.node_address, []);
+    }
     if (!latestByNode.has(row.node_address)) {
       latestByNode.set(row.node_address, []);
     }
@@ -745,14 +901,19 @@ export function buildNodeGroups(rows, latestRows) {
   return [...historicalByNode.entries()]
     .map(([nodeAddress, historicalRows]) => {
       const stances = latestByNode.get(nodeAddress) || [];
+      const participationRows = [...historicalRows];
+      const historicalKeys = new Set(historicalRows.map((row) => row.mimir_key));
+      for (const stance of stances) {
+        if (!historicalKeys.has(stance.mimir_key)) participationRows.push(stance);
+      }
       const latestVote = historicalRows.reduce((best, row) => (
         rowTimeMs(row) > rowTimeMs(best || {}) ? row : best
       ), null);
       const uniqueNodeKeyPairs = new Set(historicalRows.map((row) => `${row.node_address}:${row.mimir_key}`)).size;
-      const latestMetadata = latestVote || historicalRows[0] || {};
-      const categories = categoryCountsForRows(historicalRows);
+      const latestMetadata = latestVote || stances[0] || historicalRows[0] || {};
+      const categories = categoryCountsForRows(participationRows);
       const nodeEconomicKeys = new Set(
-        historicalRows
+        participationRows
           .filter((row) => (row.mimir_category || classifyMimirKey(row.mimir_key)) === 'economic')
           .map((row) => row.mimir_key)
       );
@@ -767,7 +928,7 @@ export function buildNodeGroups(rows, latestRows) {
         total_vote_events: historicalRows.length,
         latest_stance_count: stances.length,
         repeated_vote_events: Math.max(0, historicalRows.length - uniqueNodeKeyPairs),
-        unique_keys: uniqueCount(historicalRows, 'mimir_key'),
+        unique_keys: uniqueCount(participationRows, 'mimir_key'),
         category_counts: categories.category_counts,
         category_key_counts: categories.category_key_counts,
         avg_response_time_ms: averageNodeResponseMs(historicalRows, firstByKey),
@@ -797,6 +958,11 @@ function buildCategoryStats(rows, voteGroups) {
       passed_keys: 0
     },
     economic: {
+      vote_events: 0,
+      vote_keys: 0,
+      passed_keys: 0
+    },
+    upgrade: {
       vote_events: 0,
       vote_keys: 0,
       passed_keys: 0
@@ -830,7 +996,7 @@ function buildStats(rows, latestRows, voteGroups, nodeGroups, activeNodeCount, o
   return {
     total_vote_events: rows.length,
     latest_stances: latestRows.length,
-    unique_vote_keys: uniqueCount(rows, 'mimir_key'),
+    unique_vote_keys: voteGroups.length,
     unique_nodes: uniqueCount(rows, 'node_address'),
     unique_operators: uniqueCount(rows, 'operator_address'),
     active_node_count: activeNodeCount,
@@ -844,6 +1010,9 @@ function buildStats(rows, latestRows, voteGroups, nodeGroups, activeNodeCount, o
     economic_vote_keys: categories.economic.vote_keys,
     economic_vote_events: categories.economic.vote_events,
     economic_passed_keys: categories.economic.passed_keys,
+    upgrade_vote_keys: categories.upgrade.vote_keys,
+    upgrade_vote_events: categories.upgrade.vote_events,
+    upgrade_passed_keys: categories.upgrade.passed_keys,
     categories,
     hottest_vote_key: hottestVote?.mimir_key || '',
     hottest_vote_events: hottestVote?.historical_vote_events || 0,
@@ -867,6 +1036,10 @@ export async function loadCurrentNodeVoteChainState(options = {}) {
   const activeNodes = buildActiveNodeOperators(nodes);
   const activeNodeCount = activeNodes.length;
   const nodeMetadataByAddress = buildNodeMetadataByAddress(nodes);
+  const upgradeProposals = options.upgradeProposals !== undefined
+    ? options.upgradeProposals
+    : await (options.fetchUpgradeProposals || fetchCurrentUpgradeProposals)();
+  const upgradeState = normalizeUpgradeProposalState(upgradeProposals, nodeMetadataByAddress);
   const currentNodeMimirsAvailable = (
     Boolean(mimir) &&
     Boolean(nodeMimirs) &&
@@ -880,6 +1053,10 @@ export async function loadCurrentNodeVoteChainState(options = {}) {
       ? normalizeNodeMimirValues(nodeMimirs, nodeMetadataByAddress)
       : {},
     currentNodeMimirsAvailable,
+    currentUpgradeVotesByKey: upgradeState.votesByKey,
+    currentUpgradeProposalsByKey: upgradeState.proposalsByKey,
+    currentUpgradeVotesAvailable: true,
+    upgradeProposals: Object.values(upgradeState.proposalsByKey),
     activeNodeCount,
     activeNodes,
     sourceUpdatedAt: core?.source_updated_at || model?.sourceUpdatedAt || null
@@ -971,6 +1148,10 @@ function deriveChainStateFromRows(rows) {
     currentMimirValues: {},
     currentNodeMimirsByKey: {},
     currentNodeMimirsAvailable: false,
+    currentUpgradeVotesByKey: {},
+    currentUpgradeProposalsByKey: {},
+    currentUpgradeVotesAvailable: false,
+    upgradeProposals: [],
     activeNodeCount: activeNodes.length,
     activeNodes,
     source: 'stored-node-vote-metadata'
@@ -1036,9 +1217,22 @@ async function buildNodeVotesPayload(client, options = {}) {
     Number(chainState.activeNodeCount) || 0,
     operationalVotesMin,
     chainState.currentNodeMimirsByKey || {},
-    { currentNodeMimirsAvailable: Boolean(chainState.currentNodeMimirsAvailable) }
+    {
+      currentNodeMimirsAvailable: Boolean(chainState.currentNodeMimirsAvailable),
+      currentUpgradeVotesAvailable: Boolean(chainState.currentUpgradeVotesAvailable),
+      currentUpgradeVotesByKey: chainState.currentUpgradeVotesByKey || {},
+      currentUpgradeProposalsByKey: chainState.currentUpgradeProposalsByKey || {},
+      activeNodeAddresses: (chainState.activeNodes || []).map((node) => node.node_address)
+    }
   );
-  const byNode = buildNodeGroups(rows, latestRows);
+  const currentUpgradeStances = chainState.currentUpgradeVotesAvailable
+    ? Object.values(chainState.currentUpgradeVotesByKey || {}).flat().filter((row) => row.is_active)
+    : latestRows.filter((row) => voteKindForKey(row.mimir_key) === 'upgrade');
+  const byNodeLatestRows = [
+    ...latestRows.filter((row) => voteKindForKey(row.mimir_key) !== 'upgrade'),
+    ...currentUpgradeStances
+  ];
+  const byNode = buildNodeGroups(rows, byNodeLatestRows);
   return {
     payload: {
       schema_version: 3,
@@ -1058,6 +1252,8 @@ async function buildNodeVotesPayload(client, options = {}) {
         operationalVotesMin
       ),
       active_nodes: chainState.activeNodes || [],
+      upgrade_proposals: chainState.upgradeProposals
+        || Object.values(chainState.currentUpgradeProposalsByKey || {}),
       by_vote: options.compact === false ? byVote : byVote.map(compactVoteGroup),
       by_node: options.compact === false ? byNode : byNode.map(compactNodeGroup),
       latest_events: rows.slice(0, options.compact === false ? 50 : 20),
@@ -1065,6 +1261,7 @@ async function buildNodeVotesPayload(client, options = {}) {
       chain_state: {
         source: chainState.source || 'unknown',
         complete: Boolean(chainState.currentNodeMimirsAvailable),
+        upgrade_proposals_complete: Boolean(chainState.currentUpgradeVotesAvailable),
         current_mimir_values: chainState.currentMimirValues || {},
         active_node_count: Number(chainState.activeNodeCount) || 0
       }
