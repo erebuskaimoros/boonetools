@@ -76,7 +76,10 @@ same publisher overlays THORNode's live upgrade proposals and active-validator
 approval state, while the listener and hourly backfill retain indexed
 `approve_upgrade` and `reject_upgrade` events as `UPGRADE-*` history. Upgrade
 quorum counts only active approvals; rejects remain visible stances and can
-never become the passing value.
+never become the passing value. The additive `network_values` field reuses the
+same durable THORNode core snapshot to publish every current Mimir and every
+typed constant, with independent completeness and source-update timestamps;
+the frontend never fetches those provider routes directly.
 
 The public `/functions/v1/dynamic-fee-transactions` endpoint powers the
 click-to-inspect ADR26 epoch drawer. Midgard supplies the matching action list,

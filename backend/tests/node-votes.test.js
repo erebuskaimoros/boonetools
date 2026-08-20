@@ -505,6 +505,82 @@ test('node vote summary exposes a current proposal without indexed history', asy
   assert.equal(result.payload.chain_state.upgrade_proposals_complete, true);
 });
 
+test('node vote summary carries cached Mimirs and constants for the network-values tab', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { buildNodeVotesSummaryPayload } = await import('../src/handlers/node-votes.js');
+  const client = { query: async () => ({ rows: [] }) };
+  const result = await buildNodeVotesSummaryPayload(client, {
+    now: new Date('2026-08-20T18:00:00Z'),
+    since: '2026-08-01T00:00:00Z',
+    chainState: {
+      currentMimirValues: { CHURNINTERVAL: 43_200 },
+      currentMimirValuesAvailable: true,
+      currentConstants: {
+        int_64_values: { ChurnInterval: 21_600 },
+        bool_values: { StrictBondLiquidityRatio: true }
+      },
+      currentConstantsAvailable: true,
+      mimirUpdatedAt: '2026-08-20T17:59:00Z',
+      constantsUpdatedAt: '2026-08-20T17:45:00Z',
+      currentNodeMimirsByKey: {},
+      currentNodeMimirsAvailable: true,
+      currentUpgradeVotesByKey: {},
+      currentUpgradeProposalsByKey: {},
+      currentUpgradeVotesAvailable: true,
+      upgradeProposals: [],
+      activeNodeCount: 1,
+      activeNodes: [{ node_address: 'thor-active-1', operator_address: 'thor-operator-1' }],
+      source: 'test'
+    }
+  });
+
+  assert.deepEqual(result.payload.network_values, {
+    mimirs: { CHURNINTERVAL: 43_200 },
+    constants: {
+      int_64_values: { ChurnInterval: 21_600 },
+      bool_values: { StrictBondLiquidityRatio: true }
+    },
+    mimirs_complete: true,
+    constants_complete: true,
+    mimirs_updated_at: '2026-08-20T17:59:00Z',
+    constants_updated_at: '2026-08-20T17:45:00Z'
+  });
+});
+
+test('current node-vote chain state preserves independent Mimir and constants freshness', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { loadCurrentNodeVoteChainState } = await import('../src/handlers/node-votes.js');
+  const state = await loadCurrentNodeVoteChainState({
+    coreSnapshot: {
+      payload: {
+        mimir: { CHURNINTERVAL: 43_200 },
+        constants: { int_64_values: { ChurnInterval: 21_600 } },
+        nodes: [{
+          node_address: 'thor-active-1',
+          node_operator_address: 'thor-operator-1',
+          status: 'Active'
+        }],
+        node_mimirs: { mimirs: [] },
+        field_meta: {
+          mimir: { status: 'fresh', fetched_at: '2026-08-20T17:59:00Z' },
+          constants: { status: 'cached', fetched_at: '2026-08-20T17:45:00Z' },
+          nodes: { status: 'fresh' },
+          node_mimirs: { status: 'fresh' }
+        }
+      }
+    },
+    upgradeProposals: []
+  });
+
+  assert.deepEqual(state.currentConstants, {
+    int_64_values: { ChurnInterval: 21_600 }
+  });
+  assert.equal(state.currentMimirValuesAvailable, true);
+  assert.equal(state.currentConstantsAvailable, true);
+  assert.equal(state.mimirUpdatedAt, '2026-08-20T17:59:00Z');
+  assert.equal(state.constantsUpdatedAt, '2026-08-20T17:45:00Z');
+});
+
 test('buildVoteGroups counts economic consensus from live active node mimirs', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { buildVoteGroups } = await import('../src/handlers/node-votes.js');

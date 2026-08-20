@@ -1030,6 +1030,9 @@ export async function loadCurrentNodeVoteChainState(options = {}) {
   )({ client: options.client, allowStale: true, cache: false });
   const core = model?.payload || model;
   const mimir = core?.mimir;
+  const constants = core?.constants && typeof core.constants === 'object' && !Array.isArray(core.constants)
+    ? core.constants
+    : {};
   const nodes = Array.isArray(core?.nodes) ? core.nodes : [];
   const nodeMimirs = core?.node_mimirs;
   const currentMimirValues = mimir ? normalizeMimirValues(mimir) : {};
@@ -1046,9 +1049,20 @@ export async function loadCurrentNodeVoteChainState(options = {}) {
     nodes.length > 0 &&
     !isThorNodeCoreSnapshotStale(model, ['mimir', 'nodes', 'node_mimirs'])
   );
+  const currentMimirValuesAvailable = (
+    Boolean(mimir) && !isThorNodeCoreSnapshotStale(model, ['mimir'])
+  );
+  const currentConstantsAvailable = (
+    Object.keys(constants).length > 0 && !isThorNodeCoreSnapshotStale(model, ['constants'])
+  );
 
   return {
     currentMimirValues,
+    currentMimirValuesAvailable,
+    currentConstants: constants,
+    currentConstantsAvailable,
+    mimirUpdatedAt: core?.field_meta?.mimir?.fetched_at || null,
+    constantsUpdatedAt: core?.field_meta?.constants?.fetched_at || null,
     currentNodeMimirsByKey: nodeMimirs
       ? normalizeNodeMimirValues(nodeMimirs, nodeMetadataByAddress)
       : {},
@@ -1146,6 +1160,11 @@ function deriveChainStateFromRows(rows) {
     .sort((left, right) => left.operator_address.localeCompare(right.operator_address));
   return {
     currentMimirValues: {},
+    currentMimirValuesAvailable: false,
+    currentConstants: {},
+    currentConstantsAvailable: false,
+    mimirUpdatedAt: null,
+    constantsUpdatedAt: null,
     currentNodeMimirsByKey: {},
     currentNodeMimirsAvailable: false,
     currentUpgradeVotesByKey: {},
@@ -1254,6 +1273,14 @@ async function buildNodeVotesPayload(client, options = {}) {
       active_nodes: chainState.activeNodes || [],
       upgrade_proposals: chainState.upgradeProposals
         || Object.values(chainState.currentUpgradeProposalsByKey || {}),
+      network_values: {
+        mimirs: chainState.currentMimirValues || {},
+        constants: chainState.currentConstants || {},
+        mimirs_complete: Boolean(chainState.currentMimirValuesAvailable),
+        constants_complete: Boolean(chainState.currentConstantsAvailable),
+        mimirs_updated_at: chainState.mimirUpdatedAt || null,
+        constants_updated_at: chainState.constantsUpdatedAt || null
+      },
       by_vote: options.compact === false ? byVote : byVote.map(compactVoteGroup),
       by_node: options.compact === false ? byNode : byNode.map(compactNodeGroup),
       latest_events: rows.slice(0, options.compact === false ? 50 : 20),

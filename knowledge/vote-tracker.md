@@ -35,3 +35,18 @@ vote value, with nodes that have no current stance placed in a final `NOT
 VOTED` group. The summary payload must therefore retain the complete node list
 for every value; truncating the `values[].nodes` arrays makes the status display
 misclassify omitted voters as non-voters.
+
+## Current Mimirs and constants
+
+The third Vote Tracker tab lists current THORChain configuration without adding
+browser-to-THORNode traffic. The minute `node-votes-summary:v1` payload carries
+the latest Mimir and constants fields already maintained by
+`thornode-core:v1`, together with independent completeness and source-update
+timestamps. A missing constants snapshot degrades only this tab and does not
+block vote or upgrade publication.
+
+Rows are ordered as two explicit groups: every current Mimir first, followed
+by every protocol constant. Constants are not removed when a matching Mimir
+exists; the default remains visible and is marked `OVERRIDDEN` with the active
+Mimir value so the page distinguishes current network state from the compiled
+default.

@@ -7,6 +7,12 @@
   } from './node-votes/api.js';
   import { mergeNodeVotesDashboard } from './node-votes/dashboard-state.js';
   import { groupActiveVotersByValue } from './node-votes/missing-voters.js';
+  import {
+    buildNetworkValueRows,
+    filterNetworkValueRows,
+    networkValueText
+  } from './node-votes/network-values.js';
+  import VoteKeyCopy from './node-votes/VoteKeyCopy.svelte';
   import { formatNumber } from '$lib/utils/formatting';
 
   const REFRESH_INTERVAL_MS = 60000;
@@ -37,6 +43,18 @@
   $: activeNodes = dashboard?.active_nodes || [];
   $: nodeRows = dashboard?.by_node || [];
   $: latestEvents = dashboard?.latest_events || [];
+  $: networkValues = dashboard?.network_values || {
+    mimirs: dashboard?.chain_state?.current_mimir_values || {},
+    constants: {},
+    mimirs_complete: Boolean(dashboard?.chain_state?.complete),
+    constants_complete: false,
+    mimirs_updated_at: null,
+    constants_updated_at: null
+  };
+  $: networkValueRows = buildNetworkValueRows(networkValues);
+  $: filteredNetworkValueRows = filterNetworkValueRows(networkValueRows, searchTerm);
+  $: mimirValueCount = networkValueRows.filter((row) => row.source === 'mimir').length;
+  $: constantValueCount = networkValueRows.length - mimirValueCount;
   $: upgradeProposals = currentUpgradeProposals(dashboard, voteRows);
   $: filteredVoteRows = sortVoteRows(filterVoteRows(voteRows, searchTerm, categoryFilter), voteSortMode);
   $: filteredNodeRows = sortNodeRows(filterNodeRows(nodeRows, searchTerm, categoryFilter), nodeSortMode);
@@ -661,19 +679,30 @@
       <div class="page-tabs" role="tablist" aria-label="Vote tracker pages">
         <button class:active={activeTab === 'vote'} on:click={() => activeTab = 'vote'}>By Vote</button>
         <button class:active={activeTab === 'node'} on:click={() => activeTab = 'node'}>By Node</button>
+        <button class:active={activeTab === 'network'} on:click={() => activeTab = 'network'}>Mimirs &amp; Constants</button>
       </div>
-      <label class="type-select">
-        <span>Type</span>
-        <select bind:value={categoryFilter} aria-label="Validator vote type filter">
-          <option value="all">All</option>
-          <option value="operational">Operational</option>
-          <option value="economic">Economic</option>
-          <option value="upgrade">Upgrade</option>
-        </select>
-      </label>
-      <input bind:value={searchTerm} placeholder="filter key / operator / node / type" aria-label="Filter vote tracker rows" />
+      {#if activeTab !== 'network'}
+        <label class="type-select">
+          <span>Type</span>
+          <select bind:value={categoryFilter} aria-label="Validator vote type filter">
+            <option value="all">All</option>
+            <option value="operational">Operational</option>
+            <option value="economic">Economic</option>
+            <option value="upgrade">Upgrade</option>
+          </select>
+        </label>
+      {/if}
+      <input
+        bind:value={searchTerm}
+        placeholder={activeTab === 'network' ? 'filter key / value / source / type' : 'filter key / operator / node / type'}
+        aria-label={activeTab === 'network' ? 'Filter Mimirs and constants' : 'Filter vote tracker rows'}
+      />
       <div class="window-meta">
-        {formatDateTime(dashboard.window?.since)} -> now
+        {#if activeTab === 'network'}
+          MIMIRS {formatDateTime(networkValues.mimirs_updated_at)} | CONSTANTS {formatDateTime(networkValues.constants_updated_at)}
+        {:else}
+          {formatDateTime(dashboard.window?.since)} -> now
+        {/if}
       </div>
     </section>
 
@@ -706,14 +735,17 @@
               {#each filteredVoteRows as row}
                 <tr class:expanded={expandedVoteKey === row.mimir_key}>
                   <td class="key-cell">
-                    <button
-                      class="key-button"
-                      aria-expanded={expandedVoteKey === row.mimir_key}
-                      on:click={() => toggleVoteKey(row.mimir_key)}
-                    >
-                      <span>{expandedVoteKey === row.mimir_key ? '-' : '+'}</span>
-                      <strong>{row.mimir_key}</strong>
-                    </button>
+                    <div class="vote-key-line">
+                      <button
+                        class="key-button"
+                        aria-expanded={expandedVoteKey === row.mimir_key}
+                        on:click={() => toggleVoteKey(row.mimir_key)}
+                      >
+                        <span>{expandedVoteKey === row.mimir_key ? '-' : '+'}</span>
+                        <strong>{row.mimir_key}</strong>
+                      </button>
+                      <VoteKeyCopy voteKey={row.mimir_key} />
+                    </div>
                     <span
                       class="type-pill {voteCategory(row)}"
                       title={categoryTooltip(voteCategory(row))}
@@ -974,7 +1006,7 @@
           </table>
         </div>
       </section>
-    {:else}
+    {:else if activeTab === 'node'}
       <section class="table-block">
         <div class="block-title"><span></span> Node Rollup <em>{filteredNodeRows.length} rows</em></div>
         <div class="table-wrap">
@@ -1062,7 +1094,12 @@
                                 <tbody>
                                   {#each row.vote_history as vote}
                                     <tr class:removed={vote.vote_removed}>
-                                      <td><strong>{vote.mimir_key}</strong></td>
+                                      <td>
+                                        <span class="vote-key-line compact">
+                                          <strong>{vote.mimir_key}</strong>
+                                          <VoteKeyCopy voteKey={vote.mimir_key} />
+                                        </span>
+                                      </td>
                                       <td>
                                         <span
                                           class="type-pill {voteCategory(vote)}"
@@ -1111,6 +1148,77 @@
           </table>
         </div>
       </section>
+    {:else}
+      <section class="table-block network-values-block">
+        <div class="block-title">
+          <span></span> Current Mimirs &amp; Constants
+          <em>{formatNumber(mimirValueCount)} Mimirs | {formatNumber(constantValueCount)} constants</em>
+        </div>
+        {#if !networkValues.mimirs_complete || !networkValues.constants_complete}
+          <div class="network-values-warning">
+            <strong>WRN</strong>
+            {#if networkValueRows.length}
+              Showing the latest available network values; one or more source snapshots are incomplete.
+            {:else}
+              Current network values are not available in this snapshot yet.
+            {/if}
+          </div>
+        {/if}
+        <div class="table-wrap">
+          <table class="network-values-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Value</th>
+                <th>Source / Type</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each filteredNetworkValueRows as row, index}
+                {#if index === 0 || filteredNetworkValueRows[index - 1].source !== row.source}
+                  <tr class="network-value-section">
+                    <td colspan="4">{row.source === 'mimir' ? 'MIMIRS — ACTIVE NETWORK VALUES' : 'CONSTANTS — PROTOCOL DEFAULTS'}</td>
+                  </tr>
+                {/if}
+                <tr class:mimir-value={row.source === 'mimir'}>
+                  <td>
+                    <span class="vote-key-line compact">
+                      <strong>{row.key}</strong>
+                      <VoteKeyCopy
+                        voteKey={row.key}
+                        keyLabel={row.source === 'mimir' ? 'Mimir key' : 'constant key'}
+                      />
+                    </span>
+                  </td>
+                  <td class="network-value-cell">
+                    <strong>{networkValueText(row.value)}</strong>
+                    {#if row.overridden}
+                      <small>active Mimir {networkValueText(row.active_value)}</small>
+                    {/if}
+                  </td>
+                  <td>
+                    <span class="network-type {row.source}">{row.type_label}</span>
+                  </td>
+                  <td>
+                    {#if row.source === 'mimir'}
+                      <span class="network-status active">ACTIVE</span>
+                    {:else if row.overridden}
+                      <span class="network-status overridden">OVERRIDDEN</span>
+                    {:else}
+                      <span class="network-status default">DEFAULT</span>
+                    {/if}
+                  </td>
+                </tr>
+              {:else}
+                <tr>
+                  <td colspan="4" class="empty-detail">No Mimirs or constants match this filter.</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </section>
     {/if}
 
     <section class="table-block recent">
@@ -1119,13 +1227,16 @@
         {#each latestEvents.slice(0, 12) as event}
           <div class="event-row">
             <span>{formatDateTime(event.block_time)}</span>
-            <strong>
-              <i
-                class="type-pill {voteCategory(event)}"
-                title={categoryTooltip(voteCategory(event))}
-                aria-label={categoryTooltip(voteCategory(event))}
-              >{categoryLabel(voteCategory(event))}</i>{event.mimir_key}={displayNodeVote(event)}
-            </strong>
+            <div class="event-vote">
+              <strong>
+                <i
+                  class="type-pill {voteCategory(event)}"
+                  title={categoryTooltip(voteCategory(event))}
+                  aria-label={categoryTooltip(voteCategory(event))}
+                >{categoryLabel(voteCategory(event))}</i>{event.mimir_key}={displayNodeVote(event)}
+              </strong>
+              <VoteKeyCopy voteKey={event.mimir_key} />
+            </div>
             <em>{shortAddress(event.operator_address)}</em>
           </div>
         {/each}
@@ -1535,6 +1646,80 @@
     overflow-x: auto;
   }
 
+  .network-values-warning {
+    display: flex;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(212, 160, 23, 0.35);
+    background: rgba(212, 160, 23, 0.05);
+    color: var(--muted);
+    font: 700 11px/1.4 'JetBrains Mono', monospace;
+  }
+
+  .network-values-warning strong {
+    color: var(--amber);
+  }
+
+  table.network-values-table {
+    min-width: 760px;
+    table-layout: fixed;
+  }
+
+  .network-values-table th:nth-child(1) { width: 38%; }
+  .network-values-table th:nth-child(2) { width: 32%; }
+  .network-values-table th:nth-child(3) { width: 16%; }
+  .network-values-table th:nth-child(4) { width: 14%; }
+
+  .network-value-section td {
+    padding: 8px 14px;
+    border-bottom-color: var(--border);
+    background: #060606;
+    color: var(--dim);
+    font: 800 10px/1.2 'JetBrains Mono', monospace;
+    letter-spacing: 0.12em;
+  }
+
+  .network-value-section:hover {
+    background: transparent;
+  }
+
+  .network-values-table tr.mimir-value {
+    background: rgba(0, 204, 102, 0.025);
+  }
+
+  .network-value-cell strong {
+    display: block;
+    overflow-wrap: anywhere;
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .network-type,
+  .network-status {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--border);
+    padding: 3px 6px;
+    color: var(--muted);
+    font: 800 10px/1 'JetBrains Mono', monospace;
+    letter-spacing: 0.06em;
+  }
+
+  .network-type.mimir,
+  .network-status.active {
+    border-color: rgba(0, 204, 102, 0.45);
+    color: var(--accent);
+  }
+
+  .network-status.overridden {
+    border-color: rgba(212, 160, 23, 0.45);
+    color: var(--amber);
+  }
+
+  .network-status.default {
+    color: var(--dim);
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;
@@ -1645,6 +1830,27 @@
   td strong {
     color: var(--text);
     font-weight: 800;
+  }
+
+  .vote-key-line,
+  .event-vote {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .vote-key-line.compact {
+    display: inline-flex;
+  }
+
+  .vote-key-line .key-button {
+    min-width: 0;
+  }
+
+  .vote-key-line .key-button strong,
+  .vote-key-line.compact strong {
+    overflow-wrap: anywhere;
   }
 
   .key-button {
@@ -2061,6 +2267,14 @@
     color: var(--accent);
     flex: 1;
     overflow-wrap: anywhere;
+  }
+
+  .event-vote {
+    flex: 1;
+  }
+
+  .event-vote strong {
+    min-width: 0;
   }
 
   .event-row .type-pill {
