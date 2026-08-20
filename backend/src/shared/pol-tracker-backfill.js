@@ -99,16 +99,38 @@ export async function resolvePolTrackerAnchors(days, options = {}) {
   const resolveAnchors = options.resolveAnchors || resolvePoolDislocationBlockAnchors;
   const sampleTimes = days.map(polTrackerSampleTime);
   const daysBySampleTime = new Map(sampleTimes.map((sampleTime, index) => [sampleTime, days[index]]));
-  const anchors = await resolveAnchors(sampleTimes, {
-    rpcUrls: options.rpcUrls || config.polTrackerRpcUrls,
+  const rpcUrls = [...new Set((options.rpcUrls || config.polTrackerRpcUrls).filter(Boolean))];
+  const anchorOptions = {
     requestDelayMs: options.requestDelayMs ?? config.polTrackerRequestDelayMs,
     fetchStatus: options.fetchStatus,
     fetchBlock: options.fetchBlock,
     client: options.client,
     timeoutMs: options.timeoutMs || config.polTrackerTimeoutMs,
     cooldownScope: 'pol-tracker-history',
-    skipPointsBeforeEarliest: true
-  });
+    skipPointsBeforeEarliest: true,
+    skipPointsAtOrAfterLatest: true
+  };
+  let anchors;
+  if (options.resolveAnchors || rpcUrls.length <= 1) {
+    anchors = await resolveAnchors(sampleTimes, { ...anchorOptions, rpcUrls });
+  } else {
+    const unresolved = new Set(sampleTimes);
+    anchors = [];
+    for (const rpcUrl of rpcUrls) {
+      if (!unresolved.size) break;
+      const providerAnchors = await resolveAnchors([...unresolved], {
+        ...anchorOptions,
+        rpcUrls: [rpcUrl]
+      });
+      for (const anchor of providerAnchors) {
+        const sampleTime = new Date(anchor.observedAt).toISOString();
+        if (!unresolved.delete(sampleTime)) continue;
+        anchors.push(anchor);
+      }
+    }
+    const sampleOrder = new Map(sampleTimes.map((sampleTime, index) => [sampleTime, index]));
+    anchors.sort((left, right) => sampleOrder.get(left.observedAt) - sampleOrder.get(right.observedAt));
+  }
   return anchors.map((anchor) => {
     const sampleTime = new Date(anchor.observedAt).toISOString();
     const day = daysBySampleTime.get(sampleTime);

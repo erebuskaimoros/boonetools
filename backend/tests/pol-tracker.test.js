@@ -303,6 +303,43 @@ test('POL Tracker skips completed days outside RPC history without shifting late
   assert.equal(anchors[0].sampleTime, '2026-08-19T23:59:59.999Z');
 });
 
+test('POL Tracker resolves each day from an RPC whose retained range covers it', async () => {
+  const ranges = {
+    archive: {
+      earliestHeight: 100,
+      earliestBlockTime: '2024-09-04T19:40:00.000Z',
+      latestHeight: 200,
+      latestBlockTime: '2026-08-18T16:18:21.000Z'
+    },
+    live: {
+      earliestHeight: 300,
+      earliestBlockTime: '2026-08-19T04:03:18.000Z',
+      latestHeight: 400,
+      latestBlockTime: '2026-08-20T18:00:37.000Z'
+    }
+  };
+  const providerKey = (options) => options.rpcUrls[0];
+  const anchors = await resolvePolTrackerAnchors(['2026-08-18', '2026-08-19'], {
+    rpcUrls: ['archive', 'live'],
+    requestDelayMs: 0,
+    fetchStatus: async (options) => ranges[providerKey(options)],
+    fetchBlock: async (height, options) => {
+      const range = ranges[providerKey(options)];
+      const ratio = (height - range.earliestHeight) / (range.latestHeight - range.earliestHeight);
+      return {
+        height,
+        blockTime: new Date(
+          Date.parse(range.earliestBlockTime)
+            + (ratio * (Date.parse(range.latestBlockTime) - Date.parse(range.earliestBlockTime)))
+        ).toISOString()
+      };
+    }
+  });
+
+  assert.deepEqual(anchors.map(({ day }) => day), ['2026-08-19']);
+  assert.equal(anchors[0].sampleTime, '2026-08-19T23:59:59.999Z');
+});
+
 test('POL Tracker retries transient history failures', async () => {
   let attempts = 0;
   const delays = [];

@@ -205,6 +205,7 @@ export async function resolvePoolDislocationBlockAnchors(bucketTimes = [], optio
   for (const observedAt of bucketTimes.map(timestamp).sort()) {
     const targetMs = Date.parse(observedAt);
     if (options.skipPointsBeforeEarliest && targetMs < Date.parse(earliest.blockTime)) continue;
+    if (options.skipPointsAtOrAfterLatest && targetMs >= Date.parse(latest.blockTime)) continue;
     if (Date.parse(previous.blockTime) > targetMs) previous = earliest;
     if (Date.parse(previous.blockTime) > targetMs || Date.parse(latest.blockTime) <= targetMs) {
       const error = new Error(`Backfill point ${observedAt} is outside RPC history bounds`);
