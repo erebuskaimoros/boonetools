@@ -33,3 +33,10 @@ per-pool RUNE values must reconcile exactly to `runepool.pol.value`; otherwise
 the Reserve lane remains partial and eligible for repair. The daily timer
 revisits seven recent days; the manual backfill fills all missing or partial
 dates from February 2025.
+
+RPC block retention and THORNode historical-state retention are independent.
+If an RPC resolves a real day-end block that every configured historical
+THORNode rejects specifically as a future height, the collector records the
+day as unavailable and continues later anchors. It never substitutes another
+height or persists an approximate row; unrelated provider and 5xx failures
+still retry and fail normally.

@@ -16,6 +16,9 @@ import {
 } from '../src/shared/pol-tracker.js';
 import {
   buildPolTrackerDays,
+  ingestPolTrackerHistory,
+  isPolTrackerHistoricalHeightUnavailable,
+  isTransientPolTrackerError,
   loadPolTrackerBackfillPlan,
   polTrackerSampleTime,
   resolvePolTrackerAnchors,
@@ -338,6 +341,84 @@ test('POL Tracker resolves each day from an RPC whose retained range covers it',
 
   assert.deepEqual(anchors.map(({ day }) => day), ['2026-08-19']);
   assert.equal(anchors[0].sampleTime, '2026-08-19T23:59:59.999Z');
+});
+
+test('POL Tracker leaves a THORNode history range gap missing and continues later days', async () => {
+  const persistedDays = [];
+  const progress = [];
+  const anchors = [
+    {
+      day: '2026-08-18',
+      height: 27_485_682,
+      blockTime: '2026-08-18T23:59:58.000Z',
+      sampleTime: '2026-08-18T23:59:59.999Z'
+    },
+    {
+      day: '2026-08-19',
+      height: 27_499_999,
+      blockTime: '2026-08-19T23:59:58.000Z',
+      sampleTime: '2026-08-19T23:59:59.999Z'
+    }
+  ];
+
+  const result = await ingestPolTrackerHistory({}, {
+    attempts: 1,
+    anchorBatchDays: 2,
+    loadPlan: async () => ({
+      startDate: '2026-08-18',
+      endDate: '2026-08-19',
+      allDays: ['2026-08-18', '2026-08-19'],
+      lastStoredDay: null,
+      pendingDays: ['2026-08-18', '2026-08-19']
+    }),
+    resolveBatchAnchors: async () => anchors,
+    collectDay: async (anchor) => {
+      if (anchor.day === '2026-08-18') {
+        const error = new Error(
+          'Provider service:thornode.thorchain.liquify.com:pol-tracker-history is cooling down: '
+          + 'Request failed (500): invalid height: cannot query with height in the future'
+        );
+        error.name = 'ProviderCooldownError';
+        throw error;
+      }
+      return buildPolTrackerObservation({
+        ...DAY_INPUT,
+        day: anchor.day,
+        anchor
+      });
+    },
+    persist: async (_client, observation) => persistedDays.push(observation.daily.day),
+    updateSync: async () => {},
+    logProgress: (event) => progress.push(event)
+  });
+
+  assert.deepEqual(persistedDays, ['2026-08-19']);
+  assert.equal(result.processed_days, 1);
+  assert.equal(result.unavailable_days, 1);
+  assert.equal(result.last_completed_day, '2026-08-19');
+  assert.deepEqual(progress[0], {
+    day: '2026-08-18',
+    height: 27_485_682,
+    processed: 0,
+    pending: 2,
+    complete: false,
+    unavailable: true
+  });
+});
+
+test('POL Tracker keeps generic provider failures retryable while isolating the exact history gap', () => {
+  const genericServerError = Object.assign(new Error('upstream service failed'), { status: 500 });
+  const genericCooldown = new Error('Provider service:archive is cooling down');
+  genericCooldown.name = 'ProviderCooldownError';
+  const historicalGapCooldown = new Error(
+    'Provider service:archive is cooling down: invalid height: cannot query with height in the future'
+  );
+  historicalGapCooldown.name = 'ProviderCooldownError';
+
+  assert.equal(isTransientPolTrackerError(genericServerError), true);
+  assert.equal(isTransientPolTrackerError(genericCooldown), true);
+  assert.equal(isPolTrackerHistoricalHeightUnavailable(historicalGapCooldown), true);
+  assert.equal(isTransientPolTrackerError(historicalGapCooldown), false);
 });
 
 test('POL Tracker retries transient history failures', async () => {

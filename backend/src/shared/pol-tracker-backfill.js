@@ -12,6 +12,7 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TRANSIENT_ERROR_PATTERN = /fetch failed|network|socket|timeout|timed out|aborted|cooling down|temporarily unavailable/i;
+const HISTORICAL_HEIGHT_UNAVAILABLE_PATTERN = /invalid height:\s*cannot query with height in the future/i;
 
 function dateString(value) {
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
@@ -41,10 +42,20 @@ export function polTrackerSampleTime(day) {
 }
 
 export function isTransientPolTrackerError(error) {
+  if (isPolTrackerHistoricalHeightUnavailable(error)) return false;
   const status = Number(error?.status) || 0;
   if (error?.transient || error?.name === 'ProviderCooldownError' || error?.name === 'AbortError') return true;
   if (status === 0 && TRANSIENT_ERROR_PATTERN.test(String(error?.message || ''))) return true;
   return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+export function isPolTrackerHistoricalHeightUnavailable(error) {
+  return HISTORICAL_HEIGHT_UNAVAILABLE_PATTERN.test([
+    error?.message,
+    error?.reason,
+    error?.body,
+    error?.cause?.message
+  ].filter(Boolean).join(' '));
 }
 
 function sleep(delayMs) {
@@ -159,6 +170,7 @@ export async function ingestPolTrackerHistory(client, options = {}) {
   let processed = 0;
   let complete = 0;
   let partial = 0;
+  let unavailable = 0;
   let lastCompletedDay = plan.lastStoredDay || null;
 
   for (let offset = 0; offset < plan.pendingDays.length; offset += batchSize) {
@@ -175,7 +187,14 @@ export async function ingestPolTrackerHistory(client, options = {}) {
         nextDay: batch[0],
         lastCompletedDay,
         lastError: error?.message || String(error),
-        stats: { expected: plan.allDays.length, pending: plan.pendingDays.length, processed, complete, partial }
+        stats: {
+          expected: plan.allDays.length,
+          pending: plan.pendingDays.length,
+          processed,
+          complete,
+          partial,
+          unavailable
+        }
       }).catch(() => {});
       throw error;
     }
@@ -194,7 +213,14 @@ export async function ingestPolTrackerHistory(client, options = {}) {
           startDate: plan.startDate,
           nextDay: shiftUtcDay(anchor.day, 1),
           lastCompletedDay,
-          stats: { expected: plan.allDays.length, pending: plan.pendingDays.length, processed, complete, partial }
+          stats: {
+            expected: plan.allDays.length,
+            pending: plan.pendingDays.length,
+            processed,
+            complete,
+            partial,
+            unavailable
+          }
         });
         logProgress({
           day: anchor.day,
@@ -204,12 +230,45 @@ export async function ingestPolTrackerHistory(client, options = {}) {
           complete: observation.daily.complete
         });
       } catch (error) {
+        if (isPolTrackerHistoricalHeightUnavailable(error)) {
+          unavailable += 1;
+          await (options.updateSync || updatePolTrackerSyncState)(client, {
+            startDate: plan.startDate,
+            nextDay: shiftUtcDay(anchor.day, 1),
+            lastCompletedDay,
+            lastError: error?.message || String(error),
+            stats: {
+              expected: plan.allDays.length,
+              pending: plan.pendingDays.length,
+              processed,
+              complete,
+              partial,
+              unavailable
+            }
+          });
+          logProgress({
+            day: anchor.day,
+            height: anchor.height,
+            processed,
+            pending: plan.pendingDays.length,
+            complete: false,
+            unavailable: true
+          });
+          continue;
+        }
         await (options.updateSync || updatePolTrackerSyncState)(client, {
           startDate: plan.startDate,
           nextDay: anchor.day,
           lastCompletedDay,
           lastError: error?.message || String(error),
-          stats: { expected: plan.allDays.length, pending: plan.pendingDays.length, processed, complete, partial }
+          stats: {
+            expected: plan.allDays.length,
+            pending: plan.pendingDays.length,
+            processed,
+            complete,
+            partial,
+            unavailable
+          }
         }).catch(() => {});
         throw error;
       }
@@ -224,6 +283,7 @@ export async function ingestPolTrackerHistory(client, options = {}) {
     processed_days: processed,
     complete_days: complete,
     partial_days: partial,
+    unavailable_days: unavailable,
     last_completed_day: lastCompletedDay
   };
 }
