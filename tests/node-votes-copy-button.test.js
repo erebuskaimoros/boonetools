@@ -34,4 +34,5 @@ test('vote-key copy control writes the exact key and exposes result feedback', (
   assert.match(copyButtonSource, /`Copy \$\{keyLabel\}: \$\{voteKey\}`/);
   assert.match(copyButtonSource, /`\$\{feedbackLabel\} copied`/);
   assert.match(copyButtonSource, /`Could not copy \$\{keyLabel\}`/);
+  assert.doesNotMatch(copyButtonSource, /class="bracket"/);
 });

@@ -47,7 +47,6 @@
   title={buttonLabel}
   on:click={handleCopy}
 >
-  <span class="bracket" aria-hidden="true">[</span>
   {#if copyStatus === 'copied'}
     <span class="result" aria-hidden="true">✓</span>
   {:else if copyStatus === 'failed'}
@@ -55,7 +54,6 @@
   {:else}
     <CopyIcon size={11} />
   {/if}
-  <span class="bracket" aria-hidden="true">]</span>
   <span class="sr-only" aria-live="polite">{feedback}</span>
 </button>
 
@@ -64,10 +62,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 1px;
-    min-width: 28px;
+    min-width: 22px;
     height: 20px;
-    padding: 0 3px;
+    padding: 0 4px;
     border: 1px solid var(--border, #1a1a1a);
     background: transparent;
     color: var(--muted, #b8b8b8);
@@ -92,10 +89,6 @@
   .vote-key-copy:disabled {
     cursor: not-allowed;
     opacity: 0.5;
-  }
-
-  .bracket {
-    color: var(--dim, #949494);
   }
 
   .result {
