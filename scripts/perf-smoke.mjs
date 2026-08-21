@@ -45,7 +45,8 @@ function parseArgs(argv) {
     endpoint: '',
     requests: 1,
     requireCompression: false,
-    allowStale: false
+    allowStale: false,
+    allowStaleEndpoints: new Set()
   };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
@@ -55,6 +56,11 @@ function parseArgs(argv) {
     else if (value === '--requests') options.requests = Number(argv[++index]);
     else if (value === '--require-compression') options.requireCompression = true;
     else if (value === '--allow-stale') options.allowStale = true;
+    else if (value === '--allow-stale-endpoint') {
+      const endpoint = String(argv[++index] || '');
+      if (!endpoint) throw new Error('--allow-stale-endpoint requires an endpoint name');
+      options.allowStaleEndpoints.add(endpoint);
+    }
     else throw new Error(`Unknown argument: ${value}`);
   }
   options.base = String(options.base || DEFAULT_BASE).replace(/\/$/, '');
@@ -143,11 +149,12 @@ async function main() {
     const maxBytes = Math.max(...samples.map((sample) => sample.bytes));
     const errors = samples.filter((sample) => sample.status < 200 || sample.status >= 300);
     const stale = samples.filter((sample) => sample.stale);
+    const staleAllowed = options.allowStale || options.allowStaleEndpoints.has(endpoint.name);
     const compressed = samples.every((sample) => sample.encoding !== 'identity');
     const jsonResponses = samples.every((sample) => sample.contentType.toLowerCase().includes('application/json'));
     const checks = [
       errors.length === 0,
-      options.allowStale || stale.length === 0,
+      staleAllowed || stale.length === 0,
       p95 <= endpoint.maxMs,
       maxBytes <= endpoint.maxBytes,
       !options.requireCompression || compressed,
@@ -161,7 +168,7 @@ async function main() {
     );
 
     if (errors.length) failures.push(`${endpoint.name}: ${errors.length} non-2xx response(s)`);
-    if (!options.allowStale && stale.length) failures.push(`${endpoint.name}: ${stale.length} stale response(s)`);
+    if (!staleAllowed && stale.length) failures.push(`${endpoint.name}: ${stale.length} stale response(s)`);
     if (p95 > endpoint.maxMs) failures.push(`${endpoint.name}: p95 ${p95.toFixed(0)}ms > ${endpoint.maxMs}ms`);
     if (maxBytes > endpoint.maxBytes) failures.push(`${endpoint.name}: ${maxBytes} bytes > ${endpoint.maxBytes}`);
     if (options.requireCompression && !compressed) failures.push(`${endpoint.name}: response was not compressed`);

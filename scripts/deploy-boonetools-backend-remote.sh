@@ -301,6 +301,17 @@ start_unit_with_retry() {
   return 1
 }
 
+prime_read_model_unit() {
+  local unit="$1"
+  if [[ "$unit" == boonetools-pol-tracker.service ]]; then
+    if ! systemctl start "$unit"; then
+      log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
+    fi
+    return
+  fi
+  start_unit_with_retry "$unit"
+}
+
 refresh_status_models_after_long_primes() {
   local attempt
   local retry_delay_seconds=35
@@ -361,7 +372,7 @@ prime_read_models() {
   local unit
   refresh_core_and_app_layer_models
   for unit in "${prime_units[@]}"; do
-    start_unit_with_retry "$unit"
+    prime_read_model_unit "$unit"
   done
   refresh_status_models_after_long_primes
   # Publish the newly ingested Wasm rows before the public API gate.
@@ -430,6 +441,7 @@ verify_release() {
   wait_for_api
   node "$CURRENT_LINK/scripts/perf-smoke.mjs" \
     --base https://boone.tools/functions/v1 \
+    --allow-stale-endpoint pol-tracker \
     --require-compression
   node "$CURRENT_LINK/scripts/perf-smoke.mjs" \
     --base https://boone.tools/functions/v1 \

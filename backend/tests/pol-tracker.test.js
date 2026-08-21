@@ -396,6 +396,7 @@ test('POL Tracker leaves a THORNode history range gap missing and continues late
   assert.equal(result.processed_days, 1);
   assert.equal(result.unavailable_days, 1);
   assert.equal(result.last_completed_day, '2026-08-19');
+  assert.equal(result.target_end_day_complete, true);
   assert.deepEqual(progress[0], {
     day: '2026-08-18',
     height: 27_485_682,
@@ -404,6 +405,41 @@ test('POL Tracker leaves a THORNode history range gap missing and continues late
     complete: false,
     unavailable: true
   });
+});
+
+test('POL Tracker marks anchor-resolution gaps unavailable and exposes an incomplete target day', async () => {
+  const progress = [];
+  const sync = [];
+  const result = await ingestPolTrackerHistory({}, {
+    attempts: 1,
+    anchorBatchDays: 2,
+    loadPlan: async () => ({
+      startDate: '2026-08-18',
+      endDate: '2026-08-19',
+      allDays: ['2026-08-18', '2026-08-19'],
+      lastStoredDay: '2026-08-18',
+      pendingDays: ['2026-08-19']
+    }),
+    resolveBatchAnchors: async () => [],
+    collectDay: async () => assert.fail('an unresolved anchor must not be collected'),
+    persist: async () => assert.fail('an unresolved anchor must not be persisted'),
+    updateSync: async (_client, state) => sync.push(state),
+    logProgress: (event) => progress.push(event)
+  });
+
+  assert.equal(result.processed_days, 0);
+  assert.equal(result.unavailable_days, 1);
+  assert.equal(result.last_completed_day, '2026-08-18');
+  assert.equal(result.target_end_day_complete, false);
+  assert.match(sync.at(-1).lastError, /No configured RPC provider resolved/);
+  assert.deepEqual(progress, [{
+    day: '2026-08-19',
+    height: null,
+    processed: 0,
+    pending: 1,
+    complete: false,
+    unavailable: true
+  }]);
 });
 
 test('POL Tracker keeps generic provider failures retryable while isolating the exact history gap', () => {
@@ -461,9 +497,35 @@ test('migration, jobs, route, timer, and deployment encode the POL Tracker produ
   assert.match(server, /\['\/pol-tracker', route\(handlePolTracker, 1, 64\)\]/);
   assert.match(timer, /OnCalendar=\*-\*-\* 00:10:00 UTC/);
   assert.match(service, /src\/run-job\.js pol-tracker-scheduler/);
+  assert.match(service, /Restart=on-failure/);
+  assert.match(service, /RestartSec=15m/);
   assert.match(backfill, /src\/run-job\.js pol-tracker-backfill/);
   assert.match(backfill, /TimeoutStartSec=infinity/);
   assert.match(deploy, /boonetools-pol-tracker\.service/);
+});
+
+test('scheduled POL job publishes before failing an incomplete current target for retry', async () => {
+  const calls = [];
+  await assert.rejects(runPolTrackerScheduler({
+    now: new Date('2026-08-21T12:00:00Z'),
+    headLagDays: 1,
+    lockRunner: async (_key, callback) => callback({ id: 'db' }),
+    ingest: async () => {
+      calls.push('ingest');
+      return { target_end_day_complete: false };
+    },
+    publish: async (options) => {
+      calls.push('publish');
+      await options.build();
+      return { ok: true };
+    },
+    buildReadModel: async () => {
+      calls.push('build');
+      return { payload: {} };
+    }
+  }), /target end day 2026-08-19 remains incomplete/);
+
+  assert.deepEqual(calls, ['ingest', 'publish', 'build']);
 });
 
 test('scheduled and manual POL jobs lag archive ingestion by one completed UTC day', async () => {

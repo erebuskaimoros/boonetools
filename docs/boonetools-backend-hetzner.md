@@ -347,7 +347,13 @@ LP units and RUNE depth, double the share, and must reconcile to that total.
 
 Both scheduled and default backfill runs use `POL_TRACKER_HEAD_LAG_DAYS=1`, so
 the archive provider has a full extra UTC day to reach each requested day-end
-height. An explicit backfill end date still overrides that safety lag.
+height. An explicit backfill end date still overrides that safety lag. If the
+current scheduled target cannot be resolved, the job first republishes the
+last-good model with an explicit missing day, then exits unsuccessfully so
+systemd retries it every 15 minutes. `/pol-tracker` compares its latest source
+day with that lag-adjusted target, so republishing old rows cannot reset the
+dashboard to healthy; `target_end_date`, coverage, warnings, and `stale` expose
+the gap until the target day succeeds.
 
 Migration `042_pool_dislocation_binance_usdt_to_usd.sql` corrects the Pool
 Dislocation Binance unit contract. Binance spot markets provide `XUSDT`, so

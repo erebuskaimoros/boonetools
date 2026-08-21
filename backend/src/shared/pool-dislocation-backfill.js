@@ -263,7 +263,7 @@ export async function resolvePoolDislocationBlockAnchorsAcrossRpcRanges(
     }
   }
 
-  if (unresolved.size && providerErrors.length) throw providerErrors[0];
+  if (unresolved.size && providerErrors.length && !options.allowUnresolved) throw providerErrors[0];
   if (unresolved.size && !options.allowUnresolved) {
     const first = unresolved.values().next().value;
     throw new Error(

@@ -71,10 +71,14 @@ export async function runPolTrackerScheduler(options = {}) {
     shiftUtcDay(endDate, -(lookback - 1))
   );
   const lockRunner = options.lockRunner || withAdvisoryLock;
-  return lockRunner(LOCK_KEY, (client) => ingestAndPublish(client, {
+  const result = await lockRunner(LOCK_KEY, (client) => ingestAndPublish(client, {
     ...options,
     startDate,
     endDate,
     retryPartial: true
   }));
+  if (result?.target_end_day_complete === false) {
+    throw new Error(`POL Tracker target end day ${endDate} remains incomplete after publishing`);
+  }
+  return result;
 }

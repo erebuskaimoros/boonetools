@@ -198,6 +198,38 @@ test('historical anchor resolution uses the archive when the live RPC has pruned
   assert.equal(anchors[0].observedAt, '2026-08-13T18:10:00.000Z');
 });
 
+test('allowUnresolved tolerates an RPC status/block height mismatch', async () => {
+  const options = {
+    rpcUrls: ['internally-inconsistent'],
+    requestDelayMs: 0,
+    fetchStatus: async () => ({
+      earliestHeight: 100,
+      earliestBlockTime: '2026-08-18T00:00:00.000Z',
+      latestHeight: 300,
+      latestBlockTime: '2026-08-21T00:00:00.000Z'
+    }),
+    fetchBlock: async () => {
+      const error = new Error('RPC status advertised a height that /block rejected as future');
+      error.status = 500;
+      throw error;
+    }
+  };
+
+  await assert.rejects(
+    resolvePoolDislocationBlockAnchorsAcrossRpcRanges([
+      '2026-08-19T23:59:59.999Z'
+    ], options),
+    /advertised a height/
+  );
+
+  assert.deepEqual(await resolvePoolDislocationBlockAnchorsAcrossRpcRanges([
+    '2026-08-19T23:59:59.999Z'
+  ], {
+    ...options,
+    allowUnresolved: true
+  }), []);
+});
+
 test('historical rows retain same-height THORChain and labelled Binance close provenance', () => {
   const rows = buildHistoricalPoolDislocationRows({
     observedAt: '2026-07-22T12:05:00.000Z',

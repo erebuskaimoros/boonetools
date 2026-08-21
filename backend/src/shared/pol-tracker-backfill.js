@@ -104,6 +104,7 @@ export async function loadPolTrackerBackfillPlan(client, options = {}) {
     endDate,
     allDays,
     lastStoredDay: storedDays.at(-1) || null,
+    targetEndDayComplete: existingByDay.get(endDate) === true,
     pendingDays: allDays.filter((day) => !existingByDay.has(day) || (retryPartial && !existingByDay.get(day)))
   };
 }
@@ -172,6 +173,8 @@ export async function ingestPolTrackerHistory(client, options = {}) {
   let partial = 0;
   let unavailable = 0;
   let lastCompletedDay = plan.lastStoredDay || null;
+  let targetEndDayComplete = plan.targetEndDayComplete
+    ?? !plan.pendingDays.includes(plan.endDate);
 
   for (let offset = 0; offset < plan.pendingDays.length; offset += batchSize) {
     const batch = plan.pendingDays.slice(offset, offset + batchSize);
@@ -198,7 +201,37 @@ export async function ingestPolTrackerHistory(client, options = {}) {
       }).catch(() => {});
       throw error;
     }
-    for (const anchor of anchors) {
+    const anchorsByDay = new Map(anchors.map((anchor) => [anchor.day, anchor]));
+    for (const day of batch) {
+      const anchor = anchorsByDay.get(day);
+      if (!anchor) {
+        unavailable += 1;
+        if (day === plan.endDate) targetEndDayComplete = false;
+        const lastError = `No configured RPC provider resolved a historical anchor for ${day}`;
+        await (options.updateSync || updatePolTrackerSyncState)(client, {
+          startDate: plan.startDate,
+          nextDay: shiftUtcDay(day, 1),
+          lastCompletedDay,
+          lastError,
+          stats: {
+            expected: plan.allDays.length,
+            pending: plan.pendingDays.length,
+            processed,
+            complete,
+            partial,
+            unavailable
+          }
+        });
+        logProgress({
+          day,
+          height: null,
+          processed,
+          pending: plan.pendingDays.length,
+          complete: false,
+          unavailable: true
+        });
+        continue;
+      }
       try {
         const observation = await retryPolTrackerOperation(
           () => (options.collectDay || collectPolTrackerDay)(anchor, { ...options, client }),
@@ -208,6 +241,9 @@ export async function ingestPolTrackerHistory(client, options = {}) {
         processed += 1;
         if (observation.daily.complete) complete += 1;
         else partial += 1;
+        if (anchor.day === plan.endDate) {
+          targetEndDayComplete = Boolean(observation.daily.complete);
+        }
         lastCompletedDay = anchor.day;
         await (options.updateSync || updatePolTrackerSyncState)(client, {
           startDate: plan.startDate,
@@ -232,6 +268,7 @@ export async function ingestPolTrackerHistory(client, options = {}) {
       } catch (error) {
         if (isPolTrackerHistoricalHeightUnavailable(error)) {
           unavailable += 1;
+          if (anchor.day === plan.endDate) targetEndDayComplete = false;
           await (options.updateSync || updatePolTrackerSyncState)(client, {
             startDate: plan.startDate,
             nextDay: shiftUtcDay(anchor.day, 1),
@@ -284,6 +321,7 @@ export async function ingestPolTrackerHistory(client, options = {}) {
     complete_days: complete,
     partial_days: partial,
     unavailable_days: unavailable,
-    last_completed_day: lastCompletedDay
+    last_completed_day: lastCompletedDay,
+    target_end_day_complete: Boolean(targetEndDayComplete)
   };
 }

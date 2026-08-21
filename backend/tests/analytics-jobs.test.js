@@ -236,6 +236,10 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(remoteDeployScript, /npm ci --omit=dev/);
   assert.match(remoteDeployScript, /boonetools-db-migrate\.sh/);
   assert.match(remoteDeployScript, /local retry_delay_seconds=35/);
+  assert.match(
+    remoteDeployScript,
+    /boonetools-pol-tracker\.service[\s\S]*continuing with its cached read model/
+  );
   assert.match(remoteDeployScript, /local timer_state_wait_seconds=90/);
   assert.match(remoteDeployScript, /systemctl show "\$timer" --property=Triggers --value/);
   assert.match(remoteDeployScript, /target_state" == activating/);
@@ -261,6 +265,9 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(remoteFrontendDeployScript, /public asset does not match the activated release/);
   assert.match(remoteFrontendDeployScript, /frontend rollback did not verify successfully/);
   assert.match(perfSmoke, /allowStale: false/);
+  assert.match(perfSmoke, /--allow-stale-endpoint/);
+  assert.match(perfSmoke, /allowStaleEndpoints\.has\(endpoint\.name\)/);
+  assert.match(remoteDeployScript, /--allow-stale-endpoint pol-tracker/);
   assert.match(perfSmoke, /stale response\(s\)/);
   assert.match(perfSmoke, /response content type was not JSON/);
 });
