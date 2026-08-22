@@ -496,7 +496,7 @@
                 <div class="timeline-content">
                   <div>
                     <strong>{update.description}</strong>
-                    <span class="update-key">{update.key}={update.value}</span>
+                    <span class="update-key" title={`${update.key}=${update.value}`}>{update.key}={update.value}</span>
                   </div>
                   <small title={formatDateTime(update.blockTime)}>
                     {formatAge(update.blockTime)} · block {number.format(update.height)}
@@ -834,9 +834,9 @@
   .timeline-node { z-index: 1; width: 7px; height: 7px; margin-top: 2px; background: #00cc66; }
   .timeline-node.warn { background: #d4a017; }
   .timeline-content { min-width: 0; }
-  .timeline-content > div { display: flex; justify-content: space-between; gap: 8px; }
-  .timeline-content strong { color: var(--term-text-body); font: 600 11px/1.4 'JetBrains Mono', monospace; }
-  .update-key { color: var(--term-text-5); font: 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
+  .timeline-content > div { display: flex; min-width: 0; justify-content: space-between; gap: 8px; }
+  .timeline-content strong { min-width: 0; color: var(--term-text-body); font: 600 11px/1.4 'JetBrains Mono', monospace; overflow-wrap: anywhere; }
+  .update-key { display: block; flex: 0 1 50%; max-width: 50%; overflow: hidden; color: var(--term-text-5); font: 11px/1.4 'JetBrains Mono', monospace; text-overflow: ellipsis; white-space: nowrap; }
   .timeline-content small,
   .vote-time { display: block; margin-top: 5px; color: var(--term-text-4); font: 11px/1.4 'JetBrains Mono', monospace; }
   .timeline-content a { color: var(--term-text-3); text-decoration: none; }
@@ -900,6 +900,6 @@
     .source-line { align-items: flex-start; flex-wrap: wrap; }
     .source-line em { width: 100%; margin-left: 0; }
     .timeline-content > div { display: block; }
-    .update-key { display: block; margin-top: 3px; }
+    .update-key { max-width: 100%; margin-top: 3px; }
   }
 </style>
