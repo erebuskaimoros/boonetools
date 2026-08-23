@@ -21,6 +21,11 @@ function isoTimestamp(value) {
   return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
+function baseUnitString(value) {
+  const normalized = String(value ?? '').trim();
+  return /^\d+$/.test(normalized) ? BigInt(normalized).toString() : null;
+}
+
 function uniqueHeaders(headers) {
   const byHeight = new Map();
   for (const input of Array.isArray(headers) ? headers : []) {
@@ -35,12 +40,16 @@ export function normalizeChainHeader(input = {}) {
   const blockTime = isoTimestamp(input.blockTime ?? input.block_time ?? input.time);
   if (height <= 0 || !blockTime) return null;
 
+  const incomeBurnE8 = baseUnitString(
+    input.incomeBurnE8 ?? input.income_burn_e8 ?? input.system_income_burn_e8
+  );
   return {
     height,
     blockHash: String(input.blockHash ?? input.block_hash ?? input.hash ?? '').toUpperCase(),
     blockTime,
     hasSwapEvents: Boolean(input.hasSwapEvents ?? input.has_swap_events),
-    source: String(input.source || 'liquify-ws')
+    source: String(input.source || 'liquify-ws'),
+    ...(incomeBurnE8 === null ? {} : { incomeBurnE8 })
   };
 }
 
@@ -80,14 +89,16 @@ function buildHeaderUpsert(headers) {
       header.blockHash,
       header.blockTime,
       header.hasSwapEvents,
-      header.source
+      header.source,
+      header.incomeBurnE8 ?? null
     );
-    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, now(), now())`;
+    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, now(), now())`;
   });
 
   return {
     text: `insert into chain_block_headers
-      (height, block_hash, block_time, has_swap_events, source, received_at, updated_at)
+      (height, block_hash, block_time, has_swap_events, source,
+       system_income_burn_e8, received_at, updated_at)
      values ${tuples.join(', ')}
      on conflict (height) do update set
        block_hash = case
@@ -96,6 +107,10 @@ function buildHeaderUpsert(headers) {
        end,
        block_time = excluded.block_time,
        has_swap_events = chain_block_headers.has_swap_events or excluded.has_swap_events,
+       system_income_burn_e8 = coalesce(
+         excluded.system_income_burn_e8,
+         chain_block_headers.system_income_burn_e8
+       ),
        source = case
          when excluded.source = 'liquify-ws' then excluded.source
          else chain_block_headers.source
@@ -133,7 +148,8 @@ export async function upsertChainHeaders(client, inputs = []) {
 
   await recomputeIntervals(client, headers[0].height, headers.at(-1).height);
   const stored = await client.query(
-    `select height, block_hash, block_time, interval_ms, has_swap_events, source
+    `select height, block_hash, block_time, interval_ms, has_swap_events, source,
+            system_income_burn_e8
      from chain_block_headers
      where height = any($1::bigint[])
      order by height asc`,
@@ -194,6 +210,7 @@ export function serializeChainHead(header = {}) {
     interval_ms: normalized.intervalMs,
     block_hash: normalized.blockHash,
     has_swap_events: normalized.hasSwapEvents,
+    income_burn_e8: normalized.incomeBurnE8 ?? null,
     source: normalized.source
   };
 }
@@ -207,7 +224,8 @@ export async function notifyChainHead(client, header) {
 
 export async function loadLatestChainHead(client) {
   const result = await client.query(
-    `select height, block_hash, block_time, interval_ms, has_swap_events, source
+    `select height, block_hash, block_time, interval_ms, has_swap_events, source,
+            system_income_burn_e8
      from chain_block_headers
      order by height desc
      limit 1`

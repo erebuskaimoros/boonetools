@@ -9,6 +9,7 @@ This directory contains website/backend-specific protocol notes and session hist
 - [wasm-arb-economics.md](./wasm-arb-economics.md) — `/wasm-arb-economics` metric definitions, transaction-scoped Rujira fee attribution, post-change time-series compaction, and monitoring guardrails.
 - [status-dashboard.md](./status-dashboard.md) — `/status` data sources, chain/LP state derivation, historical vote lane, and failure behavior.
 - [pol-tracker.md](./pol-tracker.md) — same-height daily synth backing, locked Treasury LP total, and Reserve POL accounting.
+- [burn-tracker.md](./burn-tracker.md) — route-specific system-income RUNE burn metrics, daily ingestion, cumulative accounting, and source semantics.
 - [architecture-consolidation.md](./architecture-consolidation.md) — runtime ownership, unified API/backend contract, canonical provenance, queued reads, archive policy, and CI ratchets.
 - Use the shared [BooneTools project page](../../../knowledge/projects/boonetools.md) for durable product context.
 - Use the shared [analytics and tooling workstream](../../../knowledge/workstreams/analytics-and-tooling.md) for cross-project relationships.

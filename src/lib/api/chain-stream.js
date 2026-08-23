@@ -10,6 +10,7 @@ export function parseChainHeadEvent(value) {
     const time = String(payload?.time || '');
     if (!Number.isFinite(height) || height <= 0 || !Number.isFinite(Date.parse(time))) return null;
     const intervalMs = Number(payload?.interval_ms);
+    const incomeBurn = String(payload?.income_burn_e8 ?? '').trim();
     return {
       height: Math.trunc(height),
       time: new Date(time).toISOString(),
@@ -17,6 +18,7 @@ export function parseChainHeadEvent(value) {
       interval_ms: Number.isFinite(intervalMs) && intervalMs >= 0 ? Math.trunc(intervalMs) : null,
       block_hash: String(payload?.block_hash || ''),
       has_swap_events: Boolean(payload?.has_swap_events),
+      income_burn_e8: /^\d+$/.test(incomeBurn) ? BigInt(incomeBurn).toString() : null,
       source: String(payload?.source || 'liquify-ws')
     };
   } catch {

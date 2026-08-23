@@ -1,0 +1,19 @@
+[Unit]
+Description=BooneTools System Income Burn Tracker Refresh
+After=network-online.target docker.service boonetools-api.service boonetools-thornode-core-snapshot.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/opt/boonetools-backend/current/backend
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--dns-result-order=ipv4first
+EnvironmentFile=/opt/boonetools-backend/config/backend.env
+ExecStart=/usr/bin/node src/run-job.js burn-tracker-scheduler
+TimeoutStartSec=10m
+Restart=on-failure
+RestartSec=5m
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=boonetools-burn-tracker

@@ -50,6 +50,7 @@ test('site-owned chain stream parses and subscribes to compact head events', () 
     interval_ms: 6125,
     block_hash: '',
     has_swap_events: true,
+    income_burn_e8: null,
     source: 'liquify-ws'
   });
 
@@ -66,6 +67,7 @@ test('site-owned chain stream parses and subscribes to compact head events', () 
     interval_ms: 6000
   }));
   assert.equal(heads[0].height, 124);
+  assert.equal(heads[0].income_burn_e8, null);
   subscription.close();
   assert.equal(subscription.source.closed, true);
 });

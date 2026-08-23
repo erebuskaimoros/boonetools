@@ -49,6 +49,7 @@ test('chain header parser extracts the live timing and compact event hints', () 
     interval_ms: 6250,
     block_hash: 'HASH123',
     has_swap_events: true,
+    income_burn_e8: null,
     source: 'liquify-ws'
   });
   assert.equal(serializeChainHead({ ...header, intervalMs: 6250 }).interval_ms, 6250);
@@ -60,7 +61,10 @@ test('consolidated parser adapts NewBlock finalize results without another RPC r
     parseConsolidatedChainBlock
   } = await import('../src/shared/chain-stream.js');
   const data = newBlockData(200, '2026-08-05T12:01:00Z', {
-    events: [{ type: 'swap', attributes: [] }],
+    events: [
+      { type: 'swap', attributes: [] },
+      { type: 'rewards', attributes: [{ key: 'income_burn', value: '123456789' }] }
+    ],
     txResults: [{ events: [{ type: 'message', attributes: [] }] }]
   });
   const payload = normalizeNewBlockForRujiraBaseFees(data, 200);
@@ -68,9 +72,10 @@ test('consolidated parser adapts NewBlock finalize results without another RPC r
 
   assert.equal(payload.result.height, '200');
   assert.equal(payload.result.txs_results.length, 1);
-  assert.equal(payload.result.finalize_block_events.length, 1);
+  assert.equal(payload.result.finalize_block_events.length, 2);
   assert.equal(parsed.header.height, 200);
   assert.equal(parsed.header.hasSwapEvents, true);
+  assert.equal(parsed.incomeBurnE8, '123456789');
   assert.deepEqual(parsed.baseFeePayload, payload);
 });
 

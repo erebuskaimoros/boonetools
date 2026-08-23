@@ -410,7 +410,10 @@ async function processConsolidatedBlock(data) {
 
   const client = await getClient();
   try {
-    const storedHeader = await upsertChainHeader(client, parsed.header);
+    const storedHeader = await upsertChainHeader(client, {
+      ...parsed.header,
+      incomeBurnE8: parsed.incomeBurnE8
+    });
     if (!storedHeader) throw new Error(`Unable to persist block header ${parsed.header.height}`);
     persistedHeaders += 1;
     await saveChainStreamState(client, {
@@ -421,8 +424,6 @@ async function processConsolidatedBlock(data) {
         persisted_headers: persistedHeaders
       }
     });
-    await notifyChainHead(client, storedHeader);
-
     if (parsed.reservePayments.events.length > 0) {
       await saveParsedRujiraReservePaymentBlock(client, storedHeader.height, data, {
         blockTime: storedHeader.blockTime,
@@ -448,6 +449,7 @@ async function processConsolidatedBlock(data) {
       const totalRune = includedEvents.reduce((sum, event) => sum + event.liquidity_fee_rune, 0);
       log(`Generated base-fee event(s): ${parsed.baseFees.events.length} total, ${includedEvents.length} included, ${totalRune.toFixed(8)} RUNE at block ${storedHeader.height}`);
     }
+    await notifyChainHead(client, storedHeader);
     lastChainError = '';
   } finally {
     client.release();

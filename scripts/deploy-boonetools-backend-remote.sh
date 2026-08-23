@@ -309,6 +309,12 @@ prime_read_model_unit() {
     fi
     return
   fi
+  if [[ "$unit" == boonetools-burn-tracker.service ]]; then
+    if ! systemctl start "$unit"; then
+      log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
+    fi
+    return
+  fi
   start_unit_with_retry "$unit"
 }
 
@@ -364,6 +370,7 @@ prime_read_models() {
     boonetools-pool-dislocation-repair.service
     boonetools-pool-dislocation.service
     boonetools-pol-tracker.service
+    boonetools-burn-tracker.service
     boonetools-wasm-arb-economics.service
     boonetools-wasm-arb-economics-fees.service
     boonetools-wasm-arb-economics-oracle.service
@@ -444,6 +451,7 @@ verify_release() {
   node "$CURRENT_LINK/scripts/perf-smoke.mjs" \
     --base https://boone.tools/functions/v1 \
     --allow-stale-endpoint pol-tracker \
+    --allow-stale-endpoint burn-tracker \
     --require-compression
   node "$CURRENT_LINK/scripts/perf-smoke.mjs" \
     --base https://boone.tools/functions/v1 \

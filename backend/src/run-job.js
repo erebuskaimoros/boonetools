@@ -3,6 +3,7 @@ import { createJobCompletionLog, createJobFailureLog } from './lib/job-log.js';
 import { runAnalyticsReadModels } from './jobs/analytics-read-models.js';
 import { runAppLayerLiveStateScheduler } from './jobs/app-layer-live-state-scheduler.js';
 import { runBondHistoryRefreshQueue } from './jobs/bond-history-refresh.js';
+import { runBurnTrackerBackfill, runBurnTrackerScheduler } from './jobs/burn-tracker.js';
 import { runNodeopScheduler } from './jobs/nodeop-scheduler.js';
 import { runNodeVotesBackfill } from './jobs/node-votes-backfill.js';
 import { runNodeVotesSummary } from './jobs/node-votes-summary.js';
@@ -30,6 +31,8 @@ const runners = {
   'analytics-read-models': runAnalyticsReadModels,
   'app-layer-live-state-scheduler': runAppLayerLiveStateScheduler,
   'bond-history-refresh': runBondHistoryRefreshQueue,
+  'burn-tracker-backfill': runBurnTrackerBackfill,
+  'burn-tracker-scheduler': runBurnTrackerScheduler,
   'nodeop-scheduler': runNodeopScheduler,
   'node-votes-backfill': runNodeVotesBackfill,
   'node-votes-summary': runNodeVotesSummary,

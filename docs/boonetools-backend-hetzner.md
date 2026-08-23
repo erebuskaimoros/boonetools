@@ -292,7 +292,7 @@ store and bounded publisher-run history. Migration
 `028_analytics_read_paths.sql` adds the ordered/cursor indexes used by compact
 summary and drill-down routes. The additive public routes are
 `/status-live`, `/status-dashboard`, `/treasury-snapshot`, `/node-votes-summary`,
-`/rapid-swaps-summary`, and `/pol-tracker`; the established Node/Rapid routes remain compatibility
+`/rapid-swaps-summary`, `/pol-tracker`, and `/burn-tracker`; the established Node/Rapid routes remain compatibility
 surfaces during frontend rollout but never contact providers on a GET.
 
 `boonetools-thornode-core-snapshot.timer` publishes the canonical mixed-cadence
@@ -355,6 +355,27 @@ day with that lag-adjusted target, so republishing old rows cannot reset the
 dashboard to healthy; `target_end_date`, coverage, warnings, and `stale` expose
 the gap until the target day succeeds.
 
+Migration `049_system_income_burn_tracker.sql` adds route-specific daily RUNE
+burn history and resumable sync state. `boonetools-burn-tracker.timer` refreshes
+the current UTC partial day, all-time reconciliation total, and public read
+model every five minutes. Migration `050_system_income_burn_blocks.sql` adds
+the exact `rewards.income_burn` amount to live block headers. `/burn-tracker`
+overlays those committed post-snapshot blocks and the browser applies every
+`/chain-events` height once, while the five-minute job remains the durable
+reconciliation and backfill path. It reuses Mimir, constants, and bank supply
+from the core snapshot. To force a complete rebuild from the first route day:
+
+```bash
+systemctl start --no-block boonetools-burn-tracker-backfill.service
+journalctl -fu boonetools-burn-tracker-backfill.service
+```
+
+Optional configuration is `BURN_TRACKER_START_DATE` (default `2024-09-26`),
+`BURN_TRACKER_RECENT_LOOKBACK_DAYS` (default `7`), and
+`BURN_TRACKER_REQUEST_DELAY_MS` (default `250`). Both jobs use the configured
+Liquify `MIDGARD_URLS`; no public request contacts Midgard or THORNode. The
+per-block path reuses the existing consolidated Liquify websocket connection.
+
 Migration `042_pool_dislocation_binance_usdt_to_usd.sql` corrects the Pool
 Dislocation Binance unit contract. Binance spot markets provide `XUSDT`, so
 the writer and historical repair multiply each raw quote by the same-snapshot
@@ -397,7 +418,8 @@ subscription. Rapid-Swap websocket ingestion remains disabled by default and
 its scheduler/live tail remains the normal canonical fresh-data path.
 
 Migration `043_chain_block_headers.sql` owns the 48-hour raw header store and
-durable stream cursor. The listener automatically bootstraps approximately 24
+durable stream cursor; migration `050_system_income_burn_blocks.sql` extends
+live headers with exact system-income burn amounts. The listener automatically bootstraps approximately 24
 hours and repairs retained gaps every five minutes through the configured
 Liquify RPC endpoint. The API exposes compact replay at `/block-production`
 and relays committed heads at `/chain-events`; the latter uses PostgreSQL

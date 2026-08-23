@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh the System Income Burn Tracker every five minutes
+
+[Timer]
+OnActiveSec=45s
+OnUnitActiveSec=5min
+AccuracySec=15s
+Persistent=true
+Unit=boonetools-burn-tracker.service
+
+[Install]
+WantedBy=timers.target

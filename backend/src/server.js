@@ -18,6 +18,7 @@ import { handleAppLayerLiveState } from './handlers/app-layer-live-state.js';
 import { handleAppLayerReservePayments } from './handlers/app-layer-reserve-payments.js';
 import { handleBondHistory } from './handlers/bond-history.js';
 import { handleBlockProduction } from './handlers/block-production.js';
+import { handleBurnTracker } from './handlers/burn-tracker.js';
 import { handleDynamicFeeAffiliateVolume } from './handlers/dynamic-fee-affiliate-volume.js';
 import { handleDynamicFeeTransactions } from './handlers/dynamic-fee-transactions.js';
 import { handleHealth } from './handlers/health.js';
@@ -67,6 +68,7 @@ const routes = new Map([
   ['/pool-dislocation', route(handlePoolDislocation, 1, 64)],
   ['/pool-dislocation-series', route(handlePoolDislocationSeries, 2, 16)],
   ['/pol-tracker', route(handlePolTracker, 1, 64)],
+  ['/burn-tracker', route(handleBurnTracker, 1, 64)],
   ['/tc-fee-dash', route(handleTcFeeDash, 1, 64)],
   ['/rapid-swaps', route(handleRapidSwaps, 5, 3)],
   ['/rapid-swaps-summary', route(handleRapidSwapsSummary, 1, 64)],

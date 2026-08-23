@@ -70,6 +70,14 @@
     description: "Track daily synth backing, locked Treasury LP total, and Reserve POL"
   };
 
+  const burnTrackerApp = {
+    name: "Burn Tracker",
+    component: () => import("./lib/BurnTracker.svelte"),
+    icon: "△",
+    path: "burn-tracker",
+    description: "Track daily and cumulative RUNE burned through system income"
+  };
+
   const wasmArbEconomicsApp = {
     name: "Wasm Arb Economics",
     component: () => import("./lib/WasmArbEconomics.svelte"),
@@ -148,6 +156,7 @@
     tcFeeDashApp,
     poolDislocationApp,
     polTrackerApp,
+    burnTrackerApp,
     bondTrackerApp,
     vaultExplorerApp,
     treasuryTrackerApp,

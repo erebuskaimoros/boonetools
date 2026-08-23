@@ -42,6 +42,7 @@ presentation-only field.
 | `/tc-fee-dash` | `tc-fee-dash:v1` | `boonetools-analytics-read-models` | 1m / 15m |
 | `/pool-dislocation` | `pool-dislocation-summary:v1` | `boonetools-pool-dislocation` | exact 5m UTC / 15m |
 | `/pol-tracker` | `pol-tracker:v2` | `boonetools-pol-tracker` | daily at 00:10 UTC / 36h |
+| `/burn-tracker` | `system-income-burn:v1` + block overlay | chain listener / `boonetools-burn-tracker` | every block + 5m reconcile / 15m |
 
 The operator-triggered Pool Dislocation backfill populates canonical
 observations before the live sampler's first point and then invokes the normal
@@ -60,9 +61,23 @@ solely for reconciliation and is not selected into the read model. The latest
 pool breakdown derives each legacy Reserve POL value with THORNode's rounded
 safe-share formula and requires the pool sum to equal `runepool.pol.value`.
 
+Burn Tracker uses migrations `049_system_income_burn_tracker.sql` and
+`050_system_income_burn_blocks.sql`. Its provider job backfills UTC earnings
+intervals from Liquify Midgard, selects only the `income_burn` lane, replaces
+today's not-yet-final interval with the unbucketed partial-day aggregate, and
+reconciles the stored running sum with Midgard's all-time total. Between those
+five-minute snapshots, the consolidated chain listener stores the exact
+`income_burn` attribute from each `rewards` finalize-block event on the block
+header and emits it through `/chain-events`. The public API overlays committed
+post-snapshot blocks without contacting a provider; the frontend then applies
+each SSE height once. Bank RUNE supply, Mimir, and the compiled burn-rate
+fallback come from `thornode-core:v1`. All base-unit amounts remain decimal
+strings through the public model.
+
 The core publisher is the sole scheduled owner of reusable current THORNode
-state. It refreshes `lastblock` every 15 seconds; inbound addresses, Mimir, and
-node-Mimir state every minute; network and pools every two minutes; nodes every
+state. It refreshes `lastblock` every 15 seconds; inbound addresses, Mimir,
+bank RUNE supply, and node-Mimir state every minute; network and pools every
+two minutes; nodes every
 five minutes; constants every fifteen minutes; and Midgard churns every ten
 minutes. Status, Node Votes, Treasury, Rapid Swaps, NodeOp, App Layer, and
 stable browser reads consume those persisted fields instead of repeating the

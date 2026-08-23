@@ -229,6 +229,10 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(sourceGuard, /check-runs\?per_page=100/);
   assert.match(deployScript, /git .*archive/s);
   assert.match(deployScript, /ARCHIVE_SHA256/);
+  assert.match(
+    deployScript,
+    /tar --no-xattrs --no-mac-metadata[\s\S]*backend shared scripts ops/
+  );
   assert.match(remoteDeployScript, /flock -n 9/);
   assert.match(remoteDeployScript, /atomic_point_current/);
   assert.match(remoteDeployScript, /Rolling back to/);

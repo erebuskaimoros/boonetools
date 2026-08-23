@@ -57,7 +57,7 @@ else
     npm run backend:test
   )
   echo "==> Creating emergency backend artifact from the reviewed working tree ..."
-  tar \
+  tar --no-xattrs --no-mac-metadata \
     --exclude='.env' \
     --exclude='node_modules' \
     --exclude='dist' \

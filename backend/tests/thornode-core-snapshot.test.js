@@ -10,6 +10,9 @@ import {
 const START = new Date('2026-07-27T12:00:00.000Z');
 
 function payloadFor(path) {
+  if (path === '/cosmos/bank/v1beta1/supply/by_denom?denom=rune') {
+    return { amount: { denom: 'rune', amount: '35402165993252075' } };
+  }
   if (path === '/thorchain/mimir') return { HALTTRADING: 0 };
   if (path === '/thorchain/mimir/nodes_all') return { mimirs: [] };
   if (path === '/thorchain/network') return { rune_price_in_tor: '100000000' };

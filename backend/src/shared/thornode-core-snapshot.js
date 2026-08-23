@@ -12,6 +12,7 @@ export const THORNODE_CORE_FIELDS = Object.freeze([
   { key: 'lastblock', path: '/thorchain/lastblock', cadenceMs: 15_000, valid: Array.isArray, provider: 'thornode' },
   { key: 'inbound_addresses', path: '/thorchain/inbound_addresses', cadenceMs: 60_000, valid: Array.isArray, provider: 'thornode' },
   { key: 'mimir', path: '/thorchain/mimir', cadenceMs: 60_000, valid: objectValue, provider: 'thornode' },
+  { key: 'rune_supply', path: '/cosmos/bank/v1beta1/supply/by_denom?denom=rune', cadenceMs: 60_000, valid: runeSupplyValue, provider: 'thornode' },
   { key: 'node_mimirs', path: '/thorchain/mimir/nodes_all', cadenceMs: 60_000, valid: objectOrArray, provider: 'thornode' },
   { key: 'network', path: '/thorchain/network', cadenceMs: 120_000, valid: objectValue, provider: 'thornode' },
   { key: 'pools', path: '/thorchain/pools', cadenceMs: 120_000, valid: Array.isArray, provider: 'thornode' },
@@ -26,6 +27,12 @@ function objectValue(value) {
 
 function objectOrArray(value) {
   return objectValue(value) || Array.isArray(value);
+}
+
+function runeSupplyValue(value) {
+  return objectValue(value)
+    && value.amount?.denom === 'rune'
+    && /^\d+$/.test(String(value.amount?.amount || ''));
 }
 
 function timestampMs(value) {
