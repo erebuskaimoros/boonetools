@@ -133,6 +133,191 @@ test('parseRujiraReservePaymentBlock records the post-cutover Reserve and POL sp
   assert.equal(parsed.scan.pol_transfer_event_count, 1);
 });
 
+test('parseRujiraReservePaymentBlock records catch-up settlements emitted by a transaction', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    BASE_LAYER_REVENUE_COLLECTOR,
+    TC_RESERVE_MODULE,
+    THORCHAIN_POL_FUND,
+    parseRujiraReservePaymentBlock
+  } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const parsed = parseRujiraReservePaymentBlock(27545366, {
+    result: {
+      txs_results: [{
+        events: [
+          event('transfer', {
+            amount: '220940513333rune',
+            sender: BASE_LAYER_REVENUE_COLLECTOR,
+            recipient: TC_RESERVE_MODULE,
+            msg_index: '5'
+          }),
+          event('reserve', {
+            amount: '220940513333',
+            coin: '220940513333 THOR.RUNE',
+            from: BASE_LAYER_REVENUE_COLLECTOR,
+            contributor_address: BASE_LAYER_REVENUE_COLLECTOR,
+            to: TC_RESERVE_MODULE,
+            memo: 'RESERVE',
+            id: '3E261FBBDFC92578FDD0C32A3A9DE3E8B9DC6A472E02750C5869B8170AB45CA7',
+            msg_index: '5'
+          }),
+          event('transfer', {
+            amount: '110470256667rune',
+            sender: BASE_LAYER_REVENUE_COLLECTOR,
+            recipient: THORCHAIN_POL_FUND,
+            msg_index: '5'
+          })
+        ]
+      }],
+      finalize_block_events: []
+    }
+  }, {
+    blockTime: '2026-08-23T10:33:08.290494566Z',
+    source: 'test'
+  });
+
+  assert.deepEqual(parsed.events.map((row) => ({
+    paymentType: row.payment_type,
+    recipient: row.recipient,
+    amountBase: row.amount_base
+  })), [
+    {
+      paymentType: 'reserve',
+      recipient: TC_RESERVE_MODULE,
+      amountBase: '220940513333'
+    },
+    {
+      paymentType: 'pol',
+      recipient: THORCHAIN_POL_FUND,
+      amountBase: '110470256667'
+    }
+  ]);
+});
+
+test('parseRujiraReservePaymentBlock reads transaction settlements from a live NewBlock payload', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    BASE_LAYER_REVENUE_COLLECTOR,
+    TC_RESERVE_MODULE,
+    parseRujiraReservePaymentBlock
+  } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const parsed = parseRujiraReservePaymentBlock(27545366, {
+    block: {
+      header: {
+        height: '27545366',
+        time: '2026-08-23T10:33:08.290494566Z'
+      }
+    },
+    result_finalize_block: {
+      tx_results: [{
+        events: [
+          event('transfer', {
+            amount: '220940513333rune',
+            sender: BASE_LAYER_REVENUE_COLLECTOR,
+            recipient: TC_RESERVE_MODULE
+          }),
+          event('reserve', {
+            amount: '220940513333',
+            coin: '220940513333 THOR.RUNE',
+            from: BASE_LAYER_REVENUE_COLLECTOR,
+            to: TC_RESERVE_MODULE,
+            memo: 'RESERVE',
+            id: 'CATCHUP'
+          })
+        ]
+      }],
+      events: []
+    }
+  }, { source: 'test' });
+
+  assert.equal(parsed.events.length, 1);
+  assert.equal(parsed.events[0].amount_rune, 2209.40513333);
+  assert.equal(parsed.events[0].block_time, '2026-08-23T10:33:08.290Z');
+});
+
+test('parseRujiraReservePaymentBlock does not pair Reserve evidence across transactions', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    BASE_LAYER_REVENUE_COLLECTOR,
+    TC_RESERVE_MODULE,
+    parseRujiraReservePaymentBlock
+  } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const parsed = parseRujiraReservePaymentBlock(27545366, {
+    result: {
+      txs_results: [
+        {
+          events: [event('transfer', {
+            amount: '100000000rune',
+            sender: BASE_LAYER_REVENUE_COLLECTOR,
+            recipient: TC_RESERVE_MODULE
+          })]
+        },
+        {
+          events: [event('reserve', {
+            amount: '100000000',
+            coin: '100000000 THOR.RUNE',
+            from: BASE_LAYER_REVENUE_COLLECTOR,
+            to: TC_RESERVE_MODULE,
+            memo: 'RESERVE',
+            id: 'SECOND_TX'
+          })]
+        }
+      ]
+    }
+  }, {
+    blockTime: '2026-08-23T10:33:08.290494566Z',
+    source: 'test'
+  });
+
+  assert.equal(parsed.events.length, 1);
+  assert.equal(parsed.events[0].tx_id, 'SECOND_TX');
+  assert.equal(parsed.events[0].raw_event.transfer, null);
+  assert.equal(parsed.scan.matched_transfer_event_count, 0);
+  assert.equal(parsed.scan.unmatched_transfer_event_count, 1);
+  assert.equal(parsed.scan.reserve_only_event_count, 1);
+});
+
+test('parseRujiraReservePaymentBlock ignores settlement events from failed transactions', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const {
+    BASE_LAYER_REVENUE_COLLECTOR,
+    TC_RESERVE_MODULE,
+    parseRujiraReservePaymentBlock
+  } = await import('../src/shared/rujira-reserve-payments.js');
+
+  const parsed = parseRujiraReservePaymentBlock(27545366, {
+    result: {
+      txs_results: [{
+        code: 5,
+        events: [
+          event('transfer', {
+            amount: '100000000rune',
+            sender: BASE_LAYER_REVENUE_COLLECTOR,
+            recipient: TC_RESERVE_MODULE
+          }),
+          event('reserve', {
+            amount: '100000000',
+            coin: '100000000 THOR.RUNE',
+            from: BASE_LAYER_REVENUE_COLLECTOR,
+            to: TC_RESERVE_MODULE,
+            memo: 'RESERVE',
+            id: 'ROLLED_BACK'
+          })
+        ]
+      }]
+    }
+  }, {
+    blockTime: '2026-08-23T10:33:08.290494566Z',
+    source: 'test'
+  });
+
+  assert.equal(parsed.events.length, 0);
+  assert.equal(parsed.scan.matched_event_count, 0);
+});
+
 test('parseRujiraReservePaymentBlock does not classify POL transfers before the cutover', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const {
@@ -175,6 +360,19 @@ test('migration 045 repairs the POL constraint and rewinds settlement scanning',
   );
   assert.match(migration, /where height >= 27410412/i);
   assert.match(migration, /least\(rujira_reserve_payment_sync_state\.next_scheduled_height, excluded\.next_scheduled_height\)/i);
+});
+
+test('migration 048 requeues the known post-halt catch-up settlement block', async () => {
+  const migration = await readFile(
+    new URL('../migrations/048_rujira_catchup_settlements.sql', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(migration, /27545366/);
+  assert.match(migration, /insert into public\.rujira_reserve_payment_blocks/i);
+  assert.match(migration, /on conflict \(height\)/i);
+  assert.match(migration, /status = 'pending'/i);
+  assert.match(migration, /next_retry_at = now\(\)/i);
 });
 
 test('parseRujiraReservePaymentBlock falls back to reserve event when transfer is absent', async () => {
@@ -363,6 +561,96 @@ test('live scheduler phase recovers the July 26 heights missed by the fixed phas
   assert.equal(heights.includes(27173769), true);
   assert.equal(heights.includes(27160076), false);
   assert.equal((27160134 - 25982820) % 101, 58);
+});
+
+test('payment block processing keeps the known catch-up repair pending until both destinations exist', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { processRujiraReservePaymentBlocks } = await import('../src/shared/rujira-reserve-payments.js');
+  const queries = [];
+  const client = {
+    async query(sql, params = []) {
+      queries.push({ sql, params });
+      if (/select height, block_time, source, attempts/i.test(sql)) {
+        return { rows: [] };
+      }
+      return { rows: [], rowCount: 0 };
+    }
+  };
+
+  const result = await processRujiraReservePaymentBlocks(client, { limit: 1 });
+
+  assert.equal(result.selected, 0);
+  assert.match(queries[0].sql, /insert into rujira_reserve_payment_blocks/i);
+  assert.match(queries[0].sql, /status = 'pending'/i);
+  assert.deepEqual(queries[0].params.slice(0, 4), [
+    27545366,
+    '2026-08-23T10:33:08.290494566Z',
+    '220940513333',
+    '110470256667'
+  ]);
+});
+
+test('Dune-era settlement ingestion also discovers recent Midgard contract executions', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { runRujiraReservePaymentsScheduledSettlementIngestion } = await import(
+    '../src/shared/rujira-reserve-payments.js'
+  );
+  const calls = [];
+
+  const result = await runRujiraReservePaymentsScheduledSettlementIngestion({}, {}, {
+    ingestMidgardCandidates: async (_client, options) => {
+      calls.push('midgard');
+      assert.equal(options.maxPages, 1);
+      return { heights: 1 };
+    },
+    ingestScheduledCandidates: async () => {
+      calls.push('scheduled');
+      return { selected: 1 };
+    },
+    processBlocks: async () => {
+      calls.push('blocks');
+      return { events: 2 };
+    },
+    refreshPrices: async () => {
+      calls.push('prices');
+      return { priced_events: 2 };
+    }
+  });
+
+  assert.deepEqual(calls, ['midgard', 'scheduled', 'blocks', 'prices']);
+  assert.equal(result.midgard_candidates.heights, 1);
+  assert.equal(result.block_scan.events, 2);
+});
+
+test('Dune-era scheduled settlement scanning survives an ordinary Midgard candidate error', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { runRujiraReservePaymentsScheduledSettlementIngestion } = await import(
+    '../src/shared/rujira-reserve-payments.js'
+  );
+  const calls = [];
+
+  const result = await runRujiraReservePaymentsScheduledSettlementIngestion({}, {}, {
+    ingestMidgardCandidates: async () => {
+      calls.push('midgard');
+      throw new Error('temporary Midgard failure');
+    },
+    ingestScheduledCandidates: async () => {
+      calls.push('scheduled');
+      return { selected: 1 };
+    },
+    processBlocks: async () => {
+      calls.push('blocks');
+      return { events: 2 };
+    },
+    refreshPrices: async () => {
+      calls.push('prices');
+      return { priced_events: 2 };
+    }
+  });
+
+  assert.deepEqual(calls, ['midgard', 'scheduled', 'blocks', 'prices']);
+  assert.equal(result.midgard_candidates.error, 'temporary Midgard failure');
+  assert.equal(result.block_scan.events, 2);
 });
 
 test('successful Dune Reserve ingestion still runs the scheduled settlement scanner', async () => {

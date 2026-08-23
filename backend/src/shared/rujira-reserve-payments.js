@@ -31,6 +31,12 @@ with canonical_events as (
 const DEFAULT_DASHBOARD_EVENT_LIMIT = 100;
 const DEFAULT_EVENT_PAGE_SIZE = 50;
 const MAX_EVENT_PAGE_SIZE = 200;
+const POST_HALT_CATCHUP_REPAIR = Object.freeze({
+  height: 27545366,
+  blockTime: '2026-08-23T10:33:08.290494566Z',
+  reserveAmountBase: '220940513333',
+  polAmountBase: '110470256667'
+});
 
 export const BASE_LAYER_REVENUE_COLLECTOR =
   'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
@@ -253,6 +259,34 @@ function extractFinalizeEvents(payload) {
   return [];
 }
 
+function extractTransactionResults(payload) {
+  const result = payload?.result || payload || {};
+  const candidates = [
+    result.txs_results,
+    result.tx_results,
+    result.result_finalize_block?.tx_results,
+    result.result_finalize_block?.txs_results,
+    payload?.result_finalize_block?.tx_results,
+    payload?.result_finalize_block?.txs_results
+  ];
+  return candidates.find((rows) => Array.isArray(rows)) || [];
+}
+
+function extractEventContexts(payload) {
+  const contexts = extractTransactionResults(payload)
+    .map((tx, txIndex) => ({ tx, txIndex }))
+    .filter(({ tx }) => Number(tx?.code || 0) === 0)
+    .map(({ tx, txIndex }) => ({
+      key: `tx_${txIndex}`,
+      events: Array.isArray(tx?.events) ? tx.events : []
+    }));
+  const finalizeEvents = extractFinalizeEvents(payload);
+  if (finalizeEvents.length > 0) {
+    contexts.push({ key: 'finalize_block', events: finalizeEvents });
+  }
+  return contexts;
+}
+
 function getBlockHeight(payload, fallbackHeight = 0) {
   return Number(
     fallbackHeight ||
@@ -383,95 +417,105 @@ function normalizePolPaymentEvent({ height, blockTime, index, amountBase, transf
 }
 
 export function parseRujiraReservePaymentBlock(height, blockPayload, options = {}) {
-  const events = extractFinalizeEvents(blockPayload);
   const blockHeight = getBlockHeight(blockPayload, height);
   const blockTime = getBlockTime(blockPayload, options.blockTime);
   const source = options.source || 'rpc';
-  const transfers = [];
-  const polTransfers = [];
-  const reserves = [];
-
-  for (const [index, event] of events.entries()) {
-    const attrs = attrsToObject(event);
-    if (event?.type === 'transfer' && isTargetReserveTransfer(attrs)) {
-      transfers.push({ index, attrs, event, amountBase: parseExplicitRuneAmount(attrs.amount) });
-    } else if (event?.type === 'transfer' && isTargetPolTransfer(attrs, blockHeight)) {
-      polTransfers.push({ index, attrs, event, amountBase: parseExplicitRuneAmount(attrs.amount) });
-    } else if (event?.type === 'reserve' && isTargetReserve(attrs)) {
-      reserves.push({ index, attrs, event, amountBase: parseReserveRuneAmount(attrs), used: false });
-    }
-  }
-
   const parsedEvents = [];
+  let transferCount = 0;
+  let reserveCount = 0;
+  let polTransferCount = 0;
   let matchedTransferCount = 0;
-  for (const transfer of transfers) {
-    const amountBase = transfer.amountBase;
-    const reserve = takeMatchingReserve(reserves, amountBase);
-    if (!reserve) {
-      continue;
-    }
-
-    const payment = normalizePaymentEvent({
-      height: blockHeight,
-      blockTime,
-      index: transfer.index,
-      amountBase,
-      transfer,
-      reserve,
-      source
-    });
-    if (!payment) {
-      continue;
-    }
-
-    matchedTransferCount += 1;
-    parsedEvents.push(payment);
-  }
-
   let reserveOnlyEventCount = 0;
-  for (const reserve of reserves) {
-    if (reserve.used) {
-      continue;
+
+  for (const context of extractEventContexts(blockPayload)) {
+    const transfers = [];
+    const polTransfers = [];
+    const reserves = [];
+
+    for (const [eventIndex, event] of context.events.entries()) {
+      const index = context.key === 'finalize_block' ? eventIndex : `${context.key}:${eventIndex}`;
+      const attrs = attrsToObject(event);
+      if (event?.type === 'transfer' && isTargetReserveTransfer(attrs)) {
+        transfers.push({ index, attrs, event, amountBase: parseExplicitRuneAmount(attrs.amount) });
+      } else if (event?.type === 'transfer' && isTargetPolTransfer(attrs, blockHeight)) {
+        polTransfers.push({ index, attrs, event, amountBase: parseExplicitRuneAmount(attrs.amount) });
+      } else if (event?.type === 'reserve' && isTargetReserve(attrs)) {
+        reserves.push({ index, attrs, event, amountBase: parseReserveRuneAmount(attrs), used: false });
+      }
     }
 
-    const payment = normalizePaymentEvent({
-      height: blockHeight,
-      blockTime,
-      index: reserve.index,
-      amountBase: reserve.amountBase,
-      transfer: null,
-      reserve,
-      source
-    });
-    if (!payment) {
-      continue;
+    transferCount += transfers.length;
+    reserveCount += reserves.length;
+    polTransferCount += polTransfers.length;
+
+    for (const transfer of transfers) {
+      const amountBase = transfer.amountBase;
+      const reserve = takeMatchingReserve(reserves, amountBase);
+      if (!reserve) {
+        continue;
+      }
+
+      const payment = normalizePaymentEvent({
+        height: blockHeight,
+        blockTime,
+        index: transfer.index,
+        amountBase,
+        transfer,
+        reserve,
+        source
+      });
+      if (!payment) {
+        continue;
+      }
+
+      matchedTransferCount += 1;
+      parsedEvents.push(payment);
     }
 
-    reserveOnlyEventCount += 1;
-    parsedEvents.push(payment);
-  }
+    for (const reserve of reserves) {
+      if (reserve.used) {
+        continue;
+      }
 
-  for (const transfer of polTransfers) {
-    parsedEvents.push(normalizePolPaymentEvent({
-      height: blockHeight,
-      blockTime,
-      index: transfer.index,
-      amountBase: transfer.amountBase,
-      transfer,
-      source
-    }));
+      const payment = normalizePaymentEvent({
+        height: blockHeight,
+        blockTime,
+        index: reserve.index,
+        amountBase: reserve.amountBase,
+        transfer: null,
+        reserve,
+        source
+      });
+      if (!payment) {
+        continue;
+      }
+
+      reserveOnlyEventCount += 1;
+      parsedEvents.push(payment);
+    }
+
+    for (const transfer of polTransfers) {
+      parsedEvents.push(normalizePolPaymentEvent({
+        height: blockHeight,
+        blockTime,
+        index: transfer.index,
+        amountBase: transfer.amountBase,
+        transfer,
+        source
+      }));
+    }
   }
 
   return {
     events: parsedEvents.filter((event) => event.height > 0 && event.block_time && event.amount_rune > 0),
     scan: {
       height: blockHeight,
-      transfer_event_count: transfers.length,
-      reserve_event_count: reserves.length,
+      transfer_event_count: transferCount,
+      reserve_event_count: reserveCount,
       matched_transfer_event_count: matchedTransferCount,
-      unmatched_transfer_event_count: transfers.length - matchedTransferCount,
+      unmatched_transfer_event_count: transferCount - matchedTransferCount,
       reserve_only_event_count: reserveOnlyEventCount,
-      pol_transfer_event_count: polTransfers.length,
+      pol_transfer_event_count: polTransferCount,
       matched_event_count: parsedEvents.length,
       source
     }
@@ -1050,6 +1094,62 @@ async function loadPendingBlocks(client, limit) {
   return rows;
 }
 
+async function ensurePostHaltCatchupRepairCandidate(client) {
+  const result = await client.query(
+    `insert into rujira_reserve_payment_blocks
+       (height, block_time, source, status, attempts, next_retry_at, error,
+        scan_json, fetched_at, updated_at)
+     select $1, $2, 'post-halt-catchup-repair', 'pending', 0, now(), '',
+            jsonb_build_object(
+              'repair', 'transaction-result-settlement-parser',
+              'reason', 'post-halt revenue schedule catch-up'
+            ),
+            null, now()
+     where not (
+       exists (
+         select 1
+         from rujira_reserve_payment_events
+         where height = $1
+           and payment_type = 'reserve'
+           and sender = $5
+           and recipient = $6
+           and amount_base = $3::numeric
+       )
+       and exists (
+         select 1
+         from rujira_reserve_payment_events
+         where height = $1
+           and payment_type = 'pol'
+           and sender = $5
+           and recipient = $7
+           and amount_base = $4::numeric
+       )
+     )
+     on conflict (height)
+     do update set
+       block_time = coalesce(rujira_reserve_payment_blocks.block_time, excluded.block_time),
+       source = excluded.source,
+       status = 'pending',
+       attempts = 0,
+       next_retry_at = now(),
+       error = '',
+       scan_json = coalesce(rujira_reserve_payment_blocks.scan_json, '{}'::jsonb)
+         || excluded.scan_json,
+       fetched_at = null,
+       updated_at = now()`,
+    [
+      POST_HALT_CATCHUP_REPAIR.height,
+      POST_HALT_CATCHUP_REPAIR.blockTime,
+      POST_HALT_CATCHUP_REPAIR.reserveAmountBase,
+      POST_HALT_CATCHUP_REPAIR.polAmountBase,
+      BASE_LAYER_REVENUE_COLLECTOR,
+      TC_RESERVE_MODULE,
+      THORCHAIN_POL_FUND
+    ]
+  );
+  return Number(result.rowCount) || 0;
+}
+
 function retryDelaySeconds(attempts) {
   const attempt = Math.max(1, Number(attempts) || 1);
   return Math.min(30 * 60, 60 * Math.pow(2, Math.min(attempt - 1, 5)));
@@ -1085,12 +1185,14 @@ export async function processRujiraReservePaymentBlocks(client, options = {}) {
     };
   }
 
+  const repairCandidates = await ensurePostHaltCatchupRepairCandidate(client);
   const blocks = await loadPendingBlocks(client, limit);
   const stats = {
     selected: blocks.length,
     fetched: 0,
     errored: 0,
-    events: 0
+    events: 0,
+    repair_candidates: repairCandidates
   };
 
   for (const row of blocks) {
@@ -1803,17 +1905,45 @@ async function runRujiraReservePaymentsLegacyIngestion(client, initialStats = {}
   return stats;
 }
 
-async function runRujiraReservePaymentsScheduledSettlementIngestion(client, initialStats = {}) {
+export async function runRujiraReservePaymentsScheduledSettlementIngestion(
+  client,
+  initialStats = {},
+  options = {}
+) {
   const stats = {
     ...initialStats,
+    midgard_candidates: null,
     scheduled_candidates: null,
     block_scan: null,
     pricing: null,
     provider_cooldown: Boolean(initialStats.provider_cooldown)
   };
 
+  const ingestMidgardCandidates = options.ingestMidgardCandidates
+    || ingestRujiraReservePaymentMidgardCandidates;
+  const ingestScheduledCandidates = options.ingestScheduledCandidates
+    || ingestRujiraReservePaymentScheduledCandidates;
+  const processBlocks = options.processBlocks || processRujiraReservePaymentBlocks;
+  const refreshPrices = options.refreshPrices || refreshRujiraReservePaymentPrices;
+
   try {
-    stats.scheduled_candidates = await ingestRujiraReservePaymentScheduledCandidates(client);
+    // Dune covers historical Reserve payments but not the POL leg. Keep a
+    // bounded recent action scan so direct collector executions missed by the
+    // websocket listener still become RPC block candidates.
+    stats.midgard_candidates = await ingestMidgardCandidates(client, { maxPages: 1 });
+  } catch (error) {
+    const rateLimited = isProviderRateLimit(error);
+    stats.provider_cooldown ||= rateLimited;
+    stats.midgard_candidates = {
+      error: error.message,
+      ...(rateLimited
+        ? { rate_limited_until: await putCooldown(client, ACTION_SYNC_KEY, error) }
+        : {})
+    };
+  }
+
+  try {
+    stats.scheduled_candidates = await ingestScheduledCandidates(client);
   } catch (error) {
     if (!isProviderRateLimit(error)) throw error;
     stats.provider_cooldown = true;
@@ -1824,7 +1954,7 @@ async function runRujiraReservePaymentsScheduledSettlementIngestion(client, init
   }
 
   try {
-    stats.block_scan = await processRujiraReservePaymentBlocks(client);
+    stats.block_scan = await processBlocks(client);
   } catch (error) {
     if (!isProviderRateLimit(error)) throw error;
     stats.provider_cooldown = true;
@@ -1834,7 +1964,7 @@ async function runRujiraReservePaymentsScheduledSettlementIngestion(client, init
     };
   }
 
-  stats.pricing = await refreshRujiraReservePaymentPrices(client);
+  stats.pricing = await refreshPrices(client);
   return stats;
 }
 

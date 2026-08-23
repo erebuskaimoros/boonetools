@@ -357,7 +357,6 @@ start_persistent_services() {
 prime_read_models() {
   local prime_units=(
     boonetools-rujira-base-fees.service
-    boonetools-rujira-reserve-payments.service
     boonetools-analytics-read-models.service
     boonetools-node-votes-summary.service
     boonetools-rapid-swaps-market-history.service
@@ -370,6 +369,9 @@ prime_read_models() {
     boonetools-wasm-arb-economics-oracle.service
   )
   local unit
+  # Settlement ingestion must precede the App Layer earnings snapshot so any
+  # requeued catch-up payment is conserved in 01 during this deployment.
+  prime_read_model_unit "boonetools-rujira-reserve-payments.service"
   refresh_core_and_app_layer_models
   for unit in "${prime_units[@]}"; do
     prime_read_model_unit "$unit"

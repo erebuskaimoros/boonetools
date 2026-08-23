@@ -249,6 +249,10 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(remoteDeployScript, /refresh_core_and_app_layer_models/);
   assert.match(
     remoteDeployScript,
+    /prime_read_models\(\)[\s\S]*prime_read_model_unit "boonetools-rujira-reserve-payments\.service"[\s\S]*refresh_core_and_app_layer_models/
+  );
+  assert.match(
+    remoteDeployScript,
     /prime_read_models[\s\S]*boonetools-wasm-arb-economics\.service[\s\S]*refresh_status_models_after_long_primes[\s\S]*boonetools-analytics-read-models\.service/
   );
   assert.match(remoteDeployScript, /has no future trigger/);
