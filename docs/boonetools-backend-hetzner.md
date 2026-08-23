@@ -345,15 +345,15 @@ field. The gross legacy Reserve POL total comes from `runepool.pol.value`; its
 per-pool rows apply THORNode's rounded safe-share calculation to Reserve-module
 LP units and RUNE depth, double the share, and must reconcile to that total.
 
-Both scheduled and default backfill runs use `POL_TRACKER_HEAD_LAG_DAYS=1`, so
-the archive provider has a full extra UTC day to reach each requested day-end
-height. An explicit backfill end date still overrides that safety lag. If the
-current scheduled target cannot be resolved, the job first republishes the
-last-good model with an explicit missing day, then exits unsuccessfully so
-systemd retries it every 15 minutes. `/pol-tracker` compares its latest source
-day with that lag-adjusted target, so republishing old rows cannot reset the
-dashboard to healthy; `target_end_date`, coverage, warnings, and `stale` expose
-the gap until the target day succeeds.
+Scheduled and default backfill runs use `POL_TRACKER_HEAD_LAG_DAYS=0`, so the
+target is the latest completed UTC day. Raise the value only when a configured
+archive provider consistently trails day-end state; an explicit backfill end
+date still overrides the lag. If the current scheduled target cannot be
+resolved, the job first republishes the last-good model with an explicit
+missing day, then exits unsuccessfully so systemd retries it every 15 minutes.
+`/pol-tracker` compares its latest source day with that target, so republishing
+old rows cannot reset the dashboard to healthy; `target_end_date`, coverage,
+warnings, and `stale` expose the gap until the target day succeeds.
 
 Migration `049_system_income_burn_tracker.sql` adds route-specific daily RUNE
 burn history and resumable sync state. `boonetools-burn-tracker.timer` refreshes

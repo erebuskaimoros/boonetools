@@ -528,6 +528,31 @@ test('scheduled POL job publishes before failing an incomplete current target fo
   assert.deepEqual(calls, ['ingest', 'publish', 'build']);
 });
 
+test('scheduled POL job targets the latest completed UTC day by default', async () => {
+  const calls = [];
+  await runPolTrackerScheduler({
+    now: new Date('2026-08-23T21:00:00Z'),
+    lockRunner: async (_key, callback) => callback({ id: 'db' }),
+    ingest: async (_client, options) => {
+      calls.push({ type: 'ingest', startDate: options.startDate, endDate: options.endDate });
+      return { target_end_day_complete: true };
+    },
+    publish: async (options) => {
+      await options.build();
+      return { ok: true };
+    },
+    buildReadModel: async (_client, options) => {
+      calls.push({ type: 'build', startDate: options.startDate, endDate: options.endDate });
+      return { payload: {} };
+    }
+  });
+
+  assert.deepEqual(calls, [
+    { type: 'ingest', startDate: '2026-08-16', endDate: '2026-08-22' },
+    { type: 'build', startDate: '2025-02-01', endDate: '2026-08-22' }
+  ]);
+});
+
 test('scheduled and manual POL jobs lag archive ingestion by one completed UTC day', async () => {
   const calls = [];
   const client = { id: 'db' };

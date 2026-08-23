@@ -41,10 +41,12 @@ day as unavailable and continues later anchors. It never substitutes another
 height or persists an approximate row; unrelated provider and 5xx failures
 still retry and fail normally.
 
-The scheduled job treats the lag-adjusted end day as its liveness watermark.
-It can publish last-good history after an RPC range mismatch, but reports the
-current target incomplete and lets systemd retry after 15 minutes. Older gaps
-do not keep the job failing once the newest target day is complete. The public
-handler independently compares the stored source day with the expected target
-and expands coverage for any unpublished days, preventing a recent republish
+The scheduled job targets the latest completed UTC day by default and treats
+that end day as its liveness watermark. `POL_TRACKER_HEAD_LAG_DAYS` can still
+apply an explicit archive-provider lag when needed. The job can publish
+last-good history after an RPC range mismatch, but reports the current target
+incomplete and lets systemd retry after 15 minutes. Older gaps do not keep the
+job failing once the newest target day is complete. The public handler
+independently compares the stored source day with the expected target and
+expands coverage for any unpublished days, preventing a recent republish
 timestamp from making old source data appear `READY` or 100% covered.

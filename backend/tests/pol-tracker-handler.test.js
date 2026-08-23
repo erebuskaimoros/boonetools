@@ -89,11 +89,11 @@ test('POL Tracker handler marks a recently republished source-day lag stale', as
 
   assert.equal(result.status, 200);
   assert.equal(result.body.stale, true);
-  assert.equal(result.body.target_end_date, '2026-08-19');
-  assert.equal(result.body.coverage.expected_days, 565);
+  assert.equal(result.body.target_end_date, '2026-08-20');
+  assert.equal(result.body.coverage.expected_days, 566);
   assert.equal(result.body.coverage.observed_days, 564);
-  assert.equal(result.body.coverage.missing_days, 1);
-  assert.match(result.body.warnings.join(' '), /source is 1 day behind/i);
+  assert.equal(result.body.coverage.missing_days, 2);
+  assert.match(result.body.warnings.join(' '), /source is 2 days behind/i);
   assert.equal(result.body.read_model.stale, true);
   assert.equal(result.headers['X-Boone-Cache'], 'stale');
 });

@@ -204,7 +204,7 @@ export const config = Object.freeze({
   polTrackerTimeoutMs: readInt('POL_TRACKER_TIMEOUT_MS', 12_000),
   polTrackerAnchorBatchDays: readInt('POL_TRACKER_ANCHOR_BATCH_DAYS', 31),
   polTrackerRecentLookbackDays: readInt('POL_TRACKER_RECENT_LOOKBACK_DAYS', 7),
-  polTrackerHeadLagDays: readInt('POL_TRACKER_HEAD_LAG_DAYS', 1),
+  polTrackerHeadLagDays: readInt('POL_TRACKER_HEAD_LAG_DAYS', 0),
   polTrackerRetryAttempts: readInt('POL_TRACKER_RETRY_ATTEMPTS', 4),
   polTrackerRetryBaseDelayMs: readInt('POL_TRACKER_RETRY_BASE_DELAY_MS', 1000),
   polTrackerRetryMaxDelayMs: readInt('POL_TRACKER_RETRY_MAX_DELAY_MS', 30_000),
