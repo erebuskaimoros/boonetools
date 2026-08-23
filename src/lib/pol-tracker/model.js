@@ -1,8 +1,8 @@
 export const POL_TRACKER_RANGES = Object.freeze([
   { id: '30d', label: '30D', days: 30 },
   { id: '90d', label: '90D', days: 90 },
-  { id: '1y', label: '1Y', days: 365 },
-  { id: 'all', label: 'ALL', days: null }
+  { id: '180d', label: '180D', days: 180 },
+  { id: 'all', label: 'ALL TIME', days: null }
 ]);
 
 export const POL_TRACKER_SERIES = Object.freeze([
@@ -85,6 +85,26 @@ export function selectPolTrackerRange(rows = [], rangeId = 'all') {
     || POL_TRACKER_RANGES.at(-1);
   if (!range.days || ordered.length <= range.days) return ordered;
   return ordered.slice(-range.days);
+}
+
+export function projectPolTrackerChartSelection(options = {}) {
+  const count = Math.max(0, Math.trunc(Number(options.rowCount)) || 0);
+  const left = Number(options.plotLeft);
+  const right = Number(options.plotRight);
+  const first = Number(options.startX);
+  const last = Number(options.endX);
+  if (count < 2 || ![left, right, first, last].every(Number.isFinite) || right <= left) return null;
+
+  const clamp = (value) => Math.max(left, Math.min(right, value));
+  const selectionLeft = Math.min(clamp(first), clamp(last));
+  const selectionRight = Math.max(clamp(first), clamp(last));
+  if (selectionRight - selectionLeft < Math.max(0, Number(options.minDrag ?? 12) || 0)) return null;
+
+  const span = right - left;
+  const startIndex = Math.round(((selectionLeft - left) / span) * (count - 1));
+  const endIndex = Math.round(((selectionRight - left) / span) * (count - 1));
+  if (endIndex <= startIndex) return null;
+  return { startIndex, endIndex };
 }
 
 function niceCeiling(value) {

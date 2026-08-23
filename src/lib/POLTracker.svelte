@@ -10,6 +10,7 @@
     formatPolTrackerRune,
     formatPolTrackerUsd,
     normalizePolTrackerPayload,
+    projectPolTrackerChartSelection,
     relevantPolTrackerPools,
     selectPolTrackerRange,
     totalPolTrackerValue
@@ -22,10 +23,21 @@
   let loadError = '';
   let rangeId = 'all';
   let hoverIndex = -1;
+  let zoomStartDay = '';
+  let zoomEndDay = '';
+  let selecting = false;
+  let selectionStartX = null;
+  let selectionEndX = null;
   let refreshTimer;
 
   $: dashboard = normalizePolTrackerPayload(payload || {});
-  $: rows = selectPolTrackerRange(dashboard.daily, rangeId);
+  $: rangeRows = selectPolTrackerRange(dashboard.daily, rangeId);
+  $: rows = zoomStartDay && zoomEndDay
+    ? rangeRows.filter((row) => row.day >= zoomStartDay && row.day <= zoomEndDay)
+    : rangeRows;
+  $: isZoomed = Boolean(zoomStartDay && zoomEndDay && rows.length > 1) && (
+    rows[0]?.day !== rangeRows[0]?.day || rows.at(-1)?.day !== rangeRows.at(-1)?.day
+  );
   $: chartGroup = POL_TRACKER_GROUPS[0];
   $: chart = buildPolTrackerChart(rows, chartGroup.id);
   $: hovered = hoverIndex >= 0 ? rows[hoverIndex] || null : null;
@@ -64,14 +76,94 @@
 
   function setRange(nextRange) {
     rangeId = nextRange;
+    resetZoom();
+  }
+
+  function resetZoom() {
+    zoomStartDay = '';
+    zoomEndDay = '';
     hoverIndex = -1;
+    selecting = false;
+    selectionStartX = null;
+    selectionEndX = null;
   }
 
   function updateHover(event) {
-    if (!rows.length) return;
+    if (selecting || !rows.length) return;
     const bounds = event.currentTarget.getBoundingClientRect();
     const relative = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
     hoverIndex = Math.round(relative * Math.max(0, rows.length - 1));
+  }
+
+  function pointerChartX(event) {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const relative = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    return chart.plot.left + (relative * (chart.plot.right - chart.plot.left));
+  }
+
+  function startZoomSelection(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    event.preventDefault();
+    hoverIndex = -1;
+    selecting = true;
+    selectionStartX = pointerChartX(event);
+    selectionEndX = selectionStartX;
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture is optional; the selection still works inside the chart.
+    }
+  }
+
+  function updateChartPointer(event) {
+    if (!selecting) {
+      updateHover(event);
+      return;
+    }
+    selectionEndX = pointerChartX(event);
+  }
+
+  function finishZoomSelection(event) {
+    if (!selecting) return;
+    selectionEndX = pointerChartX(event);
+    selecting = false;
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // The browser may already have released this pointer.
+    }
+
+    const selection = projectPolTrackerChartSelection({
+      rowCount: rows.length,
+      plotLeft: chart.plot.left,
+      plotRight: chart.plot.right,
+      startX: selectionStartX,
+      endX: selectionEndX
+    });
+    selectionStartX = null;
+    selectionEndX = null;
+    if (!selection) return;
+
+    const selectedRows = rows.slice(selection.startIndex, selection.endIndex + 1);
+    if (selectedRows.length < 2) return;
+    if (selectedRows.length === rangeRows.length) {
+      resetZoom();
+      return;
+    }
+    zoomStartDay = selectedRows[0].day;
+    zoomEndDay = selectedRows.at(-1).day;
+    hoverIndex = -1;
+  }
+
+  function cancelZoomSelection(event) {
+    selecting = false;
+    selectionStartX = null;
+    selectionEndX = null;
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // The browser may already have released this pointer.
+    }
   }
 
   function axisDate(value) {
@@ -170,6 +262,11 @@
       {#each POL_TRACKER_RANGES as range}
         <button class:active={rangeId === range.id} on:click={() => setRange(range.id)}>{range.label}</button>
       {/each}
+      <span class="zoom-hint">DRAG TO ZOOM · DOUBLE-CLICK RESET</span>
+      {#if isZoomed}
+        <span class="zoom-window">{axisDate(rows[0]?.day)} — {axisDate(rows.at(-1)?.day)}</span>
+        <button class="zoom-reset" on:click={resetZoom}>[R] RESET</button>
+      {/if}
       <span class="selected-day">CURSOR {fullDate(selected?.day)}</span>
     </div>
 
@@ -193,7 +290,12 @@
 
       <div class="chart-scroll">
         <div class="chart-canvas">
-          <svg viewBox={`0 0 ${chart.width} ${chart.height}`} role="img" aria-label={`${chartGroup.title} daily stacked USD area chart`}>
+          <svg
+            viewBox={`0 0 ${chart.width} ${chart.height}`}
+            role="img"
+            aria-label={`${chartGroup.title} daily stacked USD area chart. Drag horizontally to zoom; double-click to reset.`}
+            on:dblclick={resetZoom}
+          >
             {#each chart.yTicks as tick}
               <line x1={chart.plot.left} x2={chart.plot.right} y1={tick.y} y2={tick.y} class="grid-line" />
               <text x={chart.plot.left - 10} y={tick.y + 4} text-anchor="end" class="axis-label">
@@ -216,15 +318,28 @@
                 class="cursor-line"
               />
             {/if}
+            {#if selecting && selectionStartX !== null && selectionEndX !== null}
+              <rect
+                x={Math.min(selectionStartX, selectionEndX)}
+                y={chart.plot.top}
+                width={Math.abs(selectionEndX - selectionStartX)}
+                height={chart.plot.bottom - chart.plot.top}
+                class="zoom-selection"
+              />
+            {/if}
             <rect
               role="presentation"
+              class="zoom-capture"
               x={chart.plot.left}
               y={chart.plot.top}
               width={chart.plot.right - chart.plot.left}
               height={chart.plot.bottom - chart.plot.top}
               fill="transparent"
-              on:mousemove={updateHover}
-              on:mouseleave={() => { hoverIndex = -1; }}
+              on:pointerdown={startZoomSelection}
+              on:pointermove={updateChartPointer}
+              on:pointerup={finishZoomSelection}
+              on:pointercancel={cancelZoomSelection}
+              on:mouseleave={() => { if (!selecting) hoverIndex = -1; }}
             />
           </svg>
           {#if hovered}
@@ -364,9 +479,12 @@
   .metric--total .metric-label, .metric--total strong { color: #00cc66; }
   .metric--total small { color: #7fc49f; }
 
-  .range-bar { gap: 6px; padding: 10px 0; color: #777; font-size: 10px; }
+  .range-bar { flex-wrap: wrap; gap: 6px; padding: 10px 0; color: #777; font-size: 10px; }
   .range-bar button { min-width: 48px; padding: 6px 9px; font-size: 10px; }
-  .selected-day { margin-left: auto; color: #c8c8c8; }
+  .zoom-hint { margin-left: auto; color: #777; }
+  .zoom-window { color: #d8d8d8; }
+  .range-bar .zoom-reset { color: #00cc66; border-color: rgba(0, 204, 102, .45); }
+  .selected-day { color: #c8c8c8; }
 
   .chart-panel, .table-panel, .method-panel { border: 1px solid #1a1a1a; background: #080808; margin-top: 12px; }
   .panel-heading { justify-content: space-between; gap: 18px; padding: 13px 15px; border-bottom: 1px solid #1a1a1a; }
@@ -381,6 +499,8 @@
   .grid-line { stroke: #171717; stroke-width: 1; vector-effect: non-scaling-stroke; }
   .axis-label { fill: #777; font: 10px 'JetBrains Mono', monospace; }
   .cursor-line { stroke: #555; stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+  .zoom-selection { fill: rgba(0, 204, 102, .12); stroke: #00cc66; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .zoom-capture { cursor: crosshair; touch-action: none; }
   .chart-tooltip {
     position: absolute;
     z-index: 2;
@@ -427,7 +547,8 @@
 
   @media (max-width: 520px) {
     .metric-grid { grid-template-columns: 1fr; }
-    .selected-day { display: none; }
+    .zoom-hint, .selected-day { display: none; }
+    .range-bar .zoom-reset { margin-left: auto; }
     .header-state { width: 100%; justify-content: space-between; }
   }
 </style>
