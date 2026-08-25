@@ -23,6 +23,7 @@
   let refreshing = false;
   let loadError = '';
   let rangeId = '90d';
+  let chartUnit = 'rune';
   let showPrice = false;
   let zoomWindow = null;
   let chartCanvas;
@@ -42,6 +43,7 @@
     await tick();
     if (!chartCanvas || !rows.length) return;
     chart = renderBurnTrackerChart(chartCanvas, chart, rows, {
+      unit: chartUnit,
       showPrice,
       onZoom(range) { zoomWindow = range; }
     });
@@ -79,6 +81,13 @@
 
   async function selectRange(range) {
     rangeId = range;
+    zoomWindow = null;
+    await drawChart();
+  }
+
+  async function selectChartUnit(unit) {
+    if (unit === chartUnit) return;
+    chartUnit = unit;
     zoomWindow = null;
     await drawChart();
   }
@@ -186,7 +195,10 @@
       <div>
         <span class="section-index">[01]</span>
         <h2 id="burn-chart-title">DAILY + CUMULATIVE BURN</h2>
-        <p>UTC daily route burn with an all-time anchored cumulative series.</p>
+        <p>
+          UTC daily route burn with an all-time anchored cumulative series
+          {chartUnit === 'usd' ? 'valued at the historical price when burned' : 'measured in RUNE'}.
+        </p>
       </div>
       {#if currentDay?.partial}
         <span class="live-badge"><i></i> LIVE PARTIAL · {currentDay.day}</span>
@@ -209,6 +221,22 @@
             >[{range.label}]</button>
           {/each}
         </div>
+        <div class="unit-group" role="group" aria-label="Chart unit">
+          <button
+            class:active={chartUnit === 'usd'}
+            aria-label="Show burn values in US dollars"
+            aria-pressed={chartUnit === 'usd'}
+            title="US dollars"
+            on:click={() => selectChartUnit('usd')}
+          >$</button>
+          <button
+            class:active={chartUnit === 'rune'}
+            aria-label="Show burn values in RUNE"
+            aria-pressed={chartUnit === 'rune'}
+            title="RUNE"
+            on:click={() => selectChartUnit('rune')}
+          >ᚱ</button>
+        </div>
         <button
           class="price-toggle"
           class:active={showPrice}
@@ -226,7 +254,7 @@
       <div class="chart-wrap">
         <canvas
           bind:this={chartCanvas}
-          aria-label="Daily RUNE burned as bars and cumulative RUNE burned as a line. Optional RUNE price can be enabled."
+          aria-label={`Daily burn in ${chartUnit === 'usd' ? 'US dollars' : 'RUNE'} as bars and cumulative burn as a line. Optional RUNE price can be enabled.`}
           on:dblclick={resetZoom}
         ></canvas>
       </div>
@@ -235,8 +263,8 @@
     {/if}
 
     <div class="chart-foot">
-      <span>DAILY <b class="green">■</b></span>
-      <span>CUMULATIVE <b class="amber">━</b></span>
+      <span>DAILY {chartUnit === 'usd' ? '$' : 'ᚱ'} <b class="green">■</b></span>
+      <span>CUMULATIVE {chartUnit === 'usd' ? '$' : 'ᚱ'} <b class="amber">━</b></span>
       <span class:muted={!showPrice}>RUNE / USD <b class="blue">┄</b></span>
       <span class="source">SOURCE · LIQUIFY MIDGARD + PER-BLOCK REWARDS</span>
     </div>
@@ -288,6 +316,7 @@
   .chart-controls,
   .control-actions,
   .range-group,
+  .unit-group,
   .chart-foot,
   .methodology {
     display: flex;
@@ -481,6 +510,8 @@
   .control-label { color: var(--term-accent); font-weight: 700; letter-spacing: 0.1em; }
   .control-actions { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   .range-group { gap: 4px; }
+  .unit-group { gap: 3px; }
+  .unit-group button { min-width: 36px; }
 
   .chart-controls button {
     min-height: 36px;

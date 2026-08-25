@@ -9,7 +9,12 @@ import {
 Chart.register(zoomPlugin);
 
 const rune = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
-const usd = new Intl.NumberFormat('en-US', {
+const usdBurn = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  maximumFractionDigits: 2
+});
+const usdPrice = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
   maximumFractionDigits: 4
@@ -54,6 +59,7 @@ export function renderBurnTrackerChart(canvas, previous, rows = [], options = {}
   previous?.destroy();
   if (!canvas) return null;
   const showPrice = Boolean(options.showPrice);
+  const showUsd = options.unit === 'usd';
   const labels = rows.map((row) => row.day);
   const chart = new Chart(canvas.getContext('2d'), {
     type: 'bar',
@@ -63,7 +69,7 @@ export function renderBurnTrackerChart(canvas, previous, rows = [], options = {}
         {
           type: 'bar',
           label: 'DAILY BURN',
-          data: rows.map((row) => row.burnedRune),
+          data: rows.map((row) => showUsd ? row.burnedUsd : row.burnedRune),
           backgroundColor: rows.map((row) => row.partial ? 'rgba(0, 204, 102, 0.16)' : 'rgba(0, 204, 102, 0.34)'),
           borderColor: TERMINAL_CHART_PALETTE.accent,
           borderWidth: 1,
@@ -74,7 +80,7 @@ export function renderBurnTrackerChart(canvas, previous, rows = [], options = {}
         {
           type: 'line',
           label: 'CUMULATIVE BURN',
-          data: rows.map((row) => row.cumulativeBurnedRune),
+          data: rows.map((row) => showUsd ? row.cumulativeBurnedUsd : row.cumulativeBurnedRune),
           borderColor: TERMINAL_CHART_PALETTE.amber,
           backgroundColor: 'rgba(212, 160, 23, 0.05)',
           borderWidth: 2,
@@ -132,8 +138,10 @@ export function renderBurnTrackerChart(canvas, previous, rows = [], options = {}
             label(context) {
               if (context.raw === null) return `${context.dataset.label}: unavailable`;
               return context.dataset.yAxisID === 'price'
-                ? `${context.dataset.label}: ${usd.format(Number(context.raw))}`
-                : `${context.dataset.label}: ${rune.format(Number(context.raw))} RUNE`;
+                ? `${context.dataset.label}: ${usdPrice.format(Number(context.raw))}`
+                : showUsd
+                  ? `${context.dataset.label}: ${usdBurn.format(Number(context.raw))}`
+                  : `${context.dataset.label}: ${rune.format(Number(context.raw))} ᚱ`;
             },
             afterBody(items) {
               return rows[items[0]?.dataIndex]?.partial ? ['LIVE PARTIAL UTC DAY'] : [];
@@ -178,16 +186,16 @@ export function renderBurnTrackerChart(canvas, previous, rows = [], options = {}
           position: 'left',
           grid: { color: TERMINAL_CHART_PALETTE.grid },
           border: { color: TERMINAL_CHART_PALETTE.border },
-          title: { display: true, text: 'DAILY RUNE', color: TERMINAL_CHART_PALETTE.accent, font: terminalChartFont(11) },
-          ticks: { color: TERMINAL_CHART_PALETTE.accent, font: terminalChartFont(11), callback: (value) => compact(value) }
+          title: { display: true, text: showUsd ? 'DAILY $' : 'DAILY ᚱ', color: TERMINAL_CHART_PALETTE.accent, font: terminalChartFont(11) },
+          ticks: { color: TERMINAL_CHART_PALETTE.accent, font: terminalChartFont(11), callback: (value) => compact(value, showUsd ? '$' : '') }
         },
         cumulative: {
           beginAtZero: false,
           position: 'right',
           grid: { drawOnChartArea: false },
           border: { color: TERMINAL_CHART_PALETTE.border },
-          title: { display: true, text: 'CUMULATIVE RUNE', color: TERMINAL_CHART_PALETTE.amber, font: terminalChartFont(11) },
-          ticks: { color: TERMINAL_CHART_PALETTE.amber, font: terminalChartFont(11), callback: (value) => compact(value) }
+          title: { display: true, text: showUsd ? 'CUMULATIVE $' : 'CUMULATIVE ᚱ', color: TERMINAL_CHART_PALETTE.amber, font: terminalChartFont(11) },
+          ticks: { color: TERMINAL_CHART_PALETTE.amber, font: terminalChartFont(11), callback: (value) => compact(value, showUsd ? '$' : '') }
         },
         price: {
           display: showPrice,

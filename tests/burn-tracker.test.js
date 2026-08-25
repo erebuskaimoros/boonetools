@@ -12,9 +12,10 @@ import {
 } from '../src/lib/burn-tracker/model.js';
 
 test('Burn Tracker is directly routable and visible in navigation', async () => {
-  const [appSource, trackerSource] = await Promise.all([
+  const [appSource, trackerSource, chartSource] = await Promise.all([
     readFile(new URL('../src/App.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lib/BurnTracker.svelte', import.meta.url), 'utf8')
+    readFile(new URL('../src/lib/BurnTracker.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('../src/lib/burn-tracker/charts.js', import.meta.url), 'utf8')
   ]);
   const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
   assert.match(appSource, /path: "burn-tracker"/);
@@ -28,6 +29,13 @@ test('Burn Tracker is directly routable and visible in navigation', async () => 
   assert.match(trackerSource, /LIVE PARTIAL/);
   assert.match(trackerSource, /subscribeChainHeads/);
   assert.match(trackerSource, /PER-BLOCK REWARDS/);
+  assert.match(trackerSource, /aria-label="Chart unit"/);
+  assert.match(trackerSource, /aria-label="Show burn values in US dollars"/);
+  assert.match(trackerSource, /aria-label="Show burn values in RUNE"/);
+  assert.match(trackerSource, />\$<\/button>/);
+  assert.match(trackerSource, />ᚱ<\/button>/);
+  assert.match(chartSource, /showUsd \? row\.burnedUsd : row\.burnedRune/);
+  assert.match(chartSource, /showUsd \? row\.cumulativeBurnedUsd : row\.cumulativeBurnedRune/);
 });
 
 test('Burn Tracker exposes 30, 90, 180 day, and all-time presets with 90 days as the default selector', () => {
@@ -66,6 +74,28 @@ test('Burn Tracker normalization preserves missing gaps, partial days, and all-t
   assert.equal(dashboard.daily[2].cumulativeBurnedRune, null);
   assert.equal(formatBurnTrackerRate(dashboard.burnRatePercent), '5.00%');
   assert.equal(formatBurnTrackerRuneBase('100000000'), '1.00');
+});
+
+test('Burn Tracker derives daily and all-time anchored cumulative USD burn values', () => {
+  const dashboard = normalizeBurnTrackerPayload({
+    daily: [
+      { day: '2026-08-20', burn_e8: '200000000', cumulative_burn_e8: '200000000', rune_price_usd: '3' },
+      { day: '2026-08-21', burn_e8: '100000000', cumulative_burn_e8: '300000000', rune_price_usd: '4' },
+      { day: '2026-08-22', burn_e8: '0', cumulative_burn_e8: '300000000', rune_price_usd: null },
+      { day: '2026-08-23', burn_e8: '100000000', cumulative_burn_e8: '400000000', rune_price_usd: null },
+      { day: '2026-08-24', burn_e8: '100000000', cumulative_burn_e8: '500000000', rune_price_usd: '5' }
+    ]
+  });
+  assert.equal(dashboard.daily[0].burnedUsd, 6);
+  assert.equal(dashboard.daily[0].cumulativeBurnedUsd, 6);
+  assert.equal(dashboard.daily[1].burnedUsd, 4);
+  assert.equal(dashboard.daily[1].cumulativeBurnedUsd, 10);
+  assert.equal(dashboard.daily[2].burnedUsd, 0);
+  assert.equal(dashboard.daily[2].cumulativeBurnedUsd, 10);
+  assert.equal(dashboard.daily[3].burnedUsd, null);
+  assert.equal(dashboard.daily[3].cumulativeBurnedUsd, null);
+  assert.equal(dashboard.daily[4].burnedUsd, 5);
+  assert.equal(dashboard.daily[4].cumulativeBurnedUsd, null);
 });
 
 test('Burn Tracker applies each streamed block once and advances its live height', () => {

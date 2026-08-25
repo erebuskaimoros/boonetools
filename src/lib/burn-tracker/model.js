@@ -42,6 +42,20 @@ export function normalizeBurnTrackerPayload(payload = {}) {
     }))
     .filter((row) => row.day)
     .sort((left, right) => left.day.localeCompare(right.day));
+  let cumulativeBurnedUsd = 0;
+  let cumulativeUsdComplete = true;
+  for (const row of daily) {
+    row.burnedUsd = row.burnedRune === null
+      ? null
+      : row.burnedRune === 0
+        ? 0
+        : row.runePriceUsd === null
+          ? null
+          : row.burnedRune * row.runePriceUsd;
+    if (row.burnedUsd === null) cumulativeUsdComplete = false;
+    else cumulativeBurnedUsd += row.burnedUsd;
+    row.cumulativeBurnedUsd = cumulativeUsdComplete ? cumulativeBurnedUsd : null;
+  }
   return {
     asOf: payload.as_of || null,
     stale: Boolean(payload.stale),
