@@ -54,7 +54,8 @@ function normalizeCoverage(value = {}, expectedDays = 0) {
   };
 }
 
-function normalizePeriodMetric(value = {}, period) {
+function normalizePeriodMetric(value = {}, period, volumeDepthScale = 1) {
+  const volumeDepthPercent = finite(value.volume_depth_percent);
   return {
     id: period.id,
     days: period.days,
@@ -63,7 +64,7 @@ function normalizePeriodMetric(value = {}, period) {
     periodFeesBase: baseString(value.fees_rune_e8),
     periodFeesUsd: finite(value.fees_usd),
     feeVolumePercent: finite(value.fee_volume_percent),
-    volumeDepthPercent: finite(value.volume_depth_percent),
+    volumeDepthPercent: volumeDepthPercent === null ? null : volumeDepthPercent * volumeDepthScale,
     annualizedFeesRune: finite(value.annualized_fees_rune),
     annualizedFeesUsd: finite(value.annualized_fees_usd),
     annualizedFeeRatePercent: finite(value.annualized_fee_rate_percent),
@@ -87,6 +88,7 @@ export function normalizePoolAnalysisSummary(payload = {}) {
   const pools = (Array.isArray(payload.pools) ? payload.pools : []).map((pool) => {
     const oneSidedDepthUsd = finite(pool.depth_usd);
     const totalDepthUsd = finite(pool.total_depth_usd);
+    const volumeDepthScale = totalDepthUsd === null ? 0.5 : 1;
     const legacy30d = {
       volume_rune_e8: pool.period_volume_rune_e8,
       volume_usd: pool.period_volume_usd,
@@ -101,7 +103,11 @@ export function normalizePoolAnalysisSummary(payload = {}) {
     };
     const periodMetrics = Object.fromEntries(POOL_ANALYSIS_TABLE_PERIODS.map((period) => [
       period.id,
-      normalizePeriodMetric(pool.period_metrics?.[period.id] || (period.id === '30d' ? legacy30d : {}), period)
+      normalizePeriodMetric(
+        pool.period_metrics?.[period.id] || (period.id === '30d' ? legacy30d : {}),
+        period,
+        volumeDepthScale
+      )
     ]));
     return selectPoolAnalysisPeriod({
       asset: String(pool.asset || '').toUpperCase(),

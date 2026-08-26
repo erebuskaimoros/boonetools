@@ -71,6 +71,22 @@ test('Pool Analysis normalizes, filters, and keeps missing sort values last in b
   }).map((row) => row.asset), ['BTC.BTC', 'ETH.ETH']);
 });
 
+test('Pool Analysis upgrades legacy one-sided summary fields to two-sided table values', () => {
+  const dashboard = normalizePoolAnalysisSummary({
+    pools: [{
+      asset: 'ETH.ETH', status: 'Available', depth_usd: 100,
+      period_metrics: {
+        '30d': {
+          volume_depth_percent: 20,
+          coverage: { observed_days: 30, expected_days: 30, missing_days: 0 }
+        }
+      }
+    }]
+  });
+  assert.equal(dashboard.pools[0].depthUsd, 200);
+  assert.equal(dashboard.pools[0].periodMetrics['30d'].volumeDepthPercent, 10);
+});
+
 test('Pool Analysis exposes exactly the consolidated semantic columns and requested chart ranges', () => {
   assert.deepEqual(POOL_ANALYSIS_RANGES, [
     { id: '30d', label: '30D' },
