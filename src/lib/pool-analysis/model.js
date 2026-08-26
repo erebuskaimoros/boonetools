@@ -85,6 +85,8 @@ export function baseToNumber(value) {
 
 export function normalizePoolAnalysisSummary(payload = {}) {
   const pools = (Array.isArray(payload.pools) ? payload.pools : []).map((pool) => {
+    const oneSidedDepthUsd = finite(pool.depth_usd);
+    const totalDepthUsd = finite(pool.total_depth_usd);
     const legacy30d = {
       volume_rune_e8: pool.period_volume_rune_e8,
       volume_usd: pool.period_volume_usd,
@@ -111,7 +113,7 @@ export function normalizePoolAnalysisSummary(payload = {}) {
       oracleSymbol: pool.oracle_symbol || null,
       oraclePriceUsd: finite(pool.oracle_price_usd),
       oracleDeviationPercent: finite(pool.oracle_deviation_percent),
-      depthUsd: finite(pool.depth_usd),
+      depthUsd: totalDepthUsd ?? (oneSidedDepthUsd === null ? null : oneSidedDepthUsd * 2),
       balanceAssetBase: baseString(pool.balance_asset_e8),
       balanceRuneBase: baseString(pool.balance_rune_e8),
       periodMetrics

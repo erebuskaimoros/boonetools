@@ -394,6 +394,10 @@ stored daily rows and never contacts a provider during a public request. Pool
 Analysis stops at liquidity-fee generation; subsequent system-income
 distribution is outside its data contract.
 
+The table displays total two-sided liquidity from `total_depth_usd` and uses
+that same total as the Volume/Depth denominator. The compatibility field
+`depth_usd` remains the one-sided RUNE-depth valuation.
+
 Run the one-time all-pool historical fill separately from deployment:
 
 ```bash

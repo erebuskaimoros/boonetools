@@ -137,6 +137,9 @@ export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregat
         : Number(pool.asset_tor_price) / 1e8;
       const oracleSymbol = referenceMappingForAsset(identity.asset).oracle;
       const oraclePriceUsd = oracleSymbol ? positive(oracles.get(oracleSymbol)) : null;
+      const oneSidedDepthUsd = balanceRune && runePriceUsd
+        ? (Number(balanceRune) / 1e8) * runePriceUsd
+        : null;
       const periodMetrics = Object.fromEntries(POOL_ANALYSIS_TABLE_PERIODS.map((period) => {
         const aggregate = assetAggregates.get(period.id) || {};
         const volumeRune = nonNegativeBaseString(aggregate.volume_rune_e8, null);
@@ -156,7 +159,7 @@ export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregat
           fees_usd: finite(aggregate.fees_usd),
           fee_volume_percent: divideBase(feesRune, volumeRune, 100),
           volume_depth_percent: coveredDays > 0
-            ? divideBase(volumeRune, balanceRune, 100 / coveredDays)
+            ? divideBase(volumeRune, balanceRune, 50 / coveredDays)
             : null,
           annualized_fees_rune: annualizedFeesRune,
           annualized_fees_usd: annualize(aggregate.fees_usd, coveredDays, period.days),
@@ -185,9 +188,8 @@ export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregat
         oracle_deviation_percent: poolPriceUsd && oraclePriceUsd
           ? ((poolPriceUsd / oraclePriceUsd) - 1) * 100
           : null,
-        depth_usd: balanceRune && runePriceUsd
-          ? (Number(balanceRune) / 1e8) * runePriceUsd
-          : null,
+        depth_usd: oneSidedDepthUsd,
+        total_depth_usd: oneSidedDepthUsd === null ? null : oneSidedDepthUsd * 2,
         balance_asset_e8: balanceAsset,
         balance_rune_e8: balanceRune,
         volume_24h_rune_e8: volume24hRune,
@@ -199,7 +201,7 @@ export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregat
         period_fees_rune_e8: defaultMetrics.fees_rune_e8,
         period_fees_usd: defaultMetrics.fees_usd,
         fee_volume_percent: defaultMetrics.fee_volume_percent,
-        volume_depth_percent: divideBase(volume24hRune, balanceRune, 100),
+        volume_depth_percent: divideBase(volume24hRune, balanceRune, 50),
         annualized_fees_rune: defaultMetrics.annualized_fees_rune,
         annualized_fees_usd: defaultMetrics.annualized_fees_usd,
         annualized_fee_rate_percent: defaultMetrics.annualized_fee_rate_percent,

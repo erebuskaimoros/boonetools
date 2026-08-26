@@ -22,7 +22,8 @@ function samplePayload() {
       {
         asset: 'BTC.BTC', chain: 'BTC', symbol: 'BTC', status: 'Available',
         price_usd: 80000, oracle_price_usd: 79000, oracle_deviation_percent: 1.2,
-        depth_usd: 5000000, balance_asset_e8: '10000000000', balance_rune_e8: '200000000000000',
+        depth_usd: 5000000, total_depth_usd: 10000000,
+        balance_asset_e8: '10000000000', balance_rune_e8: '200000000000000',
         volume_24h_usd: 1000000, period_volume_usd: 30000000, period_fees_usd: 300000,
         volume_depth_percent: 20, fee_volume_percent: 1,
         annualized_fees_usd: 3650000, annualized_fee_rate_percent: 36.5,
@@ -56,6 +57,8 @@ function samplePayload() {
 test('Pool Analysis normalizes, filters, and keeps missing sort values last in both directions', () => {
   const dashboard = normalizePoolAnalysisSummary(samplePayload());
   assert.equal(dashboard.pools[0].balanceRuneBase, '200000000000000');
+  assert.equal(dashboard.pools[0].depthUsd, 10000000);
+  assert.equal(dashboard.pools[1].depthUsd, 2000000);
   assert.deepEqual(filterPoolAnalysisRows(dashboard.pools, { status: 'available' }).map((row) => row.asset), ['BTC.BTC']);
   assert.deepEqual(filterPoolAnalysisRows(dashboard.pools, { status: 'all', search: 'eth' }).map((row) => row.asset), ['ETH.ETH']);
   for (const direction of ['asc', 'desc']) {
@@ -164,6 +167,7 @@ test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the exclude
   assert.match(component, /data-label="USD PRICE"/);
   assert.match(component, /data-label="VOLUME"/);
   assert.match(component, /data-label="FEES"/);
+  assert.match(component, /Pricing and two-sided depth are current/);
   assert.doesNotMatch(component, /data-label=\{`(?:VOLUME|FEES) · \$\{tablePeriod\.label\}`\}/);
   assert.match(component, /FEES = POOL-GENERATED LIQUIDITY FEES/);
   assert.match(component, /SYSTEM-INCOME DISTRIBUTION OUT OF SCOPE/);

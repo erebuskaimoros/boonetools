@@ -222,7 +222,7 @@
     <div>
       <span class="eyebrow">THORCHAIN · LIQUIDITY INTELLIGENCE</span>
       <h1>POOL ANALYSIS</h1>
-      <p>Current pool depth and pricing consolidated with selectable pool-generated liquidity fees.</p>
+      <p>Current total pool liquidity and pricing consolidated with selectable pool-generated liquidity fees.</p>
     </div>
     <div class="header-status" class:refreshing class:stale={dashboard.stale}>
       <span class="status-dot"></span>
@@ -248,7 +248,7 @@
       <div>
         <span class="section-index">[01]</span>
         <h2 id="pool-table-title">POOL PERFORMANCE MATRIX</h2>
-        <p>Activity covers {tablePeriod.label === '24H' ? 'the latest completed UTC day' : `${tablePeriod.days} completed UTC days`}. Pricing and one-sided depth are current.</p>
+        <p>Activity covers {tablePeriod.label === '24H' ? 'the latest completed UTC day' : `${tablePeriod.days} completed UTC days`}. Pricing and two-sided depth are current.</p>
       </div>
       <div class="table-controls">
         <div class="period-picker">
