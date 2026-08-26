@@ -9,8 +9,8 @@ BooneTools now has a dedicated Hetzner-hosted backend stack for all current DB-b
 - `rapid-swaps`
 - `stock-prices`
 - `app-layer-base-layer-earnings`
-- compact Status, Treasury, Node Votes, App Layer, Rapid Swaps, TC Fee, and
-  Wasm Arb Economics read models
+- compact Status, Treasury, Node Votes, App Layer, Rapid Swaps, TC Fee, Pool
+  Analysis, and Wasm Arb Economics read models
 - local scheduler jobs for NodeOp and Rapid Swaps
 - Dune-backed historical/canonical ingestion with THORNode/Midgard live tails where current data matters
 
@@ -292,7 +292,8 @@ store and bounded publisher-run history. Migration
 `028_analytics_read_paths.sql` adds the ordered/cursor indexes used by compact
 summary and drill-down routes. The additive public routes are
 `/status-live`, `/status-dashboard`, `/treasury-snapshot`, `/node-votes-summary`,
-`/rapid-swaps-summary`, `/pol-tracker`, and `/burn-tracker`; the established Node/Rapid routes remain compatibility
+`/rapid-swaps-summary`, `/pol-tracker`, `/burn-tracker`, `/pool-analysis`, and
+`/pool-analysis-series`; the established Node/Rapid routes remain compatibility
 surfaces during frontend rollout but never contact providers on a GET.
 
 `boonetools-thornode-core-snapshot.timer` publishes the canonical mixed-cadence
@@ -375,6 +376,34 @@ Optional configuration is `BURN_TRACKER_START_DATE` (default `2024-09-26`),
 `BURN_TRACKER_REQUEST_DELAY_MS` (default `250`). Both jobs use the configured
 Liquify `MIDGARD_URLS`; no public request contacts Midgard or THORNode. The
 per-block path reuses the existing consolidated Liquify websocket connection.
+
+Migration `051_pool_analysis.sql` adds exact per-pool UTC swap volume, gross
+liquidity fees, rewards-inclusive pool earnings, and per-asset sync state.
+`boonetools-pool-analysis.timer` refreshes the trailing 35 days every fifteen
+minutes and publishes the compact `/pool-analysis` table model. Its single
+aggregate query materializes completed-UTC 24-hour, 7-day, 30-day, 90-day, and
+1-year volume and gross-fee windows, including coverage and annualized fee
+metrics. Current price, depth, and balances come from `thornode-core:v1`; the
+core snapshot also retains `/thorchain/oracle/prices` on the pool cadence. The
+lazy `/pool-analysis-series?asset=...&range=30d|all` route reads at most 5,000
+stored daily rows and never contacts a provider during a public request.
+
+Run the one-time all-pool historical fill separately from deployment:
+
+```bash
+systemctl start --no-block boonetools-pool-analysis-backfill.service
+journalctl -fu boonetools-pool-analysis-backfill.service
+```
+
+The fill is advisory-locked against the scheduled writer, paginates Liquify
+Midgard's 100-interval history limit, writes bounded batches, and can be safely
+started again. Missing provider days remain visible gaps; they are never
+interpolated or treated as zero. Optional settings are
+`POOL_ANALYSIS_START_DATE` (default `2021-04-01`),
+`POOL_ANALYSIS_RECENT_LOOKBACK_DAYS` (default `35`),
+`POOL_ANALYSIS_REQUEST_DELAY_MS` (default `100`),
+`POOL_ANALYSIS_MAX_PAGES` (default `30`), and
+`POOL_ANALYSIS_CONCURRENCY` (default `2`).
 
 Migration `042_pool_dislocation_binance_usdt_to_usd.sql` corrects the Pool
 Dislocation Binance unit contract. Binance spot markets provide `XUSDT`, so

@@ -62,6 +62,14 @@
     description: "Track seven-day THORChain pool price deviation from oracle and Binance references"
   };
 
+  const poolAnalysisApp = {
+    name: "Pool Analysis",
+    component: () => import("./lib/PoolAnalysis.svelte"),
+    icon: "∿",
+    path: "pool-analysis",
+    description: "Compare THORChain pool depth, volume, gross fees, and all-time fee history"
+  };
+
   const polTrackerApp = {
     name: "POL Tracker",
     component: () => import("./lib/POLTracker.svelte"),
@@ -167,7 +175,7 @@
     briefingsApp
   ];
   // Direct-route previews resolve normally but stay out of desktop/mobile nav.
-  const hiddenApps = [wasmArbEconomicsApp];
+  const hiddenApps = [wasmArbEconomicsApp, poolAnalysisApp];
 
   // The site has no homepage: unknown paths and `/` land on the status page.
   const defaultApp = statusApp;

@@ -16,6 +16,7 @@ export const THORNODE_CORE_FIELDS = Object.freeze([
   { key: 'node_mimirs', path: '/thorchain/mimir/nodes_all', cadenceMs: 60_000, valid: objectOrArray, provider: 'thornode' },
   { key: 'network', path: '/thorchain/network', cadenceMs: 120_000, valid: objectValue, provider: 'thornode' },
   { key: 'pools', path: '/thorchain/pools', cadenceMs: 120_000, valid: Array.isArray, provider: 'thornode' },
+  { key: 'oracle_prices', path: '/thorchain/oracle/prices', cadenceMs: 120_000, valid: oraclePricesValue, provider: 'thornode' },
   { key: 'nodes', path: '/thorchain/nodes', cadenceMs: 300_000, valid: Array.isArray, provider: 'thornode' },
   { key: 'constants', path: '/thorchain/constants', cadenceMs: 900_000, valid: objectValue, provider: 'thornode' },
   { key: 'churns', path: '/churns', cadenceMs: 600_000, valid: Array.isArray, provider: 'midgard' }
@@ -27,6 +28,10 @@ function objectValue(value) {
 
 function objectOrArray(value) {
   return objectValue(value) || Array.isArray(value);
+}
+
+function oraclePricesValue(value) {
+  return objectValue(value) && Array.isArray(value.prices);
 }
 
 function runeSupplyValue(value) {

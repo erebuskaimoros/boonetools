@@ -41,6 +41,8 @@ presentation-only field.
 | `/app-layer-reserve-payments` | `app-layer-reserve-payments:v1` | `boonetools-analytics-read-models` | 1m / 330s |
 | `/tc-fee-dash` | `tc-fee-dash:v1` | `boonetools-analytics-read-models` | 1m / 15m |
 | `/pool-dislocation` | `pool-dislocation-summary:v1` | `boonetools-pool-dislocation` | exact 5m UTC / 15m |
+| `/pool-analysis` | `pool-analysis:v1` | `boonetools-pool-analysis` | 15m / 20m |
+| `/pool-analysis-series` | bounded `pool_analysis_daily` query | same canonical writer | lazy public read |
 | `/pol-tracker` | `pol-tracker:v2` | `boonetools-pol-tracker` | daily at 00:10 UTC / 36h |
 | `/burn-tracker` | `system-income-burn:v1` + block overlay | chain listener / `boonetools-burn-tracker` | every block + 5m reconcile / 15m |
 
@@ -74,10 +76,23 @@ each SSE height once. Bank RUNE supply, Mimir, and the compiled burn-rate
 fallback come from `thornode-core:v1`. All base-unit amounts remain decimal
 strings through the public model.
 
+Pool Analysis uses migration `051_pool_analysis.sql`. Its fifteen-minute job
+revisits the trailing 35 days of per-pool Midgard swap history, merges the
+single network-wide earnings history pass, and publishes 24-hour, 7-day,
+30-day, 90-day, and 1-year table aggregates in one database read. Each window
+uses completed UTC days and supplies volume, gross fees, coverage, ratios, and
+annualized fee metrics; volume/depth is normalized to average observed-day
+volume over current one-sided depth, while pricing, balances, and depth remain current. A
+separately triggered advisory-locked backfill fills all available history.
+Pool expansion executes one asset-filtered query capped at 5,000 stored daily
+rows; cumulative values are computed across the complete stored series before
+the 30-day view is selected. Missing UTC days are emitted as chart gaps, not
+zeros.
+
 The core publisher is the sole scheduled owner of reusable current THORNode
 state. It refreshes `lastblock` every 15 seconds; inbound addresses, Mimir,
-bank RUNE supply, and node-Mimir state every minute; network and pools every
-two minutes; nodes every
+bank RUNE supply, and node-Mimir state every minute; network, pools, and oracle
+prices every two minutes; nodes every
 five minutes; constants every fifteen minutes; and Midgard churns every ten
 minutes. Status, Node Votes, Treasury, Rapid Swaps, NodeOp, App Layer, and
 stable browser reads consume those persisted fields instead of repeating the
@@ -142,6 +157,7 @@ cold request ceilings:
 | Rapid summary/history | 1s | 150KB each |
 | TC Fee | 1s | 250KB |
 | Pool dislocation summary | 1s | 750KB |
+| Pool Analysis summary | 1s | 250KB |
 
 The deploy also sends 50 concurrent Status requests. The route-level cached
 concurrency caps and single-flight row cache are intended to absorb that burst

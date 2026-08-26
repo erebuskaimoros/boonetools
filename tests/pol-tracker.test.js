@@ -22,7 +22,7 @@ test('POL Tracker is directly routable and appears in navigation', async () => {
   const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
 
   assert.equal(visibleApps.includes('polTrackerApp'), true);
-  assert.match(appSource, /const hiddenApps = \[wasmArbEconomicsApp\];/);
+  assert.match(appSource, /const hiddenApps = \[wasmArbEconomicsApp, poolAnalysisApp\];/);
   assert.match(appSource, /return \[\.\.\.apps, \.\.\.hiddenApps\]\.find/);
   assert.doesNotMatch(trackerSource, /SAVERS|Savers|Saver/);
   assert.doesNotMatch(trackerSource, /ASSET LEG|RUNE LEG|treasuryAssetUsd|treasuryRuneUsd/);

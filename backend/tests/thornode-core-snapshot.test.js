@@ -16,6 +16,7 @@ function payloadFor(path) {
   if (path === '/thorchain/mimir') return { HALTTRADING: 0 };
   if (path === '/thorchain/mimir/nodes_all') return { mimirs: [] };
   if (path === '/thorchain/network') return { rune_price_in_tor: '100000000' };
+  if (path === '/thorchain/oracle/prices') return { prices: [{ symbol: 'RUNE', price: '1' }] };
   if (path === '/thorchain/constants') return { int_64_values: {} };
   return [];
 }

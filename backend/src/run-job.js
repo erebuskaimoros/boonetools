@@ -10,6 +10,7 @@ import { runNodeVotesSummary } from './jobs/node-votes-summary.js';
 import { runPoolDislocationBackfill } from './jobs/pool-dislocation-backfill.js';
 import { runPoolDislocationRepair } from './jobs/pool-dislocation-repair.js';
 import { runPoolDislocationScheduler } from './jobs/pool-dislocation-scheduler.js';
+import { runPoolAnalysisBackfill, runPoolAnalysisScheduler } from './jobs/pool-analysis.js';
 import { runPolTrackerBackfill, runPolTrackerScheduler } from './jobs/pol-tracker.js';
 import { runRapidSwapsMarketHistory } from './jobs/rapid-swaps-market-history.js';
 import { runRapidSwapsScheduler } from './jobs/rapid-swaps-scheduler.js';
@@ -39,6 +40,8 @@ const runners = {
   'pool-dislocation-backfill': runPoolDislocationBackfill,
   'pool-dislocation-repair': runPoolDislocationRepair,
   'pool-dislocation-scheduler': runPoolDislocationScheduler,
+  'pool-analysis-backfill': runPoolAnalysisBackfill,
+  'pool-analysis-scheduler': runPoolAnalysisScheduler,
   'pol-tracker-backfill': runPolTrackerBackfill,
   'pol-tracker-scheduler': runPolTrackerScheduler,
   'rapid-swaps-market-history': runRapidSwapsMarketHistory,

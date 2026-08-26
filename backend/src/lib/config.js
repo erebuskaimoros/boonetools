@@ -190,6 +190,11 @@ export const config = Object.freeze({
   poolDislocationRepairRetryAttempts: readInt('POOL_DISLOCATION_REPAIR_RETRY_ATTEMPTS', 4),
   poolDislocationRepairRetryBaseDelayMs: readInt('POOL_DISLOCATION_REPAIR_RETRY_BASE_DELAY_MS', 500),
   poolDislocationRepairRetryMaxDelayMs: readInt('POOL_DISLOCATION_REPAIR_RETRY_MAX_DELAY_MS', 10_000),
+  poolAnalysisStartDate: optional(process.env.POOL_ANALYSIS_START_DATE) || '2021-04-01',
+  poolAnalysisRecentLookbackDays: readInt('POOL_ANALYSIS_RECENT_LOOKBACK_DAYS', 35),
+  poolAnalysisRequestDelayMs: readInt('POOL_ANALYSIS_REQUEST_DELAY_MS', 100),
+  poolAnalysisMaxPages: readInt('POOL_ANALYSIS_MAX_PAGES', 30),
+  poolAnalysisConcurrency: readInt('POOL_ANALYSIS_CONCURRENCY', 2),
   polTrackerStartDate: optional(process.env.POL_TRACKER_START_DATE) || '2025-02-01',
   polTrackerThornodeUrls: readList('POL_TRACKER_THORNODE_URLS', [
     thornodeArchiveUrl,

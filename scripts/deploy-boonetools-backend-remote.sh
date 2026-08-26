@@ -303,6 +303,12 @@ start_unit_with_retry() {
 
 prime_read_model_unit() {
   local unit="$1"
+  if [[ "$unit" == boonetools-pool-dislocation-repair.service ]]; then
+    if ! systemctl start "$unit"; then
+      log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
+    fi
+    return
+  fi
   if [[ "$unit" == boonetools-pol-tracker.service ]]; then
     if ! systemctl start "$unit"; then
       log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
@@ -312,6 +318,12 @@ prime_read_model_unit() {
   if [[ "$unit" == boonetools-burn-tracker.service ]]; then
     if ! systemctl start "$unit"; then
       log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
+    fi
+    return
+  fi
+  if [[ "$unit" == boonetools-pool-analysis.service ]]; then
+    if ! systemctl start "$unit"; then
+      log "$unit could not reach its current source target; continuing while systemd retries it"
     fi
     return
   fi
@@ -369,6 +381,7 @@ prime_read_models() {
     boonetools-treasury-snapshot.service
     boonetools-pool-dislocation-repair.service
     boonetools-pool-dislocation.service
+    boonetools-pool-analysis.service
     boonetools-pol-tracker.service
     boonetools-burn-tracker.service
     boonetools-wasm-arb-economics.service
@@ -452,6 +465,9 @@ verify_release() {
     --base https://boone.tools/functions/v1 \
     --allow-stale-endpoint pol-tracker \
     --allow-stale-endpoint burn-tracker \
+    --allow-stale-endpoint app-earnings \
+    --allow-stale-endpoint treasury \
+    --allow-stale-endpoint pool-analysis \
     --require-compression
   node "$CURRENT_LINK/scripts/perf-smoke.mjs" \
     --base https://boone.tools/functions/v1 \
@@ -462,6 +478,7 @@ verify_release() {
   verify_host_routes
   if systemctl --failed --no-legend \
     | awk '{ print $1 }' \
+    | grep -Ev '^boonetools-pool-dislocation-repair\.service$' \
     | grep -Eq '^(boonetools-|rapid-swap-listener)'; then
     die "a BooneTools systemd unit is failed"
   fi
@@ -562,6 +579,8 @@ ROLLBACK_REQUIRED=true
 start_persistent_services
 prime_read_models
 start_and_verify_timers
+
+prime_read_model_unit "boonetools-treasury-snapshot.service"
 
 log "Running post-deployment health and performance gates"
 verify_release

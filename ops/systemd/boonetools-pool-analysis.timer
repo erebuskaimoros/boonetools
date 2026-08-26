@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh Pool Analysis every fifteen minutes
+
+[Timer]
+OnActiveSec=90s
+OnUnitActiveSec=15min
+AccuracySec=30s
+Persistent=true
+Unit=boonetools-pool-analysis.service
+
+[Install]
+WantedBy=timers.target
