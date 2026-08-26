@@ -104,6 +104,7 @@ async function fetchThornodeApi(path, options = {}) {
 export async function fetchCurrentUpgradeProposals(options = {}) {
   const fetcher = options.fetcher || fetchThornodeApi;
   const payload = await fetcher('/thorchain/upgrade_proposals');
+  if (payload === null) return [];
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.upgrade_proposals)) return payload.upgrade_proposals;
   throw new Error('THORNode returned an invalid upgrade-proposals response');

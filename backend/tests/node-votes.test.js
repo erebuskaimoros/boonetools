@@ -76,6 +76,17 @@ test('parseNodeVoteEvents extracts validator upgrade approval changes', async ()
   assert.equal(rows[1].event_key, 'UPGRADE123:1');
 });
 
+test('fetchCurrentUpgradeProposals treats a null THORNode response as no active proposals', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { fetchCurrentUpgradeProposals } = await import('../src/shared/node-votes.js');
+
+  const proposals = await fetchCurrentUpgradeProposals({
+    fetcher: async () => null
+  });
+
+  assert.deepEqual(proposals, []);
+});
+
 test('upgrade events without a transaction hash retain collision-safe identities', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { parseNodeVoteEvents } = await import('../src/shared/node-votes.js');
