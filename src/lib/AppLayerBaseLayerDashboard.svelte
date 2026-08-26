@@ -433,7 +433,6 @@
   }, 0);
   $: pendingKnownUsd = baseRoutableInventoryUsd + upstreamBaseBoundUsd;
   $: pendingTcRetainedUsd = pendingKnownUsd * 2 / 3;
-  $: pendingPolAccruedUsd = pendingKnownUsd / 3;
   $: historyLabels = Object.fromEntries(
     collectors.map((collector) => [
       collector.key,
@@ -851,10 +850,10 @@
     <p class="lede">
       App-layer fees are measured first at the <b class="k-collected">01 TC-retained accrual</b>
       boundary, using 100% through Aug 12 and the contract's two-thirds share from Aug 13, then shown
-      separately as <b class="k-paid">02 TC Reserve settlement</b>, <b class="k-pol">P POL accrual</b>,
-      and <b class="k-generated">03 liquidity fees</b>
-      generated on THORChain pools. <b class="k-benefit">Σ realized value to TC</b> = 02 Reserve + 03
-      System Income. POL is reported beside that total, not inside it or either 01 chart.
+      separately as <b class="k-paid">02 TC Reserve settlement</b>, <b class="k-pol">P POL settlement</b>,
+      and <b class="k-generated">03 liquidity fees</b> generated on THORChain pools. The dedicated
+      POL chart tracks the one-third share on its earnings date. <b class="k-benefit">Σ realized value to TC</b>
+      = 02 Reserve + 03 System Income; POL settlement is reported beside that total.
     </p>
     <div class="rule"></div>
   </div>
@@ -958,10 +957,10 @@
           <p class="fnode-sub">{number2.format(reserveEventCount)} Reserve deposits · realized value to TC</p>
         </a>
         <a class="fnode amber stage" href="#chart-pol">
-          <span class="fnode-kicker"><i>P</i> accrued</span>
-          <strong class="fnode-name">THORChain POL Allocation</strong>
-          <strong class="fnode-fig">{tcInflowsLoading ? '—' : usd2.format(totalPolAccruedUsd)}</strong>
-          <p class="fnode-sub">{liveLoading ? '—' : usd2.format(pendingPolAccruedUsd)} current POL share of pending inventory · includes inherited backlog</p>
+          <span class="fnode-kicker"><i>P</i> settled</span>
+          <strong class="fnode-name">THORChain POL Settlement</strong>
+          <strong class="fnode-fig">{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(totalPolPaidUsd)}</strong>
+          <p class="fnode-sub">{number2.format(polEventCount)} POL transfers · {number2.format(totalPolPaidRune)} RUNE at dispersal</p>
         </a>
       </div>
 
@@ -999,7 +998,7 @@
       <span class="legend-arrow">→</span>
       <span><b class="k-paid">02</b> settles to the TC Reserve</span>
       <span class="legend-sep">│</span>
-      <span><b class="k-pol">P</b> accrues the separate one-third leg from Aug 13; transfers may settle later</span>
+      <span><b class="k-pol">P</b> settles the separate one-third leg from Aug 13; its chart tracks earnings-date accrual</span>
       <span class="legend-sep">│</span>
       <span><b class="k-generated">03</b> pool fees generated along the way flow to System Income</span>
       <span class="legend-sep">│</span>
@@ -1031,8 +1030,8 @@
         <small>{totalRealizedTcUsd > 0 ? `${benefitLpShare.toFixed(0)}% of Σ` : 'liq fees'}</small>
       </div>
       <div class="benefit-hero-leg amber separate">
-        <span>P → pol accrued</span>
-        <strong>{tcInflowsLoading ? '—' : usd2.format(totalPolAccruedUsd)}</strong>
+        <span>P → pol settled</span>
+        <strong>{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(totalPolPaidUsd)}</strong>
         <small>outside Σ · {topTotalsLoading ? '—' : usd2.format(totalObservedOutputUsd)} total observed paid outputs</small>
       </div>
     </div>
@@ -1047,7 +1046,7 @@
       </div>
       <strong class="metric-value">{tcInflowsLoading ? '—' : usd2.format(totalInflowUsd)}</strong>
       <small class="metric-foot">
-        {inflowMeta ? `${usd2.format(inflowOpeningUsd)} opening + ${usd2.format(inflowNetNewUsd)} retained · ${usd2.format(totalPolAccruedUsd)} accrued to POL` : 'earnings data pending'}
+        {inflowMeta ? `${usd2.format(inflowOpeningUsd)} opening + ${usd2.format(inflowNetNewUsd)} retained` : 'earnings data pending'}
       </small>
     </article>
     <article class="metric">
@@ -1061,10 +1060,10 @@
     <article class="metric">
       <div class="metric-head">
         <span class="metric-idx pol-i">P</span>
-        <span class="metric-label">pol capital accrued</span>
+        <span class="metric-label">pol capital settled</span>
       </div>
-      <strong class="metric-value">{tcInflowsLoading ? '—' : usd2.format(totalPolAccruedUsd)}</strong>
-      <small class="metric-foot">1/3 of post-cutover 01 · {usd2.format(totalPolPaidUsd)} settled, including inherited backlog</small>
+      <strong class="metric-value">{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(totalPolPaidUsd)}</strong>
+      <small class="metric-foot">{number2.format(totalPolPaidRune)} RUNE · observed at dispersal, including inherited backlog</small>
     </article>
     <article class="metric">
       <div class="metric-head">
