@@ -17,20 +17,15 @@ export const POOL_ANALYSIS_COLUMNS = Object.freeze([
   { id: 'oraclePriceUsd', label: 'ORACLE', defaultDirection: 'desc' },
   { id: 'depthUsd', label: 'DEPTH', defaultDirection: 'desc' },
   { id: 'balanceRuneBase', label: 'BALANCES', defaultDirection: 'desc' },
-  { id: 'periodVolumeUsd', label: 'VOLUME', periodScoped: true, defaultDirection: 'desc' },
-  { id: 'periodFeesUsd', label: 'FEES', periodScoped: true, defaultDirection: 'desc' },
+  { id: 'periodVolumeUsd', label: 'VOLUME', defaultDirection: 'desc' },
+  { id: 'periodFeesUsd', label: 'FEES', defaultDirection: 'desc' },
   { id: 'volumeDepthPercent', label: 'VOLUME / DEPTH', defaultDirection: 'desc' },
   { id: 'feeVolumePercent', label: 'FEES / VOLUME', defaultDirection: 'desc' },
-  { id: 'annualizedFeesUsd', label: 'EST YR SWAP FEES', defaultDirection: 'desc' },
-  { id: 'annualizedFeeReturnPercent', label: 'EST YR FEE RETURN', defaultDirection: 'desc' }
+  { id: 'annualizedFeeRatePercent', label: 'EST APR', defaultDirection: 'desc' }
 ]);
 
-export function poolAnalysisColumns(periodId = '30d') {
-  const period = POOL_ANALYSIS_TABLE_PERIODS.find((candidate) => candidate.id === periodId)
-    || POOL_ANALYSIS_TABLE_PERIODS.find((candidate) => candidate.id === '30d');
-  return POOL_ANALYSIS_COLUMNS.map((column) => column.periodScoped
-    ? { ...column, label: `${column.label} · ${period.label}` }
-    : column);
+export function poolAnalysisColumns(_periodId = '30d') {
+  return POOL_ANALYSIS_COLUMNS;
 }
 
 function finite(value) {
@@ -71,7 +66,7 @@ function normalizePeriodMetric(value = {}, period) {
     volumeDepthPercent: finite(value.volume_depth_percent),
     annualizedFeesRune: finite(value.annualized_fees_rune),
     annualizedFeesUsd: finite(value.annualized_fees_usd),
-    annualizedFeeReturnPercent: finite(value.annualized_fee_return_percent),
+    annualizedFeeRatePercent: finite(value.annualized_fee_rate_percent),
     coverage: normalizeCoverage(value.coverage, period.days)
   };
 }
@@ -99,7 +94,7 @@ export function normalizePoolAnalysisSummary(payload = {}) {
       volume_depth_percent: pool.volume_depth_percent,
       annualized_fees_rune: pool.annualized_fees_rune,
       annualized_fees_usd: pool.annualized_fees_usd,
-      annualized_fee_return_percent: pool.annualized_fee_return_percent,
+      annualized_fee_rate_percent: pool.annualized_fee_rate_percent,
       coverage: pool.coverage
     };
     const periodMetrics = Object.fromEntries(POOL_ANALYSIS_TABLE_PERIODS.map((period) => [

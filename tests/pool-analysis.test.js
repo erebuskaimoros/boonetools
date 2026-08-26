@@ -25,22 +25,21 @@ function samplePayload() {
         depth_usd: 5000000, balance_asset_e8: '10000000000', balance_rune_e8: '200000000000000',
         volume_24h_usd: 1000000, period_volume_usd: 30000000, period_fees_usd: 300000,
         volume_depth_percent: 20, fee_volume_percent: 1,
-        annualized_pool_earnings_usd: 5000000, annualized_fees_usd: 3650000,
-        annualized_fee_return_percent: 36.5,
+        annualized_fees_usd: 3650000, annualized_fee_rate_percent: 36.5,
         coverage: { observed_days: 30, expected_days: 30, missing_days: 0 },
         period_metrics: {
           '24h': {
             id: '24h', days: 1, volume_rune_e8: '100', volume_usd: 1000000,
             fees_rune_e8: '1', fees_usd: 10000, fee_volume_percent: 1,
             volume_depth_percent: 5, annualized_fees_usd: 3650000,
-            annualized_fee_return_percent: 36.5,
+            annualized_fee_rate_percent: 36.5,
             coverage: { observed_days: 1, expected_days: 1, missing_days: 0 }
           },
           '90d': {
             id: '90d', days: 90, volume_rune_e8: '9000', volume_usd: 90000000,
             fees_rune_e8: '90', fees_usd: 900000, fee_volume_percent: 1,
             volume_depth_percent: 45, annualized_fees_usd: 3650000,
-            annualized_fee_return_percent: 36.5,
+            annualized_fee_rate_percent: 36.5,
             coverage: { observed_days: 90, expected_days: 90, missing_days: 0 }
           }
         }
@@ -61,7 +60,7 @@ test('Pool Analysis normalizes, filters, and keeps missing sort values last in b
   assert.deepEqual(filterPoolAnalysisRows(dashboard.pools, { status: 'all', search: 'eth' }).map((row) => row.asset), ['ETH.ETH']);
   for (const direction of ['asc', 'desc']) {
     assert.equal(sortPoolAnalysisRows(dashboard.pools, {
-      column: 'annualizedFeesUsd', direction
+      column: 'annualizedFeeRatePercent', direction
     }).at(-1).asset, 'ETH.ETH');
   }
   assert.deepEqual(sortPoolAnalysisRows(dashboard.pools, {
@@ -83,9 +82,10 @@ test('Pool Analysis exposes exactly the consolidated semantic columns and reques
   ]);
   assert.deepEqual(poolAnalysisColumns('90d').map((column) => column.label), [
     'POOL', 'USD PRICE', 'ORACLE', 'DEPTH', 'BALANCES',
-    'VOLUME · 90D', 'FEES · 90D', 'VOLUME / DEPTH',
-    'FEES / VOLUME', 'EST YR SWAP FEES', 'EST YR FEE RETURN'
+    'VOLUME', 'FEES', 'VOLUME / DEPTH',
+    'FEES / VOLUME', 'EST APR'
   ]);
+  assert.equal(POOL_ANALYSIS_COLUMNS.some((column) => column.id === 'annualizedFeesUsd'), false);
   assert.equal(POOL_ANALYSIS_COLUMNS.some((column) => column.id === 'volume24hUsd'), false);
   assert.equal(POOL_ANALYSIS_COLUMNS.filter((column) => column.label === 'VOLUME').length, 1);
   assert.equal(POOL_ANALYSIS_COLUMNS.some((column) => column.id === 'actions'), false);
@@ -152,7 +152,7 @@ test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the exclude
   assert.match(component, /Keyboard zoom controls/);
   assert.match(component, /aria-label="Table activity period"/);
   assert.match(component, /FIRST INDEXED/);
-  for (const excluded of ['TRADE ASSET DEPTH', 'RUNEPOOL SHARE', 'LP EARNINGS', 'POOL EARNINGS', 'DISTRIBUTED']) {
+  for (const excluded of ['TRADE ASSET DEPTH', 'RUNEPOOL SHARE', 'POOL EARNINGS', 'DISTRIBUTED', 'EST YR SWAP FEES']) {
     assert.equal(component.toUpperCase().includes(excluded), false, excluded);
   }
   assert.equal((component.match(/<canvas\b/g) || []).length, 1);
@@ -162,9 +162,12 @@ test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the exclude
   assert.match(component, /table \{[^}]*min-width: 1000px;[^}]*table-layout: fixed;/);
   assert.match(component, /@container \(max-width: 900px\)/);
   assert.match(component, /data-label="USD PRICE"/);
-  assert.match(component, /data-label=\{`VOLUME · \$\{tablePeriod\.label\}`\}/);
-  assert.match(component, /data-label=\{`FEES · \$\{tablePeriod\.label\}`\}/);
-  assert.doesNotMatch(component, /SWAP \/ LP|app\.thorswap\.finance/);
+  assert.match(component, /data-label="VOLUME"/);
+  assert.match(component, /data-label="FEES"/);
+  assert.doesNotMatch(component, /data-label=\{`(?:VOLUME|FEES) · \$\{tablePeriod\.label\}`\}/);
+  assert.match(component, /FEES = POOL-GENERATED LIQUIDITY FEES/);
+  assert.match(component, /SYSTEM-INCOME DISTRIBUTION OUT OF SCOPE/);
+  assert.doesNotMatch(component, /app\.thorswap\.finance/);
   assert.match(component, /\.detail-panel \{[^}]*width: 100cqw;[^}]*max-width: 100cqw;/);
   assert.match(chart, /label: 'DAILY VOLUME'/);
   assert.match(chart, /label: 'DAILY FEES'/);

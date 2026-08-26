@@ -214,7 +214,7 @@
 
 <svelte:head>
   <title>THORChain Pool Analysis | BooneTools</title>
-  <meta name="description" content="Compare THORChain pool liquidity, volume, gross fees, annualized returns, and all-time daily fee history." />
+  <meta name="description" content="Compare THORChain pool liquidity, volume, pool-generated liquidity fees, annualized fee rates, and all-time daily fee history." />
 </svelte:head>
 
 <main class="pool-analysis">
@@ -222,7 +222,7 @@
     <div>
       <span class="eyebrow">THORCHAIN · LIQUIDITY INTELLIGENCE</span>
       <h1>POOL ANALYSIS</h1>
-      <p>Current pool depth and pricing consolidated with selectable gross fee performance.</p>
+      <p>Current pool depth and pricing consolidated with selectable pool-generated liquidity fees.</p>
     </div>
     <div class="header-status" class:refreshing class:stale={dashboard.stale}>
       <span class="status-dot"></span>
@@ -290,7 +290,7 @@
               <th colspan="2">PRICING</th>
               <th colspan="2">LIQUIDITY</th>
               <th colspan="4">ACTIVITY · {tablePeriod.label}</th>
-              <th colspan="2">ANNUALIZED</th>
+              <th colspan="1">ANNUALIZED</th>
             </tr>
             <tr class="column-row">
               {#each tableColumns as column}
@@ -342,15 +342,14 @@
                   <span>{balanceLabel(pool.balanceAssetBase, pool.symbol)}</span>
                   <small>{balanceLabel(pool.balanceRuneBase, 'RUNE')}</small>
                 </td>
-                <td class="number" data-label={`VOLUME · ${tablePeriod.label}`}>{formatPoolAnalysisUsd(pool.periodVolumeUsd, { compact: true })}</td>
-                <td class="number" data-label={`FEES · ${tablePeriod.label}`} class:coverage-warning={pool.coverage.missingDays > 0}>
+                <td class="number" data-label="VOLUME">{formatPoolAnalysisUsd(pool.periodVolumeUsd, { compact: true })}</td>
+                <td class="number" data-label="FEES" class:coverage-warning={pool.coverage.missingDays > 0}>
                   {formatPoolAnalysisUsd(pool.periodFeesUsd, { compact: true })}
                   {#if pool.coverage.missingDays > 0}<small>{pool.coverage.observedDays}/{pool.coverage.expectedDays}D</small>{/if}
                 </td>
                 <td class="number" data-label="VOLUME / DEPTH">{formatPoolAnalysisPercent(pool.volumeDepthPercent)}</td>
                 <td class="number" data-label="FEES / VOLUME">{formatPoolAnalysisPercent(pool.feeVolumePercent)}</td>
-                <td class="number" data-label="EST YR SWAP FEES">{formatPoolAnalysisUsd(pool.annualizedFeesUsd, { compact: true })}</td>
-                <td class="number" data-label="EST YR FEE RETURN">{formatPoolAnalysisPercent(pool.annualizedFeeReturnPercent)}</td>
+                <td class="number" data-label="EST APR">{formatPoolAnalysisPercent(pool.annualizedFeeRatePercent)}</td>
               </tr>
               {#if selectedAsset === pool.asset}
                 <tr class="detail-row">
@@ -359,7 +358,7 @@
                       <div class="detail-heading">
                         <div>
                           <span class="detail-kicker">{pool.asset} · DAILY HISTORY</span>
-                          <h3>VOLUME + GROSS LIQUIDITY FEES</h3>
+                          <h3>VOLUME + POOL-GENERATED LIQUIDITY FEES</h3>
                         </div>
                         <div class="range-copy">
                           <span>{displayDay(zoomWindow?.startDay || displayedPoints[0]?.day)} → {displayDay(zoomWindow?.endDay || displayedPoints.at(-1)?.day)}</span>
@@ -397,7 +396,7 @@
                         <div class="chart-frame" role="group" aria-label={`${pool.asset} combined daily chart`} on:dblclick={resetZoom}>
                           <canvas
                             bind:this={chartCanvas}
-                            aria-label={`${pool.asset} daily volume, daily gross liquidity fees, and cumulative gross liquidity fees in US dollars`}
+                            aria-label={`${pool.asset} daily volume, daily pool-generated liquidity fees, and cumulative pool-generated liquidity fees in US dollars`}
                           ></canvas>
                         </div>
                       {:else}
@@ -439,8 +438,9 @@
     <span>METHOD</span>
     <span>VOLUME = EXECUTED POOL LEGS</span>
     <span>VOLUME / DEPTH = AVG DAILY VOLUME / ONE-SIDED DEPTH</span>
-    <span>FEES = GROSS LIQUIDITY FEES</span>
-    <span>ANNUALIZED = {tablePeriod.label} × 365 / {tablePeriod.days}</span>
+    <span>FEES = POOL-GENERATED LIQUIDITY FEES</span>
+    <span>EST APR = ANNUALIZED FEES / CURRENT TWO-SIDED DEPTH</span>
+    <span>SYSTEM-INCOME DISTRIBUTION OUT OF SCOPE</span>
     <span>GAPS ARE NOT INTERPOLATED</span>
     <span>ALL TIMES UTC</span>
   </footer>

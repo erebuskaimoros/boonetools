@@ -1,7 +1,6 @@
 const DAILY_COLUMNS = [
   'asset', 'day', 'volume_rune_e8', 'volume_usd_e2', 'fees_rune_e8',
-  'pool_earnings_rune_e8', 'rune_price_usd', 'interval_start', 'interval_end',
-  'partial', 'source'
+  'rune_price_usd', 'interval_start', 'interval_end', 'partial', 'source'
 ];
 
 export async function upsertPoolAnalysisDays(client, rows = []) {
@@ -13,27 +12,22 @@ export async function upsertPoolAnalysisDays(client, rows = []) {
     `insert into pool_analysis_daily as current (${DAILY_COLUMNS.join(', ')})
      select incoming.asset, incoming.day, incoming.volume_rune_e8,
             incoming.volume_usd_e2, incoming.fees_rune_e8,
-            incoming.pool_earnings_rune_e8, incoming.rune_price_usd,
-            incoming.interval_start, incoming.interval_end, incoming.partial,
-            incoming.source
+            incoming.rune_price_usd, incoming.interval_start,
+            incoming.interval_end, incoming.partial, incoming.source
      from jsonb_to_recordset($1::jsonb) as incoming (
        asset text, day date, volume_rune_e8 numeric, volume_usd_e2 numeric,
-       fees_rune_e8 numeric, pool_earnings_rune_e8 numeric, rune_price_usd numeric,
-       interval_start timestamptz, interval_end timestamptz, partial boolean, source text
+       fees_rune_e8 numeric, rune_price_usd numeric, interval_start timestamptz,
+       interval_end timestamptz, partial boolean, source text
      )
      on conflict (asset, day) do update set
        volume_rune_e8 = coalesce(excluded.volume_rune_e8, current.volume_rune_e8),
        volume_usd_e2 = coalesce(excluded.volume_usd_e2, current.volume_usd_e2),
        fees_rune_e8 = coalesce(excluded.fees_rune_e8, current.fees_rune_e8),
-       pool_earnings_rune_e8 = coalesce(excluded.pool_earnings_rune_e8, current.pool_earnings_rune_e8),
        rune_price_usd = coalesce(excluded.rune_price_usd, current.rune_price_usd),
        interval_start = coalesce(excluded.interval_start, current.interval_start),
        interval_end = coalesce(excluded.interval_end, current.interval_end),
        partial = excluded.partial,
-       source = case
-         when current.source = excluded.source then current.source
-         else 'liquify-midgard-history'
-       end,
+       source = excluded.source,
        observed_at = now(),
        updated_at = now()`,
     [JSON.stringify(payload)]
@@ -94,14 +88,6 @@ export async function loadPoolAnalysisAggregates(client, completedDay, periods =
               where daily.day between $1::date - (periods.period_days - 1) * interval '1 day'
                 and $1::date and not daily.partial
             ) as fees_usd,
-            sum(daily.pool_earnings_rune_e8) filter (
-              where daily.day between $1::date - (periods.period_days - 1) * interval '1 day'
-                and $1::date and not daily.partial
-            )::text as pool_earnings_rune_e8,
-            sum((daily.pool_earnings_rune_e8 / 100000000::numeric) * daily.rune_price_usd) filter (
-              where daily.day between $1::date - (periods.period_days - 1) * interval '1 day'
-                and $1::date and not daily.partial
-            ) as pool_earnings_usd,
             max(daily.updated_at) as source_updated_at
      from pool_analysis_daily daily
      cross join periods
@@ -115,8 +101,7 @@ export async function loadPoolAnalysisAggregates(client, completedDay, periods =
 export async function loadPoolAnalysisSeries(client, asset) {
   const { rows } = await client.query(
     `select day, volume_rune_e8::text, volume_usd_e2::text,
-            fees_rune_e8::text, pool_earnings_rune_e8::text,
-            rune_price_usd::text, partial, source
+            fees_rune_e8::text, rune_price_usd::text, partial, source
      from pool_analysis_daily
      where asset = $1
      order by day

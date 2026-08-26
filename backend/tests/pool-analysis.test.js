@@ -6,8 +6,6 @@ import {
   POOL_ANALYSIS_TABLE_PERIODS,
   buildPoolAnalysisRows,
   buildPoolAnalysisSeries,
-  mergePoolAnalysisHistoryRows,
-  parsePoolAnalysisEarningsIntervals,
   parsePoolAnalysisSwapInterval
 } from '../src/shared/pool-analysis.js';
 import { loadPoolAnalysisAggregates } from '../src/shared/pool-analysis-store.js';
@@ -18,7 +16,7 @@ import {
 import { runPoolAnalysisBackfill, runPoolAnalysisScheduler } from '../src/jobs/pool-analysis.js';
 import { handlePoolAnalysis, handlePoolAnalysisSeries } from '../src/handlers/pool-analysis.js';
 
-test('Pool Analysis parses exact swap and pool-earnings history without merging fees and rewards', () => {
+test('Pool Analysis parses exact pool-generated liquidity fees without distribution fields', () => {
   const swap = parsePoolAnalysisSwapInterval({
     startTime: '1727308800',
     endTime: '1727395200',
@@ -30,24 +28,8 @@ test('Pool Analysis parses exact swap and pool-earnings history without merging 
   assert.equal(swap.asset, 'BTC.BTC');
   assert.equal(swap.volume_rune_e8, '9007199254740993');
   assert.equal(swap.fees_rune_e8, '7654321');
-  assert.equal(swap.pool_earnings_rune_e8, null);
-
-  const earnings = parsePoolAnalysisEarningsIntervals([{
-    startTime: '1727308800',
-    endTime: '1727395200',
-    runePriceUSD: '4.125',
-    pools: [{ pool: 'BTC.BTC', earnings: '999', rewards: '300', totalLiquidityFeesRune: '699' }]
-  }]);
-  assert.equal(earnings[0].pool_earnings_rune_e8, '999');
-  assert.equal(earnings[0].fees_rune_e8, null);
-
-  assert.deepEqual(mergePoolAnalysisHistoryRows([swap, earnings[0]])[0], {
-    ...earnings[0],
-    volume_rune_e8: '9007199254740993',
-    volume_usd_e2: '1234567',
-    fees_rune_e8: '7654321',
-    source: 'liquify-midgard-history'
-  });
+  assert.equal(Object.hasOwn(swap, 'pool_earnings_rune_e8'), false);
+  assert.equal(swap.source, 'liquify-midgard-swaps');
 });
 
 test('Pool Analysis builds every selectable table period from exact daily aggregates', () => {
@@ -71,7 +53,6 @@ test('Pool Analysis builds every selectable table period from exact daily aggreg
       asset: 'BTC.BTC', period_id: '30d', period_days: 30,
       observed_days: 30, volume_rune_e8: '300000000000',
       volume_usd: '1500000', fees_rune_e8: '3000000000', fees_usd: '15000',
-      pool_earnings_rune_e8: '6000000000', pool_earnings_usd: '30000',
       first_day: '2026-01-01', last_day: '2026-01-30'
     }]
   });
@@ -80,8 +61,8 @@ test('Pool Analysis builds every selectable table period from exact daily aggreg
   assert.equal(rows[0].volume_24h_usd, 50);
   assert.equal(rows[0].fee_volume_percent, 1);
   assert.equal(rows[0].annualized_fees_usd, 182500);
-  assert.equal(rows[0].annualized_pool_earnings_usd, 365000);
-  assert.equal(rows[0].annualized_fee_return_percent, 18.25);
+  assert.equal(rows[0].annualized_fee_rate_percent, 18.25);
+  assert.equal(Object.hasOwn(rows[0], 'annualized_pool_earnings_usd'), false);
   assert.equal(rows[0].period_metrics['24h'].volume_usd, 500);
   assert.equal(rows[0].period_metrics['24h'].fees_usd, 5);
   assert.equal(rows[0].period_metrics['24h'].volume_depth_percent, 1);
@@ -104,6 +85,7 @@ test('Pool Analysis aggregate query requests all table windows in one database r
   };
   await loadPoolAnalysisAggregates(client, '2026-01-30', POOL_ANALYSIS_TABLE_PERIODS);
   assert.match(captured.text, /unnest\(\$2::text\[\], \$3::integer\[\]\)/);
+  assert.doesNotMatch(captured.text, /pool_earnings/);
   assert.deepEqual(captured.params, [
     '2026-01-30',
     ['24h', '7d', '30d', '90d', '1y'],
@@ -205,13 +187,13 @@ test('Pool Analysis ingestion tolerates one failed pool and persists successful 
         fees_rune_e8: '1', partial: true, source: 'swaps'
       }] };
     },
-    fetchEarningsHistory: async () => ({ pages: 1, rows: [] }),
     upsert: async (_client, rows) => { persisted.push(...rows); return rows.length; },
     updateSyncState: async (_client, state) => { states.push(state); }
   });
   assert.equal(result.successful_pools, 1);
   assert.equal(result.failed_pools, 1);
   assert.equal(persisted.length, 1);
+  assert.equal(Object.hasOwn(result, 'earnings_pages'), false);
   assert.match(states.find((state) => state.asset === 'ETH.ETH').lastError, /temporary/);
 });
 
@@ -236,16 +218,16 @@ test('scheduled and backfill jobs share the Pool Analysis lock and publication c
   assert.deepEqual(calls, [
     ['lock', 'boonetools:pool-analysis'],
     ['ingest', false],
-    ['publish', 'pool-analysis:v1'],
+    ['publish', 'pool-analysis:v2'],
     ['lock', 'boonetools:pool-analysis'],
     ['ingest', true],
-    ['publish', 'pool-analysis:v1']
+    ['publish', 'pool-analysis:v2']
   ]);
 });
 
 test('Pool Analysis handlers are provider-free and validate detail requests', async () => {
   const model = {
-    key: 'pool-analysis:v1', schemaVersion: 1, generatedAt: '2026-01-31T12:00:00Z',
+    key: 'pool-analysis:v2', schemaVersion: 2, generatedAt: '2026-01-31T12:00:00Z',
     sourceUpdatedAt: '2026-01-31T12:00:00Z', freshUntil: '2026-01-31T12:20:00Z',
     ageSeconds: 0, stale: false,
     payload: { as_of: '2026-01-31T12:00:00Z', pools: [{ asset: 'BTC.BTC', symbol: 'BTC' }] }
@@ -271,8 +253,9 @@ test('Pool Analysis handlers are provider-free and validate detail requests', as
 });
 
 test('migration, route, jobs, units, deploy, and performance gate encode Pool Analysis', async () => {
-  const [migration, server, runJob, timer, service, backfill, deploy, smoke] = await Promise.all([
+  const [migration, feeScopeMigration, server, runJob, timer, service, backfill, deploy, smoke] = await Promise.all([
     readFile(new URL('../migrations/051_pool_analysis.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/052_pool_analysis_fee_scope.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-analysis.timer', import.meta.url), 'utf8'),
@@ -282,6 +265,9 @@ test('migration, route, jobs, units, deploy, and performance gate encode Pool An
     readFile(new URL('../../scripts/perf-smoke.mjs', import.meta.url), 'utf8')
   ]);
   assert.match(migration, /pool_analysis_daily/);
+  assert.match(feeScopeMigration, /drop column if exists pool_earnings_rune_e8/);
+  assert.match(feeScopeMigration, /delete from public\.pool_analysis_daily/);
+  assert.match(feeScopeMigration, /pool-generated liquidity fees/);
   assert.match(server, /pool-analysis-series/);
   assert.match(runJob, /pool-analysis-backfill/);
   assert.match(timer, /OnUnitActiveSec=15min/);

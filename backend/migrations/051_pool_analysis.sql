@@ -6,7 +6,6 @@ create table if not exists public.pool_analysis_daily (
   volume_rune_e8 numeric(78, 0),
   volume_usd_e2 numeric(78, 0),
   fees_rune_e8 numeric(78, 0),
-  pool_earnings_rune_e8 numeric(78, 0),
   rune_price_usd numeric,
   interval_start timestamptz,
   interval_end timestamptz,
@@ -18,8 +17,7 @@ create table if not exists public.pool_analysis_daily (
   primary key (asset, day),
   check (volume_rune_e8 is null or volume_rune_e8 >= 0),
   check (volume_usd_e2 is null or volume_usd_e2 >= 0),
-  check (fees_rune_e8 is null or fees_rune_e8 >= 0),
-  check (pool_earnings_rune_e8 is null or pool_earnings_rune_e8 >= 0)
+  check (fees_rune_e8 is null or fees_rune_e8 >= 0)
 );
 
 create index if not exists pool_analysis_daily_day_asset_idx
@@ -37,6 +35,6 @@ create table if not exists public.pool_analysis_sync_state (
 );
 
 comment on table public.pool_analysis_daily is
-  'Per-pool UTC swap volume, gross liquidity fees, and rewards-inclusive pool earnings. RUNE values use 1e8 base units and USD volume uses cents.';
+  'Per-pool UTC swap volume and pool-generated liquidity fees. RUNE values use 1e8 base units and USD volume uses cents; downstream system-income distribution is outside this dataset.';
 
 commit;

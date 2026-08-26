@@ -67,7 +67,7 @@
     component: () => import("./lib/PoolAnalysis.svelte"),
     icon: "∿",
     path: "pool-analysis",
-    description: "Compare THORChain pool depth, volume, gross fees, and all-time fee history"
+    description: "Compare THORChain pool depth, volume, pool-generated liquidity fees, and all-time fee history"
   };
 
   const polTrackerApp = {

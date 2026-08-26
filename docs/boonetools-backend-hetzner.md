@@ -377,16 +377,22 @@ Optional configuration is `BURN_TRACKER_START_DATE` (default `2024-09-26`),
 Liquify `MIDGARD_URLS`; no public request contacts Midgard or THORNode. The
 per-block path reuses the existing consolidated Liquify websocket connection.
 
-Migration `051_pool_analysis.sql` adds exact per-pool UTC swap volume, gross
-liquidity fees, rewards-inclusive pool earnings, and per-asset sync state.
+Migration `051_pool_analysis.sql` adds exact per-pool UTC swap volume,
+pool-generated liquidity fees, and per-asset sync state. Migration
+`052_pool_analysis_fee_scope.sql` removes the legacy downstream-earnings
+column, discards rows that contain no swap measures, and normalizes retained
+rows to swap-history provenance.
 `boonetools-pool-analysis.timer` refreshes the trailing 35 days every fifteen
 minutes and publishes the compact `/pool-analysis` table model. Its single
 aggregate query materializes completed-UTC 24-hour, 7-day, 30-day, 90-day, and
-1-year volume and gross-fee windows, including coverage and annualized fee
-metrics. Current price, depth, and balances come from `thornode-core:v1`; the
-core snapshot also retains `/thorchain/oracle/prices` on the pool cadence. The
-lazy `/pool-analysis-series?asset=...&range=30d|all` route reads at most 5,000
-stored daily rows and never contacts a provider during a public request.
+1-year volume and liquidity-fee windows, including coverage and annualized
+generated-fee rates. Current price, depth, and balances come from
+`thornode-core:v1`; the core snapshot also retains
+`/thorchain/oracle/prices` on the pool cadence. The lazy
+`/pool-analysis-series?asset=...&range=30d|all` route reads at most 5,000
+stored daily rows and never contacts a provider during a public request. Pool
+Analysis stops at liquidity-fee generation; subsequent system-income
+distribution is outside its data contract.
 
 Run the one-time all-pool historical fill separately from deployment:
 
@@ -396,9 +402,9 @@ journalctl -fu boonetools-pool-analysis-backfill.service
 ```
 
 The fill is advisory-locked against the scheduled writer, paginates Liquify
-Midgard's 100-interval history limit, writes bounded batches, and can be safely
-started again. Missing provider days remain visible gaps; they are never
-interpolated or treated as zero. Optional settings are
+Midgard's 100-interval per-pool swap-history limit, writes bounded batches, and
+can be safely started again. Missing provider days remain visible gaps; they
+are never interpolated or treated as zero. Optional settings are
 `POOL_ANALYSIS_START_DATE` (default `2021-04-01`),
 `POOL_ANALYSIS_RECENT_LOOKBACK_DAYS` (default `35`),
 `POOL_ANALYSIS_REQUEST_DELAY_MS` (default `100`),

@@ -5,8 +5,6 @@ import { coreSnapshotValue, getThorNodeCoreSnapshot } from './thornode-core-snap
 import {
   POOL_ANALYSIS_START_DATE,
   assetIdentity,
-  mergePoolAnalysisHistoryRows,
-  parsePoolAnalysisEarningsIntervals,
   parsePoolAnalysisSwapInterval
 } from './pool-analysis.js';
 import {
@@ -106,18 +104,6 @@ export async function fetchPoolAnalysisSwapHistory(asset, options = {}) {
   });
 }
 
-export async function fetchPoolAnalysisEarningsHistory(options = {}) {
-  const startDate = dateKey(options.startDate || POOL_ANALYSIS_START_DATE);
-  const endDate = dateKey(options.endDate || resolvedNow(options.now));
-  return dailyHistory({
-    path: '/history/earnings',
-    startDate,
-    endDate,
-    options,
-    parse: (intervals) => parsePoolAnalysisEarningsIntervals(intervals, { currentDay: endDate })
-  });
-}
-
 async function mapWithConcurrency(items, limit, worker) {
   const results = new Array(items.length);
   let cursor = 0;
@@ -181,24 +167,7 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
     throw new Error(`Pool Analysis swap history failed for all ${assets.length} pools`);
   }
 
-  let earnings = { rows: [], pages: 0, error: '' };
-  try {
-    earnings = await (options.fetchEarningsHistory || fetchPoolAnalysisEarningsHistory)({
-      ...options,
-      client,
-      startDate,
-      endDate: today,
-      now
-    });
-  } catch (error) {
-    earnings = { rows: [], pages: 0, error: error?.message || String(error) };
-  }
-
-  const acceptedAssets = new Set(assets);
-  const merged = mergePoolAnalysisHistoryRows([
-    ...successfulSwaps.flatMap((result) => result.rows),
-    ...earnings.rows.filter((row) => acceptedAssets.has(row.asset))
-  ]);
+  const merged = successfulSwaps.flatMap((result) => result.rows);
   const upsert = options.upsert || upsertPoolAnalysisDays;
   const upserted = await upsertBatches(client, merged, upsert, options.batchSize);
   const rowsByAsset = new Map(assets.map((asset) => [asset, []]));
@@ -218,9 +187,7 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
         start_date: startDate,
         end_date: today,
         rows: rows.length,
-        swap_pages: result.pages,
-        earnings_pages: earnings.pages,
-        earnings_error: earnings.error
+        swap_pages: result.pages
       }
     });
   }
@@ -233,8 +200,6 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
     failed_pools: swapResults.length - successfulSwaps.length,
     rows: merged.length,
     upserted,
-    swap_pages: swapResults.reduce((total, result) => total + result.pages, 0),
-    earnings_pages: earnings.pages,
-    earnings_error: earnings.error
+    swap_pages: swapResults.reduce((total, result) => total + result.pages, 0)
   };
 }

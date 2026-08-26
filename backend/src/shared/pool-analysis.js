@@ -10,8 +10,8 @@ import {
   loadPoolAnalysisSyncStates
 } from './pool-analysis-store.js';
 
-export const POOL_ANALYSIS_MODEL_KEY = 'pool-analysis:v1';
-export const POOL_ANALYSIS_SCHEMA_VERSION = 1;
+export const POOL_ANALYSIS_MODEL_KEY = 'pool-analysis:v2';
+export const POOL_ANALYSIS_SCHEMA_VERSION = 2;
 export const POOL_ANALYSIS_TTL_MS = 20 * 60 * 1000;
 export const POOL_ANALYSIS_PERIOD_DAYS = 30;
 export const POOL_ANALYSIS_TABLE_PERIODS = Object.freeze([
@@ -86,7 +86,6 @@ export function parsePoolAnalysisSwapInterval(interval = {}, options = {}) {
     volume_rune_e8: nonNegativeBaseString(interval.totalVolume ?? interval.total_volume, null),
     volume_usd_e2: nonNegativeBaseString(interval.totalVolumeUSD ?? interval.total_volume_usd, null),
     fees_rune_e8: nonNegativeBaseString(interval.totalFees ?? interval.total_fees, null),
-    pool_earnings_rune_e8: null,
     rune_price_usd: decimal(interval.runePriceUSD ?? interval.rune_price_usd),
     interval_start: isoFromUnix(interval.startTime ?? interval.start_time),
     interval_end: isoFromUnix(interval.endTime ?? interval.end_time),
@@ -94,62 +93,6 @@ export function parsePoolAnalysisSwapInterval(interval = {}, options = {}) {
     source: options.source || 'liquify-midgard-swaps'
   };
 }
-
-export function parsePoolAnalysisEarningsIntervals(intervals = [], options = {}) {
-  const rows = [];
-  const currentDay = dayString(options.currentDay);
-  for (const interval of Array.isArray(intervals) ? intervals : []) {
-    const day = dayFromUnix(interval?.startTime ?? interval?.start_time);
-    if (!day) continue;
-    for (const pool of Array.isArray(interval?.pools) ? interval.pools : []) {
-      const asset = assetIdentity(pool?.pool ?? pool?.asset).asset;
-      const earnings = nonNegativeBaseString(pool?.earnings, null);
-      if (!asset || earnings === null) continue;
-      rows.push({
-        asset,
-        day,
-        volume_rune_e8: null,
-        volume_usd_e2: null,
-        fees_rune_e8: null,
-        pool_earnings_rune_e8: earnings,
-        rune_price_usd: decimal(interval?.runePriceUSD ?? interval?.rune_price_usd),
-        interval_start: isoFromUnix(interval?.startTime ?? interval?.start_time),
-        interval_end: isoFromUnix(interval?.endTime ?? interval?.end_time),
-        partial: day === currentDay,
-        source: 'liquify-midgard-earnings'
-      });
-    }
-  }
-  return rows;
-}
-
-function mergeHistoryRows(rows = []) {
-  const merged = new Map();
-  for (const row of rows) {
-    const key = `${row.asset}|${row.day}`;
-    const prior = merged.get(key) || {};
-    merged.set(key, {
-      ...prior,
-      ...row,
-      volume_rune_e8: row.volume_rune_e8 ?? prior.volume_rune_e8 ?? null,
-      volume_usd_e2: row.volume_usd_e2 ?? prior.volume_usd_e2 ?? null,
-      fees_rune_e8: row.fees_rune_e8 ?? prior.fees_rune_e8 ?? null,
-      pool_earnings_rune_e8: row.pool_earnings_rune_e8 ?? prior.pool_earnings_rune_e8 ?? null,
-      rune_price_usd: row.rune_price_usd ?? prior.rune_price_usd ?? null,
-      interval_start: row.interval_start ?? prior.interval_start ?? null,
-      interval_end: row.interval_end ?? prior.interval_end ?? null,
-      partial: Boolean(row.partial || prior.partial),
-      source: prior.source && prior.source !== row.source
-        ? 'liquify-midgard-history'
-        : row.source || prior.source
-    });
-  }
-  return [...merged.values()].sort((left, right) => (
-    left.asset.localeCompare(right.asset) || left.day.localeCompare(right.day)
-  ));
-}
-
-export { mergeHistoryRows as mergePoolAnalysisHistoryRows };
 
 function divideBase(numerator, denominator, multiplier = 1) {
   const top = positive(numerator);
@@ -217,7 +160,7 @@ export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregat
             : null,
           annualized_fees_rune: annualizedFeesRune,
           annualized_fees_usd: annualize(aggregate.fees_usd, coveredDays, period.days),
-          annualized_fee_return_percent: annualizedFeesRune === null || balanceRune === null
+          annualized_fee_rate_percent: annualizedFeesRune === null || balanceRune === null
             ? null
             : divideBase(annualizedFeesRune, (Number(balanceRune) / 1e8) * 2, 100),
           coverage: {
@@ -229,10 +172,7 @@ export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregat
           }
         }];
       }));
-      const defaultAggregate = assetAggregates.get('30d') || {};
       const defaultMetrics = periodMetrics['30d'];
-      const defaultPoolEarningsRune = nonNegativeBaseString(defaultAggregate.pool_earnings_rune_e8, null);
-      const defaultPoolEarningsUsd = finite(defaultAggregate.pool_earnings_usd);
       return {
         asset: identity.asset,
         chain: identity.chain,
@@ -260,17 +200,9 @@ export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregat
         period_fees_usd: defaultMetrics.fees_usd,
         fee_volume_percent: defaultMetrics.fee_volume_percent,
         volume_depth_percent: divideBase(volume24hRune, balanceRune, 100),
-        annualized_pool_earnings_rune: annualize(
-          defaultPoolEarningsRune === null ? null : Number(defaultPoolEarningsRune) / 1e8,
-          defaultMetrics.coverage.observed_days
-        ),
-        annualized_pool_earnings_usd: annualize(
-          defaultPoolEarningsUsd,
-          defaultMetrics.coverage.observed_days
-        ),
         annualized_fees_rune: defaultMetrics.annualized_fees_rune,
         annualized_fees_usd: defaultMetrics.annualized_fees_usd,
-        annualized_fee_return_percent: defaultMetrics.annualized_fee_return_percent,
+        annualized_fee_rate_percent: defaultMetrics.annualized_fee_rate_percent,
         coverage: defaultMetrics.coverage,
         period_metrics: periodMetrics
       };
@@ -328,7 +260,7 @@ export async function buildPoolAnalysisReadModel(client, options = {}) {
       pools: rows,
       sources: {
         current: 'thornode-core:pools+oracle_prices',
-        history: 'liquify-midgard:history/swaps+history/earnings'
+        history: 'liquify-midgard:history/swaps'
       },
       warnings
     },
