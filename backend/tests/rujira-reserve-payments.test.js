@@ -653,6 +653,37 @@ test('Dune-era scheduled settlement scanning survives an ordinary Midgard candid
   assert.equal(result.block_scan.events, 2);
 });
 
+test('legacy fallback survives a cooled-down Midgard candidate lane and continues RPC settlement work', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { runRujiraReservePaymentsLegacyIngestion } = await import(
+    '../src/shared/rujira-reserve-payments.js'
+  );
+  const calls = [];
+
+  const result = await runRujiraReservePaymentsLegacyIngestion({}, {}, {
+    ingestMidgardCandidates: async () => {
+      calls.push('midgard');
+      throw new Error('Provider THORChain Midgard is cooling down after a 500 response');
+    },
+    ingestScheduledCandidates: async () => {
+      calls.push('scheduled');
+      return { selected: 1 };
+    },
+    processBlocks: async () => {
+      calls.push('blocks');
+      return { events: 2 };
+    },
+    refreshPrices: async () => {
+      calls.push('prices');
+      return { priced_events: 2 };
+    }
+  });
+
+  assert.deepEqual(calls, ['midgard', 'scheduled', 'blocks', 'prices']);
+  assert.match(result.midgard_candidates.error, /cooling down after a 500 response/);
+  assert.equal(result.block_scan.events, 2);
+});
+
 test('successful Dune Reserve ingestion still runs the scheduled settlement scanner', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { runRujiraReservePaymentsIngestion } = await import('../src/shared/rujira-reserve-payments.js');

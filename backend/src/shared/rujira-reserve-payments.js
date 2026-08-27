@@ -1851,7 +1851,11 @@ async function runRujiraReservePaymentsDuneIngestion(client) {
   };
 }
 
-async function runRujiraReservePaymentsLegacyIngestion(client, initialStats = {}) {
+export async function runRujiraReservePaymentsLegacyIngestion(
+  client,
+  initialStats = {},
+  options = {}
+) {
   const stats = {
     ...initialStats,
     midgard_candidates: null,
@@ -1860,22 +1864,28 @@ async function runRujiraReservePaymentsLegacyIngestion(client, initialStats = {}
     pricing: null,
     provider_cooldown: Boolean(initialStats.provider_cooldown)
   };
+  const ingestMidgardCandidates = options.ingestMidgardCandidates
+    || ingestRujiraReservePaymentMidgardCandidates;
+  const ingestScheduledCandidates = options.ingestScheduledCandidates
+    || ingestRujiraReservePaymentScheduledCandidates;
+  const processBlocks = options.processBlocks || processRujiraReservePaymentBlocks;
+  const refreshPrices = options.refreshPrices || refreshRujiraReservePaymentPrices;
 
   try {
-    stats.midgard_candidates = await ingestRujiraReservePaymentMidgardCandidates(client);
+    stats.midgard_candidates = await ingestMidgardCandidates(client);
   } catch (error) {
-    if (!isProviderRateLimit(error)) {
-      throw error;
-    }
-    stats.provider_cooldown = true;
+    const rateLimited = isProviderRateLimit(error);
+    stats.provider_cooldown ||= rateLimited;
     stats.midgard_candidates = {
       error: error.message,
-      rate_limited_until: await putCooldown(client, ACTION_SYNC_KEY, error)
+      ...(rateLimited
+        ? { rate_limited_until: await putCooldown(client, ACTION_SYNC_KEY, error) }
+        : {})
     };
   }
 
   try {
-    stats.scheduled_candidates = await ingestRujiraReservePaymentScheduledCandidates(client);
+    stats.scheduled_candidates = await ingestScheduledCandidates(client);
   } catch (error) {
     if (!isProviderRateLimit(error)) {
       throw error;
@@ -1888,7 +1898,7 @@ async function runRujiraReservePaymentsLegacyIngestion(client, initialStats = {}
   }
 
   try {
-    stats.block_scan = await processRujiraReservePaymentBlocks(client);
+    stats.block_scan = await processBlocks(client);
   } catch (error) {
     if (!isProviderRateLimit(error)) {
       throw error;
@@ -1900,7 +1910,7 @@ async function runRujiraReservePaymentsLegacyIngestion(client, initialStats = {}
     };
   }
 
-  stats.pricing = await refreshRujiraReservePaymentPrices(client);
+  stats.pricing = await refreshPrices(client);
 
   return stats;
 }
