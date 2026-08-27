@@ -455,6 +455,7 @@ verify_release() {
   node "$CURRENT_LINK/scripts/perf-smoke.mjs" \
     --base https://boone.tools/functions/v1 \
     --allow-stale-endpoint pol-tracker \
+    --allow-stale-endpoint rapid-market \
     --allow-stale-endpoint burn-tracker \
     --allow-stale-endpoint app-earnings \
     --allow-stale-endpoint treasury \
