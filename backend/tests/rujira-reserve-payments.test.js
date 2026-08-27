@@ -684,6 +684,25 @@ test('legacy fallback survives a cooled-down Midgard candidate lane and continue
   assert.equal(result.block_scan.events, 2);
 });
 
+test('legacy fallback preserves completed settlement work when Midgard pricing is cooled down', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { runRujiraReservePaymentsLegacyIngestion } = await import(
+    '../src/shared/rujira-reserve-payments.js'
+  );
+
+  const result = await runRujiraReservePaymentsLegacyIngestion({}, {}, {
+    ingestMidgardCandidates: async () => ({ heights: 1 }),
+    ingestScheduledCandidates: async () => ({ selected: 1 }),
+    processBlocks: async () => ({ events: 2 }),
+    refreshPrices: async () => {
+      throw new Error('Provider THORChain Midgard is cooling down during price refresh');
+    }
+  });
+
+  assert.equal(result.block_scan.events, 2);
+  assert.match(result.pricing.error, /cooling down during price refresh/);
+});
+
 test('successful Dune Reserve ingestion still runs the scheduled settlement scanner', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { runRujiraReservePaymentsIngestion } = await import('../src/shared/rujira-reserve-payments.js');

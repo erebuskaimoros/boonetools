@@ -1910,7 +1910,18 @@ export async function runRujiraReservePaymentsLegacyIngestion(
     };
   }
 
-  stats.pricing = await refreshPrices(client);
+  try {
+    stats.pricing = await refreshPrices(client);
+  } catch (error) {
+    const rateLimited = isProviderRateLimit(error);
+    stats.provider_cooldown ||= rateLimited;
+    stats.pricing = {
+      error: error.message,
+      ...(rateLimited
+        ? { rate_limited_until: await putCooldown(client, ACTION_SYNC_KEY, error) }
+        : {})
+    };
+  }
 
   return stats;
 }
