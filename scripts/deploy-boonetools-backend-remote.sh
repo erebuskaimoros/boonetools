@@ -18,6 +18,7 @@ CURRENT_LINK="$DEST/current"
 CONFIG_DIR="$DEST/config"
 ENV_FILE="$CONFIG_DIR/backend.env"
 LOCK_FILE=/var/lock/boonetools-deploy.lock
+OPTIONAL_PRIME_UNIT_PATTERN='^(boonetools-pool-dislocation-repair\.service|boonetools-pool-analysis\.service|boonetools-pol-tracker\.service|boonetools-burn-tracker\.service|boonetools-wasm-arb-economics\.service|boonetools-wasm-arb-economics-fees\.service|boonetools-wasm-arb-economics-oracle\.service)$'
 
 PREVIOUS_TARGET=
 ROLLBACK_REQUIRED=false
@@ -306,24 +307,14 @@ prime_read_model_unit() {
   if [[ "$unit" == boonetools-pool-dislocation-repair.service ]]; then
     if ! systemctl start "$unit"; then
       log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
+      systemctl reset-failed "$unit" || true
     fi
     return
   fi
-  if [[ "$unit" == boonetools-pol-tracker.service ]]; then
+  if [[ "$unit" =~ $OPTIONAL_PRIME_UNIT_PATTERN ]]; then
     if ! systemctl start "$unit"; then
       log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
-    fi
-    return
-  fi
-  if [[ "$unit" == boonetools-burn-tracker.service ]]; then
-    if ! systemctl start "$unit"; then
-      log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
-    fi
-    return
-  fi
-  if [[ "$unit" == boonetools-pool-analysis.service ]]; then
-    if ! systemctl start "$unit"; then
-      log "$unit could not reach its current source target; continuing while systemd retries it"
+      systemctl reset-failed "$unit" || true
     fi
     return
   fi
@@ -479,6 +470,7 @@ verify_release() {
   if systemctl --failed --no-legend \
     | awk '{ print $1 }' \
     | grep -Ev '^boonetools-pool-dislocation-repair\.service$' \
+    | grep -Ev "$OPTIONAL_PRIME_UNIT_PATTERN" \
     | grep -Eq '^(boonetools-|rapid-swap-listener)'; then
     die "a BooneTools systemd unit is failed"
   fi

@@ -297,4 +297,10 @@ test('deployment does not roll back when the independently scheduled pool-disloc
     deploy,
     /start_and_verify_timers\n\nprime_read_model_unit "boonetools-treasury-snapshot\.service"\n\nlog "Running post-deployment health and performance gates"/
   );
+  assert.match(deploy, /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-pool-analysis/);
+  assert.match(deploy, /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-pol-tracker/);
+  assert.match(deploy, /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-burn-tracker/);
+  assert.match(deploy, /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-wasm-arb-economics/);
+  assert.match(deploy, /systemctl reset-failed "\$unit"/);
+  assert.match(deploy, /grep -Ev "\$OPTIONAL_PRIME_UNIT_PATTERN"/);
 });

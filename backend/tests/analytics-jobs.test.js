@@ -242,7 +242,11 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(remoteDeployScript, /local retry_delay_seconds=35/);
   assert.match(
     remoteDeployScript,
-    /boonetools-pol-tracker\.service[\s\S]*continuing with its cached read model/
+    /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-pol-tracker/
+  );
+  assert.match(
+    remoteDeployScript,
+    /if \[\[ "\$unit" =~ \$OPTIONAL_PRIME_UNIT_PATTERN \]\]; then[\s\S]*continuing with its cached read model/
   );
   assert.match(remoteDeployScript, /local timer_state_wait_seconds=90/);
   assert.match(remoteDeployScript, /systemctl show "\$timer" --property=Triggers --value/);
