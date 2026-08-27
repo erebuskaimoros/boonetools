@@ -7,6 +7,7 @@ import {
   buildStatusNetworkReadModel
 } from '../shared/status-live.js';
 import { getNetworkSnapshot } from '../shared/network-snapshot.js';
+import { loadLatestChainHead } from '../shared/chain-headers.js';
 
 const LOCK_KEY = 'boonetools:status-live';
 
@@ -34,12 +35,25 @@ export async function buildStatusLiveSnapshot(options = {}) {
     client: options.client,
     readModelCache: false
   }));
-  const networkSnapshot = await loadNetwork();
+  const loadLatestBlock = options.loadLatestChainHead || (
+    typeof options.client?.query === 'function'
+      ? loadLatestChainHead
+      : async () => null
+  );
+  const [networkSnapshot, latestBlock] = await Promise.all([
+    loadNetwork(),
+    loadLatestBlock(options.client)
+  ]);
   if (networkSnapshot?.stale) {
     throw new Error('Network providers did not produce a fresh live status snapshot');
   }
   const generatedAt = options.generatedAt || new Date().toISOString();
-  const payload = buildStatusNetworkReadModel({ networkSnapshot, generatedAt });
+  const payload = buildStatusNetworkReadModel({
+    networkSnapshot,
+    generatedAt,
+    latestBlock,
+    stallThresholdMs: options.stallThresholdMs
+  });
   return {
     payload,
     generatedAt,

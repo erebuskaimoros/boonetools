@@ -38,6 +38,15 @@
     tone: 'err',
     label: 'Unavailable'
   };
+  $: networkConsensus = currentDashboard?.network?.consensus || {
+    state: 'unknown',
+    signing_blocks: false,
+    last_block_at: null,
+    block_age_seconds: null
+  };
+  $: consensusStalled = networkConsensus.state === 'stalled';
+  $: displayNetworkTone = consensusStalled ? 'err' : networkSummary.tone;
+  $: displayNetworkLabel = consensusStalled ? 'Stalled' : networkSummary.label;
   $: activeNodeCount = Number(currentDashboard?.network?.active_node_count || 0);
   $: networkVersion = currentDashboard?.network?.majority_version || '-';
   $: thorchainHeight = Number(currentDashboard?.network?.height || 0);
@@ -215,6 +224,21 @@
     return `${Math.floor(hours / 24)}d ago`;
   }
 
+  function formatDurationSeconds(value) {
+    if (value === null || value === undefined || value === '') return '-';
+    const parsedSeconds = Number(value);
+    if (!Number.isFinite(parsedSeconds)) return '-';
+    const totalSeconds = Math.max(0, Math.floor(parsedSeconds));
+    const days = Math.floor(totalSeconds / 86_400);
+    const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+    const minutes = Math.floor((totalSeconds % 3_600) / 60);
+    const seconds = totalSeconds % 60;
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+  }
+
   function stateLabel(state) {
     if (state === 'enabled') return 'ENABLED';
     if (state === 'partial') return 'PARTIAL';
@@ -281,8 +305,8 @@
     <div class="command-line">
       <span class="prompt">$</span>
       <span>network-status --mainnet --live</span>
-      <span class="status-pill {networkSummary.tone}">
-        <span class="dot"></span>{networkSummary.label}
+      <span class="status-pill {displayNetworkTone}">
+        <span class="dot"></span>{displayNetworkLabel}
       </span>
     </div>
     <div class="title-row">
@@ -296,6 +320,21 @@
     </div>
   </section>
 
+  {#if consensusStalled}
+    <div class="alert err stall-alert" role="alert" aria-live="assertive">
+      <span>ERR</span>
+      <div>
+        <strong>Block production is stalled.</strong>
+        <p>
+          No THORChain block has committed for {formatDurationSeconds(networkConsensus.block_age_seconds)}.
+          Height {number.format(thorchainHeight)} has not advanced; last commit: {formatDateTime(networkConsensus.last_block_at)}.
+        </p>
+        <p>Validators may still be signing consensus votes, but no proposed block is reaching commit quorum. On-chain actions cannot progress until consensus resumes.</p>
+        <p>Mimir and configured chain lanes below can still show ENABLED. “Outbound Signing” reports TSS/config state, not block-finalization health.</p>
+      </div>
+    </div>
+  {/if}
+
   {#if statusError}
     <div class="alert err"><span>ERR</span>{statusError}</div>
   {/if}
@@ -304,36 +343,41 @@
     <div class="loading-panel"><span>▓░░░░</span> Reading live network state...</div>
   {:else if chainStatuses.length > 0}
     <div class="overview-grid">
-      <section class="network-callout {networkSummary.tone}">
+      <section class="network-callout {displayNetworkTone}">
         <div class="network-state">
           <span class="state-dot"></span>
           <div>
             <small>NETWORK STATE</small>
-            <strong>{networkSummary.label}</strong>
+            <strong>{displayNetworkLabel}</strong>
           </div>
         </div>
         <div class="network-notes">
-          <p>
-            Trading is available on <strong>{networkSummary.tradingEnabled} of {networkSummary.total}</strong> connected chains.
-            {#if haltedChains.length}Paused: <span>{haltedChains.join(', ')}</span>.{/if}
-          </p>
-          <p>
-            LP actions are available on <strong>{networkSummary.lpEnabled} of {networkSummary.total}</strong> chains;
-            signing on <strong>{networkSummary.signingEnabled} of {networkSummary.total}</strong>.
-            {#if networkSummary.lpPartial}Partial LP availability: <span>{networkSummary.lpPartial}</span>.{/if}
-          </p>
+          {#if consensusStalled}
+            <p><strong>No new block commits are being finalized.</strong> Network height remains at {number.format(thorchainHeight)}.</p>
+            <p>Configured lane state remains visible below for incident context; it does not mean transactions can execute.</p>
+          {:else}
+            <p>
+              Trading is available on <strong>{networkSummary.tradingEnabled} of {networkSummary.total}</strong> connected chains.
+              {#if haltedChains.length}Paused: <span>{haltedChains.join(', ')}</span>.{/if}
+            </p>
+            <p>
+              LP actions are available on <strong>{networkSummary.lpEnabled} of {networkSummary.total}</strong> chains;
+              outbound signing configured on <strong>{networkSummary.signingEnabled} of {networkSummary.total}</strong>.
+              {#if networkSummary.lpPartial}Partial LP availability: <span>{networkSummary.lpPartial}</span>.{/if}
+            </p>
+          {/if}
         </div>
         <a class="text-link" href="https://thorchain.net/network" target="_blank" rel="noopener noreferrer">
           Full network <span>↗</span>
         </a>
       </section>
 
-      <section class="churn-card" class:paused={churnStatus.isPaused} aria-label="Validator churn status">
+      <section class="churn-card" class:paused={churnStatus.isPaused} class:stalled={consensusStalled} aria-label="Validator churn status">
         <div class="churn-head">
           <span class="churn-dot"></span>
           <div>
             <small>VALIDATOR CHURN</small>
-            <strong>{churnStatus.isPaused ? 'PAUSED' : 'ACTIVE'}</strong>
+            <strong>{consensusStalled ? 'BLOCKED' : churnStatus.isPaused ? 'PAUSED' : 'ACTIVE'}</strong>
           </div>
         </div>
         <div class="churn-meta">
@@ -353,7 +397,13 @@
         <span class="metric-index">01</span>
         <span class="metric-label">THORChain Block</span>
         <strong>{number.format(thorchainHeight)}</strong>
-        <small>live height</small>
+        {#if consensusStalled}
+          <small>no new block for {formatDurationSeconds(networkConsensus.block_age_seconds)}</small>
+        {:else if networkConsensus.last_block_at}
+          <small>last block {formatAge(networkConsensus.last_block_at)}</small>
+        {:else}
+          <small>live height</small>
+        {/if}
       </div>
       <div class="metric">
         <span class="metric-index">02</span>
@@ -387,7 +437,7 @@
               <th>Chain</th>
               <th>Trading</th>
               <th>LP Actions</th>
-              <th>Signing</th>
+              <th>Outbound Signing</th>
               <th>Last Observed</th>
             </tr>
           </thead>
@@ -543,8 +593,8 @@
       </section>
     </div>
 
-    <div class="source-line">
-      <span><i></i> LIVE</span>
+    <div class="source-line" class:stalled={consensusStalled}>
+      <span><i></i> {consensusStalled ? 'NO NEW BLOCKS' : 'LIVE'}</span>
       THORNode live state 15s · block headers, stuck-tx scan, and node-vote history 60s
       {#if lastUpdated}<em>updated {formatDateTime(lastUpdated)}</em>{/if}
     </div>
@@ -678,6 +728,17 @@
   .inline-alert span { margin-right: 10px; color: var(--term-error); font-weight: 800; }
   .loading-panel span { margin-right: 10px; color: #00cc66; animation: loader 1.2s steps(5) infinite; }
 
+  .stall-alert {
+    display: flex;
+    align-items: flex-start;
+    border-color: rgba(220, 53, 69, .42);
+    border-left: 2px solid var(--term-error);
+    background: rgba(220, 53, 69, .055);
+  }
+  .stall-alert > span { flex: 0 0 auto; }
+  .stall-alert strong { display: block; color: #f3c3c8; font-size: 13px; letter-spacing: .04em; text-transform: uppercase; }
+  .stall-alert p { margin: 4px 0 0; color: var(--term-text-2); }
+
   .network-callout {
     min-height: 78px;
     padding: 14px 16px;
@@ -728,9 +789,11 @@
     background: rgba(0, 204, 102, .035);
   }
   .churn-card.paused { border-left-color: #d4a017; background: rgba(212, 160, 23, .035); }
+  .churn-card.stalled { border-left-color: var(--term-error); background: rgba(220, 53, 69, .035); }
   .churn-head { min-width: 94px; gap: 10px; }
   .churn-dot { width: 6px; height: 6px; border-radius: 50%; background: #00cc66; box-shadow: 0 0 6px rgba(0, 204, 102, .4); animation: pulse-dot 2s infinite; }
   .churn-card.paused .churn-dot { background: #d4a017; box-shadow: none; animation: none; }
+  .churn-card.stalled .churn-dot { background: var(--term-error); box-shadow: none; animation: none; }
   .churn-head small,
   .churn-meta span { display: block; color: var(--term-text-4); font: 700 11px/1.4 'JetBrains Mono', monospace; letter-spacing: .12em; }
   .churn-head strong { color: var(--term-text, #f5f5f5); font: 800 14px/1.2 'JetBrains Mono', monospace; }
@@ -868,6 +931,8 @@
   }
   .source-line > span { color: #00cc66; }
   .source-line i { display: inline-block; width: 5px; height: 5px; margin-right: 4px; animation: pulse-dot 2s infinite; }
+  .source-line.stalled > span { color: var(--term-error); }
+  .source-line.stalled i { background: var(--term-error); animation: none; }
   .source-line em { margin-left: auto; color: var(--term-text-4); font-style: normal; }
 
   @keyframes pulse-dot { 50% { opacity: .45; } }

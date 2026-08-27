@@ -46,6 +46,64 @@ test('live status model contains only compact current network state', () => {
   assert.ok(Buffer.byteLength(JSON.stringify(payload)) < 5_000);
 });
 
+test('live status reports a consensus stall even when every Mimir lane looks operational', () => {
+  const payload = buildStatusNetworkReadModel({
+    generatedAt: '2026-08-26T12:05:00Z',
+    latestBlock: {
+      height: 27_500_000,
+      time: '2026-08-26T12:00:00Z',
+      source: 'liquify-thorchain-block-headers'
+    },
+    networkSnapshot: {
+      inbound_addresses: [{ chain: 'BTC' }, { chain: 'ETH' }],
+      nodes: [{ status: 'Active', version: '3.20.0', status_since: 27_400_000 }],
+      mimir: {
+        HALTTRADING: 0,
+        HALTSIGNING: 0,
+        HALTCHAINGLOBAL: 0
+      },
+      lastblock: [
+        { chain: 'BTC', thorchain: 27_500_000 },
+        { chain: 'ETH', thorchain: 27_500_000 }
+      ],
+      churns: [],
+      as_of: '2026-08-26T12:05:00Z',
+      source: { live: 'thornode', churns: 'midgard' },
+      partial: false,
+      stale: false
+    }
+  });
+
+  assert.equal(payload.network.consensus.state, 'stalled');
+  assert.equal(payload.network.consensus.signing_blocks, false);
+  assert.equal(payload.network.consensus.last_block_at, '2026-08-26T12:00:00.000Z');
+  assert.equal(payload.network.consensus.block_age_seconds, 300);
+  assert.equal(payload.network.summary.label, 'Stalled');
+  assert.equal(payload.network.summary.tone, 'err');
+});
+
+test('consensus liveness separates normal slow blocks from delay and stall states', () => {
+  const networkSnapshot = {
+    inbound_addresses: [{ chain: 'BTC' }],
+    nodes: [{ status: 'Active', version: '3.20.0' }],
+    mimir: {},
+    lastblock: [{ chain: 'BTC', thorchain: 100 }],
+    churns: [],
+    as_of: '2026-08-26T12:00:00Z'
+  };
+  const buildAt = (generatedAt) => buildStatusNetworkReadModel({
+    generatedAt,
+    latestBlock: { height: 100, time: '2026-08-26T12:00:00Z' },
+    networkSnapshot
+  });
+
+  assert.equal(buildAt('2026-08-26T12:00:29Z').network.consensus.state, 'signing');
+  assert.equal(buildAt('2026-08-26T12:00:30Z').network.consensus.state, 'delayed');
+  assert.equal(buildAt('2026-08-26T12:01:29Z').network.consensus.state, 'delayed');
+  assert.equal(buildAt('2026-08-26T12:01:30Z').network.consensus.state, 'stalled');
+  assert.equal(buildAt('2026-08-26T11:59:59Z').network.consensus.block_age_seconds, 0);
+});
+
 test('height Mimirs activate only after a positive activation height', () => {
   assert.equal(isHeightMimirActive(1, 100), true);
   assert.equal(isHeightMimirActive(101, 100), false);

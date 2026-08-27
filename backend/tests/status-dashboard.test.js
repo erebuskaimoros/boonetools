@@ -253,6 +253,78 @@ test('live status snapshot excludes heavy dashboard lanes', async () => {
     height: 1000,
     partial: false
   });
+  assert.deepEqual(snapshot.payload.network.consensus, {
+    state: 'unknown',
+    signing_blocks: null,
+    last_block_at: null,
+    block_age_seconds: null
+  });
+});
+
+test('live status snapshot derives consensus liveness from the durable chain head', async () => {
+  const client = { name: 'status-client' };
+  let receivedClient;
+  const snapshot = await buildStatusLiveSnapshot({
+    client,
+    generatedAt: '2026-07-18T12:02:00Z',
+    loadNetworkSnapshot: async () => sources().networkSnapshot,
+    loadLatestChainHead: async (inputClient) => {
+      receivedClient = inputClient;
+      return {
+        height: 1000,
+        time: '2026-07-18T12:00:00Z',
+        source: 'liquify-ws'
+      };
+    }
+  });
+
+  assert.equal(receivedClient, client);
+  assert.deepEqual(snapshot.payload.network.consensus, {
+    state: 'stalled',
+    signing_blocks: false,
+    last_block_at: '2026-07-18T12:00:00.000Z',
+    block_age_seconds: 120
+  });
+  assert.equal(snapshot.payload.network.summary.label, 'Stalled');
+  assert.equal(snapshot.payload.network.summary.tone, 'err');
+});
+
+test('live status does not confuse lagging header ingestion with a chain stall', async () => {
+  const snapshot = await buildStatusLiveSnapshot({
+    generatedAt: '2026-07-18T12:05:00Z',
+    loadNetworkSnapshot: async () => sources().networkSnapshot,
+    loadLatestChainHead: async () => ({
+      height: 999,
+      time: '2026-07-18T12:00:00Z',
+      source: 'liquify-ws'
+    })
+  });
+
+  assert.deepEqual(snapshot.payload.network.consensus, {
+    state: 'unknown',
+    signing_blocks: null,
+    last_block_at: null,
+    block_age_seconds: null
+  });
+  assert.notEqual(snapshot.payload.network.summary.label, 'Stalled');
+});
+
+test('live status does not infer liveness from a reused lastblock field', async () => {
+  const networkSnapshot = sources().networkSnapshot;
+  networkSnapshot.field_meta = { lastblock: { status: 'reused' } };
+  const snapshot = await buildStatusLiveSnapshot({
+    generatedAt: '2026-07-18T12:05:00Z',
+    loadNetworkSnapshot: async () => networkSnapshot,
+    loadLatestChainHead: async () => ({
+      height: 1000,
+      time: '2026-07-18T12:00:00Z',
+      source: 'liquify-ws'
+    })
+  });
+
+  assert.equal(snapshot.payload.network.consensus.state, 'unknown');
+  assert.equal(snapshot.payload.network.consensus.signing_blocks, null);
+  assert.notEqual(snapshot.payload.network.summary.label, 'Stalled');
 });
 
 test('live status handler is DB-only and supports conditional polling', async () => {
@@ -290,12 +362,21 @@ test('live status handler is DB-only and supports conditional polling', async ()
 
 test('live status scheduler publishes with a short TTL and logs a compact result', async () => {
   let publishOptions;
+  let loadedHeadWith;
   const result = await runStatusLiveScheduler({
     lockRunner: async (key, callback) => {
       assert.equal(key, 'boonetools:status-live');
       return callback({ name: 'locked-client' });
     },
     loadNetworkSnapshot: async () => sources().networkSnapshot,
+    loadLatestChainHead: async (client) => {
+      loadedHeadWith = client;
+      return {
+        height: 1000,
+        time: '2026-07-18T12:00:00Z',
+        source: 'liquify-ws'
+      };
+    },
     publish: async (options) => {
       publishOptions = options;
       const built = await options.build();
@@ -319,6 +400,7 @@ test('live status scheduler publishes with a short TTL and logs a compact result
   });
 
   assert.equal(publishOptions.modelKey, 'status-live:v1');
+  assert.deepEqual(loadedHeadWith, { name: 'locked-client' });
   assert.equal(publishOptions.ttlMs, 45_000);
   assert.equal(result.model.key, 'status-live:v1');
   assert.equal(result.model.payload, undefined);

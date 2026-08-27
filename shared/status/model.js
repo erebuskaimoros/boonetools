@@ -1,6 +1,10 @@
 const STATUS_STATE_KEY = /^(HALT|PAUSELP|SOLVENCYHALT|NODEPAUSE)/i;
 export const MAX_STATUS_STUCK_TRANSACTIONS = 20;
 export const MAX_BLOCK_PRODUCTION_POINTS = 150;
+// Slow blocks can legitimately take 10-20 seconds. Flag delay after 30 seconds,
+// but require 90 seconds without a committed block before declaring a stall.
+export const STATUS_CONSENSUS_DELAY_THRESHOLD_MS = 30_000;
+export const STATUS_CONSENSUS_STALL_THRESHOLD_MS = 90_000;
 
 function numberValue(value) {
   const numeric = Number(value);
@@ -121,6 +125,38 @@ export function summarizeNetwork(chains = []) {
     degradedChains,
     tone,
     label
+  };
+}
+
+function buildConsensusStatus(latestBlock, nowMs, currentHeight, stallThresholdMs, lastBlockReliable) {
+  const lastBlockAt = timestamp(latestBlock?.time ?? latestBlock?.blockTime);
+  const latestBlockHeight = numberValue(latestBlock?.height);
+  if (
+    !lastBlockReliable ||
+    !lastBlockAt ||
+    latestBlockHeight <= 0 ||
+    latestBlockHeight < currentHeight
+  ) {
+    return {
+      state: 'unknown',
+      signing_blocks: null,
+      last_block_at: null,
+      block_age_seconds: null
+    };
+  }
+
+  const lastBlockMs = Date.parse(lastBlockAt);
+  const blockAgeMs = Math.max(0, nowMs - lastBlockMs);
+  const stalled = blockAgeMs >= stallThresholdMs;
+  const delayed = !stalled && blockAgeMs >= Math.min(
+    STATUS_CONSENSUS_DELAY_THRESHOLD_MS,
+    stallThresholdMs
+  );
+  return {
+    state: stalled ? 'stalled' : delayed ? 'delayed' : 'signing',
+    signing_blocks: !stalled && !delayed,
+    last_block_at: lastBlockAt,
+    block_age_seconds: Math.floor(blockAgeMs / 1_000)
   };
 }
 
@@ -255,6 +291,27 @@ export function buildStatusNetworkReadModel(input = {}) {
     : {};
   const chains = buildChainStatuses(networkSnapshot.inbound_addresses, mimir, lastBlocks);
   const thorchainHeight = Math.max(0, ...lastBlocks.map((row) => numberValue(row?.thorchain)));
+  const configuredStallThresholdMs = Number(input.stallThresholdMs);
+  const stallThresholdMs = Number.isFinite(configuredStallThresholdMs) && configuredStallThresholdMs >= 1_000
+    ? configuredStallThresholdMs
+    : STATUS_CONSENSUS_STALL_THRESHOLD_MS;
+  const lastBlockFieldStatus = String(networkSnapshot?.field_meta?.lastblock?.status || '');
+  const lastBlockReliable = lastBlockFieldStatus !== 'reused' && lastBlockFieldStatus !== 'error';
+  const consensus = buildConsensusStatus(
+    input.latestBlock,
+    Number.isFinite(nowMs) ? nowMs : Date.now(),
+    thorchainHeight,
+    stallThresholdMs,
+    lastBlockReliable
+  );
+  const summary = summarizeNetwork(chains);
+  if (consensus.state === 'stalled') {
+    summary.tone = 'err';
+    summary.label = 'Stalled';
+  } else if (consensus.state === 'delayed' && summary.tone === 'ok') {
+    summary.tone = 'warn';
+    summary.label = 'Delayed';
+  }
   const warnings = warningValues(
     networkSnapshot.warnings,
     Object.values(networkSnapshot.errors || {}),
@@ -268,7 +325,8 @@ export function buildStatusNetworkReadModel(input = {}) {
       height: thorchainHeight,
       active_node_count: activeNodes.length,
       majority_version: majorityVersion(nodes),
-      summary: summarizeNetwork(chains)
+      summary,
+      consensus
     },
     chains,
     churn: buildChurnStatus(
