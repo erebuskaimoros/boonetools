@@ -201,3 +201,55 @@ test('protocol Mimir backfill rolls from its own bounded watermark', async () =>
   assert.deepEqual(eventQueries, ['set_mimir.key EXISTS']);
   assert.ok(calls.some(({ sql }) => sql.includes('insert into "node_vote_sync_state"')));
 });
+
+test('protocol Mimir backfill reuses a confirmed height range without another RPC status lookup', async () => {
+  const { runProtocolMimirBackfill } = await import('../src/shared/protocol-mimir-changes.js');
+  const client = {
+    async query(sql) {
+      if (sql.includes('from node_vote_sync_state')) return { rows: [] };
+      return { rows: [] };
+    }
+  };
+  let fetchedRange = null;
+  await runProtocolMimirBackfill(client, {
+    startTime: '2026-08-14T00:00:00.000Z',
+    endTime: '2026-08-28T00:00:00.000Z',
+    startHeight: 27_584_001,
+    endHeight: 27_597_399,
+    resolveHeightRange: async () => {
+      throw new Error('inconsistent RPC status must not be consulted');
+    },
+    fetchTxs: async (range) => {
+      fetchedRange = range;
+      return { total: 0, txs: [] };
+    }
+  });
+
+  assert.deepEqual(fetchedRange, {
+    startHeight: 27_584_001,
+    endHeight: 27_597_399
+  });
+});
+
+test('node-vote parent forwards its confirmed scan range to protocol Mimir backfill', async () => {
+  const { buildProtocolMimirBackfillOptions } = await import('../src/shared/node-votes.js');
+  assert.deepEqual(buildProtocolMimirBackfillOptions({
+    startTime: '2026-08-14T00:00:00.000Z',
+    endTime: '2026-08-28T00:00:00.000Z',
+    startHeight: 27_584_001,
+    endHeight: 27_597_399
+  }), {
+    startTime: '2026-08-14T00:00:00.000Z',
+    endTime: '2026-08-28T00:00:00.000Z',
+    startHeight: 27_584_001,
+    endHeight: 27_597_399
+  });
+
+  assert.deepEqual(buildProtocolMimirBackfillOptions({
+    startTime: '2026-08-14T00:00:00.000Z',
+    endTime: '2026-08-28T00:00:00.000Z'
+  }), {
+    startTime: '2026-08-14T00:00:00.000Z',
+    endTime: '2026-08-28T00:00:00.000Z'
+  });
+});

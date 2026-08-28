@@ -175,7 +175,12 @@ export async function runProtocolMimirBackfill(client, options = {}) {
   });
   const resolveRange = options.resolveHeightRange || resolveNodeVoteHeightRange;
   const fetchTxs = options.fetchTxs || fetchNodeVoteTxs;
-  const { startHeight, endHeight } = await resolveRange(window.startTime, window.endTime);
+  const explicitStartHeight = Math.trunc(Number(options.startHeight || 0));
+  const explicitEndHeight = Math.trunc(Number(options.endHeight || 0));
+  const confirmedRange = explicitStartHeight > 0 && explicitEndHeight >= explicitStartHeight
+    ? { startHeight: explicitStartHeight, endHeight: explicitEndHeight }
+    : await resolveRange(window.startTime, window.endTime);
+  const { startHeight, endHeight } = confirmedRange;
   const result = await fetchTxs(
     { startHeight, endHeight },
     { eventQueries: [PROTOCOL_MIMIR_EVENT_QUERY] }

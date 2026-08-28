@@ -481,6 +481,22 @@ export function resolveNodeVoteBackfillWindow({ endTime, startTime, latestStored
   };
 }
 
+export function buildProtocolMimirBackfillOptions({
+  startTime,
+  endTime,
+  startHeight,
+  endHeight
+} = {}) {
+  const options = { startTime, endTime };
+  const confirmedStartHeight = Math.trunc(Number(startHeight || 0));
+  const confirmedEndHeight = Math.trunc(Number(endHeight || 0));
+  if (confirmedStartHeight > 0 && confirmedEndHeight >= confirmedStartHeight) {
+    options.startHeight = confirmedStartHeight;
+    options.endHeight = confirmedEndHeight;
+  }
+  return options;
+}
+
 function statusHeights(status) {
   const syncInfo = status?.result?.sync_info || {};
   return {
@@ -906,6 +922,13 @@ export async function runNodeVoteBackfill(client, options = {}) {
   }
   rows = [...mergedRows.values()];
 
+  // Cosmos/RPC vote and upgrade ingestion already resolved this time window
+  // against one RPC status snapshot. Reuse that confirmed range for direct
+  // Mimir discovery so a second, changing status response cannot invalidate
+  // an otherwise successful backfill.
+  const confirmedStartHeight = Math.trunc(Number(startHeight || 0));
+  const confirmedEndHeight = Math.trunc(Number(endHeight || 0));
+
   rows = await enrichRowsWithNodeMetadata(rows);
 
   const inserted = await upsertNodeVotes(client, rows);
@@ -916,10 +939,12 @@ export async function runNodeVoteBackfill(client, options = {}) {
   let protocolMimirError = '';
   try {
     const { runProtocolMimirBackfill } = await import('./protocol-mimir-changes.js');
-    protocolMimir = await runProtocolMimirBackfill(client, {
-      startTime: options.startTime,
-      endTime: options.endTime
-    });
+    protocolMimir = await runProtocolMimirBackfill(client, buildProtocolMimirBackfillOptions({
+      startTime,
+      endTime: latestTime,
+      startHeight: confirmedStartHeight,
+      endHeight: confirmedEndHeight
+    }));
   } catch (error) {
     // Protocol changes are additive history. Preserve the existing validator
     // vote backfill and last-good summary when archive RPC is temporarily down.
