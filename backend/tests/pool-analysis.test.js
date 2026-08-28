@@ -295,7 +295,7 @@ test('deployment does not roll back when the independently scheduled pool-disloc
   assert.match(deploy, /--allow-stale-endpoint treasury/);
   assert.match(
     deploy,
-    /start_and_verify_timers\n\nprime_read_model_unit "boonetools-treasury-snapshot\.service"\n\nlog "Running post-deployment health and performance gates"/
+    /start_and_verify_timers\nrefresh_status_models_after_long_primes\n\nprime_read_model_unit "boonetools-treasury-snapshot\.service"\n\nlog "Running post-deployment health and performance gates"/
   );
   assert.match(deploy, /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-pool-analysis/);
   assert.match(deploy, /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-pol-tracker/);

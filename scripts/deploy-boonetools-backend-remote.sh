@@ -572,6 +572,7 @@ ROLLBACK_REQUIRED=true
 start_persistent_services
 prime_read_models
 start_and_verify_timers
+refresh_status_models_after_long_primes
 
 prime_read_model_unit "boonetools-treasury-snapshot.service"
 
