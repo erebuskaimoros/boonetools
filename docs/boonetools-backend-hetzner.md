@@ -151,6 +151,8 @@ PROVIDER_FAILURE_COOLDOWN_SECONDS=60
 PROVIDER_RATE_LIMIT_COOLDOWN_SECONDS=3600
 THORNODE_PRIMARY_URL=https://gateway.liquify.com/chain/thorchain_api
 THORNODE_URLS=
+BIFROST_SCANNER_INFO_URL=https://vanaheimex.com/api/nodesInfo
+BIFROST_SCANNER_INFO_TIMEOUT_MS=8000
 BINANCE_API_BASE_URL=https://data-api.binance.vision
 BINANCE_API_BASE_URLS=https://data-api.binance.vision
 POOL_DISLOCATION_BACKFILL_REQUEST_DELAY_MS=100
@@ -195,6 +197,13 @@ comma-separated ordered lists.
 Use them to put a dedicated node or paid provider ahead of the public defaults
 without changing application code. The older primary/fallback variables remain
 the defaults when the list variables are empty.
+
+`BIFROST_SCANNER_INFO_URL` supplies the compact five-minute scanner-health
+snapshot used by the status page's `Avg Blocks Behind Tip` column. The default
+is the same aggregate that backs `thorchain.net/nodes`. BooneTools retains only
+the node address and per-chain scanner height, lag, and health fields. A failed
+refresh reuses the last good scanner snapshot and surfaces a scoped warning;
+it does not mark otherwise healthy THORNode state stale.
 
 Authenticated Liquify Portal URLs belong only in the server-owned
 `backend.env`; never commit their embedded API keys. A dedicated

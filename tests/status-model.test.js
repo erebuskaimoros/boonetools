@@ -154,7 +154,7 @@ test('chain status keeps trading and LP actions distinct', () => {
   assert.equal(rows[1].signing, 'enabled');
 });
 
-test('chain status averages active validator lag behind the highest reported chain tip', () => {
+test('chain status does not fall back to stale observe-chain heights without scanner reports', () => {
   const rows = buildChainStatuses([
     { chain: 'BTC' },
     { chain: 'ETH' }
@@ -195,9 +195,100 @@ test('chain status averages active validator lag behind the highest reported cha
     avgBlocksBehindTip: row.avgBlocksBehindTip,
     reportingValidators: row.reportingValidators
   })), [
-    { chain: 'BTC', tipHeight: 100, avgBlocksBehindTip: 3.3, reportingValidators: 3 },
-    { chain: 'ETH', tipHeight: 200, avgBlocksBehindTip: 1, reportingValidators: 2 }
+    { chain: 'BTC', tipHeight: 0, avgBlocksBehindTip: null, reportingValidators: 0 },
+    { chain: 'ETH', tipHeight: 0, avgBlocksBehindTip: null, reportingValidators: 0 }
   ]);
+});
+
+test('chain status uses Bifrost scanner lag instead of stale observe-chain heights', () => {
+  const rows = buildChainStatuses([
+    { chain: 'SOL' }
+  ], {}, [
+    { chain: 'SOL', thorchain: 100 }
+  ], [
+    {
+      node_address: 'thor1activea',
+      status: 'Active',
+      observe_chains: [{ chain: 'SOL', height: 1_000 }]
+    },
+    {
+      node_address: 'thor1activeb',
+      status: 'Active',
+      observe_chains: [{ chain: 'SOL', height: 100 }]
+    },
+    {
+      node_address: 'thor1standby',
+      status: 'Standby',
+      observe_chains: [{ chain: 'SOL', height: 2_000 }]
+    }
+  ], [
+    {
+      node_address: 'thor1activea',
+      scanner: {
+        SOL: {
+          chain: 'SOL',
+          chain_height: 2_000,
+          block_scanner_height: 1_996,
+          scanner_height_diff: 4,
+          healthy: true
+        }
+      }
+    },
+    {
+      node_address: 'thor1activeb',
+      scanner: {
+        SOL: {
+          chain: 'SOL',
+          chain_height: 2_000,
+          block_scanner_height: 1_994,
+          scanner_height_diff: 6,
+          healthy: true
+        }
+      }
+    },
+    {
+      node_address: 'thor1standby',
+      scanner: {
+        SOL: {
+          chain: 'SOL',
+          chain_height: 2_000,
+          block_scanner_height: 1_000,
+          scanner_height_diff: 1_000,
+          healthy: false
+        }
+      }
+    }
+  ]);
+
+  assert.deepEqual(rows.map((row) => ({
+    chain: row.chain,
+    tipHeight: row.tipHeight,
+    avgBlocksBehindTip: row.avgBlocksBehindTip,
+    reportingValidators: row.reportingValidators
+  })), [
+    { chain: 'SOL', tipHeight: 2_000, avgBlocksBehindTip: 5, reportingValidators: 2 }
+  ]);
+});
+
+test('chain status excludes missing, invalid, and negative scanner diffs', () => {
+  const rows = buildChainStatuses([{ chain: 'SOL' }], {}, [], [
+    { node_address: 'thor1a', status: 'Active' },
+    { node_address: 'thor1b', status: 'Active' },
+    { node_address: 'thor1c', status: 'Active' },
+    { node_address: 'thor1d', status: 'Active' }
+  ], [
+    { node_address: 'thor1a', scanner: { SOL: { chain_height: 500, scanner_height_diff: 1 } } },
+    { node_address: 'thor1b', scanner: { SOL: { chain_height: 800, scanner_height_diff: -1 } } },
+    { node_address: 'thor1c', scanner: { SOL: { chain_height: 900 } } },
+    { node_address: 'thor1d', scanner: { SOL: { chain_height: 700, scanner_height_diff: 'bad' } } },
+    { node_address: 'thor1unknown', scanner: { SOL: { chain_height: 1_000, scanner_height_diff: 99 } } }
+  ]);
+
+  assert.deepEqual(rows.map((row) => ({
+    tipHeight: row.tipHeight,
+    avgBlocksBehindTip: row.avgBlocksBehindTip,
+    reportingValidators: row.reportingValidators
+  })), [{ tipHeight: 500, avgBlocksBehindTip: 1, reportingValidators: 1 }]);
 });
 
 test('network summary is degraded when any chain action is unavailable', () => {

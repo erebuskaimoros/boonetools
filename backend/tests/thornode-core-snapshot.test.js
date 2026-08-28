@@ -21,17 +21,30 @@ function payloadFor(path) {
   return [];
 }
 
+function scannerPayload(diff = 2) {
+  return [{
+    node_address: 'thor1active',
+    scanner: { SOL: { chain_height: 400_000_000, scanner_height_diff: diff } }
+  }];
+}
+
 test('durable core snapshot staggers fields by their volatility', async () => {
   const firstCalls = [];
+  let scannerCalls = 0;
   const first = await buildThorNodeCoreSnapshot({
     now: () => START,
     fetchThorchain: async (path) => {
       firstCalls.push(path);
       return payloadFor(path);
     },
-    fetchMidgardChurns: async () => []
+    fetchMidgardChurns: async () => [],
+    fetchBifrostScannerInfo: async () => {
+      scannerCalls += 1;
+      return scannerPayload();
+    }
   });
   assert.equal(firstCalls.length, THORNODE_CORE_FIELDS.filter((field) => field.provider === 'thornode').length);
+  assert.equal(scannerCalls, 1);
   assert.equal(first.stale, false);
 
   const secondCalls = [];
@@ -44,6 +57,9 @@ test('durable core snapshot staggers fields by their volatility', async () => {
     },
     fetchMidgardChurns: async () => {
       throw new Error('churns should not be due');
+    },
+    fetchBifrostScannerInfo: async () => {
+      throw new Error('scanners should not be due');
     }
   });
   assert.deepEqual(secondCalls, ['/thorchain/lastblock']);
@@ -55,13 +71,15 @@ test('durable core snapshot preserves values but marks provider-total failure st
   const first = await buildThorNodeCoreSnapshot({
     now: () => START,
     fetchThorchain: async (path) => payloadFor(path),
-    fetchMidgardChurns: async () => []
+    fetchMidgardChurns: async () => [],
+    fetchBifrostScannerInfo: async () => scannerPayload()
   });
   const failed = await buildThorNodeCoreSnapshot({
     now: () => new Date(START.getTime() + 15_001),
     previousSnapshot: first,
     fetchThorchain: async () => { throw new Error('temporarily blocked'); },
-    fetchMidgardChurns: async () => []
+    fetchMidgardChurns: async () => [],
+    fetchBifrostScannerInfo: async () => scannerPayload()
   });
   assert.equal(failed.stale, true);
   assert.deepEqual(failed.lastblock, first.lastblock);
@@ -72,8 +90,31 @@ test('durable core snapshot refuses a first publication without required THORNod
   await assert.rejects(() => buildThorNodeCoreSnapshot({
     now: () => START,
     fetchThorchain: async () => { throw new Error('blocked'); },
-    fetchMidgardChurns: async () => [{ height: 1 }]
+    fetchMidgardChurns: async () => [{ height: 1 }],
+    fetchBifrostScannerInfo: async () => scannerPayload()
   }), /missing required fields/);
+});
+
+test('scanner refresh failure reuses last-good scanner data without staling the THORNode lane', async () => {
+  const first = await buildThorNodeCoreSnapshot({
+    now: () => START,
+    fetchThorchain: async (path) => payloadFor(path),
+    fetchMidgardChurns: async () => [],
+    fetchBifrostScannerInfo: async () => scannerPayload(3)
+  });
+  const failed = await buildThorNodeCoreSnapshot({
+    now: () => new Date(START.getTime() + 300_001),
+    previousSnapshot: first,
+    fetchThorchain: async (path) => payloadFor(path),
+    fetchMidgardChurns: async () => [],
+    fetchBifrostScannerInfo: async () => { throw new Error('scanner aggregate unavailable'); }
+  });
+
+  assert.equal(failed.stale, false);
+  assert.equal(failed.partial, true);
+  assert.deepEqual(failed.bifrost_scanners, scannerPayload(3));
+  assert.equal(failed.field_meta.bifrost_scanners.status, 'reused');
+  assert.match(failed.warnings.join(' '), /scanner aggregate unavailable.*reused last successful value/);
 });
 
 test('durable core freshness includes model TTL and required field health', () => {

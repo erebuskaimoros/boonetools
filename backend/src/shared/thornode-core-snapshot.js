@@ -1,10 +1,15 @@
 import { withAdvisoryLock } from '../db/lock.js';
 import { buildAndPublishReadModel, getReadModel } from './read-models.js';
+import {
+  BIFROST_SCANNER_PROVIDER,
+  fetchBifrostScannerInfo,
+  isBifrostScannerInfo
+} from './bifrost-scanner.js';
 import { fetchMidgardChurns } from './midgard.js';
 import { fetchThorchain } from './thornode.js';
 
 export const THORNODE_CORE_MODEL_KEY = 'thornode-core:v1';
-export const THORNODE_CORE_SCHEMA_VERSION = 1;
+export const THORNODE_CORE_SCHEMA_VERSION = 2;
 export const THORNODE_CORE_TTL_MS = 45_000;
 export const THORNODE_CORE_LOCK_KEY = 'boonetools:thornode-core';
 
@@ -18,6 +23,7 @@ export const THORNODE_CORE_FIELDS = Object.freeze([
   { key: 'pools', path: '/thorchain/pools', cadenceMs: 120_000, valid: Array.isArray, provider: 'thornode' },
   { key: 'oracle_prices', path: '/thorchain/oracle/prices', cadenceMs: 120_000, valid: oraclePricesValue, provider: 'thornode' },
   { key: 'nodes', path: '/thorchain/nodes', cadenceMs: 300_000, valid: Array.isArray, provider: 'thornode' },
+  { key: 'bifrost_scanners', path: '/api/nodesInfo', cadenceMs: 300_000, valid: isBifrostScannerInfo, provider: BIFROST_SCANNER_PROVIDER },
   { key: 'constants', path: '/thorchain/constants', cadenceMs: 900_000, valid: objectValue, provider: 'thornode' },
   { key: 'churns', path: '/churns', cadenceMs: 600_000, valid: Array.isArray, provider: 'midgard' }
 ]);
@@ -101,6 +107,7 @@ export async function buildThorNodeCoreSnapshot(options = {}) {
   const dueFields = THORNODE_CORE_FIELDS.filter((field) => isDue(field, previous, nowMs));
   const fetchThor = options.fetchThorchain || fetchThorchain;
   const fetchChurns = options.fetchMidgardChurns || fetchMidgardChurns;
+  const fetchScanners = options.fetchBifrostScannerInfo || fetchBifrostScannerInfo;
   const results = await mapWithConcurrency(
     dueFields,
     Math.max(1, Math.trunc(Number(options.concurrency) || 3)),
@@ -108,7 +115,9 @@ export async function buildThorNodeCoreSnapshot(options = {}) {
       try {
         const value = field.provider === 'midgard'
           ? await fetchChurns({ cooldownClient: options.client })
-          : await fetchThor(field.path, { cooldownClient: options.client });
+          : field.provider === BIFROST_SCANNER_PROVIDER
+            ? await fetchScanners({ cooldownClient: options.client })
+            : await fetchThor(field.path, { cooldownClient: options.client });
         if (!field.valid(value)) throw new Error(`Invalid ${field.path} response`);
         return { field, ok: true, value };
       } catch (error) {
@@ -119,7 +128,7 @@ export async function buildThorNodeCoreSnapshot(options = {}) {
 
   const payload = {
     schema_version: THORNODE_CORE_SCHEMA_VERSION,
-    source: { live: 'thornode', churns: 'midgard' },
+    source: { live: 'thornode', churns: 'midgard', scanner: BIFROST_SCANNER_PROVIDER },
     as_of: nowIso,
     field_meta: { ...(previous?.field_meta || {}) },
     errors: {},

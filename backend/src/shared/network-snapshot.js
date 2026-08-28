@@ -2,6 +2,11 @@ import { TtlSingleFlightCache } from '../lib/ttl-cache.js';
 import { fetchMidgardChurns } from './midgard.js';
 import { fetchThorchain } from './thornode.js';
 import { getThorNodeCoreSnapshot } from './thornode-core-snapshot.js';
+import {
+  BIFROST_SCANNER_PROVIDER,
+  fetchBifrostScannerInfo,
+  isBifrostScannerInfo
+} from './bifrost-scanner.js';
 
 const SNAPSHOT_TTL_MS = 15_000;
 const snapshotCache = new TtlSingleFlightCache({ ttlMs: SNAPSHOT_TTL_MS });
@@ -40,12 +45,14 @@ function errorMessage(reason, fallback) {
 async function loadNetworkSnapshot(dependencies = {}) {
   const fetchThor = dependencies.fetchThorchain || fetchThorchain;
   const fetchChurns = dependencies.fetchMidgardChurns || fetchMidgardChurns;
+  const fetchScanners = dependencies.fetchBifrostScannerInfo || fetchBifrostScannerInfo;
   const requests = SNAPSHOT_FIELDS.map((field) => fetchThor(field.path, {
     validateResponse: (value) => field.valid(value)
       ? null
       : `Invalid ${field.path} response`
   }));
   requests.push(fetchChurns());
+  requests.push(fetchScanners());
   const results = await Promise.allSettled(requests);
   const snapshot = {};
   const errors = {};
@@ -72,6 +79,16 @@ async function loadNetworkSnapshot(dependencies = {}) {
       : 'Invalid Midgard churn response';
   }
 
+  const scannerResult = results[SNAPSHOT_FIELDS.length + 1];
+  if (scannerResult.status === 'fulfilled' && isBifrostScannerInfo(scannerResult.value)) {
+    snapshot.bifrost_scanners = scannerResult.value;
+  } else {
+    snapshot.bifrost_scanners = [];
+    errors.bifrost_scanners = scannerResult.status === 'rejected'
+      ? errorMessage(scannerResult.reason, 'Unable to load Bifrost scanner state')
+      : 'Invalid Bifrost scanner response';
+  }
+
   const thornodeSuccesses = results
     .slice(0, SNAPSHOT_FIELDS.length)
     .filter((result, index) => (
@@ -91,7 +108,8 @@ async function loadNetworkSnapshot(dependencies = {}) {
     as_of: new Date().toISOString(),
     source: {
       live: 'thornode',
-      churns: 'midgard'
+      churns: 'midgard',
+      scanner: BIFROST_SCANNER_PROVIDER
     },
     errors,
     warnings,
@@ -109,6 +127,7 @@ function fromCoreReadModel(model) {
   return {
     inbound_addresses: Array.isArray(payload.inbound_addresses) ? payload.inbound_addresses : [],
     nodes: Array.isArray(payload.nodes) ? payload.nodes : [],
+    bifrost_scanners: Array.isArray(payload.bifrost_scanners) ? payload.bifrost_scanners : [],
     mimir: payload.mimir && typeof payload.mimir === 'object' ? payload.mimir : {},
     lastblock: Array.isArray(payload.lastblock) ? payload.lastblock : [],
     network: payload.network && typeof payload.network === 'object' ? payload.network : {},
@@ -119,7 +138,11 @@ function fromCoreReadModel(model) {
     field_meta: payload.field_meta || {},
     as_of: payload.as_of || model.generatedAt,
     source_updated_at: payload.source_updated_at || model.sourceUpdatedAt,
-    source: payload.source || { live: 'thornode', churns: 'midgard' },
+    source: payload.source || {
+      live: 'thornode',
+      churns: 'midgard',
+      scanner: BIFROST_SCANNER_PROVIDER
+    },
     errors,
     warnings,
     partial: Boolean(payload.partial || warnings.length),
@@ -130,7 +153,7 @@ function fromCoreReadModel(model) {
 
 export async function getNetworkSnapshot(options = {}) {
   const hasLiveDependencies = Boolean(
-    options.cache || options.fetchThorchain || options.fetchMidgardChurns
+    options.cache || options.fetchThorchain || options.fetchMidgardChurns || options.fetchBifrostScannerInfo
   );
   if (!hasLiveDependencies) {
     const model = await (options.getThorNodeCoreSnapshot || getThorNodeCoreSnapshot)({

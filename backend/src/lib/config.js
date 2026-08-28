@@ -43,6 +43,8 @@ const rpcWsUrl = optional(process.env.RPC_WS_URL) || 'wss://gateway.liquify.com/
 const rpcRestUrl = optional(process.env.RPC_REST_URL) || 'https://gateway.liquify.com/chain/thorchain_rpc';
 const rpcFallbackRestUrl = '';
 const rpcArchiveRestUrl = optional(process.env.RPC_ARCHIVE_REST_URL) || 'https://rpc.thorchain.liquify.com';
+const bifrostScannerInfoUrl = optional(process.env.BIFROST_SCANNER_INFO_URL)
+  || 'https://vanaheimex.com/api/nodesInfo';
 const duneApiBaseUrl = optional(process.env.DUNE_API_BASE_URL) || 'https://api.dune.com';
 const binanceApiBaseUrl = optional(process.env.BINANCE_API_BASE_URL) || 'https://data-api.binance.vision';
 const cmcApiKey = optional(process.env.CMC_API_KEY || process.env.CMC_PRO_API_KEY);
@@ -84,6 +86,8 @@ export const config = Object.freeze({
   ]),
   rpcWsUrl,
   rpcWsUrls: readList('RPC_WS_URLS', [rpcWsUrl]),
+  bifrostScannerInfoUrl,
+  bifrostScannerInfoTimeoutMs: readInt('BIFROST_SCANNER_INFO_TIMEOUT_MS', 8_000),
   midgardDelayMs: readInt('MIDGARD_DELAY_MS', 5000),
   rapidSwapsMaxPages: readInt('RAPID_SWAPS_MAX_PAGES', 200),
   rapidSwapsCatchupMaxPages: readInt('RAPID_SWAPS_CATCHUP_MAX_PAGES', 200),

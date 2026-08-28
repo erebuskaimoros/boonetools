@@ -15,12 +15,15 @@ The BooneTools `/status` dashboard is a concise public current-state surface. It
 
 The chain table presents one `LP Actions` state. `chain_lp_actions_paused` blocks both adds and withdrawals. Full `Halt<chain>Chain`, solvency, global-chain, and node-pause state also blocks both actions, matching the Thornode handlers. If those flags are clear but any `PauseLPDeposit-<chain>-*` Mimir is positive, the combined chain state is `PARTIAL`.
 
-`Avg Blocks Behind Tip` is computed from the active validator set in the same
-durable node snapshot. For each connected chain, the highest height reported
-in `observe_chains` is the tip and the table shows the mean non-negative lag
-of every active validator reporting that chain. Standby validators and missing
-chain observations are excluded; the node snapshot refreshes every five
-minutes to avoid adding provider fan-out to public status requests.
+`Avg Blocks Behind Tip` is computed from the active validator set and the
+compact Bifrost scanner-health snapshot. For each connected chain, the table
+shows the mean non-negative `scanner_height_diff` across validators that are
+currently Active in `/thorchain/nodes`; the displayed tip is the highest valid
+scanner `chain_height`. Standby validators and missing, invalid, or negative
+scanner reports are excluded without falling back to the transaction-driven
+`observe_chains` height. The scanner aggregate refreshes every five minutes,
+stores only the fields needed for this calculation, and reuses its last good
+snapshot with a scoped warning when the provider is unavailable.
 
 Signing is independent of trading and LP actions. Global or per-chain `HaltSigning` values become active once their configured height is reached; a full chain halt also reports signing as paused. The top churn card applies the same height-aware rule to `HaltChurning` and shows elapsed time since Midgard's latest successful churn. If churn history is unavailable, the card estimates from the newest active-node `status_since` height without failing current chain status.
 

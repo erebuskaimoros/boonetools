@@ -254,8 +254,8 @@
   }
 
   function blockLagTitle(chain) {
-    if (!chain?.reportingValidators) return 'No active validator observations available';
-    return `Mean lag across ${number.format(chain.reportingValidators)} active validators; reported tip ${number.format(chain.tipHeight)}`;
+    if (!chain?.reportingValidators) return 'No active validator scanner reports available';
+    return `Mean Bifrost scanner lag across ${number.format(chain.reportingValidators)} active validators; highest reported chain height ${number.format(chain.tipHeight)}`;
   }
 
   function formatElapsed(value) {
@@ -452,7 +452,7 @@
               <th>LP Actions</th>
               <th>Outbound Signing</th>
               <th>Last Observed</th>
-              <th title="Mean active-validator lag from the highest reported height for each chain">Avg Blocks Behind Tip</th>
+              <th title="Mean Bifrost scanner lag across active validators for each chain">Avg Blocks Behind Tip</th>
             </tr>
           </thead>
           <tbody>

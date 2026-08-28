@@ -38,10 +38,11 @@ test('stalled block timing replaces false live indicators', () => {
   assert.match(source, /\.source-line\.stalled i \{[^}]*animation:\s*none/);
 });
 
-test('chain availability shows average active-validator lag behind each reported tip', () => {
+test('chain availability identifies average active-validator Bifrost scanner lag', () => {
   assert.match(source, /<th[^>]*>Avg Blocks Behind Tip<\/th>/);
   assert.match(source, /formatAverageBlockLag\(chain\)/);
-  assert.match(source, /Mean lag across/);
-  assert.match(source, /reported tip/);
+  assert.match(source, /Mean Bifrost scanner lag across/);
+  assert.match(source, /highest reported chain height/);
+  assert.match(source, /No active validator scanner reports available/);
   assert.match(source, /\.lag \{[^}]*color:\s*var\(--term-text-strong,\s*#fff\)/);
 });

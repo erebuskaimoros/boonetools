@@ -45,39 +45,62 @@ function combineLpState(deposits, withdrawals) {
   return 'partial';
 }
 
-function buildChainObservationStats(nodes = []) {
-  const heightsByChain = new Map();
+function validNonNegativeNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+}
 
-  for (const node of nodes) {
-    if (node?.status !== 'Active') continue;
-    const nodeHeights = new Map();
-    for (const observation of Array.isArray(node?.observe_chains) ? node.observe_chains : []) {
-      const chain = String(observation?.chain || '').toUpperCase();
-      const height = Number(observation?.height);
-      if (!chain || !Number.isFinite(height) || height < 0) continue;
-      nodeHeights.set(chain, Math.max(nodeHeights.get(chain) ?? 0, height));
-    }
-    for (const [chain, height] of nodeHeights) {
-      if (!heightsByChain.has(chain)) heightsByChain.set(chain, []);
-      heightsByChain.get(chain).push(height);
+function buildChainScannerStats(nodes = [], scannerNodes = []) {
+  const activeNodeAddresses = new Set(nodes
+    .filter((node) => node?.status === 'Active')
+    .map((node) => String(node?.node_address || '').trim())
+    .filter(Boolean));
+  const reportsByChain = new Map();
+
+  for (const scannerNode of scannerNodes) {
+    const nodeAddress = String(scannerNode?.node_address || '').trim();
+    if (!activeNodeAddresses.has(nodeAddress)) continue;
+    const scanner = scannerNode?.scanner;
+    if (!scanner || typeof scanner !== 'object' || Array.isArray(scanner)) continue;
+
+    for (const [key, record] of Object.entries(scanner)) {
+      const chain = String(record?.chain || key || '').trim().toUpperCase();
+      const lag = validNonNegativeNumber(record?.scanner_height_diff);
+      if (!chain || lag === null) continue;
+      if (!reportsByChain.has(chain)) reportsByChain.set(chain, new Map());
+      // A validator contributes at most one report per chain, even if a provider
+      // accidentally includes the node twice.
+      if (!reportsByChain.get(chain).has(nodeAddress)) {
+        reportsByChain.get(chain).set(nodeAddress, {
+          lag,
+          chainHeight: validNonNegativeNumber(record?.chain_height)
+        });
+      }
     }
   }
 
-  return new Map([...heightsByChain].map(([chain, heights]) => {
-    const tipHeight = Math.max(...heights);
-    const averageLag = heights.reduce((sum, height) => sum + Math.max(0, tipHeight - height), 0)
-      / heights.length;
+  return new Map([...reportsByChain].map(([chain, reportsByAddress]) => {
+    const reports = [...reportsByAddress.values()];
+    const heights = reports.map((report) => report.chainHeight).filter((height) => height !== null);
+    const averageLag = reports.reduce((sum, report) => sum + report.lag, 0) / reports.length;
     return [chain, {
-      tipHeight,
+      tipHeight: heights.length > 0 ? Math.max(...heights) : 0,
       avgBlocksBehindTip: Math.round(averageLag * 10) / 10,
-      reportingValidators: heights.length
+      reportingValidators: reports.length
     }];
   }));
 }
 
-export function buildChainStatuses(inboundAddresses = [], mimir = {}, lastBlocks = [], nodes = []) {
+export function buildChainStatuses(
+  inboundAddresses = [],
+  mimir = {},
+  lastBlocks = [],
+  nodes = [],
+  scannerNodes = []
+) {
   const blockByChain = new Map(lastBlocks.map((row) => [row.chain, row]));
-  const observationStatsByChain = buildChainObservationStats(nodes);
+  const scannerStatsByChain = buildChainScannerStats(nodes, scannerNodes);
   const mimirByKey = new Map(
     Object.entries(mimir || {}).map(([key, value]) => [key.toUpperCase(), value])
   );
@@ -91,7 +114,7 @@ export function buildChainStatuses(inboundAddresses = [], mimir = {}, lastBlocks
     .map((inbound) => {
       const chain = String(inbound.chain || '').toUpperCase();
       const lastBlock = blockByChain.get(chain) || {};
-      const observationStats = observationStatsByChain.get(chain);
+      const scannerStats = scannerStatsByChain.get(chain);
       const tradingPaused = Boolean(
         inbound.halted || inbound.global_trading_paused || inbound.chain_trading_paused
       );
@@ -121,9 +144,9 @@ export function buildChainStatuses(inboundAddresses = [], mimir = {}, lastBlocks
         lastObservedIn: numberValue(lastBlock.last_observed_in),
         lastSignedOut: numberValue(lastBlock.last_signed_out),
         thorchainHeight: numberValue(lastBlock.thorchain),
-        tipHeight: observationStats?.tipHeight ?? 0,
-        avgBlocksBehindTip: observationStats?.avgBlocksBehindTip ?? null,
-        reportingValidators: observationStats?.reportingValidators ?? 0,
+        tipHeight: scannerStats?.tipHeight ?? 0,
+        avgBlocksBehindTip: scannerStats?.avgBlocksBehindTip ?? null,
+        reportingValidators: scannerStats?.reportingValidators ?? 0,
         degraded: tradingPaused || lpActions !== 'enabled' || signingPaused
       };
     })
@@ -324,7 +347,16 @@ export function buildStatusNetworkReadModel(input = {}) {
   const mimir = networkSnapshot.mimir && typeof networkSnapshot.mimir === 'object'
     ? networkSnapshot.mimir
     : {};
-  const chains = buildChainStatuses(networkSnapshot.inbound_addresses, mimir, lastBlocks, nodes);
+  const scanners = Array.isArray(networkSnapshot.bifrost_scanners)
+    ? networkSnapshot.bifrost_scanners
+    : [];
+  const chains = buildChainStatuses(
+    networkSnapshot.inbound_addresses,
+    mimir,
+    lastBlocks,
+    nodes,
+    scanners
+  );
   const thorchainHeight = Math.max(0, ...lastBlocks.map((row) => numberValue(row?.thorchain)));
   const configuredStallThresholdMs = Number(input.stallThresholdMs);
   const stallThresholdMs = Number.isFinite(configuredStallThresholdMs) && configuredStallThresholdMs >= 1_000
@@ -354,7 +386,7 @@ export function buildStatusNetworkReadModel(input = {}) {
   );
 
   return {
-    schema_version: 1,
+    schema_version: 2,
     as_of: generatedAt,
     network: {
       height: thorchainHeight,
@@ -452,7 +484,7 @@ export function buildStatusDashboardReadModel(input = {}) {
   };
 
   return {
-    schema_version: 2,
+    schema_version: 3,
     as_of: generatedAt,
     network: liveNetwork.network,
     chains: liveNetwork.chains,

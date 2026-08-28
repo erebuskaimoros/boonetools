@@ -16,6 +16,7 @@ function sources() {
       ],
       nodes: [
         {
+          node_address: 'thor1activea',
           status: 'Active',
           version: '3.8.0',
           status_since: 900,
@@ -25,6 +26,7 @@ function sources() {
           ]
         },
         {
+          node_address: 'thor1activeb',
           status: 'Active',
           version: '3.8.0',
           status_since: 901,
@@ -34,6 +36,7 @@ function sources() {
           ]
         },
         {
+          node_address: 'thor1standby',
           status: 'Standby',
           version: '3.7.0',
           status_since: 800,
@@ -41,6 +44,29 @@ function sources() {
             { chain: 'BTC', height: 1_000 },
             { chain: 'ETH', height: 1_000 }
           ]
+        }
+      ],
+      bifrost_scanners: [
+        {
+          node_address: 'thor1activea',
+          scanner: {
+            BTC: { chain_height: 100, scanner_height_diff: 0 },
+            ETH: { chain_height: 200, scanner_height_diff: 0 }
+          }
+        },
+        {
+          node_address: 'thor1activeb',
+          scanner: {
+            BTC: { chain_height: 100, scanner_height_diff: 4 },
+            ETH: { chain_height: 200, scanner_height_diff: 2 }
+          }
+        },
+        {
+          node_address: 'thor1standby',
+          scanner: {
+            BTC: { chain_height: 1_000, scanner_height_diff: 900 },
+            ETH: { chain_height: 1_000, scanner_height_diff: 800 }
+          }
         }
       ],
       mimir: { HALTCHURNING: 0 },
