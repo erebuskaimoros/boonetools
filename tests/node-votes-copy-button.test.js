@@ -36,3 +36,11 @@ test('vote-key copy control writes the exact key and exposes result feedback', (
   assert.match(copyButtonSource, /`Could not copy \$\{keyLabel\}`/);
   assert.doesNotMatch(copyButtonSource, /class="bracket"/);
 });
+
+test('Effective Value History labels direct protocol safety changes without vote attribution', () => {
+  assert.match(
+    dashboardSource,
+    /change\.change_source === 'protocol_safety'[\s\S]*?Protocol safety event[\s\S]*?not a validator vote/
+  );
+  assert.match(dashboardSource, /change\.security_message/);
+});

@@ -23,6 +23,11 @@ import {
   writeNodeVoteListenerHeartbeat
 } from './shared/node-votes.js';
 import {
+  parseProtocolMimirChanges,
+  PROTOCOL_MIMIR_EVENT_QUERY,
+  upsertProtocolMimirChanges
+} from './shared/protocol-mimir-changes.js';
+import {
   notifyChainHead,
   repairChainHeaderGaps,
   saveChainStreamState,
@@ -404,6 +409,19 @@ async function processNodeVotes(rows) {
   }
 }
 
+async function processProtocolMimirChanges(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return;
+  const client = await getClient();
+  try {
+    await upsertProtocolMimirChanges(client, rows);
+    for (const row of rows) {
+      log(`Protocol Mimir change: ${row.mimir_key}=${row.mimir_value} at block ${row.height}`);
+    }
+  } finally {
+    client.release();
+  }
+}
+
 async function processConsolidatedBlock(data) {
   const parsed = parseConsolidatedChainBlock({ data });
   if (!parsed) return;
@@ -492,6 +510,27 @@ function parseNodeVotesFromTxMessage(message, data) {
   });
 }
 
+function parseProtocolMimirFromTxMessage(message, data) {
+  const value = data?.TxResult || data?.tx_result || data;
+  const txResult = value?.result || value?.tx_result || value?.txResult || value;
+  const height = Number(value?.height || data?.height || 0) || 0;
+  const txIndex = Number(value?.index || data?.index || 0) || 0;
+  const txId = String(
+    message.result?.events?.['tx.hash']?.[0]
+    || message.result?.events?.['tx.hash']
+    || value?.hash
+    || data?.hash
+    || ''
+  ).toUpperCase();
+  return parseProtocolMimirChanges(txResult?.events || [], {
+    txId,
+    txIndex,
+    height,
+    blockTime: recentBlockTimes.get(height) || new Date().toISOString(),
+    source: 'ws'
+  });
+}
+
 function handleMessage(message) {
   messagesReceived += 1;
 
@@ -509,6 +548,10 @@ function handleMessage(message) {
       const nodeVotes = parseNodeVotesFromTxMessage(message, data);
       processNodeVotes(nodeVotes).catch((error) => {
         log(`Error processing node vote tx: ${error.message}`);
+      });
+      const protocolChanges = parseProtocolMimirFromTxMessage(message, data);
+      processProtocolMimirChanges(protocolChanges).catch((error) => {
+        log(`Error processing protocol Mimir tx: ${error.message}`);
       });
     }
     return;
@@ -560,6 +603,14 @@ function handleMessage(message) {
     });
     processNodeVotes(nodeVotes).catch((error) => {
       log(`Error processing node vote block ${blockHeight}: ${error.message}`);
+    });
+    const protocolChanges = parseProtocolMimirChanges(events, {
+      height: blockHeight,
+      blockTime,
+      source: 'ws'
+    });
+    processProtocolMimirChanges(protocolChanges).catch((error) => {
+      log(`Error processing protocol Mimir block ${blockHeight}: ${error.message}`);
     });
   }
 
@@ -636,6 +687,12 @@ function connect() {
           params: { query: `tm.event='Tx' AND ${eventQuery}` }
         }));
       });
+      ws.send(JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'subscribe',
+        id: Object.keys(NODE_VOTE_EVENT_QUERIES).length + 2,
+        params: { query: `tm.event='Tx' AND ${PROTOCOL_MIMIR_EVENT_QUERY}` }
+      }));
     }
 
     startHeartbeat();

@@ -1,5 +1,22 @@
 # Vote Tracker
 
+## Direct protocol Mimir changes
+
+Direct `set_mimir` changes are protocol actions, not validator votes. They are
+stored in `protocol_mimir_changes`, separately from `set_node_mimir` rows in
+`node_votes`, and merged only into a key's Effective Value History. Changes
+with a transaction-local `security` message are labeled `Protocol safety
+event`; other direct changes are labeled `Direct protocol event`. Neither is
+assigned a node/operator or a 0-of-N vote count.
+
+The consolidated listener subscribes to `set_mimir.key EXISTS` for live
+ingestion. The node-vote backfill also searches that indexed RPC event over six
+months on its first run and uses its own rolling watermark afterward. A
+`set_mimir` with the same key and value as a `set_node_mimir` in one transaction
+is vote-driven and is not duplicated as a protocol event. Direct-only keys
+still appear in By Vote so current Mimir state has its recorded protocol
+history.
+
 ## Upgrade vote coverage
 
 The Vote Tracker stores validator-scheduled upgrade stance changes in the

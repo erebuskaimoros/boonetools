@@ -682,7 +682,7 @@ export async function fetchNodeVoteCosmosTxs({ startHeight, endHeight }, options
   };
 }
 
-async function resolveNodeVoteHeightRange(startTime, endTime) {
+export async function resolveNodeVoteHeightRange(startTime, endTime) {
   // Block-level archive routing errors are path-specific. Do not let one bad
   // historical height cool down the healthy gateway before the adjacent-block
   // recovery or Cosmos transaction query can run.
@@ -912,6 +912,20 @@ export async function runNodeVoteBackfill(client, options = {}) {
   const heights = rows.map((row) => Number(row.height || 0)).filter((height) => height > 0);
   startHeight = heights.length ? Math.min(...heights) : startHeight;
   endHeight = heights.length ? Math.max(...heights) : endHeight;
+  let protocolMimir = null;
+  let protocolMimirError = '';
+  try {
+    const { runProtocolMimirBackfill } = await import('./protocol-mimir-changes.js');
+    protocolMimir = await runProtocolMimirBackfill(client, {
+      startTime: options.startTime,
+      endTime: options.endTime
+    });
+  } catch (error) {
+    // Protocol changes are additive history. Preserve the existing validator
+    // vote backfill and last-good summary when archive RPC is temporarily down.
+    protocolMimirError = error?.message || String(error);
+  }
+
   const stats = {
     mode: window.mode,
     source,
@@ -932,6 +946,9 @@ export async function runNodeVoteBackfill(client, options = {}) {
     upgrade_error: upgradeError,
     upgrade_history_status: upgradeError ? 'degraded' : 'complete',
     upgrade_event_count: rows.filter((row) => row.mimir_key.startsWith('UPGRADE-')).length,
+    protocol_mimir: protocolMimir,
+    protocol_mimir_error: protocolMimirError,
+    protocol_mimir_history_status: protocolMimirError ? 'degraded' : 'complete',
     event_count: rows.length,
     upserted: inserted,
     unique_vote_keys: new Set(rows.map((row) => row.mimir_key)).size,

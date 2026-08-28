@@ -964,15 +964,28 @@
                                 </thead>
                                 <tbody>
                                   {#each row.effective_history as change}
-                                    <tr>
+                                    <tr class:protocol-change={change.change_source === 'protocol_safety' || change.change_source === 'protocol_direct'}>
                                       <td><span class="value-chip">{change.effective_value}</span></td>
                                       <td>
-                                        <strong>{formatNumber(change.leader_count || 0)}</strong>
-                                        <small>of {formatNumber(change.threshold || 0)} threshold</small>
+                                        {#if change.change_source === 'protocol_safety'}
+                                          <strong>Protocol safety event</strong>
+                                          <small>not a validator vote</small>
+                                        {:else if change.change_source === 'protocol_direct'}
+                                          <strong>Direct protocol event</strong>
+                                          <small>not a validator vote</small>
+                                        {:else}
+                                          <strong>{formatNumber(change.leader_count || 0)}</strong>
+                                          <small>of {formatNumber(change.threshold || 0)} threshold</small>
+                                        {/if}
                                       </td>
-                                      <td title={change.triggered_by_node}>
-                                        <strong>{shortAddress(change.triggered_by_operator)}</strong>
-                                        <small>{shortAddress(change.triggered_by_node)} voted {change.trigger_vote_value}</small>
+                                      <td title={change.change_source === 'protocol_safety' || change.change_source === 'protocol_direct' ? change.security_message : change.triggered_by_node}>
+                                        {#if change.change_source === 'protocol_safety' || change.change_source === 'protocol_direct'}
+                                          <strong>Protocol action</strong>
+                                          <small>{change.security_message || 'Direct protocol Mimir change'}</small>
+                                        {:else}
+                                          <strong>{shortAddress(change.triggered_by_operator)}</strong>
+                                          <small>{shortAddress(change.triggered_by_node)} voted {change.trigger_vote_value}</small>
+                                        {/if}
                                       </td>
                                       <td>
                                         <strong>{formatDateTime(change.block_time)}</strong>
@@ -2187,6 +2200,17 @@
   }
 
   .mini-table tr.removed td strong {
+    color: var(--amber);
+  }
+
+  .history-table tr.protocol-change td {
+    background: rgba(255, 176, 0, 0.045);
+    border-top-color: rgba(255, 176, 0, 0.3);
+    border-bottom-color: rgba(255, 176, 0, 0.3);
+  }
+
+  .history-table tr.protocol-change .value-chip {
+    border-color: rgba(255, 176, 0, 0.55);
     color: var(--amber);
   }
 

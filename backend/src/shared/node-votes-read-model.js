@@ -21,7 +21,7 @@ export async function refreshNodeVotesReadModel(options = {}) {
     modelKey,
     client: options.client,
     ttlMs: NODE_VOTES_READ_MODEL_TTL_MS,
-    schemaVersion: 1,
+    schemaVersion: 2,
     now,
     build: async (client) => {
       let chainState = options.chainState || null;

@@ -596,6 +596,36 @@ function mergeEffectiveHistory(effectiveHistory, currentValueChange) {
   return [currentValueChange, ...effectiveHistory].sort(compareRowsDesc);
 }
 
+function protocolEffectiveHistory(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) => ({
+    event_key: row.event_key,
+    effective_value: String(row.mimir_value ?? ''),
+    mimir_category: classifyMimirKey(row.mimir_key),
+    vote_kind: 'mimir',
+    vote_category: classifyMimirKey(row.mimir_key),
+    consensus_model: row.change_source === 'protocol_safety'
+      ? 'protocol-safety'
+      : 'protocol-direct',
+    change_source: String(row.change_source || 'protocol_direct'),
+    source_label: String(row.source_label || 'Direct protocol event'),
+    security_message: String(row.security_message || ''),
+    block_time: toIsoString(row.block_time),
+    height: Number(row.height || 0),
+    tx_id: String(row.tx_id || '')
+  }));
+}
+
+function mergeProtocolEffectiveHistory(effectiveHistory, protocolRows) {
+  const combined = [...effectiveHistory, ...protocolEffectiveHistory(protocolRows)];
+  const unique = new Map();
+  for (const change of combined) {
+    const identity = change.event_key
+      || [change.change_source || 'validator_vote', change.tx_id, change.height, change.effective_value].join(':');
+    if (!unique.has(identity)) unique.set(identity, change);
+  }
+  return [...unique.values()].sort(compareRowsDesc);
+}
+
 function liveActiveNodeMimirRows(rows) {
   return (Array.isArray(rows) ? rows : [])
     .filter((row) => row?.is_active && !isVoteRemoval(row));
@@ -661,6 +691,7 @@ export function buildVoteGroups(
   const currentUpgradeVotesAvailable = Boolean(options.currentUpgradeVotesAvailable);
   const currentUpgradeVotesByKey = options.currentUpgradeVotesByKey || {};
   const currentUpgradeProposalsByKey = options.currentUpgradeProposalsByKey || {};
+  const protocolMimirChangesByKey = options.protocolMimirChangesByKey || {};
   const activeNodeAddresses = new Set(options.activeNodeAddresses || []);
 
   for (const row of rows) {
@@ -678,6 +709,9 @@ export function buildVoteGroups(
   }
 
   for (const mimirKey of Object.keys(currentUpgradeProposalsByKey)) {
+    if (!historicalByKey.has(mimirKey)) historicalByKey.set(mimirKey, []);
+  }
+  for (const mimirKey of Object.keys(protocolMimirChangesByKey)) {
     if (!historicalByKey.has(mimirKey)) historicalByKey.set(mimirKey, []);
   }
 
@@ -748,7 +782,15 @@ export function buildVoteGroups(
         currentValue: currentMimirValues[mimirKey],
         currentNodeMimirs
       });
-      const effectiveHistory = mergeEffectiveHistory(rawEffectiveHistory, currentValueChange);
+      const validatorEffectiveHistory = mergeEffectiveHistory(rawEffectiveHistory, currentValueChange);
+      const effectiveHistory = mergeProtocolEffectiveHistory(
+        validatorEffectiveHistory,
+        protocolMimirChangesByKey[mimirKey] || []
+      );
+      const currentProtocolChange = effectiveHistory.find((change) => (
+        String(change.change_source || '').startsWith('protocol_')
+        && String(change.effective_value) === String(currentValue ?? '')
+      ));
       const currentVoteSource = voteKind === 'upgrade'
         ? (currentUpgradeVotesAvailable && proposal
           ? 'thornode-upgrade-proposal'
@@ -789,8 +831,10 @@ export function buildVoteGroups(
           'operator_address'
         ),
         first_vote_at: firstVoteTime(historicalRows),
-        passed_at: category === 'operational' ? null : firstPassedTime(effectiveHistory),
-        current_value_changed_at: toIsoString(currentValueChange?.block_time),
+        passed_at: category === 'operational' ? null : firstPassedTime(validatorEffectiveHistory),
+        current_value_changed_at: toIsoString(
+          currentProtocolChange?.block_time || currentValueChange?.block_time
+        ),
         latest_vote_at: toIsoString(latestVote?.block_time),
         latest_height: latestVote?.height || 0,
         leader_value: leader?.value || '',
@@ -1214,12 +1258,42 @@ async function loadNodeVoteRows(client, since) {
   return result.rows.map(normalizeVoteRow);
 }
 
+async function loadProtocolMimirChangesByKey(client, since) {
+  const result = await client.query(
+    `select event_key, tx_id, height, block_time, event_index, mimir_key,
+            mimir_value, change_source, source_label, security_message, source
+     from protocol_mimir_changes
+     where block_time is null or block_time >= $1
+     order by block_time desc nulls last, height desc, tx_id desc, event_index desc
+     limit $2`,
+    [since, MAX_ROWS]
+  );
+  const byKey = {};
+  for (const row of result.rows) {
+    const key = normalizeMimirKey(row.mimir_key);
+    if (!key) continue;
+    byKey[key] ||= [];
+    byKey[key].push({
+      ...row,
+      mimir_key: key,
+      mimir_value: String(row.mimir_value ?? ''),
+      height: Number(row.height || 0),
+      event_index: Number(row.event_index || 0),
+      block_time: toIsoString(row.block_time)
+    });
+  }
+  return byKey;
+}
+
 async function buildNodeVotesPayload(client, options = {}) {
   const now = options.now instanceof Date ? options.now : new Date();
   const days = Math.min(366, Math.max(1, Number(options.days) || DEFAULT_DAYS));
   const backend = await loadBackendState(client);
   const since = options.since || backend.sync?.start_time || subtractMonths(now, 6).toISOString();
-  const rows = await loadNodeVoteRows(client, since);
+  const [rows, protocolMimirChangesByKey] = await Promise.all([
+    loadNodeVoteRows(client, since),
+    loadProtocolMimirChangesByKey(client, since)
+  ]);
   let chainState = options.chainState || null;
   if (!chainState && options.allowProvider === true) {
     chainState = await loadCurrentNodeVoteChainState();
@@ -1241,6 +1315,7 @@ async function buildNodeVotesPayload(client, options = {}) {
       currentUpgradeVotesAvailable: Boolean(chainState.currentUpgradeVotesAvailable),
       currentUpgradeVotesByKey: chainState.currentUpgradeVotesByKey || {},
       currentUpgradeProposalsByKey: chainState.currentUpgradeProposalsByKey || {},
+      protocolMimirChangesByKey,
       activeNodeAddresses: (chainState.activeNodes || []).map((node) => node.node_address)
     }
   );
@@ -1254,7 +1329,7 @@ async function buildNodeVotesPayload(client, options = {}) {
   const byNode = buildNodeGroups(rows, byNodeLatestRows);
   return {
     payload: {
-      schema_version: 3,
+      schema_version: 4,
       as_of: now.toISOString(),
       window: {
         days,
@@ -1428,7 +1503,7 @@ export async function handleNodeVoteDetails(_request, url) {
     };
   });
   return json({
-    schema_version: 3,
+    schema_version: 4,
     mimir_key: key,
     summary,
     ...page,
@@ -1453,7 +1528,7 @@ export async function handleNodeVoteNodeDetails(_request, url) {
     limit: parseIntegerParam(url.searchParams.get('limit'), 50, { min: 1, max: 200 })
   });
   return json({
-    schema_version: 3,
+    schema_version: 4,
     node_address: address,
     summary: model?.payload?.by_node?.find((row) => row.node_address === address) || null,
     ...page,

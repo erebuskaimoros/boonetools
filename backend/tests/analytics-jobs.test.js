@@ -246,6 +246,10 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   );
   assert.match(
     remoteDeployScript,
+    /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-node-votes-backfill/
+  );
+  assert.match(
+    remoteDeployScript,
     /if \[\[ "\$unit" =~ \$OPTIONAL_PRIME_UNIT_PATTERN \]\]; then[\s\S]*continuing with its cached read model/
   );
   assert.match(remoteDeployScript, /local timer_state_wait_seconds=90/);
@@ -262,6 +266,10 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(
     remoteDeployScript,
     /prime_read_models[\s\S]*boonetools-wasm-arb-economics\.service[\s\S]*refresh_status_models_after_long_primes[\s\S]*boonetools-analytics-read-models\.service/
+  );
+  assert.match(
+    remoteDeployScript,
+    /prime_read_models\(\)[\s\S]*boonetools-node-votes-backfill\.service[\s\S]*boonetools-node-votes-summary\.service/
   );
   assert.match(remoteDeployScript, /has no future trigger/);
   assert.match(remoteDeployScript, /https:\/\/mail\.theaiguys\.ai\//);

@@ -18,7 +18,7 @@ CURRENT_LINK="$DEST/current"
 CONFIG_DIR="$DEST/config"
 ENV_FILE="$CONFIG_DIR/backend.env"
 LOCK_FILE=/var/lock/boonetools-deploy.lock
-OPTIONAL_PRIME_UNIT_PATTERN='^(boonetools-pool-dislocation-repair\.service|boonetools-pool-analysis\.service|boonetools-pol-tracker\.service|boonetools-burn-tracker\.service|boonetools-wasm-arb-economics\.service|boonetools-wasm-arb-economics-fees\.service|boonetools-wasm-arb-economics-oracle\.service)$'
+OPTIONAL_PRIME_UNIT_PATTERN='^(boonetools-node-votes-backfill\.service|boonetools-pool-dislocation-repair\.service|boonetools-pool-analysis\.service|boonetools-pol-tracker\.service|boonetools-burn-tracker\.service|boonetools-wasm-arb-economics\.service|boonetools-wasm-arb-economics-fees\.service|boonetools-wasm-arb-economics-oracle\.service)$'
 
 PREVIOUS_TARGET=
 ROLLBACK_REQUIRED=false
@@ -367,6 +367,7 @@ prime_read_models() {
   local prime_units=(
     boonetools-rujira-base-fees.service
     boonetools-analytics-read-models.service
+    boonetools-node-votes-backfill.service
     boonetools-node-votes-summary.service
     boonetools-rapid-swaps-market-history.service
     boonetools-treasury-snapshot.service
