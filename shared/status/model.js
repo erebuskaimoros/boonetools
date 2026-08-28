@@ -45,8 +45,39 @@ function combineLpState(deposits, withdrawals) {
   return 'partial';
 }
 
-export function buildChainStatuses(inboundAddresses = [], mimir = {}, lastBlocks = []) {
+function buildChainObservationStats(nodes = []) {
+  const heightsByChain = new Map();
+
+  for (const node of nodes) {
+    if (node?.status !== 'Active') continue;
+    const nodeHeights = new Map();
+    for (const observation of Array.isArray(node?.observe_chains) ? node.observe_chains : []) {
+      const chain = String(observation?.chain || '').toUpperCase();
+      const height = Number(observation?.height);
+      if (!chain || !Number.isFinite(height) || height < 0) continue;
+      nodeHeights.set(chain, Math.max(nodeHeights.get(chain) ?? 0, height));
+    }
+    for (const [chain, height] of nodeHeights) {
+      if (!heightsByChain.has(chain)) heightsByChain.set(chain, []);
+      heightsByChain.get(chain).push(height);
+    }
+  }
+
+  return new Map([...heightsByChain].map(([chain, heights]) => {
+    const tipHeight = Math.max(...heights);
+    const averageLag = heights.reduce((sum, height) => sum + Math.max(0, tipHeight - height), 0)
+      / heights.length;
+    return [chain, {
+      tipHeight,
+      avgBlocksBehindTip: Math.round(averageLag * 10) / 10,
+      reportingValidators: heights.length
+    }];
+  }));
+}
+
+export function buildChainStatuses(inboundAddresses = [], mimir = {}, lastBlocks = [], nodes = []) {
   const blockByChain = new Map(lastBlocks.map((row) => [row.chain, row]));
+  const observationStatsByChain = buildChainObservationStats(nodes);
   const mimirByKey = new Map(
     Object.entries(mimir || {}).map(([key, value]) => [key.toUpperCase(), value])
   );
@@ -60,6 +91,7 @@ export function buildChainStatuses(inboundAddresses = [], mimir = {}, lastBlocks
     .map((inbound) => {
       const chain = String(inbound.chain || '').toUpperCase();
       const lastBlock = blockByChain.get(chain) || {};
+      const observationStats = observationStatsByChain.get(chain);
       const tradingPaused = Boolean(
         inbound.halted || inbound.global_trading_paused || inbound.chain_trading_paused
       );
@@ -89,6 +121,9 @@ export function buildChainStatuses(inboundAddresses = [], mimir = {}, lastBlocks
         lastObservedIn: numberValue(lastBlock.last_observed_in),
         lastSignedOut: numberValue(lastBlock.last_signed_out),
         thorchainHeight: numberValue(lastBlock.thorchain),
+        tipHeight: observationStats?.tipHeight ?? 0,
+        avgBlocksBehindTip: observationStats?.avgBlocksBehindTip ?? null,
+        reportingValidators: observationStats?.reportingValidators ?? 0,
         degraded: tradingPaused || lpActions !== 'enabled' || signingPaused
       };
     })
@@ -289,7 +324,7 @@ export function buildStatusNetworkReadModel(input = {}) {
   const mimir = networkSnapshot.mimir && typeof networkSnapshot.mimir === 'object'
     ? networkSnapshot.mimir
     : {};
-  const chains = buildChainStatuses(networkSnapshot.inbound_addresses, mimir, lastBlocks);
+  const chains = buildChainStatuses(networkSnapshot.inbound_addresses, mimir, lastBlocks, nodes);
   const thorchainHeight = Math.max(0, ...lastBlocks.map((row) => numberValue(row?.thorchain)));
   const configuredStallThresholdMs = Number(input.stallThresholdMs);
   const stallThresholdMs = Number.isFinite(configuredStallThresholdMs) && configuredStallThresholdMs >= 1_000

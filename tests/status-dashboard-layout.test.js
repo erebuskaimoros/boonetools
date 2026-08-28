@@ -37,3 +37,10 @@ test('stalled block timing replaces false live indicators', () => {
   assert.match(source, /\{consensusStalled \? 'NO NEW BLOCKS' : 'LIVE'\}/);
   assert.match(source, /\.source-line\.stalled i \{[^}]*animation:\s*none/);
 });
+
+test('chain availability shows average active-validator lag behind each reported tip', () => {
+  assert.match(source, /<th[^>]*>Avg Blocks Behind Tip<\/th>/);
+  assert.match(source, /formatAverageBlockLag\(chain\)/);
+  assert.match(source, /Mean lag across/);
+  assert.match(source, /reported tip/);
+});

@@ -15,9 +15,33 @@ function sources() {
         { chain: 'ETH', chain_trading_paused: true, chain_lp_actions_paused: true }
       ],
       nodes: [
-        { status: 'Active', version: '3.8.0', status_since: 900 },
-        { status: 'Active', version: '3.8.0', status_since: 901 },
-        { status: 'Standby', version: '3.7.0', status_since: 800 }
+        {
+          status: 'Active',
+          version: '3.8.0',
+          status_since: 900,
+          observe_chains: [
+            { chain: 'BTC', height: 100 },
+            { chain: 'ETH', height: 200 }
+          ]
+        },
+        {
+          status: 'Active',
+          version: '3.8.0',
+          status_since: 901,
+          observe_chains: [
+            { chain: 'BTC', height: 96 },
+            { chain: 'ETH', height: 198 }
+          ]
+        },
+        {
+          status: 'Standby',
+          version: '3.7.0',
+          status_since: 800,
+          observe_chains: [
+            { chain: 'BTC', height: 1_000 },
+            { chain: 'ETH', height: 1_000 }
+          ]
+        }
       ],
       mimir: { HALTCHURNING: 0 },
       lastblock: [
@@ -113,6 +137,15 @@ test('status dashboard read model compacts network, governance, updates, and stu
   assert.equal(payload.network.majority_version, '3.8.0');
   assert.equal(payload.network.summary.label, 'Degraded');
   assert.equal(payload.chains.length, 2);
+  assert.deepEqual(payload.chains.map((chain) => ({
+    chain: chain.chain,
+    tipHeight: chain.tipHeight,
+    avgBlocksBehindTip: chain.avgBlocksBehindTip,
+    reportingValidators: chain.reportingValidators
+  })), [
+    { chain: 'BTC', tipHeight: 100, avgBlocksBehindTip: 2, reportingValidators: 2 },
+    { chain: 'ETH', tipHeight: 200, avgBlocksBehindTip: 1, reportingValidators: 2 }
+  ]);
   assert.equal(payload.block_production.points.length, 1);
   assert.equal(payload.block_production.points[0].seconds_per_block, 6.125);
   assert.equal(payload.votes.governance.length, 1);

@@ -142,6 +142,9 @@ test('chain status keeps trading and LP actions distinct', () => {
     lastObservedIn: 900,
     lastSignedOut: 95,
     thorchainHeight: 100,
+    tipHeight: 0,
+    avgBlocksBehindTip: null,
+    reportingValidators: 0,
     degraded: true
   });
   assert.equal(rows[1].trading, 'paused');
@@ -149,6 +152,52 @@ test('chain status keeps trading and LP actions distinct', () => {
   assert.equal(rows[1].withdrawals, 'enabled');
   assert.equal(rows[1].lpActions, 'partial');
   assert.equal(rows[1].signing, 'enabled');
+});
+
+test('chain status averages active validator lag behind the highest reported chain tip', () => {
+  const rows = buildChainStatuses([
+    { chain: 'BTC' },
+    { chain: 'ETH' }
+  ], {}, [
+    { chain: 'BTC', thorchain: 100 },
+    { chain: 'ETH', thorchain: 100 }
+  ], [
+    {
+      status: 'Active',
+      observe_chains: [
+        { chain: 'BTC', height: 100 },
+        { chain: 'ETH', height: 200 }
+      ]
+    },
+    {
+      status: 'Active',
+      observe_chains: [
+        { chain: 'BTC', height: 96 },
+        { chain: 'ETH', height: 198 }
+      ]
+    },
+    {
+      status: 'Active',
+      observe_chains: [{ chain: 'BTC', height: 94 }]
+    },
+    {
+      status: 'Standby',
+      observe_chains: [
+        { chain: 'BTC', height: 1_000 },
+        { chain: 'ETH', height: 1_000 }
+      ]
+    }
+  ]);
+
+  assert.deepEqual(rows.map((row) => ({
+    chain: row.chain,
+    tipHeight: row.tipHeight,
+    avgBlocksBehindTip: row.avgBlocksBehindTip,
+    reportingValidators: row.reportingValidators
+  })), [
+    { chain: 'BTC', tipHeight: 100, avgBlocksBehindTip: 3.3, reportingValidators: 3 },
+    { chain: 'ETH', tipHeight: 200, avgBlocksBehindTip: 1, reportingValidators: 2 }
+  ]);
 });
 
 test('network summary is degraded when any chain action is unavailable', () => {

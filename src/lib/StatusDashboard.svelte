@@ -7,6 +7,7 @@
   const DASHBOARD_REFRESH_INTERVAL_MS = 60_000;
   const LIVE_REFRESH_INTERVAL_MS = 15_000;
   const number = new Intl.NumberFormat('en-US');
+  const blockLagNumber = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
 
   let dashboard = null;
   let liveStatus = null;
@@ -245,6 +246,18 @@
     return 'PAUSED';
   }
 
+  function formatAverageBlockLag(chain) {
+    const value = Number(chain?.avgBlocksBehindTip);
+    return chain?.avgBlocksBehindTip === null || !Number.isFinite(value)
+      ? '-'
+      : blockLagNumber.format(value);
+  }
+
+  function blockLagTitle(chain) {
+    if (!chain?.reportingValidators) return 'No active validator observations available';
+    return `Mean lag across ${number.format(chain.reportingValidators)} active validators; reported tip ${number.format(chain.tipHeight)}`;
+  }
+
   function formatElapsed(value) {
     const time = Number(value);
     if (!Number.isFinite(time) || time <= 0) return '-';
@@ -439,6 +452,7 @@
               <th>LP Actions</th>
               <th>Outbound Signing</th>
               <th>Last Observed</th>
+              <th title="Mean active-validator lag from the highest reported height for each chain">Avg Blocks Behind Tip</th>
             </tr>
           </thead>
           <tbody>
@@ -449,6 +463,7 @@
                 <td><span class="state {chain.lpActions}"><i></i>{stateLabel(chain.lpActions)}</span></td>
                 <td><span class="state {chain.signing}"><i></i>{stateLabel(chain.signing)}</span></td>
                 <td class="height">{number.format(chain.lastObservedIn)}</td>
+                <td class="lag" title={blockLagTitle(chain)}>{formatAverageBlockLag(chain)}</td>
               </tr>
             {/each}
           </tbody>
@@ -854,6 +869,7 @@
   .block-title h2 span { color: #00cc66; }
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; }
+  .chain-block table { min-width: 820px; }
   th { padding: 10px 14px; color: var(--term-text-4); font-size: 11px; line-height: 1.4; letter-spacing: .12em; text-align: left; text-transform: uppercase; background: #080808; }
   td { padding: 10px 14px; border-top: 1px solid #111; color: var(--term-text-2); font-size: 11px; line-height: 1.4; }
   tbody tr:hover { background: #0d0d0d; }
@@ -868,6 +884,7 @@
   .state.partial { color: var(--term-text-2); }
   .state.partial i { background: var(--term-text-2); }
   .height { color: var(--term-text-3); }
+  .lag { color: #00cc66; font-weight: 700; white-space: nowrap; }
 
   .stuck-table { min-width: 840px; }
   .stuck-row { background: rgba(220, 53, 69, .018); }
