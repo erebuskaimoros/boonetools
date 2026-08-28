@@ -884,7 +884,7 @@
   .state.partial { color: var(--term-text-2); }
   .state.partial i { background: var(--term-text-2); }
   .height { color: var(--term-text-3); }
-  .lag { color: #00cc66; font-weight: 700; white-space: nowrap; }
+  .lag { color: var(--term-text-strong, #fff); font-weight: 700; white-space: nowrap; }
 
   .stuck-table { min-width: 840px; }
   .stuck-row { background: rgba(220, 53, 69, .018); }

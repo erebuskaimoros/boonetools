@@ -43,4 +43,5 @@ test('chain availability shows average active-validator lag behind each reported
   assert.match(source, /formatAverageBlockLag\(chain\)/);
   assert.match(source, /Mean lag across/);
   assert.match(source, /reported tip/);
+  assert.match(source, /\.lag \{[^}]*color:\s*var\(--term-text-strong,\s*#fff\)/);
 });
