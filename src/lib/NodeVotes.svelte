@@ -2092,7 +2092,7 @@
 
   .detail-grid {
     display: grid;
-    grid-template-columns: minmax(500px, 0.78fr) minmax(520px, 1.22fr);
+    grid-template-columns: minmax(640px, 1.2fr) minmax(420px, 0.8fr);
     gap: 0;
     border-top: 1px solid rgba(0, 204, 102, 0.28);
   }
@@ -2142,8 +2142,21 @@
   }
 
   .history-table {
-    min-width: 620px;
+    min-width: 420px;
+    table-layout: fixed;
   }
+
+  .history-table th,
+  .history-table td {
+    padding: 7px 8px;
+    overflow-wrap: anywhere;
+  }
+
+  .history-table th:nth-child(1) { width: 17%; }
+  .history-table th:nth-child(2) { width: 16%; }
+  .history-table th:nth-child(3) { width: 27%; }
+  .history-table th:nth-child(4) { width: 27%; }
+  .history-table th:nth-child(5) { width: 13%; }
 
   .node-history-table {
     min-width: 760px;
