@@ -163,6 +163,7 @@
     rapidSwapsApp,
     tcFeeDashApp,
     poolDislocationApp,
+    poolAnalysisApp,
     polTrackerApp,
     burnTrackerApp,
     bondTrackerApp,
@@ -175,7 +176,7 @@
     briefingsApp
   ];
   // Direct-route previews resolve normally but stay out of desktop/mobile nav.
-  const hiddenApps = [wasmArbEconomicsApp, poolAnalysisApp];
+  const hiddenApps = [wasmArbEconomicsApp];
 
   // The site has no homepage: unknown paths and `/` land on the status page.
   const defaultApp = statusApp;
