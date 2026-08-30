@@ -29,6 +29,12 @@ Signing is independent of trading and LP actions. Global or per-chain `HaltSigni
 
 The Stuck Transactions section is intentionally narrower than a pending-transaction list. It includes only finalized user obligations that have no matching completed outbound and have exceeded the live protocol window while the relevant operation is enabled. Outbound signing uses the original transaction's scheduled height—not the rolling retry height—and the current `SigningTransactionPeriod + ObservationDelayFlexibility`. Completed sibling outbounds are matched individually so one successful payment cannot hide another unpaid obligation. Active limit orders, progressing streams, calculated security delays, and transactions explained by current trading, streaming, signing, full-chain, or solvency halts are excluded.
 
+The status card groups these obligations by destination chain, ordered by the
+most overdue transaction in each group. Each chain summary shows its active
+count, affected stages, and maximum overdue age; the native disclosure expands
+to the full transaction table and explorer links without changing the backend
+payload.
+
 The backend bounds per-transaction lookup concurrency, persists lookups by
 queue fingerprint, and exposes partial-scan metadata if individual lookups
 fail. This prevents both browsers and successive scheduler processes from

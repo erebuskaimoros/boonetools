@@ -3,6 +3,7 @@
 
   import { fetchStatusDashboard, fetchStatusLive } from './status/api.js';
   import BlockProductionChart from './status/BlockProductionChart.svelte';
+  import { groupStuckTransactionsByChain } from './status/stuck-transactions.js';
 
   const DASHBOARD_REFRESH_INTERVAL_MS = 60_000;
   const LIVE_REFRESH_INTERVAL_MS = 15_000;
@@ -63,6 +64,7 @@
   $: statusUpdates = currentDashboard?.votes?.status_updates || [];
   $: stuckDashboard = currentDashboard?.stuck_transactions || null;
   $: stuckTransactions = stuckDashboard?.transactions || [];
+  $: stuckTransactionGroups = groupStuckTransactionsByChain(stuckTransactions);
   $: hasStuckTransactions = stuckTransactions.length > 0 || Number(stuckDashboard?.count || 0) > 0;
   $: haltedChains = chainStatuses.filter((chain) => chain.trading === 'paused').map((chain) => chain.chain);
   $: statusError = [coreError, liveError].filter(Boolean).join('; ');
@@ -298,6 +300,13 @@
       : `${formatted} ${row?.asset_ticker || ''}`.trim();
   }
 
+  function formatBundleStages(bundle) {
+    const labels = Array.isArray(bundle?.stageLabels) ? bundle.stageLabels : [];
+    if (labels.length === 0) return 'Unknown stage';
+    const visible = labels.slice(0, 2).join(' · ');
+    return labels.length > 2 ? `${visible} +${labels.length - 2}` : visible;
+  }
+
   function formatBlockDuration(value) {
     const totalMinutes = Math.max(0, Math.floor((Number(value) * 6) / 60));
     const days = Math.floor(totalMinutes / 1440);
@@ -493,50 +502,79 @@
             {stuckError || stuckDashboard?.warning || `${stuckDashboard?.failed_lookups || 0} transaction lookups failed; this scan may be incomplete.`}
           </div>
         {/if}
-        {#if stuckTransactions.length === 0}
+        {#if stuckTransactionGroups.length === 0}
           <div class="empty-state clean-state"><span>✓</span>No currently detected stuck transactions.</div>
         {:else}
-          <div class="table-wrap">
-            <table class="stuck-table">
-              <thead>
-                <tr>
-                  <th>Transaction</th>
-                  <th>State</th>
-                  <th>Outstanding</th>
-                  <th>Destination</th>
-                  <th>Overdue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each stuckTransactions as transaction}
-                  <tr class="stuck-row">
-                    <td>
-                      <a class="tx-id" href={txUrl(transaction.tx_id)} target="_blank" rel="noopener noreferrer" title={transaction.tx_id}>
-                        {shortValue(transaction.tx_id)} <span>↗</span>
-                      </a>
-                      {#if transaction.completed_outbounds > 0}
-                        <small>{transaction.completed_outbounds} sibling outbound{transaction.completed_outbounds === 1 ? '' : 's'} completed</small>
-                      {/if}
-                    </td>
-                    <td>
-                      <span class="stuck-state"><i></i>STUCK</span>
-                      <small>{transaction.stage_label}</small>
-                    </td>
-                    <td>
-                      <strong class="outstanding-amount">{formatOutstanding(transaction)}</strong>
-                      <small>{transaction.chain}</small>
-                    </td>
-                    <td>
-                      <span class="destination" title={transaction.destination}>{shortValue(transaction.destination, 7, 6)}</span>
-                    </td>
-                    <td>
-                      <strong class="overdue-time">{formatBlockDuration(transaction.overdue_blocks)}</strong>
-                      <small>{number.format(transaction.overdue_blocks)} blocks</small>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
+          <div class="stuck-bundles">
+            {#each stuckTransactionGroups as bundle (bundle.chain)}
+              <details class="stuck-bundle">
+                <summary>
+                  <span class="stuck-bundle-chain">
+                    <i>{bundle.chain.slice(0, 2)}</i>
+                    <span><strong>{bundle.chain}</strong><small>chain</small></span>
+                  </span>
+                  <span class="stuck-bundle-metric">
+                    <strong>{number.format(bundle.count)} STUCK</strong>
+                    <small>transaction{bundle.count === 1 ? '' : 's'}</small>
+                  </span>
+                  <span class="stuck-bundle-metric stuck-bundle-stages" title={bundle.stageLabels.join(', ')}>
+                    <strong>{formatBundleStages(bundle)}</strong>
+                    <small>affected stages</small>
+                  </span>
+                  <span class="stuck-bundle-metric">
+                    <strong>{formatBlockDuration(bundle.maxOverdueBlocks)}</strong>
+                    <small>{number.format(bundle.maxOverdueBlocks)} blocks max</small>
+                  </span>
+                  <span class="stuck-bundle-action">
+                    <span class="when-closed">Open {number.format(bundle.count)} transaction{bundle.count === 1 ? '' : 's'}</span>
+                    <span class="when-open">Hide transaction{bundle.count === 1 ? '' : 's'}</span>
+                    <i aria-hidden="true"></i>
+                  </span>
+                </summary>
+                <div class="table-wrap stuck-bundle-details">
+                  <table class="stuck-table">
+                    <thead>
+                      <tr>
+                        <th>Transaction</th>
+                        <th>State</th>
+                        <th>Outstanding</th>
+                        <th>Destination</th>
+                        <th>Overdue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {#each bundle.transactions as transaction (transaction.tx_id)}
+                        <tr class="stuck-row">
+                          <td>
+                            <a class="tx-id" href={txUrl(transaction.tx_id)} target="_blank" rel="noopener noreferrer" title={transaction.tx_id}>
+                              {shortValue(transaction.tx_id)} <span>↗</span>
+                            </a>
+                            {#if transaction.completed_outbounds > 0}
+                              <small>{transaction.completed_outbounds} sibling outbound{transaction.completed_outbounds === 1 ? '' : 's'} completed</small>
+                            {/if}
+                          </td>
+                          <td>
+                            <span class="stuck-state"><i></i>STUCK</span>
+                            <small>{transaction.stage_label}</small>
+                          </td>
+                          <td>
+                            <strong class="outstanding-amount">{formatOutstanding(transaction)}</strong>
+                            <small>{transaction.chain}</small>
+                          </td>
+                          <td>
+                            <span class="destination" title={transaction.destination}>{shortValue(transaction.destination, 7, 6)}</span>
+                          </td>
+                          <td>
+                            <strong class="overdue-time">{formatBlockDuration(transaction.overdue_blocks)}</strong>
+                            <small>{number.format(transaction.overdue_blocks)} blocks</small>
+                          </td>
+                        </tr>
+                      {/each}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            {/each}
           </div>
         {/if}
       {/if}
@@ -886,6 +924,49 @@
   .height { color: var(--term-text-3); }
   .lag { color: var(--term-text-strong, #fff); font-weight: 700; white-space: nowrap; }
 
+  .stuck-bundles { background: #080808; }
+  .stuck-bundle { border-top: 1px solid #181112; background: rgba(220, 53, 69, .018); }
+  .stuck-bundle:first-child { border-top: 0; }
+  .stuck-bundle[open] { background: rgba(220, 53, 69, .03); }
+  .stuck-bundle summary {
+    display: grid;
+    grid-template-columns: minmax(145px, .85fr) 120px minmax(180px, 1.2fr) 125px minmax(185px, auto);
+    align-items: center;
+    gap: 16px;
+    min-height: 64px;
+    padding: 10px 14px;
+    color: var(--term-text-2);
+    cursor: pointer;
+    list-style: none;
+  }
+  .stuck-bundle summary::-webkit-details-marker { display: none; }
+  .stuck-bundle summary:hover { background: rgba(220, 53, 69, .045); }
+  .stuck-bundle summary:focus-visible { outline: 1px solid var(--term-error); outline-offset: -2px; }
+  .stuck-bundle-chain { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .stuck-bundle-chain > i {
+    display: grid;
+    flex: 0 0 28px;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid #2a1a1d;
+    color: #e0b4b9;
+    font: normal 700 10px/1 'JetBrains Mono', monospace;
+  }
+  .stuck-bundle-chain strong,
+  .stuck-bundle-metric strong { display: block; overflow: hidden; color: var(--term-text-body); font: 700 11px/1.4 'JetBrains Mono', monospace; text-overflow: ellipsis; white-space: nowrap; }
+  .stuck-bundle-chain small,
+  .stuck-bundle-metric small { display: block; margin-top: 3px; color: var(--term-text-5); font: 11px/1.35 'JetBrains Mono', monospace; }
+  .stuck-bundle-metric { min-width: 0; }
+  .stuck-bundle-metric:nth-child(2) strong,
+  .stuck-bundle-metric:nth-child(4) strong { color: #e0b4b9; }
+  .stuck-bundle-action { display: flex; align-items: center; justify-content: flex-end; gap: 9px; color: var(--term-text-3); font: 700 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
+  .stuck-bundle-action i::before { color: var(--term-error); font-style: normal; content: '[+]'; }
+  .stuck-bundle .when-open { display: none; }
+  .stuck-bundle[open] .when-closed { display: none; }
+  .stuck-bundle[open] .when-open { display: inline; }
+  .stuck-bundle[open] .stuck-bundle-action i::before { content: '[-]'; }
+  .stuck-bundle-details { border-top: 1px solid #211416; background: #080808; }
   .stuck-table { min-width: 840px; }
   .stuck-row { background: rgba(220, 53, 69, .018); }
   .stuck-row:hover { background: rgba(220, 53, 69, .045); }
@@ -966,6 +1047,8 @@
     .network-notes { order: 3; width: 100%; padding: 12px 0 0; border-top: 1px solid #1a1a1a; border-left: 0; }
     .text-link { margin-left: auto; }
     .churn-card { justify-content: flex-start; }
+    .stuck-bundle summary { grid-template-columns: minmax(140px, 1fr) 110px 125px minmax(155px, auto); }
+    .stuck-bundle-stages { display: none; }
   }
 
   @media (max-width: 560px) {
@@ -983,5 +1066,9 @@
     .source-line em { width: 100%; margin-left: 0; }
     .timeline-content > div { display: block; }
     .update-key { max-width: 100%; margin-top: 3px; }
+    .stuck-bundle summary { grid-template-columns: 1fr auto; gap: 10px 14px; padding: 11px; }
+    .stuck-bundle-metric:nth-child(4),
+    .stuck-bundle-action { justify-self: end; }
+    .stuck-bundle-action { grid-column: 1 / -1; width: 100%; padding-top: 8px; border-top: 1px solid #181112; }
   }
 </style>

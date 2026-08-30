@@ -46,3 +46,12 @@ test('chain availability identifies average active-validator Bifrost scanner lag
   assert.match(source, /No active validator scanner reports available/);
   assert.match(source, /\.lag \{[^}]*color:\s*var\(--term-text-strong,\s*#fff\)/);
 });
+
+test('stuck transactions render as expandable chain bundles', () => {
+  assert.match(source, /groupStuckTransactionsByChain/);
+  assert.match(source, /\{#each stuckTransactionGroups as bundle \(bundle\.chain\)\}/);
+  assert.match(source, /<details class="stuck-bundle">/);
+  assert.match(source, /<summary[^>]*>[\s\S]*bundle\.count[\s\S]*bundle\.maxOverdueBlocks/);
+  assert.match(source, /\{#each bundle\.transactions as transaction \(transaction\.tx_id\)\}/);
+  assert.match(source, /Open \{number\.format\(bundle\.count\)\} transaction/);
+});
