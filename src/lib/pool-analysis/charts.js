@@ -83,8 +83,7 @@ export function renderPoolAnalysisCharts(canvas, previous, rows = [], options = 
           backgroundColor: 'rgba(85, 136, 204, 0.30)',
           borderColor: TERMINAL_CHART_PALETTE.info,
           borderWidth: 1,
-          borderRadius: 0,
-          maxBarThickness: 20
+          borderRadius: 0
         },
         {
           type: 'bar',
@@ -94,8 +93,7 @@ export function renderPoolAnalysisCharts(canvas, previous, rows = [], options = 
           backgroundColor: 'rgba(212, 160, 23, 0.28)',
           borderColor: TERMINAL_CHART_PALETTE.amber,
           borderWidth: 1,
-          borderRadius: 0,
-          maxBarThickness: 12
+          borderRadius: 0
         },
         {
           type: 'line',

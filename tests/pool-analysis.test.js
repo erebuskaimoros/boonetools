@@ -204,3 +204,11 @@ test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the exclude
   assert.match(chart, /pinch: \{ enabled: true \}/);
   assert.match(chart, /cumulativeFeesUsd/);
 });
+
+test('Pool Analysis bars can expand with the visible zoom range', async () => {
+  const chart = await readFile(
+    new URL('../src/lib/pool-analysis/charts.js', import.meta.url),
+    'utf8'
+  );
+  assert.doesNotMatch(chart, /maxBarThickness/);
+});
