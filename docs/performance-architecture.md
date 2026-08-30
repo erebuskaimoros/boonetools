@@ -82,8 +82,9 @@ Pool Analysis uses migrations `051_pool_analysis.sql` and
 90-day, and 1-year table aggregates in one database read. Each window uses
 completed UTC days and supplies volume, pool-generated liquidity fees,
 coverage, ratios, and annualized generated-fee rates; volume/depth is
-normalized to average observed-day volume over current two-sided depth, while
-pricing, balances, and total two-sided depth remain current. The read model
+normalized to average observed-day volume over current two-sided depth;
+fees/depth uses selected-period generated fees over that same current depth,
+while pricing, balances, and total two-sided depth remain current. The read model
 retains one-sided `depth_usd` for compatibility and publishes
 `total_depth_usd` for the table. Downstream system-income
 distribution is deliberately outside this read model. A separately triggered

@@ -66,12 +66,15 @@ test('Pool Analysis builds every selectable table period from exact daily aggreg
   assert.equal(Object.hasOwn(rows[0], 'annualized_pool_earnings_usd'), false);
   assert.equal(rows[0].period_metrics['24h'].volume_usd, 500);
   assert.equal(rows[0].period_metrics['24h'].fees_usd, 5);
+  assert.equal(rows[0].period_metrics['24h'].fee_depth_percent, 0.005);
   assert.equal(rows[0].period_metrics['24h'].volume_depth_percent, 0.5);
   assert.equal(rows[0].period_metrics['24h'].annualized_fees_usd, 1825);
   assert.equal(rows[0].period_metrics['24h'].coverage.expected_days, 1);
   assert.equal(rows[0].period_metrics['7d'].volume_depth_percent, 0.5);
+  assert.equal(rows[0].period_metrics['7d'].fee_depth_percent, 0.025);
   assert.equal(rows[0].period_metrics['7d'].coverage.missing_days, 2);
   assert.equal(rows[0].period_metrics['30d'].volume_depth_percent, 5);
+  assert.equal(rows[0].period_metrics['30d'].fee_depth_percent, 1.5);
   assert.equal(rows[0].period_metrics['90d'].volume_usd, null);
   assert.equal(rows[0].period_metrics['90d'].coverage.expected_days, 90);
 });

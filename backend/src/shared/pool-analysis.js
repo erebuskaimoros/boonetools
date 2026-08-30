@@ -157,6 +157,7 @@ export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregat
           volume_usd: finite(aggregate.volume_usd),
           fees_rune_e8: feesRune,
           fees_usd: finite(aggregate.fees_usd),
+          fee_depth_percent: divideBase(feesRune, balanceRune, 50),
           fee_volume_percent: divideBase(feesRune, volumeRune, 100),
           volume_depth_percent: coveredDays > 0
             ? divideBase(volumeRune, balanceRune, 50 / coveredDays)
@@ -200,6 +201,7 @@ export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregat
         period_volume_usd: defaultMetrics.volume_usd,
         period_fees_rune_e8: defaultMetrics.fees_rune_e8,
         period_fees_usd: defaultMetrics.fees_usd,
+        fee_depth_percent: defaultMetrics.fee_depth_percent,
         fee_volume_percent: defaultMetrics.fee_volume_percent,
         volume_depth_percent: divideBase(volume24hRune, balanceRune, 50),
         annualized_fees_rune: defaultMetrics.annualized_fees_rune,

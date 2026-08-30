@@ -20,6 +20,7 @@ export const POOL_ANALYSIS_COLUMNS = Object.freeze([
   { id: 'periodVolumeUsd', label: 'VOLUME', defaultDirection: 'desc' },
   { id: 'periodFeesUsd', label: 'FEES', defaultDirection: 'desc' },
   { id: 'volumeDepthPercent', label: 'VOLUME / DEPTH', defaultDirection: 'desc' },
+  { id: 'feeDepthPercent', label: 'FEES / DEPTH', defaultDirection: 'desc' },
   { id: 'feeVolumePercent', label: 'FEES / VOLUME', defaultDirection: 'desc' },
   { id: 'annualizedFeeRatePercent', label: 'EST APR', defaultDirection: 'desc' }
 ]);
@@ -54,15 +55,25 @@ function normalizeCoverage(value = {}, expectedDays = 0) {
   };
 }
 
-function normalizePeriodMetric(value = {}, period, volumeDepthScale = 1) {
+function baseRatioPercent(numerator, denominator, multiplier = 100) {
+  const top = baseString(numerator);
+  const bottom = baseString(denominator);
+  if (top === null || bottom === null || Number(bottom) <= 0) return null;
+  return (Number(top) / Number(bottom)) * multiplier;
+}
+
+function normalizePeriodMetric(value = {}, period, volumeDepthScale = 1, balanceRuneBase = null) {
   const volumeDepthPercent = finite(value.volume_depth_percent);
+  const periodFeesBase = baseString(value.fees_rune_e8);
+  const feeDepthPercent = finite(value.fee_depth_percent);
   return {
     id: period.id,
     days: period.days,
     periodVolumeBase: baseString(value.volume_rune_e8),
     periodVolumeUsd: finite(value.volume_usd),
-    periodFeesBase: baseString(value.fees_rune_e8),
+    periodFeesBase,
     periodFeesUsd: finite(value.fees_usd),
+    feeDepthPercent: feeDepthPercent ?? baseRatioPercent(periodFeesBase, balanceRuneBase, 50),
     feeVolumePercent: finite(value.fee_volume_percent),
     volumeDepthPercent: volumeDepthPercent === null ? null : volumeDepthPercent * volumeDepthScale,
     annualizedFeesRune: finite(value.annualized_fees_rune),
@@ -88,12 +99,14 @@ export function normalizePoolAnalysisSummary(payload = {}) {
   const pools = (Array.isArray(payload.pools) ? payload.pools : []).map((pool) => {
     const oneSidedDepthUsd = finite(pool.depth_usd);
     const totalDepthUsd = finite(pool.total_depth_usd);
+    const balanceRuneBase = baseString(pool.balance_rune_e8);
     const volumeDepthScale = totalDepthUsd === null ? 0.5 : 1;
     const legacy30d = {
       volume_rune_e8: pool.period_volume_rune_e8,
       volume_usd: pool.period_volume_usd,
       fees_rune_e8: pool.period_fees_rune_e8,
       fees_usd: pool.period_fees_usd,
+      fee_depth_percent: pool.fee_depth_percent,
       fee_volume_percent: pool.fee_volume_percent,
       volume_depth_percent: pool.volume_depth_percent,
       annualized_fees_rune: pool.annualized_fees_rune,
@@ -106,7 +119,8 @@ export function normalizePoolAnalysisSummary(payload = {}) {
       normalizePeriodMetric(
         pool.period_metrics?.[period.id] || (period.id === '30d' ? legacy30d : {}),
         period,
-        volumeDepthScale
+        volumeDepthScale,
+        balanceRuneBase
       )
     ]));
     return selectPoolAnalysisPeriod({
@@ -121,7 +135,7 @@ export function normalizePoolAnalysisSummary(payload = {}) {
       oracleDeviationPercent: finite(pool.oracle_deviation_percent),
       depthUsd: totalDepthUsd ?? (oneSidedDepthUsd === null ? null : oneSidedDepthUsd * 2),
       balanceAssetBase: baseString(pool.balance_asset_e8),
-      balanceRuneBase: baseString(pool.balance_rune_e8),
+      balanceRuneBase,
       periodMetrics
     }, '30d');
   }).filter((pool) => pool.asset);

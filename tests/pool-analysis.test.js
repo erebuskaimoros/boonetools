@@ -32,14 +32,14 @@ function samplePayload() {
           '24h': {
             id: '24h', days: 1, volume_rune_e8: '100', volume_usd: 1000000,
             fees_rune_e8: '1', fees_usd: 10000, fee_volume_percent: 1,
-            volume_depth_percent: 5, annualized_fees_usd: 3650000,
+            volume_depth_percent: 5, fee_depth_percent: 0.1, annualized_fees_usd: 3650000,
             annualized_fee_rate_percent: 36.5,
             coverage: { observed_days: 1, expected_days: 1, missing_days: 0 }
           },
           '90d': {
             id: '90d', days: 90, volume_rune_e8: '9000', volume_usd: 90000000,
             fees_rune_e8: '90', fees_usd: 900000, fee_volume_percent: 1,
-            volume_depth_percent: 45, annualized_fees_usd: 3650000,
+            volume_depth_percent: 45, fee_depth_percent: 2.5, annualized_fees_usd: 3650000,
             annualized_fee_rate_percent: 36.5,
             coverage: { observed_days: 90, expected_days: 90, missing_days: 0 }
           }
@@ -75,8 +75,10 @@ test('Pool Analysis upgrades legacy one-sided summary fields to two-sided table 
   const dashboard = normalizePoolAnalysisSummary({
     pools: [{
       asset: 'ETH.ETH', status: 'Available', depth_usd: 100,
+      balance_rune_e8: '100000000000',
       period_metrics: {
         '30d': {
+          fees_rune_e8: '3000000000',
           volume_depth_percent: 20,
           coverage: { observed_days: 30, expected_days: 30, missing_days: 0 }
         }
@@ -85,6 +87,7 @@ test('Pool Analysis upgrades legacy one-sided summary fields to two-sided table 
   });
   assert.equal(dashboard.pools[0].depthUsd, 200);
   assert.equal(dashboard.pools[0].periodMetrics['30d'].volumeDepthPercent, 10);
+  assert.equal(dashboard.pools[0].periodMetrics['30d'].feeDepthPercent, 1.5);
 });
 
 test('Pool Analysis exposes exactly the consolidated semantic columns and requested chart ranges', () => {
@@ -101,7 +104,7 @@ test('Pool Analysis exposes exactly the consolidated semantic columns and reques
   ]);
   assert.deepEqual(poolAnalysisColumns('90d').map((column) => column.label), [
     'POOL', 'USD PRICE', 'ORACLE', 'DEPTH', 'BALANCES',
-    'VOLUME', 'FEES', 'VOLUME / DEPTH',
+    'VOLUME', 'FEES', 'VOLUME / DEPTH', 'FEES / DEPTH',
     'FEES / VOLUME', 'EST APR'
   ]);
   assert.equal(POOL_ANALYSIS_COLUMNS.some((column) => column.id === 'annualizedFeesUsd'), false);
@@ -118,10 +121,12 @@ test('Pool Analysis applies one selected period to every activity value in a row
   assert.equal(daily.periodVolumeUsd, 1000000);
   assert.equal(daily.periodFeesUsd, 10000);
   assert.equal(daily.volumeDepthPercent, 5);
+  assert.equal(daily.feeDepthPercent, 0.1);
   assert.equal(daily.coverage.expectedDays, 1);
   assert.equal(quarterly.periodVolumeUsd, 90000000);
   assert.equal(quarterly.periodFeesUsd, 900000);
   assert.equal(quarterly.volumeDepthPercent, 45);
+  assert.equal(quarterly.feeDepthPercent, 2.5);
   assert.equal(quarterly.coverage.expectedDays, 90);
 });
 
@@ -183,9 +188,12 @@ test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the exclude
   assert.match(component, /data-label="USD PRICE"/);
   assert.match(component, /data-label="VOLUME"/);
   assert.match(component, /data-label="FEES"/);
+  assert.match(component, /data-label="FEES \/ DEPTH"/);
   assert.match(component, /Pricing and two-sided depth are current/);
   assert.doesNotMatch(component, /data-label=\{`(?:VOLUME|FEES) · \$\{tablePeriod\.label\}`\}/);
   assert.match(component, /FEES = POOL-GENERATED LIQUIDITY FEES/);
+  assert.match(component, /VOLUME \/ DEPTH = AVG DAILY VOLUME \/ CURRENT TWO-SIDED DEPTH/);
+  assert.match(component, /FEES \/ DEPTH = PERIOD FEES \/ CURRENT TWO-SIDED DEPTH/);
   assert.match(component, /SYSTEM-INCOME DISTRIBUTION OUT OF SCOPE/);
   assert.doesNotMatch(component, /app\.thorswap\.finance/);
   assert.match(component, /\.detail-panel \{[^}]*width: 100cqw;[^}]*max-width: 100cqw;/);

@@ -289,7 +289,7 @@
               <th colspan="1">POOL</th>
               <th colspan="2">PRICING</th>
               <th colspan="2">LIQUIDITY</th>
-              <th colspan="4">ACTIVITY · {tablePeriod.label}</th>
+              <th colspan="5">ACTIVITY · {tablePeriod.label}</th>
               <th colspan="1">ANNUALIZED</th>
             </tr>
             <tr class="column-row">
@@ -348,6 +348,7 @@
                   {#if pool.coverage.missingDays > 0}<small>{pool.coverage.observedDays}/{pool.coverage.expectedDays}D</small>{/if}
                 </td>
                 <td class="number" data-label="VOLUME / DEPTH">{formatPoolAnalysisPercent(pool.volumeDepthPercent)}</td>
+                <td class="number" data-label="FEES / DEPTH">{formatPoolAnalysisPercent(pool.feeDepthPercent)}</td>
                 <td class="number" data-label="FEES / VOLUME">{formatPoolAnalysisPercent(pool.feeVolumePercent)}</td>
                 <td class="number" data-label="EST APR">{formatPoolAnalysisPercent(pool.annualizedFeeRatePercent)}</td>
               </tr>
@@ -437,8 +438,9 @@
   <footer class="method-line">
     <span>METHOD</span>
     <span>VOLUME = EXECUTED POOL LEGS</span>
-    <span>VOLUME / DEPTH = AVG DAILY VOLUME / ONE-SIDED DEPTH</span>
+    <span>VOLUME / DEPTH = AVG DAILY VOLUME / CURRENT TWO-SIDED DEPTH</span>
     <span>FEES = POOL-GENERATED LIQUIDITY FEES</span>
+    <span>FEES / DEPTH = PERIOD FEES / CURRENT TWO-SIDED DEPTH</span>
     <span>EST APR = ANNUALIZED FEES / CURRENT TWO-SIDED DEPTH</span>
     <span>SYSTEM-INCOME DISTRIBUTION OUT OF SCOPE</span>
     <span>GAPS ARE NOT INTERPOLATED</span>
