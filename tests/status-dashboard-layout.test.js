@@ -69,3 +69,15 @@ test('the churn card renders a one-second next-churn countdown', () => {
   assert.match(source, /class="churn-countdown"/);
   assert.match(source, /churnStatus\.nextChurnHeight/);
 });
+
+test('last churn metadata uses a full-width footer that cannot overflow the card', () => {
+  assert.match(source, /<div class="churn-main">[\s\S]*?<\/div>\s*<small class="churn-last">/);
+  assert.match(source, /\.churn-card \{[^}]*flex-direction:\s*column[^}]*align-items:\s*stretch[^}]*overflow:\s*hidden/);
+  assert.match(source, /\.churn-main \{[^}]*display:\s*flex[^}]*min-width:\s*0/);
+  assert.match(source, /\.churn-last \{[^}]*width:\s*100%[^}]*white-space:\s*normal/);
+});
+
+test('HALTCHURNING is grouped with the churn status instead of floating over the countdown', () => {
+  assert.match(source, /<div class="churn-head">[\s\S]*?<span class="churn-mimir">\[HALTCHURNING=/);
+  assert.doesNotMatch(source, /\.churn-mimir \{[^}]*position:\s*absolute/);
+});

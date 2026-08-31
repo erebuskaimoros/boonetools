@@ -408,35 +408,37 @@
       </section>
 
       <section class="churn-card" class:paused={churnStatus.isPaused} class:stalled={consensusStalled} aria-label="Validator churn status">
-        <div class="churn-head">
-          <span class="churn-dot"></span>
-          <div>
-            <small>VALIDATOR CHURN</small>
-            <strong>{consensusStalled ? 'BLOCKED' : churnStatus.isInProgress ? 'CHURNING' : churnStatus.isPaused ? 'PAUSED' : 'ACTIVE'}</strong>
+        <div class="churn-main">
+          <div class="churn-head">
+            <span class="churn-dot"></span>
+            <div>
+              <small>VALIDATOR CHURN</small>
+              <strong>{consensusStalled ? 'BLOCKED' : churnStatus.isInProgress ? 'CHURNING' : churnStatus.isPaused ? 'PAUSED' : 'ACTIVE'}</strong>
+              <span class="churn-mimir">[HALTCHURNING={churnStatus.mimirValue}]</span>
+            </div>
+          </div>
+          <div class="churn-meta">
+            <span>Next churn</span>
+            <strong class="churn-countdown" aria-live="off">{churnCountdown}</strong>
+            <small>
+              {#if churnStatus.nextChurnHeight > 0}
+                block {number.format(churnStatus.nextChurnHeight)}
+                {#if churnStatus.nextChurnSource === 'computed'} · estimated{/if}
+              {:else}
+                target unavailable
+              {/if}
+            </small>
+            {#if churnStatus.isInProgress}
+              <a class="churn-link" href="https://churn.thorchain.org/" target="_blank" rel="noopener noreferrer">
+                Track churn <span>↗</span>
+              </a>
+            {/if}
           </div>
         </div>
-        <div class="churn-meta">
-          <span>Next churn</span>
-          <strong class="churn-countdown" aria-live="off">{churnCountdown}</strong>
-          <small>
-            {#if churnStatus.nextChurnHeight > 0}
-              block {number.format(churnStatus.nextChurnHeight)}
-              {#if churnStatus.nextChurnSource === 'computed'} · estimated{/if}
-            {:else}
-              target unavailable
-            {/if}
-          </small>
-          <small class="churn-last">
-            last {formatElapsed(churnStatus.lastChurnTimestampMs)} ago · block {number.format(churnStatus.lastChurnHeight)}
-            {#if churnStatus.estimated || churnError} · estimated{/if}
-          </small>
-          {#if churnStatus.isInProgress}
-            <a class="churn-link" href="https://churn.thorchain.org/" target="_blank" rel="noopener noreferrer">
-              Track churn <span>↗</span>
-            </a>
-          {/if}
-        </div>
-        <span class="churn-mimir">[HALTCHURNING={churnStatus.mimirValue}]</span>
+        <small class="churn-last">
+          last {formatElapsed(churnStatus.lastChurnTimestampMs)} ago · block {number.format(churnStatus.lastChurnHeight)}
+          {#if churnStatus.estimated || churnError} · estimated{/if}
+        </small>
       </section>
     </div>
 
@@ -860,8 +862,11 @@
 
   .churn-card {
     position: relative;
+    flex-direction: column;
+    align-items: stretch;
+    overflow: hidden;
     min-height: 94px;
-    gap: 14px;
+    gap: 8px;
     padding: 14px 16px;
     border: 1px solid #1a1a1a;
     border-left: 2px solid #00cc66;
@@ -869,22 +874,23 @@
   }
   .churn-card.paused { border-left-color: #d4a017; background: rgba(212, 160, 23, .035); }
   .churn-card.stalled { border-left-color: var(--term-error); background: rgba(220, 53, 69, .035); }
-  .churn-head { min-width: 94px; gap: 10px; }
+  .churn-main { display: flex; min-width: 0; align-items: center; gap: 14px; }
+  .churn-head { min-width: 118px; gap: 10px; }
   .churn-dot { width: 6px; height: 6px; border-radius: 50%; background: #00cc66; box-shadow: 0 0 6px rgba(0, 204, 102, .4); animation: pulse-dot 2s infinite; }
   .churn-card.paused .churn-dot { background: #d4a017; box-shadow: none; animation: none; }
   .churn-card.stalled .churn-dot { background: var(--term-error); box-shadow: none; animation: none; }
   .churn-head small,
   .churn-meta > span { display: block; color: var(--term-text-4); font: 700 11px/1.4 'JetBrains Mono', monospace; letter-spacing: .12em; }
   .churn-head strong { color: var(--term-text, #f5f5f5); font: 800 14px/1.2 'JetBrains Mono', monospace; }
-  .churn-meta { min-width: 0; padding-left: 14px; border-left: 1px solid #1a1a1a; }
+  .churn-meta { flex: 1; min-width: 0; padding-left: 14px; border-left: 1px solid #1a1a1a; }
   .churn-meta strong { display: block; margin: 3px 0 2px; color: var(--term-text-body); font: 700 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
   .churn-meta .churn-countdown { color: var(--term-text-strong, #fff); font-size: 14px; letter-spacing: .02em; }
   .churn-meta small { color: var(--term-text-4); font: 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
-  .churn-meta .churn-last { display: block; margin-top: 3px; color: var(--term-text-5); font-size: 10px; }
+  .churn-last { display: block; width: 100%; padding-top: 7px; border-top: 1px solid #1a1a1a; color: var(--term-text-5); font: 10px/1.4 'JetBrains Mono', monospace; white-space: normal; overflow-wrap: anywhere; }
   .churn-link { display: inline-block; margin-top: 4px; color: var(--term-text-3); font: 700 10px/1.4 'JetBrains Mono', monospace; letter-spacing: .06em; text-decoration: none; text-transform: uppercase; white-space: nowrap; }
   .churn-link span,
   .churn-link:hover { color: #00cc66; }
-  .churn-mimir { position: absolute; top: 7px; right: 9px; color: var(--term-text-6); font: 11px/1.3 'JetBrains Mono', monospace; }
+  .churn-mimir { display: block; margin-top: 4px; color: var(--term-text-6); font: 9px/1.3 'JetBrains Mono', monospace; white-space: nowrap; }
 
   .metric-grid {
     display: grid;
