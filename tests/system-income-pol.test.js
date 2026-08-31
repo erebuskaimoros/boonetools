@@ -33,6 +33,17 @@ test('System Income POL owns /pol-tracker but stays out of navigation', async ()
   assert.match(dashboardSource, /DATA COVERAGE/);
 });
 
+test('System Income POL coverage rendering exposes coverage as a template dependency', async () => {
+  const dashboardSource = await readFile(
+    new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(dashboardSource, /function coverageValue\(source, \.\.\.keys\)/);
+  assert.match(dashboardSource, /coverageValue\(coverage, 'first_height', 'start_height'\)/);
+  assert.doesNotMatch(dashboardSource, /const value = coverage\?\.\[key\]/);
+});
+
 test('System Income POL normalization preserves exact base-unit accounting', () => {
   const dashboard = normalizeSystemIncomePolPayload({
     as_of: '2026-08-31T12:00:00Z',

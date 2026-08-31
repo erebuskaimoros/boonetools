@@ -114,9 +114,9 @@
     }).format(value);
   }
 
-  function coverageValue(...keys) {
+  function coverageValue(source, ...keys) {
     for (const key of keys) {
-      const value = coverage?.[key];
+      const value = source?.[key];
       if (value !== null && value !== undefined && value !== '') return value;
     }
     return '—';
@@ -313,11 +313,11 @@
         <div><span class="section-index">[03]</span><h2>DATA COVERAGE</h2></div>
       </div>
       <dl>
-        <div><dt>EVENT HEIGHT RANGE</dt><dd>{coverageValue('first_height', 'start_height')} → {coverageValue('last_height', 'end_height')}</dd></div>
-        <div><dt>OBSERVED BLOCKS</dt><dd>{coverageValue('observed_blocks', 'blocks_observed')}</dd></div>
-        <div><dt>MISSING / REPAIRED</dt><dd>{coverageValue('missing_blocks')} / {coverageValue('repaired_blocks')}</dd></div>
-        <div><dt>POSITION POOLS</dt><dd>{coverageValue('position_pools', 'pools_observed', 'active_pool_count')}</dd></div>
-        <div><dt>HISTORY THROUGH</dt><dd>{displayDay(coverageValue('through_day', 'history_through_day') === '—' ? latestDay?.day : coverageValue('through_day', 'history_through_day'))}</dd></div>
+        <div><dt>EVENT HEIGHT RANGE</dt><dd>{coverageValue(coverage, 'first_height', 'start_height')} → {coverageValue(coverage, 'last_height', 'end_height')}</dd></div>
+        <div><dt>OBSERVED BLOCKS</dt><dd>{coverageValue(coverage, 'observed_blocks', 'blocks_observed')}</dd></div>
+        <div><dt>MISSING / REPAIRED</dt><dd>{coverageValue(coverage, 'missing_blocks')} / {coverageValue(coverage, 'repaired_blocks')}</dd></div>
+        <div><dt>POSITION POOLS</dt><dd>{coverageValue(coverage, 'position_pools', 'pools_observed', 'active_pool_count')}</dd></div>
+        <div><dt>HISTORY THROUGH</dt><dd>{displayDay(coverageValue(coverage, 'through_day', 'history_through_day') === '—' ? latestDay?.day : coverageValue(coverage, 'through_day', 'history_through_day'))}</dd></div>
       </dl>
     </article>
     <article class="panel method-panel">
