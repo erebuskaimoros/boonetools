@@ -218,7 +218,14 @@ function buildConsensusStatus(latestBlock, nowMs, currentHeight, stallThresholdM
   };
 }
 
-export function buildChurnStatus(mimir = {}, currentHeight = 0, churns = [], activeNodes = [], nowMs = Date.now()) {
+export function buildChurnStatus(
+  mimir = {},
+  currentHeight = 0,
+  churns = [],
+  activeNodes = [],
+  nowMs = Date.now(),
+  network = {}
+) {
   const mimirByKey = new Map(
     Object.entries(mimir || {}).map(([key, value]) => [key.toUpperCase(), value])
   );
@@ -243,6 +250,7 @@ export function buildChurnStatus(mimir = {}, currentHeight = 0, churns = [], act
   }
   return {
     isPaused,
+    isInProgress: network?.vaults_migrating === true,
     mimirValue: numberValue(mimirByKey.get('HALTCHURNING')),
     lastChurnHeight,
     lastChurnTimestampMs,
@@ -401,7 +409,8 @@ export function buildStatusNetworkReadModel(input = {}) {
       thorchainHeight,
       networkSnapshot.churns,
       activeNodes,
-      Number.isFinite(nowMs) ? nowMs : Date.now()
+      Number.isFinite(nowMs) ? nowMs : Date.now(),
+      networkSnapshot.network
     ),
     source: {
       provider: networkSnapshot.source || {},

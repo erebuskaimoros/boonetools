@@ -25,6 +25,7 @@ test('live status model contains only compact current network state', () => {
         { chain: 'BTC', thorchain: 1000, last_observed_in: 50, last_signed_out: 49 },
         { chain: 'ETH', thorchain: 1000, last_observed_in: 60, last_signed_out: 58 }
       ],
+      network: { vaults_migrating: true },
       churns: [{ height: 900, date: 1_721_304_000_000_000_000 }],
       as_of: '2026-07-21T12:00:00Z',
       source: { live: 'thornode', churns: 'midgard' },
@@ -39,6 +40,7 @@ test('live status model contains only compact current network state', () => {
   assert.equal(payload.network.summary.label, 'Degraded');
   assert.equal(payload.chains.length, 2);
   assert.equal(payload.churn.isPaused, true);
+  assert.equal(payload.churn.isInProgress, true);
   assert.equal(payload.source.as_of, '2026-07-21T12:00:00.000Z');
   assert.equal(payload.block_production, undefined);
   assert.equal(payload.votes, undefined);
@@ -377,6 +379,19 @@ test('churn status falls back to active-set height when history is unavailable',
   assert.equal(status.lastChurnHeight, 180);
   assert.equal(status.lastChurnTimestampMs, now - 120_000);
   assert.equal(status.estimated, true);
+});
+
+test('churn status reports an active vault migration as a churn in progress', () => {
+  const status = buildChurnStatus(
+    { HALTCHURNING: 0 },
+    200,
+    [{ height: 150, date: '1721304000000000000' }],
+    [],
+    Date.UTC(2026, 6, 18, 12),
+    { vaults_migrating: true }
+  );
+
+  assert.equal(status.isInProgress, true);
 });
 
 test('status updates translate effective halt values into plain language', () => {

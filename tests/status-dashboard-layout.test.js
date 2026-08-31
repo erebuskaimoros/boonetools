@@ -55,3 +55,9 @@ test('stuck transactions render as expandable chain bundles', () => {
   assert.match(source, /\{#each bundle\.transactions as transaction \(transaction\.tx_id\)\}/);
   assert.match(source, /Open \{number\.format\(bundle\.count\)\} transaction/);
 });
+
+test('an active churn exposes the dedicated churn tracker', () => {
+  assert.match(source, /churnStatus\.isInProgress\s*\?\s*'CHURNING'/);
+  assert.match(source, /\{#if churnStatus\.isInProgress\}[\s\S]*href="https:\/\/churn\.thorchain\.net"/);
+  assert.match(source, /Track churn <span>↗<\/span>/);
+});

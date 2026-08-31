@@ -54,6 +54,7 @@
   $: thorchainHeight = Number(currentDashboard?.network?.height || 0);
   $: churnStatus = currentDashboard?.churn || {
     isPaused: false,
+    isInProgress: false,
     mimirValue: 0,
     lastChurnHeight: 0,
     lastChurnTimestampMs: 0,
@@ -399,7 +400,7 @@
           <span class="churn-dot"></span>
           <div>
             <small>VALIDATOR CHURN</small>
-            <strong>{consensusStalled ? 'BLOCKED' : churnStatus.isPaused ? 'PAUSED' : 'ACTIVE'}</strong>
+            <strong>{consensusStalled ? 'BLOCKED' : churnStatus.isInProgress ? 'CHURNING' : churnStatus.isPaused ? 'PAUSED' : 'ACTIVE'}</strong>
           </div>
         </div>
         <div class="churn-meta">
@@ -409,6 +410,11 @@
             block {number.format(churnStatus.lastChurnHeight)}
             {#if churnStatus.estimated || churnError} · estimated{/if}
           </small>
+          {#if churnStatus.isInProgress}
+            <a class="churn-link" href="https://churn.thorchain.net" target="_blank" rel="noopener noreferrer">
+              Track churn <span>↗</span>
+            </a>
+          {/if}
         </div>
         <span class="churn-mimir">[HALTCHURNING={churnStatus.mimirValue}]</span>
       </section>
@@ -848,11 +854,14 @@
   .churn-card.paused .churn-dot { background: #d4a017; box-shadow: none; animation: none; }
   .churn-card.stalled .churn-dot { background: var(--term-error); box-shadow: none; animation: none; }
   .churn-head small,
-  .churn-meta span { display: block; color: var(--term-text-4); font: 700 11px/1.4 'JetBrains Mono', monospace; letter-spacing: .12em; }
+  .churn-meta > span { display: block; color: var(--term-text-4); font: 700 11px/1.4 'JetBrains Mono', monospace; letter-spacing: .12em; }
   .churn-head strong { color: var(--term-text, #f5f5f5); font: 800 14px/1.2 'JetBrains Mono', monospace; }
   .churn-meta { min-width: 0; padding-left: 14px; border-left: 1px solid #1a1a1a; }
   .churn-meta strong { display: block; margin: 3px 0 2px; color: var(--term-text-body); font: 700 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
   .churn-meta small { color: var(--term-text-4); font: 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
+  .churn-link { display: inline-block; margin-top: 4px; color: var(--term-text-3); font: 700 10px/1.4 'JetBrains Mono', monospace; letter-spacing: .06em; text-decoration: none; text-transform: uppercase; white-space: nowrap; }
+  .churn-link span,
+  .churn-link:hover { color: #00cc66; }
   .churn-mimir { position: absolute; top: 7px; right: 9px; color: var(--term-text-6); font: 11px/1.3 'JetBrains Mono', monospace; }
 
   .metric-grid {
