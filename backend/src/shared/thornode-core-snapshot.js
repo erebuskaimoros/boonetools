@@ -5,11 +5,11 @@ import {
   fetchBifrostScannerInfo,
   isBifrostScannerInfo
 } from './bifrost-scanner.js';
-import { fetchMidgardChurns } from './midgard.js';
+import { fetchMidgardChurns, fetchMidgardNetwork } from './midgard.js';
 import { fetchThorchain } from './thornode.js';
 
 export const THORNODE_CORE_MODEL_KEY = 'thornode-core:v1';
-export const THORNODE_CORE_SCHEMA_VERSION = 2;
+export const THORNODE_CORE_SCHEMA_VERSION = 3;
 export const THORNODE_CORE_TTL_MS = 45_000;
 export const THORNODE_CORE_LOCK_KEY = 'boonetools:thornode-core';
 
@@ -20,6 +20,7 @@ export const THORNODE_CORE_FIELDS = Object.freeze([
   { key: 'rune_supply', path: '/cosmos/bank/v1beta1/supply/by_denom?denom=rune', cadenceMs: 60_000, valid: runeSupplyValue, provider: 'thornode' },
   { key: 'node_mimirs', path: '/thorchain/mimir/nodes_all', cadenceMs: 60_000, valid: objectOrArray, provider: 'thornode' },
   { key: 'network', path: '/thorchain/network', cadenceMs: 120_000, valid: objectValue, provider: 'thornode' },
+  { key: 'midgard_network', path: '/network', cadenceMs: 120_000, valid: objectValue, provider: 'midgard' },
   { key: 'pools', path: '/thorchain/pools', cadenceMs: 120_000, valid: Array.isArray, provider: 'thornode' },
   { key: 'oracle_prices', path: '/thorchain/oracle/prices', cadenceMs: 120_000, valid: oraclePricesValue, provider: 'thornode' },
   { key: 'nodes', path: '/thorchain/nodes', cadenceMs: 300_000, valid: Array.isArray, provider: 'thornode' },
@@ -107,6 +108,7 @@ export async function buildThorNodeCoreSnapshot(options = {}) {
   const dueFields = THORNODE_CORE_FIELDS.filter((field) => isDue(field, previous, nowMs));
   const fetchThor = options.fetchThorchain || fetchThorchain;
   const fetchChurns = options.fetchMidgardChurns || fetchMidgardChurns;
+  const fetchNetwork = options.fetchMidgardNetwork || fetchMidgardNetwork;
   const fetchScanners = options.fetchBifrostScannerInfo || fetchBifrostScannerInfo;
   const results = await mapWithConcurrency(
     dueFields,
@@ -114,7 +116,9 @@ export async function buildThorNodeCoreSnapshot(options = {}) {
     async (field) => {
       try {
         const value = field.provider === 'midgard'
-          ? await fetchChurns({ cooldownClient: options.client })
+          ? field.key === 'churns'
+            ? await fetchChurns({ cooldownClient: options.client })
+            : await fetchNetwork({ cooldownClient: options.client })
           : field.provider === BIFROST_SCANNER_PROVIDER
             ? await fetchScanners({ cooldownClient: options.client })
             : await fetchThor(field.path, { cooldownClient: options.client });

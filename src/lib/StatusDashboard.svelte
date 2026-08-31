@@ -3,6 +3,7 @@
 
   import { fetchStatusDashboard, fetchStatusLive } from './status/api.js';
   import BlockProductionChart from './status/BlockProductionChart.svelte';
+  import { formatChurnCountdown } from './status/churn-countdown.js';
   import { groupStuckTransactionsByChain } from './status/stuck-transactions.js';
 
   const DASHBOARD_REFRESH_INTERVAL_MS = 60_000;
@@ -22,6 +23,8 @@
   let stuckError = '';
   let refreshTimer;
   let liveRefreshTimer;
+  let countdownTimer;
+  let countdownNowMs = Date.now();
   let statusRequestInFlight = false;
   let liveRequestInFlight = false;
   let visibilityHandler;
@@ -59,8 +62,13 @@
     lastChurnHeight: 0,
     lastChurnTimestampMs: 0,
     blocksSince: 0,
+    nextChurnHeight: 0,
+    nextChurnTimestampMs: 0,
+    nextChurnSource: 'unavailable',
+    blocksRemaining: 0,
     estimated: true
   };
+  $: churnCountdown = formatChurnCountdown(churnStatus, countdownNowMs, { consensusStalled });
   $: governanceVotes = currentDashboard?.votes?.governance || [];
   $: statusUpdates = currentDashboard?.votes?.status_updates || [];
   $: stuckDashboard = currentDashboard?.stuck_transactions || null;
@@ -83,6 +91,9 @@
     liveRefreshTimer = setInterval(() => {
       if (document.visibilityState === 'visible') loadLiveStatus({ revalidate: true });
     }, LIVE_REFRESH_INTERVAL_MS);
+    countdownTimer = setInterval(() => {
+      countdownNowMs = Date.now();
+    }, 1_000);
     visibilityHandler = () => {
       if (document.visibilityState !== 'visible') return;
       loadLiveStatus({ revalidate: true });
@@ -98,6 +109,7 @@
   onDestroy(() => {
     clearInterval(refreshTimer);
     clearInterval(liveRefreshTimer);
+    clearInterval(countdownTimer);
     document.removeEventListener('visibilitychange', visibilityHandler);
     window.removeEventListener('focus', visibilityHandler);
   });
@@ -404,14 +416,22 @@
           </div>
         </div>
         <div class="churn-meta">
-          <span>Last churn</span>
-          <strong>{formatElapsed(churnStatus.lastChurnTimestampMs)} ago</strong>
+          <span>Next churn</span>
+          <strong class="churn-countdown" aria-live="off">{churnCountdown}</strong>
           <small>
-            block {number.format(churnStatus.lastChurnHeight)}
+            {#if churnStatus.nextChurnHeight > 0}
+              block {number.format(churnStatus.nextChurnHeight)}
+              {#if churnStatus.nextChurnSource === 'computed'} · estimated{/if}
+            {:else}
+              target unavailable
+            {/if}
+          </small>
+          <small class="churn-last">
+            last {formatElapsed(churnStatus.lastChurnTimestampMs)} ago · block {number.format(churnStatus.lastChurnHeight)}
             {#if churnStatus.estimated || churnError} · estimated{/if}
           </small>
           {#if churnStatus.isInProgress}
-            <a class="churn-link" href="https://churn.thorchain.net" target="_blank" rel="noopener noreferrer">
+            <a class="churn-link" href="https://churn.thorchain.org/" target="_blank" rel="noopener noreferrer">
               Track churn <span>↗</span>
             </a>
           {/if}
@@ -810,7 +830,7 @@
   .network-callout.err { border-left-color: var(--term-error); background: rgba(220, 53, 69, .035); }
   .overview-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 300px;
+    grid-template-columns: minmax(0, 1fr) 340px;
     gap: 16px;
     margin-bottom: 16px;
   }
@@ -840,7 +860,7 @@
 
   .churn-card {
     position: relative;
-    min-height: 78px;
+    min-height: 94px;
     gap: 14px;
     padding: 14px 16px;
     border: 1px solid #1a1a1a;
@@ -858,7 +878,9 @@
   .churn-head strong { color: var(--term-text, #f5f5f5); font: 800 14px/1.2 'JetBrains Mono', monospace; }
   .churn-meta { min-width: 0; padding-left: 14px; border-left: 1px solid #1a1a1a; }
   .churn-meta strong { display: block; margin: 3px 0 2px; color: var(--term-text-body); font: 700 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
+  .churn-meta .churn-countdown { color: var(--term-text-strong, #fff); font-size: 14px; letter-spacing: .02em; }
   .churn-meta small { color: var(--term-text-4); font: 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
+  .churn-meta .churn-last { display: block; margin-top: 3px; color: var(--term-text-5); font-size: 10px; }
   .churn-link { display: inline-block; margin-top: 4px; color: var(--term-text-3); font: 700 10px/1.4 'JetBrains Mono', monospace; letter-spacing: .06em; text-decoration: none; text-transform: uppercase; white-space: nowrap; }
   .churn-link span,
   .churn-link:hover { color: #00cc66; }

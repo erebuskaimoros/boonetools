@@ -131,6 +131,9 @@ function fromCoreReadModel(model) {
     mimir: payload.mimir && typeof payload.mimir === 'object' ? payload.mimir : {},
     lastblock: Array.isArray(payload.lastblock) ? payload.lastblock : [],
     network: payload.network && typeof payload.network === 'object' ? payload.network : {},
+    midgard_network: payload.midgard_network && typeof payload.midgard_network === 'object'
+      ? payload.midgard_network
+      : {},
     pools: Array.isArray(payload.pools) ? payload.pools : [],
     constants: payload.constants && typeof payload.constants === 'object' ? payload.constants : {},
     node_mimirs: payload.node_mimirs ?? {},

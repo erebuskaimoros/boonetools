@@ -4,6 +4,24 @@ import assert from 'node:assert/strict';
 import { TtlSingleFlightCache } from '../src/lib/ttl-cache.js';
 import { getNetworkSnapshot } from '../src/shared/network-snapshot.js';
 
+test('network snapshot carries the durable Midgard next-churn target', async () => {
+  const snapshot = await getNetworkSnapshot({
+    getThorNodeCoreSnapshot: async () => ({
+      payload: {
+        lastblock: [],
+        inbound_addresses: [],
+        mimir: {},
+        nodes: [],
+        midgard_network: { nextChurnHeight: '27629547' }
+      },
+      generatedAt: '2026-08-31T01:00:00Z',
+      stale: false
+    })
+  });
+
+  assert.equal(snapshot.midgard_network.nextChurnHeight, '27629547');
+});
+
 test('network snapshot coalesces shared public THORNode and Midgard state', async () => {
   const calls = [];
   const payloads = new Map([

@@ -97,7 +97,8 @@ The core publisher is the sole scheduled owner of reusable current THORNode
 state. It refreshes `lastblock` every 15 seconds; inbound addresses, Mimir,
 bank RUNE supply, and node-Mimir state every minute; network, pools, and oracle
 prices every two minutes; nodes every
-five minutes; constants every fifteen minutes; and Midgard churns every ten
+five minutes; constants every fifteen minutes; Midgard network state every two
+minutes; and Midgard churns every ten
 minutes. Status, Node Votes, Treasury, Rapid Swaps, NodeOp, App Layer, and
 stable browser reads consume those persisted fields instead of repeating the
 same provider requests in separate processes.

@@ -113,6 +113,13 @@ export async function fetchMidgardChurns(options = {}) {
   return payload;
 }
 
+export async function fetchMidgardNetwork(options = {}) {
+  return fetchMidgard('/network', {
+    ...options,
+    validateResponse: (_path, data) => !data || typeof data !== 'object' || Array.isArray(data)
+  });
+}
+
 export async function fetchMidgardSwapHistory(params = {}) {
   const query = new URLSearchParams(params).toString();
   const path = query ? `/history/swaps?${query}` : '/history/swaps';

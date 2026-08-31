@@ -58,6 +58,14 @@ test('stuck transactions render as expandable chain bundles', () => {
 
 test('an active churn exposes the dedicated churn tracker', () => {
   assert.match(source, /churnStatus\.isInProgress\s*\?\s*'CHURNING'/);
-  assert.match(source, /\{#if churnStatus\.isInProgress\}[\s\S]*href="https:\/\/churn\.thorchain\.net"/);
+  assert.match(source, /\{#if churnStatus\.isInProgress\}[\s\S]*href="https:\/\/churn\.thorchain\.org\/"/);
   assert.match(source, /Track churn <span>↗<\/span>/);
+});
+
+test('the churn card renders a one-second next-churn countdown', () => {
+  assert.match(source, /formatChurnCountdown/);
+  assert.match(source, /setInterval\(\(\) => \{\s*countdownNowMs = Date\.now\(\);\s*\}, 1_000\)/);
+  assert.match(source, /<span>Next churn<\/span>/);
+  assert.match(source, /class="churn-countdown"/);
+  assert.match(source, /churnStatus\.nextChurnHeight/);
 });

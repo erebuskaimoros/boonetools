@@ -224,7 +224,8 @@ export function buildChurnStatus(
   churns = [],
   activeNodes = [],
   nowMs = Date.now(),
-  network = {}
+  network = {},
+  midgardNetwork = {}
 ) {
   const mimirByKey = new Map(
     Object.entries(mimir || {}).map(([key, value]) => [key.toUpperCase(), value])
@@ -248,6 +249,29 @@ export function buildChurnStatus(
       : 0;
     estimated = lastChurnHeight > 0;
   }
+  const midgardNextChurnHeight = numberValue(
+    midgardNetwork?.nextChurnHeight ?? midgardNetwork?.next_churn_height
+  );
+  const churnIntervalBlocks = numberValue(mimirByKey.get('CHURNINTERVAL'));
+  const computedNextChurnHeight = lastChurnHeight > 0 && churnIntervalBlocks > 0
+    ? lastChurnHeight + churnIntervalBlocks
+    : 0;
+  const nextChurnHeight = midgardNextChurnHeight > 0 && midgardNextChurnHeight >= height
+    ? midgardNextChurnHeight
+    : computedNextChurnHeight > 0 && computedNextChurnHeight >= height
+      ? computedNextChurnHeight
+      : 0;
+  const nextChurnSource = nextChurnHeight > 0 && nextChurnHeight === midgardNextChurnHeight
+    ? 'midgard'
+    : nextChurnHeight > 0 && nextChurnHeight === computedNextChurnHeight
+      ? 'computed'
+      : 'unavailable';
+  const blocksRemaining = nextChurnHeight > 0
+    ? Math.max(0, nextChurnHeight - height)
+    : 0;
+  const nextChurnTimestampMs = nextChurnHeight > 0
+    ? nowMs + (blocksRemaining * 6_000)
+    : 0;
   return {
     isPaused,
     isInProgress: network?.vaults_migrating === true,
@@ -255,6 +279,11 @@ export function buildChurnStatus(
     lastChurnHeight,
     lastChurnTimestampMs,
     blocksSince: lastChurnHeight > 0 ? Math.max(0, height - lastChurnHeight) : 0,
+    churnIntervalBlocks,
+    nextChurnHeight,
+    nextChurnTimestampMs,
+    nextChurnSource,
+    blocksRemaining,
     estimated
   };
 }
@@ -410,7 +439,8 @@ export function buildStatusNetworkReadModel(input = {}) {
       networkSnapshot.churns,
       activeNodes,
       Number.isFinite(nowMs) ? nowMs : Date.now(),
-      networkSnapshot.network
+      networkSnapshot.network,
+      networkSnapshot.midgard_network
     ),
     source: {
       provider: networkSnapshot.source || {},

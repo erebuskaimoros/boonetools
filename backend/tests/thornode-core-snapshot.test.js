@@ -31,6 +31,7 @@ function scannerPayload(diff = 2) {
 test('durable core snapshot staggers fields by their volatility', async () => {
   const firstCalls = [];
   let scannerCalls = 0;
+  let midgardNetworkCalls = 0;
   const first = await buildThorNodeCoreSnapshot({
     now: () => START,
     fetchThorchain: async (path) => {
@@ -38,6 +39,10 @@ test('durable core snapshot staggers fields by their volatility', async () => {
       return payloadFor(path);
     },
     fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => {
+      midgardNetworkCalls += 1;
+      return { nextChurnHeight: '123456' };
+    },
     fetchBifrostScannerInfo: async () => {
       scannerCalls += 1;
       return scannerPayload();
@@ -45,6 +50,8 @@ test('durable core snapshot staggers fields by their volatility', async () => {
   });
   assert.equal(firstCalls.length, THORNODE_CORE_FIELDS.filter((field) => field.provider === 'thornode').length);
   assert.equal(scannerCalls, 1);
+  assert.equal(midgardNetworkCalls, 1);
+  assert.equal(first.midgard_network.nextChurnHeight, '123456');
   assert.equal(first.stale, false);
 
   const secondCalls = [];
@@ -57,6 +64,9 @@ test('durable core snapshot staggers fields by their volatility', async () => {
     },
     fetchMidgardChurns: async () => {
       throw new Error('churns should not be due');
+    },
+    fetchMidgardNetwork: async () => {
+      throw new Error('Midgard network should not be due');
     },
     fetchBifrostScannerInfo: async () => {
       throw new Error('scanners should not be due');
@@ -72,6 +82,7 @@ test('durable core snapshot preserves values but marks provider-total failure st
     now: () => START,
     fetchThorchain: async (path) => payloadFor(path),
     fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({ nextChurnHeight: '123456' }),
     fetchBifrostScannerInfo: async () => scannerPayload()
   });
   const failed = await buildThorNodeCoreSnapshot({
@@ -91,6 +102,7 @@ test('durable core snapshot refuses a first publication without required THORNod
     now: () => START,
     fetchThorchain: async () => { throw new Error('blocked'); },
     fetchMidgardChurns: async () => [{ height: 1 }],
+    fetchMidgardNetwork: async () => ({ nextChurnHeight: '123456' }),
     fetchBifrostScannerInfo: async () => scannerPayload()
   }), /missing required fields/);
 });
@@ -100,6 +112,7 @@ test('scanner refresh failure reuses last-good scanner data without staling the 
     now: () => START,
     fetchThorchain: async (path) => payloadFor(path),
     fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({ nextChurnHeight: '123456' }),
     fetchBifrostScannerInfo: async () => scannerPayload(3)
   });
   const failed = await buildThorNodeCoreSnapshot({
@@ -107,6 +120,7 @@ test('scanner refresh failure reuses last-good scanner data without staling the 
     previousSnapshot: first,
     fetchThorchain: async (path) => payloadFor(path),
     fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({ nextChurnHeight: '123456' }),
     fetchBifrostScannerInfo: async () => { throw new Error('scanner aggregate unavailable'); }
   });
 

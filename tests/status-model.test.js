@@ -394,6 +394,66 @@ test('churn status reports an active vault migration as a churn in progress', ()
   assert.equal(status.isInProgress, true);
 });
 
+test('churn status exposes the Midgard next-churn target and a live ETA', () => {
+  const now = Date.UTC(2026, 7, 31, 12);
+  const status = buildChurnStatus(
+    { HALTCHURNING: 0, CHURNINTERVAL: 43_200 },
+    200,
+    [{ height: 150, date: String((now - 300_000) * 1_000_000) }],
+    [],
+    now,
+    { vaults_migrating: false },
+    { nextChurnHeight: '260' }
+  );
+
+  assert.equal(status.nextChurnHeight, 260);
+  assert.equal(status.blocksRemaining, 60);
+  assert.equal(status.nextChurnTimestampMs, now + (60 * 6_000));
+  assert.equal(status.nextChurnSource, 'midgard');
+});
+
+test('churn status only computes a future fallback target from CHURNINTERVAL', () => {
+  const now = Date.UTC(2026, 7, 31, 12);
+  const future = buildChurnStatus(
+    { CHURNINTERVAL: 100 },
+    200,
+    [{ height: 150, date: String((now - 300_000) * 1_000_000) }],
+    [],
+    now
+  );
+  const overdue = buildChurnStatus(
+    { CHURNINTERVAL: 20 },
+    200,
+    [{ height: 150, date: String((now - 300_000) * 1_000_000) }],
+    [],
+    now
+  );
+
+  assert.equal(future.nextChurnHeight, 250);
+  assert.equal(future.nextChurnSource, 'computed');
+  assert.equal(overdue.nextChurnHeight, 0);
+  assert.equal(overdue.nextChurnTimestampMs, 0);
+  assert.equal(overdue.nextChurnSource, 'unavailable');
+});
+
+test('churn status keeps an exact-height target available as due now', () => {
+  const now = Date.UTC(2026, 7, 31, 12);
+  const status = buildChurnStatus(
+    { HALTCHURNING: 0 },
+    200,
+    [],
+    [],
+    now,
+    {},
+    { nextChurnHeight: '200' }
+  );
+
+  assert.equal(status.nextChurnHeight, 200);
+  assert.equal(status.blocksRemaining, 0);
+  assert.equal(status.nextChurnTimestampMs, now);
+  assert.equal(status.nextChurnSource, 'midgard');
+});
+
 test('status updates translate effective halt values into plain language', () => {
   const updates = getRecentStatusUpdates([
     {
