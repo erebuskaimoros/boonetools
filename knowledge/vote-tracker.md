@@ -1,21 +1,30 @@
 # Vote Tracker
 
-## Direct protocol Mimir changes
+## Authoritative effective Mimir changes
 
-Direct `set_mimir` changes are protocol actions, not validator votes. They are
-stored in `protocol_mimir_changes`, separately from `set_node_mimir` rows in
-`node_votes`, and merged only into a key's Effective Value History. Changes
-with a transaction-local `security` message are labeled `Protocol safety
-event`; other direct changes are labeled `Direct protocol event`. Neither is
-assigned a node/operator or a 0-of-N vote count.
+Every `set_mimir` event is an authoritative effective-value transition and is
+stored in `protocol_mimir_changes`, separately from the `set_node_mimir` rows
+in `node_votes`. A `set_mimir` with the same key and value as a
+transaction-local `set_node_mimir` is labeled `Validator consensus event`.
+Changes with a transaction-local `security` message are labeled `Protocol
+safety event`; other direct changes are labeled `Direct protocol event`.
+Direct events are not assigned a node/operator or a synthetic 0-of-N vote
+count.
 
 The consolidated listener subscribes to `set_mimir.key EXISTS` for live
 ingestion. The node-vote backfill also searches that indexed RPC event over six
-months on its first run and uses its own rolling watermark afterward. A
-`set_mimir` with the same key and value as a `set_node_mimir` in one transaction
-is vote-driven and is not duplicated as a protocol event. Direct-only keys
-still appear in By Vote so current Mimir state has its recorded protocol
-history.
+months on its first run and uses its own rolling watermark afterward. Effective
+Value History prefers these recorded transitions and deduplicates any matching
+vote reconstruction by transaction, height, and value. Reconstruction remains
+a fallback for older history; it cannot observe vote purges performed during
+churn because those purges emit no individual `set_node_mimir` removals.
+Direct-only keys still appear in By Vote so current Mimir state has its recorded
+protocol history.
+
+The current vote distribution and current effective Mimir are related but not
+interchangeable. Removing or purging enough node votes can leave a different
+vote leader without emitting a new `set_mimir`, so the effective value does not
+change until THORNode actually records another effective transition.
 
 ## Upgrade vote coverage
 

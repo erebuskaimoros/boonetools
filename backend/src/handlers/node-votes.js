@@ -597,30 +597,41 @@ function mergeEffectiveHistory(effectiveHistory, currentValueChange) {
 }
 
 function protocolEffectiveHistory(rows) {
-  return (Array.isArray(rows) ? rows : []).map((row) => ({
-    event_key: row.event_key,
-    effective_value: String(row.mimir_value ?? ''),
-    mimir_category: classifyMimirKey(row.mimir_key),
-    vote_kind: 'mimir',
-    vote_category: classifyMimirKey(row.mimir_key),
-    consensus_model: row.change_source === 'protocol_safety'
-      ? 'protocol-safety'
-      : 'protocol-direct',
-    change_source: String(row.change_source || 'protocol_direct'),
-    source_label: String(row.source_label || 'Direct protocol event'),
-    security_message: String(row.security_message || ''),
-    block_time: toIsoString(row.block_time),
-    height: Number(row.height || 0),
-    tx_id: String(row.tx_id || '')
-  }));
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    const category = classifyMimirKey(row.mimir_key);
+    const changeSource = String(row.change_source || 'protocol_direct');
+    const sourceLabel = changeSource === 'validator_consensus'
+      ? 'Validator consensus event'
+      : (changeSource === 'protocol_safety' ? 'Protocol safety event' : 'Direct protocol event');
+    return {
+      event_key: row.event_key,
+      effective_value: String(row.mimir_value ?? ''),
+      mimir_category: category,
+      vote_kind: 'mimir',
+      vote_category: category,
+      consensus_model: changeSource === 'validator_consensus'
+        ? (category === 'operational' ? 'operational-min' : 'economic-supermajority')
+        : (changeSource === 'protocol_safety' ? 'protocol-safety' : 'protocol-direct'),
+      change_source: changeSource,
+      source_label: String(row.source_label || sourceLabel),
+      security_message: String(row.security_message || ''),
+      block_time: toIsoString(row.block_time),
+      height: Number(row.height || 0),
+      tx_id: String(row.tx_id || '')
+    };
+  });
 }
 
 function mergeProtocolEffectiveHistory(effectiveHistory, protocolRows) {
-  const combined = [...effectiveHistory, ...protocolEffectiveHistory(protocolRows)];
+  const combined = [...protocolEffectiveHistory(protocolRows), ...effectiveHistory];
   const unique = new Map();
   for (const change of combined) {
-    const identity = change.event_key
-      || [change.change_source || 'validator_vote', change.tx_id, change.height, change.effective_value].join(':');
+    const txId = String(change.tx_id || '').toUpperCase();
+    const height = Number(change.height || 0);
+    const identity = txId && height > 0
+      ? [txId, height, change.effective_value].join(':')
+      : (change.event_key
+        || [change.change_source || 'validator_vote', txId, height, change.effective_value].join(':'));
     if (!unique.has(identity)) unique.set(identity, change);
   }
   return [...unique.values()].sort(compareRowsDesc);
@@ -787,8 +798,11 @@ export function buildVoteGroups(
         validatorEffectiveHistory,
         protocolMimirChangesByKey[mimirKey] || []
       );
-      const currentProtocolChange = effectiveHistory.find((change) => (
-        String(change.change_source || '').startsWith('protocol_')
+      const currentAuthoritativeChange = effectiveHistory.find((change) => (
+        (
+          String(change.change_source || '').startsWith('protocol_')
+          || change.change_source === 'validator_consensus'
+        )
         && String(change.effective_value) === String(currentValue ?? '')
       ));
       const currentVoteSource = voteKind === 'upgrade'
@@ -833,7 +847,7 @@ export function buildVoteGroups(
         first_vote_at: firstVoteTime(historicalRows),
         passed_at: category === 'operational' ? null : firstPassedTime(validatorEffectiveHistory),
         current_value_changed_at: toIsoString(
-          currentProtocolChange?.block_time || currentValueChange?.block_time
+          currentAuthoritativeChange?.block_time || currentValueChange?.block_time
         ),
         latest_vote_at: toIsoString(latestVote?.block_time),
         latest_height: latestVote?.height || 0,

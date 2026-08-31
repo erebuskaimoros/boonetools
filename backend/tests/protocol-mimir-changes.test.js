@@ -48,7 +48,11 @@ test('direct set_mimir safety events are parsed separately from validator votes'
     }),
     event('set_mimir', { key: 'HaltSigningSOL', value: '0' })
   ], { txId: 'VOTE123', height: 27_596_545 });
-  assert.deepEqual(voteDriven, []);
+  assert.equal(voteDriven.length, 1);
+  assert.equal(voteDriven[0].mimir_key, 'HALTSIGNINGSOL');
+  assert.equal(voteDriven[0].mimir_value, '0');
+  assert.equal(voteDriven[0].change_source, 'validator_consensus');
+  assert.equal(voteDriven[0].source_label, 'Validator consensus event');
 
   const differentDirectValue = parseProtocolMimirChanges([
     event('set_node_mimir', {
@@ -61,6 +65,54 @@ test('direct set_mimir safety events are parsed separately from validator votes'
   assert.equal(differentDirectValue.length, 1);
   assert.equal(differentDirectValue[0].mimir_value, '27591961');
   assert.equal(differentDirectValue[0].change_source, 'protocol_direct');
+});
+
+test('Effective Value History prefers authoritative validator-consensus transitions', async () => {
+  const { buildVoteGroups } = await import('../src/handlers/node-votes.js');
+  const historicalVotes = Array.from({ length: 3 }, (_, index) => ({
+    mimir_key: 'HALTSOLTRADING',
+    vote_value: '1',
+    node_address: `thor1historical${index}`,
+    operator_address: `thor1operator${index}`,
+    block_time: index === 2
+      ? '2026-08-30T14:11:30.000Z'
+      : `2026-08-30T14:0${index}:00.000Z`,
+    height: index === 2 ? 27_620_350 : 27_620_300 + index,
+    tx_id: index === 2 ? 'VOTE123' : `VOTE12${index}`
+  }));
+
+  const [group] = buildVoteGroups(
+    historicalVotes,
+    historicalVotes,
+    { HALTSOLTRADING: 1 },
+    95,
+    3,
+    { HALTSOLTRADING: [] },
+    {
+      currentNodeMimirsAvailable: true,
+      protocolMimirChangesByKey: {
+        HALTSOLTRADING: [{
+          event_key: 'VOTE123:2',
+          tx_id: 'VOTE123',
+          height: 27_620_350,
+          block_time: '2026-08-30T14:11:30.000Z',
+          mimir_key: 'HALTSOLTRADING',
+          mimir_value: '1',
+          change_source: 'validator_consensus',
+          source_label: 'Validator consensus event',
+          security_message: ''
+        }]
+      }
+    }
+  );
+
+  const matchingChanges = group.effective_history.filter((change) => (
+    change.tx_id === 'VOTE123' && change.effective_value === '1'
+  ));
+  assert.equal(matchingChanges.length, 1);
+  assert.equal(matchingChanges[0].change_source, 'validator_consensus');
+  assert.equal(matchingChanges[0].consensus_model, 'operational-min');
+  assert.equal(group.current_value_changed_at, '2026-08-30T14:11:30.000+00:00');
 });
 
 test('Effective Value History includes protocol safety changes without validator attribution', async () => {

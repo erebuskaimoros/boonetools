@@ -16,7 +16,14 @@ test('expanded vote details give Node Votes more desktop width than Effective Va
 
   const [, nodeMin, nodeShare, historyMin, historyShare] = detailGridRule.map(Number);
   assert.ok(nodeMin > historyMin, 'Node Votes should have the larger minimum track width');
-  assert.ok(nodeShare > historyShare, 'Node Votes should receive the larger share of available width');
+  assert.ok(
+    nodeShare >= historyShare * 2,
+    'Node Votes should receive at least twice the available width of Effective Value History'
+  );
+  assert.ok(
+    historyMin <= 360,
+    'Effective Value History should keep a compact minimum width'
+  );
 });
 
 test('expanded vote details still stack at the mobile breakpoint', () => {

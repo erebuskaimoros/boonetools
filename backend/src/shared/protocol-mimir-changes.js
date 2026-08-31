@@ -79,8 +79,15 @@ export function parseProtocolMimirChanges(events, envelope = {}) {
     if (type !== 'set_mimir') return [];
     const mimirKey = String(attrs.key || '').trim().toUpperCase();
     const mimirValue = String(attrs.value ?? '').trim();
-    if (!mimirKey || validatorVoteChanges.has(`${mimirKey}\u0000${mimirValue}`)) return [];
+    if (!mimirKey) return [];
+    const isValidatorConsensus = validatorVoteChanges.has(`${mimirKey}\u0000${mimirValue}`);
     const isSafetyEvent = Boolean(securityMessage);
+    const changeSource = isValidatorConsensus
+      ? 'validator_consensus'
+      : (isSafetyEvent ? 'protocol_safety' : 'protocol_direct');
+    const sourceLabel = isValidatorConsensus
+      ? 'Validator consensus event'
+      : (isSafetyEvent ? 'Protocol safety event' : 'Direct protocol event');
     return [{
       event_key: eventKey({ txId, height, txIndex, eventIndex, attrs }),
       tx_id: txId,
@@ -89,8 +96,8 @@ export function parseProtocolMimirChanges(events, envelope = {}) {
       event_index: eventIndex,
       mimir_key: mimirKey,
       mimir_value: mimirValue,
-      change_source: isSafetyEvent ? 'protocol_safety' : 'protocol_direct',
-      source_label: isSafetyEvent ? 'Protocol safety event' : 'Direct protocol event',
+      change_source: changeSource,
+      source_label: sourceLabel,
       security_message: securityMessage,
       source: envelope.source || 'rpc',
       raw_event: {

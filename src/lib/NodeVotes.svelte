@@ -964,7 +964,7 @@
                                 </thead>
                                 <tbody>
                                   {#each row.effective_history as change}
-                                    <tr class:protocol-change={change.change_source === 'protocol_safety' || change.change_source === 'protocol_direct'}>
+                                    <tr class:protocol-change={change.change_source === 'protocol_safety' || change.change_source === 'protocol_direct' || change.change_source === 'validator_consensus'}>
                                       <td><span class="value-chip">{change.effective_value}</span></td>
                                       <td>
                                         {#if change.change_source === 'protocol_safety'}
@@ -973,15 +973,25 @@
                                         {:else if change.change_source === 'protocol_direct'}
                                           <strong>Direct protocol event</strong>
                                           <small>not a validator vote</small>
+                                        {:else if change.change_source === 'validator_consensus'}
+                                          <strong>Validator consensus event</strong>
+                                          <small>effective Mimir change</small>
                                         {:else}
                                           <strong>{formatNumber(change.leader_count || 0)}</strong>
                                           <small>of {formatNumber(change.threshold || 0)} threshold</small>
                                         {/if}
                                       </td>
-                                      <td title={change.change_source === 'protocol_safety' || change.change_source === 'protocol_direct' ? change.security_message : change.triggered_by_node}>
+                                      <td title={change.change_source === 'validator_consensus'
+                                        ? 'Authoritative set_mimir emitted with matching node vote'
+                                        : (change.change_source === 'protocol_safety' || change.change_source === 'protocol_direct'
+                                          ? change.security_message
+                                          : change.triggered_by_node)}>
                                         {#if change.change_source === 'protocol_safety' || change.change_source === 'protocol_direct'}
                                           <strong>Protocol action</strong>
                                           <small>{change.security_message || 'Direct protocol Mimir change'}</small>
+                                        {:else if change.change_source === 'validator_consensus'}
+                                          <strong>Consensus transaction</strong>
+                                          <small>matching node-vote threshold reached</small>
                                         {:else}
                                           <strong>{shortAddress(change.triggered_by_operator)}</strong>
                                           <small>{shortAddress(change.triggered_by_node)} voted {change.trigger_vote_value}</small>
@@ -2092,7 +2102,7 @@
 
   .detail-grid {
     display: grid;
-    grid-template-columns: minmax(640px, 1.2fr) minmax(420px, 0.8fr);
+    grid-template-columns: minmax(640px, 2fr) minmax(340px, 1fr);
     gap: 0;
     border-top: 1px solid rgba(0, 204, 102, 0.28);
   }
@@ -2142,7 +2152,7 @@
   }
 
   .history-table {
-    min-width: 420px;
+    min-width: 340px;
     table-layout: fixed;
   }
 

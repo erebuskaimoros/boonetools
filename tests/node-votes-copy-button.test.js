@@ -44,3 +44,11 @@ test('Effective Value History labels direct protocol safety changes without vote
   );
   assert.match(dashboardSource, /change\.security_message/);
 });
+
+test('Effective Value History labels authoritative validator-consensus changes', () => {
+  assert.match(
+    dashboardSource,
+    /change\.change_source === 'validator_consensus'[\s\S]*?Validator consensus event[\s\S]*?effective Mimir change/
+  );
+  assert.match(dashboardSource, /matching node-vote threshold reached/);
+});
