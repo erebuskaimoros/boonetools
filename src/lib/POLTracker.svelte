@@ -67,7 +67,7 @@
     try {
       payload = await fetchPolTracker({ forceRefresh: options.forceRefresh });
     } catch (error) {
-      loadError = error?.message || 'POL Tracker history is unavailable.';
+      loadError = error?.message || 'POL TVL history is unavailable.';
     } finally {
       loading = false;
       refreshing = false;
@@ -182,15 +182,15 @@
 </script>
 
 <svelte:head>
-  <title>POL Tracker | BooneTools</title>
+  <title>POL TVL | BooneTools</title>
   <meta name="description" content="Daily THORChain synth backing, locked Treasury LP, and Reserve POL history." />
 </svelte:head>
 
 <main class="pol-shell">
   <header class="terminal-header">
     <div>
-      <p class="eyebrow">$ boonetools pol-tracker --from 2025-02-01</p>
-      <h1>POL TRACKER</h1>
+      <p class="eyebrow">$ boonetools pol-tvl --from 2025-02-01</p>
+      <h1>POL TVL</h1>
       <p class="subtitle">Daily protocol liquidity and liability state at completed UTC day-end blocks.</p>
     </div>
     <div class="header-state">
@@ -219,7 +219,7 @@
   {/if}
 
   {#if payload}
-    <section class="metric-grid" aria-label="Latest POL Tracker values">
+    <section class="metric-grid" aria-label="Latest POL TVL values">
       <article class="metric metric--total">
         <span class="metric-label">TOTAL TRACKED VALUE</span>
         <strong>{formatPolTrackerUsd(latestTotal, true)}</strong>

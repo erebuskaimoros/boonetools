@@ -42,6 +42,7 @@ import {
   saveParsedRujiraReservePaymentBlock,
   writeRujiraReservePaymentListenerHeartbeat
 } from './shared/rujira-reserve-payments.js';
+import { saveSystemIncomePolBlock } from './shared/system-income-pol-store.js';
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
@@ -430,9 +431,23 @@ async function processConsolidatedBlock(data) {
   try {
     const storedHeader = await upsertChainHeader(client, {
       ...parsed.header,
-      incomeBurnE8: parsed.incomeBurnE8
+      incomeBurnE8: parsed.incomeBurnE8,
+      systemIncomePolObserved: parsed.systemIncomePol.observed,
+      systemIncomePolRewardE8: parsed.systemIncomePol.rewardE8,
+      systemIncomePolDeployments: parsed.systemIncomePol.deployments,
+      systemIncomePolPoolFees: parsed.systemIncomePol.poolFees
     });
     if (!storedHeader) throw new Error(`Unable to persist block header ${parsed.header.height}`);
+    if (storedHeader.height >= config.systemIncomePolActivationHeight) {
+      await saveSystemIncomePolBlock(client, {
+        height: storedHeader.height,
+        blockTime: storedHeader.blockTime,
+        rewardE8: parsed.systemIncomePol.rewardE8,
+        deployments: parsed.systemIncomePol.deployments,
+        poolFees: parsed.systemIncomePol.poolFees,
+        source: 'liquify-ws'
+      });
+    }
     persistedHeaders += 1;
     await saveChainStreamState(client, {
       lastSeenHeight: storedHeader.height,

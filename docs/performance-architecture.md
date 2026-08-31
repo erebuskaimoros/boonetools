@@ -43,7 +43,8 @@ presentation-only field.
 | `/pool-dislocation` | `pool-dislocation-summary:v1` | `boonetools-pool-dislocation` | exact 5m UTC / 15m |
 | `/pool-analysis` | `pool-analysis:v2` | `boonetools-pool-analysis` | 15m / 20m |
 | `/pool-analysis-series` | bounded `pool_analysis_daily` query | same canonical writer | lazy public read |
-| `/pol-tracker` | `pol-tracker:v2` | `boonetools-pol-tracker` | daily at 00:10 UTC / 36h |
+| `/pol-tvl` | `pol-tracker:v2` | `boonetools-pol-tracker` | daily at 00:10 UTC / 36h |
+| `/pol-tracker` | `system-income-pol:v1` + block overlay | chain listener / `boonetools-system-income-pol` | every block + 2m reconcile / 5m |
 | `/burn-tracker` | `system-income-burn:v1` + block overlay | chain listener / `boonetools-burn-tracker` | every block + 5m reconcile / 15m |
 
 The operator-triggered Pool Dislocation backfill populates canonical
@@ -52,7 +53,7 @@ publisher. It never runs on a public request path. Reconstructed THORChain pool
 and oracle prices share one historical height; reconstructed Binance prices
 are provenance-labeled five-minute kline closes rather than live BBO midpoints.
 
-POL Tracker uses migrations `046_pol_tracker.sql` and
+POL TVL uses migrations `046_pol_tracker.sql` and
 `047_pol_tracker_pool_breakdown.sql` for one same-height snapshot per completed
 UTC day plus its per-pool inputs. The scheduled job revisits the latest seven
 days, atomically replaces each day, and publishes one bounded read model; the
@@ -62,6 +63,17 @@ not public lanes. Provider-owned RUNEPool value is retained in the daily table
 solely for reconciliation and is not selected into the read model. The latest
 pool breakdown derives each legacy Reserve POL value with THORNode's rounded
 safe-share formula and requires the pool sum to equal `runepool.pol.value`.
+
+System Income POL uses migration `054_system_income_pol.sql`. The consolidated
+listener persists exact `rewards.pol_reserve_reward`, `pol_reserve_deploy`, and
+paired internal `add_liquidity` units in a durable per-height ledger and emits
+a compact block overlay through `/chain-events`. Its two-minute publisher
+repairs missing RPC block results from the activation height, compacts UTC flow
+history, consumes the shared two-minute core pool snapshot, and makes only the
+feature-specific module-balance and deposited-pool LP calls. Position samples
+time-weight ownership against canonical `pool_analysis_daily` fees; incomplete
+ownership coverage remains null. `/pol-tracker` reads only Postgres and overlays
+committed blocks newer than `system-income-pol:v1`.
 
 Burn Tracker uses migrations `049_system_income_burn_tracker.sql` and
 `050_system_income_burn_blocks.sql`. Its provider job backfills UTC earnings

@@ -42,7 +42,9 @@ test('site-owned chain stream parses and subscribes to compact head events', () 
     height: 123,
     time: '2026-08-05T12:00:00Z',
     interval_ms: 6125,
-    has_swap_events: true
+    has_swap_events: true,
+    pol_reserve_reward_e8: '9',
+    pol_reserve_deployments: [{ asset: 'BTC.BTC', rune_e8: '7', units_e8: '3' }]
   })), {
     height: 123,
     time: '2026-08-05T12:00:00.000Z',
@@ -51,8 +53,16 @@ test('site-owned chain stream parses and subscribes to compact head events', () 
     block_hash: '',
     has_swap_events: true,
     income_burn_e8: null,
+    pol_reserve_reward_e8: '9',
+    pol_reserve_deployments: [{ asset: 'BTC.BTC', rune_e8: '7', units_e8: '3' }],
     source: 'liquify-ws'
   });
+
+  assert.deepEqual(parseChainHeadEvent(JSON.stringify({
+    height: 124,
+    time: '2026-08-05T12:00:06Z',
+    pol_reserve_deployments: [{ asset: 'ETH.ETH', rune_e8: '7', units_e8: null }]
+  }))?.pol_reserve_deployments, [{ asset: 'ETH.ETH', rune_e8: '7', units_e8: null }]);
 
   const heads = [];
   const subscription = subscribeChainHeads({

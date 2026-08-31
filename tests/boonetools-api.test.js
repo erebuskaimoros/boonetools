@@ -11,6 +11,7 @@ import { fetchAppLayerLiveState } from '../src/lib/app-layer/api.js';
 import { fetchNodeVotesDashboard } from '../src/lib/node-votes/api.js';
 import { fetchPolTracker } from '../src/lib/pol-tracker/api.js';
 import { fetchStatusLive, fetchStuckTransactions } from '../src/lib/status/api.js';
+import { fetchSystemIncomePol } from '../src/lib/system-income-pol/api.js';
 import { fetchTcFeeDash } from '../src/lib/tc-fee-dash/api.js';
 
 function createResponse(payload, options = {}) {
@@ -203,6 +204,7 @@ test('active feature adapters retain their public functions and endpoint shapes'
   await fetchNodeVotesDashboard({ days: 45 });
   await fetchTcFeeDash();
   await fetchAppLayerLiveState();
+  await fetchSystemIncomePol({ forceRefresh: true });
   await fetchPolTracker({ forceRefresh: true });
 
   assert.deepEqual(requests.map((request) => request.url), [
@@ -211,10 +213,12 @@ test('active feature adapters retain their public functions and endpoint shapes'
     '/functions/v1/node-votes-summary?days=45',
     '/functions/v1/tc-fee-dash',
     '/functions/v1/app-layer-live-state',
-    '/functions/v1/pol-tracker'
+    '/functions/v1/pol-tracker',
+    '/functions/v1/pol-tvl'
   ]);
   assert.equal(requests[1].options.cache, 'no-cache');
   assert.notEqual(requests[4].options.cache, 'no-store');
   assert.equal(requests[5].options.cache, 'no-cache');
+  assert.equal(requests[6].options.cache, 'no-cache');
   assert.equal(requests.every((request) => request.options.headers.Accept === 'application/json'), true);
 });

@@ -70,12 +70,20 @@
     description: "Compare THORChain pool depth, volume, pool-generated liquidity fees, and all-time fee history"
   };
 
-  const polTrackerApp = {
-    name: "POL Tracker",
+  const polTvlApp = {
+    name: "POL TVL",
     component: () => import("./lib/POLTracker.svelte"),
     icon: "≋",
-    path: "pol-tracker",
+    path: "pol-tvl",
     description: "Track daily synth backing, locked Treasury LP total, and Reserve POL"
+  };
+
+  const systemIncomePolApp = {
+    name: "System Income POL",
+    component: () => import("./lib/SystemIncomePOL.svelte"),
+    icon: "◈",
+    path: "pol-tracker",
+    description: "Track live system income funding, deployments, pool positions, and estimated fees"
   };
 
   const burnTrackerApp = {
@@ -164,7 +172,7 @@
     tcFeeDashApp,
     poolDislocationApp,
     poolAnalysisApp,
-    polTrackerApp,
+    polTvlApp,
     burnTrackerApp,
     bondTrackerApp,
     vaultExplorerApp,
@@ -176,7 +184,7 @@
     briefingsApp
   ];
   // Direct-route previews resolve normally but stay out of desktop/mobile nav.
-  const hiddenApps = [wasmArbEconomicsApp];
+  const hiddenApps = [wasmArbEconomicsApp, systemIncomePolApp];
 
   // The site has no homepage: unknown paths and `/` land on the status page.
   const defaultApp = statusApp;

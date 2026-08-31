@@ -11,6 +11,22 @@ export function parseChainHeadEvent(value) {
     if (!Number.isFinite(height) || height <= 0 || !Number.isFinite(Date.parse(time))) return null;
     const intervalMs = Number(payload?.interval_ms);
     const incomeBurn = String(payload?.income_burn_e8 ?? '').trim();
+    const polReserveReward = String(payload?.pol_reserve_reward_e8 ?? '').trim();
+    const polReserveDeployments = (Array.isArray(payload?.pol_reserve_deployments)
+      ? payload.pol_reserve_deployments
+      : [])
+      .map((deployment) => {
+        const asset = String(deployment?.asset || deployment?.pool || '').trim();
+        const runeE8 = String(deployment?.rune_e8 ?? deployment?.rune_amount_e8 ?? '').trim();
+        const unitsE8 = String(deployment?.units_e8 ?? deployment?.minted_units_e8 ?? '').trim();
+        if (!asset || !/^\d+$/.test(runeE8)) return null;
+        return {
+          asset,
+          rune_e8: runeE8,
+          units_e8: /^\d+$/.test(unitsE8) ? unitsE8 : null
+        };
+      })
+      .filter(Boolean);
     return {
       height: Math.trunc(height),
       time: new Date(time).toISOString(),
@@ -19,6 +35,8 @@ export function parseChainHeadEvent(value) {
       block_hash: String(payload?.block_hash || ''),
       has_swap_events: Boolean(payload?.has_swap_events),
       income_burn_e8: /^\d+$/.test(incomeBurn) ? BigInt(incomeBurn).toString() : null,
+      pol_reserve_reward_e8: /^\d+$/.test(polReserveReward) ? BigInt(polReserveReward).toString() : null,
+      pol_reserve_deployments: polReserveDeployments,
       source: String(payload?.source || 'liquify-ws')
     };
   } catch {

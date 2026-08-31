@@ -41,6 +41,7 @@ import { handleStockPrices } from './handlers/stock-prices.js';
 import { handleStuckTransactions } from './handlers/stuck-transactions.js';
 import { handleStatusDashboard } from './handlers/status-dashboard.js';
 import { handleStatusLive } from './handlers/status-live.js';
+import { handleSystemIncomePol } from './handlers/system-income-pol.js';
 import { handleTcFeeDash } from './handlers/tc-fee-dash.js';
 import { handleTreasurySnapshot } from './handlers/treasury-snapshot.js';
 import { handleWasmArbEconomics } from './handlers/wasm-arb-economics.js';
@@ -70,7 +71,8 @@ const routes = new Map([
   ['/pool-dislocation-series', route(handlePoolDislocationSeries, 2, 16)],
   ['/pool-analysis', route(handlePoolAnalysis, 1, 64)],
   ['/pool-analysis-series', route(handlePoolAnalysisSeries, 2, 16)],
-  ['/pol-tracker', route(handlePolTracker, 1, 64)],
+  ['/pol-tracker', route(handleSystemIncomePol, 1, 64)],
+  ['/pol-tvl', route(handlePolTracker, 1, 64)],
   ['/burn-tracker', route(handleBurnTracker, 1, 64)],
   ['/tc-fee-dash', route(handleTcFeeDash, 1, 64)],
   ['/rapid-swaps', route(handleRapidSwaps, 5, 3)],

@@ -375,6 +375,7 @@ prime_read_models() {
     boonetools-pool-dislocation.service
     boonetools-pool-analysis.service
     boonetools-pol-tracker.service
+    boonetools-system-income-pol.service
     boonetools-burn-tracker.service
     boonetools-wasm-arb-economics.service
     boonetools-wasm-arb-economics-fees.service
@@ -455,7 +456,7 @@ verify_release() {
   wait_for_api
   node "$CURRENT_LINK/scripts/perf-smoke.mjs" \
     --base https://boone.tools/functions/v1 \
-    --allow-stale-endpoint pol-tracker \
+    --allow-stale-endpoint pol-tvl \
     --allow-stale-endpoint rapid-market \
     --allow-stale-endpoint burn-tracker \
     --allow-stale-endpoint app-earnings \

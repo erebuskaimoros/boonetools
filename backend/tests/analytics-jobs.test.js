@@ -287,7 +287,7 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(perfSmoke, /allowStale: false/);
   assert.match(perfSmoke, /--allow-stale-endpoint/);
   assert.match(perfSmoke, /allowStaleEndpoints\.has\(endpoint\.name\)/);
-  assert.match(remoteDeployScript, /--allow-stale-endpoint pol-tracker/);
+  assert.match(remoteDeployScript, /--allow-stale-endpoint pol-tvl/);
   assert.match(remoteDeployScript, /--allow-stale-endpoint rapid-market/);
   assert.match(perfSmoke, /stale response\(s\)/);
   assert.match(perfSmoke, /response content type was not JSON/);

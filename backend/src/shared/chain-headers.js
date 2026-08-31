@@ -26,6 +26,30 @@ function baseUnitString(value) {
   return /^\d+$/.test(normalized) ? BigInt(normalized).toString() : null;
 }
 
+function normalizeSystemIncomePolDeployments(value) {
+  if (!Array.isArray(value)) return null;
+  return value.map((row) => {
+    const asset = String(row?.asset ?? row?.pool ?? '').trim();
+    const runeE8 = baseUnitString(row?.runeE8 ?? row?.rune_e8 ?? row?.rune_amount);
+    if (!asset || runeE8 === null) return null;
+    return {
+      asset,
+      runeE8,
+      unitsE8: baseUnitString(row?.unitsE8 ?? row?.units_e8 ?? row?.liquidity_provider_units),
+      runeAddress: String(row?.runeAddress ?? row?.rune_address ?? '')
+    };
+  }).filter(Boolean);
+}
+
+function normalizeSystemIncomePolPoolFees(value) {
+  if (!Array.isArray(value)) return null;
+  return value.map((row) => {
+    const asset = String(row?.asset ?? row?.pool ?? '').trim();
+    const feeE8 = baseUnitString(row?.feeE8 ?? row?.fee_e8 ?? row?.liquidity_fee_in_rune);
+    return asset && feeE8 !== null ? { asset, feeE8 } : null;
+  }).filter(Boolean);
+}
+
 function uniqueHeaders(headers) {
   const byHeight = new Map();
   for (const input of Array.isArray(headers) ? headers : []) {
@@ -43,20 +67,48 @@ export function normalizeChainHeader(input = {}) {
   const incomeBurnE8 = baseUnitString(
     input.incomeBurnE8 ?? input.income_burn_e8 ?? input.system_income_burn_e8
   );
+  const systemIncomePolRewardE8 = baseUnitString(
+    input.systemIncomePolRewardE8
+      ?? input.pol_reserve_reward_e8
+      ?? input.system_income_pol_reward_e8
+  );
+  const systemIncomePolDeployments = normalizeSystemIncomePolDeployments(
+    input.systemIncomePolDeployments
+      ?? input.pol_reserve_deployments
+      ?? input.system_income_pol_deployments
+  );
+  const systemIncomePolPoolFees = normalizeSystemIncomePolPoolFees(
+    input.systemIncomePolPoolFees
+      ?? input.pol_reserve_pool_fees
+      ?? input.system_income_pol_pool_fees
+  );
+  const hasPolObserved = Object.prototype.hasOwnProperty.call(input, 'systemIncomePolObserved')
+    || Object.prototype.hasOwnProperty.call(input, 'system_income_pol_observed');
   return {
     height,
     blockHash: String(input.blockHash ?? input.block_hash ?? input.hash ?? '').toUpperCase(),
     blockTime,
     hasSwapEvents: Boolean(input.hasSwapEvents ?? input.has_swap_events),
     source: String(input.source || 'liquify-ws'),
-    ...(incomeBurnE8 === null ? {} : { incomeBurnE8 })
+    ...(incomeBurnE8 === null ? {} : { incomeBurnE8 }),
+    ...(hasPolObserved ? {
+      systemIncomePolObserved: Boolean(
+        input.systemIncomePolObserved ?? input.system_income_pol_observed
+      )
+    } : {}),
+    ...(systemIncomePolRewardE8 === null ? {} : { systemIncomePolRewardE8 }),
+    ...(systemIncomePolDeployments === null ? {} : { systemIncomePolDeployments }),
+    ...(systemIncomePolPoolFees === null ? {} : { systemIncomePolPoolFees })
   };
 }
 
 export function parseChainHeaderFromNewBlock(data = {}) {
-  const events = data?.result_finalize_block?.events
-    || data?.result_end_block?.events
-    || [];
+  const finalize = data?.result_finalize_block || data?.result_end_block || {};
+  const events = [
+    ...(Array.isArray(finalize.events) ? finalize.events : []),
+    ...(Array.isArray(finalize.tx_results) ? finalize.tx_results : [])
+      .flatMap((result) => Array.isArray(result?.events) ? result.events : [])
+  ];
   return normalizeChainHeader({
     height: data?.block?.header?.height,
     blockHash: data?.block_id?.hash,
@@ -90,15 +142,25 @@ function buildHeaderUpsert(headers) {
       header.blockTime,
       header.hasSwapEvents,
       header.source,
-      header.incomeBurnE8 ?? null
+      header.incomeBurnE8 ?? null,
+      header.systemIncomePolObserved === true,
+      header.systemIncomePolRewardE8 ?? null,
+      header.systemIncomePolDeployments == null
+        ? null
+        : JSON.stringify(header.systemIncomePolDeployments),
+      header.systemIncomePolPoolFees == null
+        ? null
+        : JSON.stringify(header.systemIncomePolPoolFees)
     );
-    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, now(), now())`;
+    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}::jsonb, $${offset + 10}::jsonb, now(), now())`;
   });
 
   return {
     text: `insert into chain_block_headers
       (height, block_hash, block_time, has_swap_events, source,
-       system_income_burn_e8, received_at, updated_at)
+       system_income_burn_e8, system_income_pol_observed, system_income_pol_reward_e8,
+       system_income_pol_deployments, system_income_pol_pool_fees,
+       received_at, updated_at)
      values ${tuples.join(', ')}
      on conflict (height) do update set
        block_hash = case
@@ -111,6 +173,20 @@ function buildHeaderUpsert(headers) {
          excluded.system_income_burn_e8,
          chain_block_headers.system_income_burn_e8
        ),
+       system_income_pol_observed = chain_block_headers.system_income_pol_observed
+         or excluded.system_income_pol_observed,
+       system_income_pol_reward_e8 = case
+         when excluded.system_income_pol_observed then excluded.system_income_pol_reward_e8
+         else chain_block_headers.system_income_pol_reward_e8
+       end,
+       system_income_pol_deployments = case
+         when excluded.system_income_pol_observed then excluded.system_income_pol_deployments
+         else chain_block_headers.system_income_pol_deployments
+       end,
+       system_income_pol_pool_fees = case
+         when excluded.system_income_pol_observed then excluded.system_income_pol_pool_fees
+         else chain_block_headers.system_income_pol_pool_fees
+       end,
        source = case
          when excluded.source = 'liquify-ws' then excluded.source
          else chain_block_headers.source
@@ -149,7 +225,9 @@ export async function upsertChainHeaders(client, inputs = []) {
   await recomputeIntervals(client, headers[0].height, headers.at(-1).height);
   const stored = await client.query(
     `select height, block_hash, block_time, interval_ms, has_swap_events, source,
-            system_income_burn_e8
+            system_income_burn_e8, system_income_pol_observed,
+            system_income_pol_reward_e8, system_income_pol_deployments,
+            system_income_pol_pool_fees
      from chain_block_headers
      where height = any($1::bigint[])
      order by height asc`,
@@ -211,6 +289,17 @@ export function serializeChainHead(header = {}) {
     block_hash: normalized.blockHash,
     has_swap_events: normalized.hasSwapEvents,
     income_burn_e8: normalized.incomeBurnE8 ?? null,
+    pol_reserve_reward_e8: normalized.systemIncomePolRewardE8 ?? null,
+    pol_reserve_deployments: (normalized.systemIncomePolDeployments || []).map((row) => ({
+      asset: row.asset,
+      rune_e8: row.runeE8,
+      units_e8: row.unitsE8,
+      rune_address: row.runeAddress
+    })),
+    pol_reserve_pool_fees: (normalized.systemIncomePolPoolFees || []).map((row) => ({
+      asset: row.asset,
+      fee_e8: row.feeE8
+    })),
     source: normalized.source
   };
 }
@@ -225,7 +314,9 @@ export async function notifyChainHead(client, header) {
 export async function loadLatestChainHead(client) {
   const result = await client.query(
     `select height, block_hash, block_time, interval_ms, has_swap_events, source,
-            system_income_burn_e8
+            system_income_burn_e8, system_income_pol_observed,
+            system_income_pol_reward_e8, system_income_pol_deployments,
+            system_income_pol_pool_fees
      from chain_block_headers
      order by height desc
      limit 1`

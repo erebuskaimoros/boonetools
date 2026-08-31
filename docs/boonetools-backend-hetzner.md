@@ -301,7 +301,7 @@ store and bounded publisher-run history. Migration
 `028_analytics_read_paths.sql` adds the ordered/cursor indexes used by compact
 summary and drill-down routes. The additive public routes are
 `/status-live`, `/status-dashboard`, `/treasury-snapshot`, `/node-votes-summary`,
-`/rapid-swaps-summary`, `/pol-tracker`, `/burn-tracker`, `/pool-analysis`, and
+`/rapid-swaps-summary`, `/pol-tvl`, `/pol-tracker`, `/burn-tracker`, `/pool-analysis`, and
 `/pool-analysis-series`; the established Node/Rapid routes remain compatibility
 surfaces during frontend rollout but never contact providers on a GET.
 
@@ -339,7 +339,7 @@ Migrations `046_pol_tracker.sql` and `047_pol_tracker_pool_breakdown.sql` add
 daily and per-pool POL Tracker history, including the legacy Reserve module's
 gross value in each pool.
 The `boonetools-pol-tracker.timer` samples the latest completed UTC day at
-00:10 UTC and republishes `/pol-tracker`. Configure `POL_TRACKER_THORNODE_URLS`
+00:10 UTC and republishes `/pol-tvl`. Configure `POL_TRACKER_THORNODE_URLS`
 with a historical-height THORNode endpoint and `POL_TRACKER_RPC_URLS` with an
 archive RPC before starting the one-time February 2025 backfill:
 
@@ -361,9 +361,25 @@ archive provider consistently trails day-end state; an explicit backfill end
 date still overrides the lag. If the current scheduled target cannot be
 resolved, the job first republishes the last-good model with an explicit
 missing day, then exits unsuccessfully so systemd retries it every 15 minutes.
-`/pol-tracker` compares its latest source day with that target, so republishing
+`/pol-tvl` compares its latest source day with that target, so republishing
 old rows cannot reset the dashboard to healthy; `target_end_date`, coverage,
 warnings, and `stale` expose the gap until the target day succeeds.
+
+Migration `054_system_income_pol.sql` adds the block-live System Income POL
+ledger, daily and per-pool rollups, current positions, ownership samples, and
+sync state. `boonetools-system-income-pol.timer` repairs missing block results
+from the activation height and publishes `system-income-pol:v1` every two
+minutes. The chain listener writes live reward/deployment events continuously;
+the scheduler reconciles the `pol_reserve` module balance and deposited-pool LP
+positions against `thornode-core:v1`, then derives ownership-weighted fee
+estimates from `pool_analysis_daily`. `/pol-tracker` remains provider-free and
+adds committed block events newer than its model watermark.
+
+Optional controls are `SYSTEM_INCOME_POL_ACTIVATION_HEIGHT`,
+`SYSTEM_INCOME_POL_REPAIR_BLOCKS_PER_RUN`,
+`SYSTEM_INCOME_POL_REPAIR_CONCURRENCY`, `SYSTEM_INCOME_POL_LP_CONCURRENCY`, and
+`SYSTEM_INCOME_POL_TIMEOUT_MS`. A deployment primes the publisher before the
+public performance gate; subsequent repair is resumable and idempotent.
 
 Migration `049_system_income_burn_tracker.sql` adds route-specific daily RUNE
 burn history and resumable sync state. `boonetools-burn-tracker.timer` refreshes

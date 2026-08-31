@@ -20,7 +20,7 @@ test('Burn Tracker is directly routable and visible in navigation', async () => 
   const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
   assert.match(appSource, /path: "burn-tracker"/);
   assert.equal(visibleApps.includes('burnTrackerApp'), true);
-  assert.match(appSource, /const hiddenApps = \[wasmArbEconomicsApp\];/);
+  assert.match(appSource, /const hiddenApps = \[wasmArbEconomicsApp, systemIncomePolApp\];/);
   assert.match(trackerSource, />SYSTEM INCOME BURNED</);
   assert.match(trackerSource, />CURRENT RUNE SUPPLY</);
   assert.match(trackerSource, />CURRENT BURN RATE</);

@@ -1,8 +1,8 @@
-# POL Tracker
+# POL TVL
 
 ## Product contract
 
-`/pol-tracker` begins at 2025-02-01 and samples the latest finalized THORChain
+`/pol-tvl` begins at 2025-02-01 and samples the latest finalized THORChain
 block at or before each completed UTC day end. It tracks:
 
 - Synth-unit backing: `2 * balance_asset * asset_price * synth_units / pool_units`.
@@ -50,3 +50,8 @@ job failing once the newest target day is complete. The public handler
 independently compares the stored source day with the expected target and
 expands coverage for any unpublished days, preventing a recent republish
 timestamp from making old source data appear `READY` or 100% covered.
+
+This legacy TVL accounting is intentionally separate from the System Income
+POL dashboard at `/pol-tracker`. Its `pol_tracker_*` tables, `pol-tracker:v2`
+read model, and scheduled history collector retain their internal names for
+backward-compatible operations.

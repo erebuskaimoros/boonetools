@@ -494,7 +494,7 @@ test('migration, jobs, route, timer, and deployment encode the POL Tracker produ
   assert.match(poolBreakdownMigration, /reserve_pol_usd_e8/);
   assert.match(runJob, /'pol-tracker-backfill': runPolTrackerBackfill/);
   assert.match(runJob, /'pol-tracker-scheduler': runPolTrackerScheduler/);
-  assert.match(server, /\['\/pol-tracker', route\(handlePolTracker, 1, 64\)\]/);
+  assert.match(server, /\['\/pol-tvl', route\(handlePolTracker, 1, 64\)\]/);
   assert.match(timer, /OnCalendar=\*-\*-\* 00:10:00 UTC/);
   assert.match(service, /src\/run-job\.js pol-tracker-scheduler/);
   assert.match(service, /Restart=on-failure/);

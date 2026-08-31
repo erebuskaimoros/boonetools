@@ -1,0 +1,12 @@
+[Unit]
+Description=Reconcile System Income POL every two minutes
+
+[Timer]
+OnActiveSec=30s
+OnUnitActiveSec=2min
+AccuracySec=10s
+Persistent=true
+Unit=boonetools-system-income-pol.service
+
+[Install]
+WantedBy=timers.target

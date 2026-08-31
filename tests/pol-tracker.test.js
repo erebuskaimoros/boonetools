@@ -14,15 +14,16 @@ import {
   totalPolTrackerValue
 } from '../src/lib/pol-tracker/model.js';
 
-test('POL Tracker is directly routable and appears in navigation', async () => {
+test('legacy POL dashboard is directly routable as POL TVL and appears in navigation', async () => {
   const [appSource, trackerSource] = await Promise.all([
     readFile(new URL('../src/App.svelte', import.meta.url), 'utf8'),
     readFile(new URL('../src/lib/POLTracker.svelte', import.meta.url), 'utf8')
   ]);
   const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
 
-  assert.equal(visibleApps.includes('polTrackerApp'), true);
-  assert.match(appSource, /const hiddenApps = \[wasmArbEconomicsApp\];/);
+  assert.equal(visibleApps.includes('polTvlApp'), true);
+  assert.match(appSource, /path: "pol-tvl"/);
+  assert.match(appSource, /name: "POL TVL"/);
   assert.match(appSource, /return \[\.\.\.apps, \.\.\.hiddenApps\]\.find/);
   assert.doesNotMatch(trackerSource, /SAVERS|Savers|Saver/);
   assert.doesNotMatch(trackerSource, /ASSET LEG|RUNE LEG|treasuryAssetUsd|treasuryRuneUsd/);

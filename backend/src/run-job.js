@@ -18,6 +18,7 @@ import { runRujiraBaseFeesScheduler } from './jobs/rujira-base-fees-scheduler.js
 import { runRujiraReservePaymentsScheduler } from './jobs/rujira-reserve-payments-scheduler.js';
 import { runStatusDashboardScheduler } from './jobs/status-dashboard-scheduler.js';
 import { runStatusLiveScheduler } from './jobs/status-live-scheduler.js';
+import { runSystemIncomePolScheduler } from './jobs/system-income-pol.js';
 import { runTcFeeDashBackfill } from './jobs/tc-fee-dash-backfill.js';
 import { runTreasurySnapshot } from './jobs/treasury-snapshot.js';
 import { runWasmArbEconomicsFees } from './jobs/wasm-arb-economics-fees.js';
@@ -50,6 +51,7 @@ const runners = {
   'rujira-reserve-payments-scheduler': runRujiraReservePaymentsScheduler,
   'status-dashboard-scheduler': runStatusDashboardScheduler,
   'status-live-scheduler': runStatusLiveScheduler,
+  'system-income-pol-scheduler': runSystemIncomePolScheduler,
   'tc-fee-dash-backfill': runTcFeeDashBackfill,
   'thornode-core-snapshot': runThorNodeCoreSnapshot,
   'treasury-snapshot': runTreasurySnapshot,
