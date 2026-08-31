@@ -51,51 +51,35 @@ export const exchangeRates = writable({});
 // ---- Rate Fetching ----
 
 export async function fetchExchangeRates() {
-  const results = await Promise.allSettled([
-    // 1. RUNE price in fiat + BTC + XAU
-    fetch('https://api.coingecko.com/api/v3/simple/price?ids=thorchain&vs_currencies=usd,eur,gbp,jpy,btc,xau')
-      .then(r => r.ok ? r.json() : null),
-    // 2. XMR and ZEC prices in USD
-    fetch('https://api.coingecko.com/api/v3/simple/price?ids=monero,zcash&vs_currencies=usd')
-      .then(r => r.ok ? r.json() : null),
-    // 3. SPY, VT, gold from stock-prices proxy
-    booneToolsApi.get('/stock-prices', {
-      query: { symbols: 'SPY,VT,GC=F' }
-    }).catch(() => null)
-  ]);
+  try {
+    const payload = await booneToolsApi.get('/currency-rates');
+    const providedRates = payload?.rates || payload;
+    const rates = providedRates && typeof providedRates === 'object'
+      ? { ...providedRates }
+      : {};
 
-  const rates = {};
-  const runeData = results[0].status === 'fulfilled' ? results[0].value?.thorchain : null;
-  const cryptoData = results[1].status === 'fulfilled' ? results[1].value : null;
-  const stockData = results[2].status === 'fulfilled' ? results[2].value : null;
+    // SPY and VT are not supplied by the currency-rates service. Keep their
+    // existing backend proxy, including gold as a fallback, but do not request
+    // symbols already supplied by the shared endpoint.
+    const stockSymbols = [];
+    if (!rates.SPY) stockSymbols.push('SPY');
+    if (!rates.VT) stockSymbols.push('VT');
+    if (!rates.XAU) stockSymbols.push('GC=F');
 
-  // Direct RUNE prices from CoinGecko (same format the frontend expects)
-  if (runeData) {
-    if (runeData.usd) rates.USD = runeData.usd;
-    if (runeData.eur) rates.EUR = runeData.eur;
-    if (runeData.gbp) rates.GBP = runeData.gbp;
-    if (runeData.jpy) rates.JPY = runeData.jpy;
-    if (runeData.btc) rates.BTC = runeData.btc;
-    if (runeData.xau) rates.XAU = runeData.xau;
+    if (rates.USD && stockSymbols.length > 0) {
+      const stockData = await booneToolsApi.get('/stock-prices', {
+        query: { symbols: stockSymbols.join(',') }
+      }).catch(() => null);
+
+      if (!rates.SPY && stockData?.SPY) rates.SPY = rates.USD / stockData.SPY;
+      if (!rates.VT && stockData?.VT) rates.VT = rates.USD / stockData.VT;
+      if (!rates.XAU && stockData?.['GC=F']) rates.XAU = rates.USD / stockData['GC=F'];
+    }
+
+    exchangeRates.set(rates);
+  } catch {
+    exchangeRates.set({});
   }
-
-  // XMR/ZEC: compute RUNE price in XMR/ZEC
-  // rates.XMR = RUNE_USD / XMR_USD (how many XMR per 1 RUNE)
-  if (rates.USD && cryptoData) {
-    if (cryptoData.monero?.usd) rates.XMR = rates.USD / cryptoData.monero.usd;
-    if (cryptoData.zcash?.usd) rates.ZEC = rates.USD / cryptoData.zcash.usd;
-  }
-
-  // SPY/VT: compute RUNE price in shares
-  // rates.SPY = RUNE_USD / SPY_USD (how many SPY shares per 1 RUNE)
-  if (rates.USD && stockData) {
-    if (stockData.SPY) rates.SPY = rates.USD / stockData.SPY;
-    if (stockData.VT) rates.VT = rates.USD / stockData.VT;
-    // Gold fallback from Yahoo if CoinGecko XAU failed
-    if (!rates.XAU && stockData['GC=F']) rates.XAU = rates.USD / stockData['GC=F'];
-  }
-
-  exchangeRates.set(rates);
 }
 
 // ---- Historical Rates (on-demand) ----
@@ -259,11 +243,13 @@ export function getCurrencySymbol(currency) {
  * Format a USD value in the specified currency (large values, no decimals for fiat)
  */
 export function formatCurrency(rates, valueInUSD, currency) {
-  if (!rates || !rates[currency] || !rates.USD) return '--';
-
-  const convertedValue = valueInUSD * (rates[currency] / rates.USD);
   const config = currencyConfig[currency];
   if (!config) return '--';
+  if (currency !== 'USD' && (!rates || !rates[currency] || !rates.USD)) return '--';
+
+  const convertedValue = currency === 'USD'
+    ? valueInUSD
+    : valueInUSD * (rates[currency] / rates.USD);
 
   if (config.isISO) {
     const formatted = new Intl.NumberFormat('en-US', {
@@ -286,11 +272,13 @@ export function formatCurrency(rates, valueInUSD, currency) {
  * Format a USD value in the specified currency (precise, with decimals)
  */
 export function formatCurrencyWithDecimals(rates, valueInUSD, currency) {
-  if (!rates || !rates[currency] || !rates.USD) return '--';
-
-  const convertedValue = valueInUSD * (rates[currency] / rates.USD);
   const config = currencyConfig[currency];
   if (!config) return '--';
+  if (currency !== 'USD' && (!rates || !rates[currency] || !rates.USD)) return '--';
+
+  const convertedValue = currency === 'USD'
+    ? valueInUSD
+    : valueInUSD * (rates[currency] / rates.USD);
 
   if (config.isISO) {
     const formatted = new Intl.NumberFormat('en-US', {

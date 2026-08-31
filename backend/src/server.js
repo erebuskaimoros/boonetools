@@ -19,6 +19,7 @@ import { handleAppLayerReservePayments } from './handlers/app-layer-reserve-paym
 import { handleBondHistory } from './handlers/bond-history.js';
 import { handleBlockProduction } from './handlers/block-production.js';
 import { handleBurnTracker } from './handlers/burn-tracker.js';
+import { handleCurrencyRates } from './handlers/currency-rates.js';
 import { handleDynamicFeeAffiliateVolume } from './handlers/dynamic-fee-affiliate-volume.js';
 import { handleDynamicFeeTransactions } from './handlers/dynamic-fee-transactions.js';
 import { handleHealth } from './handlers/health.js';
@@ -74,6 +75,7 @@ const routes = new Map([
   ['/pol-tracker', route(handleSystemIncomePol, 1, 64)],
   ['/pol-tvl', route(handlePolTracker, 1, 64)],
   ['/burn-tracker', route(handleBurnTracker, 1, 64)],
+  ['/currency-rates', route(handleCurrencyRates, 1, 64)],
   ['/tc-fee-dash', route(handleTcFeeDash, 1, 64)],
   ['/rapid-swaps', route(handleRapidSwaps, 5, 3)],
   ['/rapid-swaps-summary', route(handleRapidSwapsSummary, 1, 64)],
