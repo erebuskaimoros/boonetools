@@ -476,10 +476,11 @@ test('SIPOL handler serves only the durable model plus chain-header overlay', as
 });
 
 test('SIPOL production contract keeps legacy POL at pol-tvl and serves SIPOL from pol-tracker', async () => {
-  const [migration, server, runJob, service, timer, deploy, smoke] = await Promise.all([
+  const [migration, server, runJob, repair, service, timer, deploy, smoke] = await Promise.all([
     readFile(new URL('../migrations/054_system_income_pol.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/shared/system-income-pol-repair.js', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-system-income-pol.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-system-income-pol.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8'),
@@ -491,6 +492,7 @@ test('SIPOL production contract keeps legacy POL at pol-tvl and serves SIPOL fro
   assert.match(server, /\['\/pol-tracker', route\(handleSystemIncomePol, 1, 64\)\]/);
   assert.match(server, /\['\/pol-tvl', route\(handlePolTracker, 1, 64\)\]/);
   assert.match(runJob, /'system-income-pol-scheduler': runSystemIncomePolScheduler/);
+  assert.match(repair, /cooldownScope: 'system-income-pol-repair'/);
   assert.match(service, /src\/run-job\.js system-income-pol-scheduler/);
   assert.match(timer, /OnUnitActiveSec=2min/);
   assert.match(deploy, /boonetools-system-income-pol\.service/);

@@ -389,9 +389,13 @@ prime_read_models() {
   for unit in "${prime_units[@]}"; do
     prime_read_model_unit "$unit"
   done
-  refresh_status_models_after_long_primes
   # Publish the newly ingested Wasm rows before the public API gate.
   start_unit_with_retry boonetools-analytics-read-models.service
+  # Long-running provider primes can outlive short model TTLs. Refresh the
+  # shared core, App Layer live model, and Status models immediately before
+  # the public performance gate so deployment work cannot make them stale.
+  refresh_core_and_app_layer_models
+  refresh_status_models_after_long_primes
 }
 
 start_and_verify_timers() {

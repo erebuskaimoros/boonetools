@@ -66,7 +66,11 @@ async function ensureHeaderRange(client, startHeight, endHeight, options = {}) {
 }
 
 export async function repairSystemIncomePolBlocks(client, options = {}) {
-  const fetchRpc = options.fetchRpc || fetchThorchainRpc;
+  const fetchRpcSource = options.fetchRpc || fetchThorchainRpc;
+  const fetchRpc = (path, params = {}) => fetchRpcSource(path, params, {
+    cooldownClient: client,
+    cooldownScope: 'system-income-pol-repair'
+  });
   const activationHeight = Math.max(
     1,
     Math.trunc(Number(options.activationHeight)) || config.systemIncomePolActivationHeight
