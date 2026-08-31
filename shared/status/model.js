@@ -225,7 +225,8 @@ export function buildChurnStatus(
   activeNodes = [],
   nowMs = Date.now(),
   network = {},
-  midgardNetwork = {}
+  midgardNetwork = {},
+  nodes = []
 ) {
   const mimirByKey = new Map(
     Object.entries(mimir || {}).map(([key, value]) => [key.toUpperCase(), value])
@@ -272,9 +273,15 @@ export function buildChurnStatus(
   const nextChurnTimestampMs = nextChurnHeight > 0
     ? nowMs + (blocksRemaining * 6_000)
     : 0;
+  const readyKeygenInProgress = lastChurnHeight > 0 && (Array.isArray(nodes) ? nodes : [])
+    .some((node) => (
+      node?.status === 'Ready' &&
+      numberValue(node?.status_since) > lastChurnHeight &&
+      numberValue(node?.status_since) <= height
+    ));
   return {
     isPaused,
-    isInProgress: network?.vaults_migrating === true,
+    isInProgress: network?.vaults_migrating === true || readyKeygenInProgress,
     mimirValue: numberValue(mimirByKey.get('HALTCHURNING')),
     lastChurnHeight,
     lastChurnTimestampMs,
@@ -440,7 +447,8 @@ export function buildStatusNetworkReadModel(input = {}) {
       activeNodes,
       Number.isFinite(nowMs) ? nowMs : Date.now(),
       networkSnapshot.network,
-      networkSnapshot.midgard_network
+      networkSnapshot.midgard_network,
+      nodes
     ),
     source: {
       provider: networkSnapshot.source || {},

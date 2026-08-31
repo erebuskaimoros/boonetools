@@ -394,6 +394,39 @@ test('churn status reports an active vault migration as a churn in progress', ()
   assert.equal(status.isInProgress, true);
 });
 
+test('churn status reports the live Ready-validator keygen phase before vault migration', () => {
+  const status = buildChurnStatus(
+    { HALTCHURNING: 0 },
+    27_629_640,
+    [{ height: 26_771_307, date: '1782611628468671341' }],
+    [{ status: 'Active', status_since: 26_771_307 }],
+    Date.UTC(2026, 7, 31, 6, 41),
+    { vaults_migrating: false },
+    { nextChurnHeight: '27630267' },
+    [
+      { status: 'Active', status_since: 26_771_307 },
+      { status: 'Ready', status_since: 27_614_427 }
+    ]
+  );
+
+  assert.equal(status.isInProgress, true);
+});
+
+test('churn status ignores Ready-validator records that predate the last completed churn', () => {
+  const status = buildChurnStatus(
+    { HALTCHURNING: 0 },
+    300,
+    [{ height: 250, date: '1782611628468671341' }],
+    [{ status: 'Active', status_since: 250 }],
+    Date.UTC(2026, 7, 31, 6, 41),
+    { vaults_migrating: false },
+    {},
+    [{ status: 'Ready', status_since: 200 }]
+  );
+
+  assert.equal(status.isInProgress, false);
+});
+
 test('churn status exposes the Midgard next-churn target and a live ETA', () => {
   const now = Date.UTC(2026, 7, 31, 12);
   const status = buildChurnStatus(
