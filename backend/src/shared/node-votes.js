@@ -591,14 +591,21 @@ export async function findNodeVotesStartHeight(startTime, status = null, options
   return low;
 }
 
-async function fetchNodeVoteTxPage({ startHeight, endHeight, page, perPage, eventQuery }) {
+async function fetchNodeVoteTxPage({
+  startHeight,
+  endHeight,
+  page,
+  perPage,
+  eventQuery,
+  transportOptions
+}) {
   const queryText = `tx.height>=${startHeight} AND tx.height<=${endHeight} AND ${eventQuery}`;
   const payload = await fetchNodeVotesRpc('/tx_search', {
     query: `"${queryText}"`,
     page,
     per_page: perPage,
     order_by: '"asc"'
-  });
+  }, transportOptions);
 
   if (payload?.error) {
     throw new Error(payload.error?.data || payload.error?.message || 'tx_search failed');
@@ -627,7 +634,8 @@ export async function fetchNodeVoteTxs({ startHeight, endHeight }, options = {})
         endHeight,
         page,
         perPage,
-        eventQuery
+        eventQuery,
+        transportOptions: options.transportOptions
       });
 
       total += page === 1 ? result.total : 0;

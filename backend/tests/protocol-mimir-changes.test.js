@@ -263,6 +263,7 @@ test('protocol Mimir backfill reuses a confirmed height range without another RP
     }
   };
   let fetchedRange = null;
+  let fetchOptions = null;
   await runProtocolMimirBackfill(client, {
     startTime: '2026-08-14T00:00:00.000Z',
     endTime: '2026-08-28T00:00:00.000Z',
@@ -271,8 +272,9 @@ test('protocol Mimir backfill reuses a confirmed height range without another RP
     resolveHeightRange: async () => {
       throw new Error('inconsistent RPC status must not be consulted');
     },
-    fetchTxs: async (range) => {
+    fetchTxs: async (range, options) => {
       fetchedRange = range;
+      fetchOptions = options;
       return { total: 0, txs: [] };
     }
   });
@@ -280,6 +282,10 @@ test('protocol Mimir backfill reuses a confirmed height range without another RP
   assert.deepEqual(fetchedRange, {
     startHeight: 27_584_001,
     endHeight: 27_597_399
+  });
+  assert.deepEqual(fetchOptions.transportOptions, {
+    sharedCooldown: true,
+    cooldownScope: 'protocol-mimir-history'
   });
 });
 

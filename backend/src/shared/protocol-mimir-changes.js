@@ -166,7 +166,7 @@ async function blockTimesFor(heights, options = {}) {
   const times = new Map();
   const fetchTime = options.fetchBlockTime || fetchNodeVotesBlockTime;
   for (const height of heights) {
-    const value = await fetchTime(height).catch(() => null);
+    const value = await fetchTime(height, options.transportOptions).catch(() => null);
     times.set(height, value);
     if (config.nodeVotesRequestDelayMs > 0) await sleep(config.nodeVotesRequestDelayMs);
   }
@@ -188,14 +188,21 @@ export async function runProtocolMimirBackfill(client, options = {}) {
     ? { startHeight: explicitStartHeight, endHeight: explicitEndHeight }
     : await resolveRange(window.startTime, window.endTime);
   const { startHeight, endHeight } = confirmedRange;
+  const transportOptions = {
+    sharedCooldown: true,
+    cooldownScope: 'protocol-mimir-history'
+  };
   const result = await fetchTxs(
     { startHeight, endHeight },
-    { eventQueries: [PROTOCOL_MIMIR_EVENT_QUERY] }
+    {
+      eventQueries: [PROTOCOL_MIMIR_EVENT_QUERY],
+      transportOptions
+    }
   );
   const heights = [...new Set(
     result.txs.map((tx) => Number(tx?.height || 0)).filter((height) => height > 0)
   )];
-  const times = await blockTimesFor(heights, options);
+  const times = await blockTimesFor(heights, { ...options, transportOptions });
   const rows = result.txs.flatMap((tx) => (
     parseProtocolMimirTxSearchTx(tx, times.get(Number(tx?.height || 0)) || null)
   ));

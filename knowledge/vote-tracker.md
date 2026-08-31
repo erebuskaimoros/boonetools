@@ -21,6 +21,11 @@ churn because those purges emit no individual `set_node_mimir` removals.
 Direct-only keys still appear in By Vote so current Mimir state has its recorded
 protocol history.
 
+Protocol Mimir `tx_search` and block-time requests use the scoped
+`protocol-mimir-history` provider cooldown lane. Upgrade-history or unrelated
+RPC failures therefore cannot suppress the authoritative Mimir catch-up in the
+same node-vote job.
+
 The current vote distribution and current effective Mimir are related but not
 interchangeable. Removing or purging enough node votes can leave a different
 vote leader without emitting a new `set_mimir`, so the effective value does not
