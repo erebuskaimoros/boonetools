@@ -1,6 +1,7 @@
 import Chart from 'chart.js/auto';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import { TERMINAL_CHART_PALETTE, terminalChartFont } from '../charts/terminal.js';
+import { poolAnalysisFeeVolumeBps } from './model.js';
 
 Chart.register(zoomPlugin);
 
@@ -8,6 +9,13 @@ const usd = new Intl.NumberFormat('en-US', {
   style: 'currency', currency: 'USD', maximumFractionDigits: 2
 });
 const rune = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
+
+function formatBps(value) {
+  if (value === null) return 'unavailable';
+  return `${new Intl.NumberFormat('en-US', {
+    maximumFractionDigits: Math.abs(value) < 10 && value !== 0 ? 2 : 0
+  }).format(value)} BPS`;
+}
 
 function compact(value) {
   const amount = Number(value);
@@ -58,9 +66,11 @@ export function renderPoolAnalysisCharts(canvas, previous, rows = [], options = 
       label() { return ''; },
       afterBody(items) {
         const row = rows[items[0]?.dataIndex] || {};
+        const feeVolumeBps = poolAnalysisFeeVolumeBps(row.feesRuneBase, row.volumeRuneBase);
         return [
           `DAILY VOLUME: ${row.volumeUsd == null ? 'unavailable' : usd.format(row.volumeUsd)}`,
           `DAILY FEES: ${row.feesUsd == null ? 'unavailable' : usd.format(row.feesUsd)}`,
+          `FEES / VOLUME: ${formatBps(feeVolumeBps)}`,
           `FEES IN RUNE: ${row.feesRune == null ? 'unavailable' : `${rune.format(row.feesRune)} ᚱ`}`,
           `CUMULATIVE FEES: ${row.cumulativeFeesUsd == null ? 'unavailable' : usd.format(row.cumulativeFeesUsd)}`,
           ...(row.partial ? ['LIVE PARTIAL UTC DAY'] : []),

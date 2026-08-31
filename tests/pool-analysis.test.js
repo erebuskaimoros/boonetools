@@ -10,6 +10,7 @@ import {
   normalizePoolAnalysisSeries,
   normalizePoolAnalysisSummary,
   poolAnalysisColumns,
+  poolAnalysisFeeVolumeBps,
   selectPoolAnalysisPeriod,
   sortPoolAnalysisRows
 } from '../src/lib/pool-analysis/model.js';
@@ -157,6 +158,13 @@ test('Pool Analysis series preserves gaps, partial state, exact RUNE, and cumula
   assert.equal(series.coverage.firstIndexedDay, '2021-04-11');
 });
 
+test('Pool Analysis derives daily chart fees per volume in basis points', () => {
+  assert.equal(poolAnalysisFeeVolumeBps('2500000', '10000000000'), 2.5);
+  assert.equal(poolAnalysisFeeVolumeBps('0', '10000000000'), 0);
+  assert.equal(poolAnalysisFeeVolumeBps('1', '0'), null);
+  assert.equal(poolAnalysisFeeVolumeBps(null, '10000000000'), null);
+});
+
 test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the excluded raw columns', async () => {
   const [app, component, chart] = await Promise.all([
     readFile(new URL('../src/App.svelte', import.meta.url), 'utf8'),
@@ -200,6 +208,8 @@ test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the exclude
   assert.match(chart, /label: 'DAILY VOLUME'/);
   assert.match(chart, /label: 'DAILY FEES'/);
   assert.match(chart, /label: 'CUMULATIVE FEES'/);
+  assert.match(chart, /FEES \/ VOLUME:/);
+  assert.match(chart, /poolAnalysisFeeVolumeBps\(row\.feesRuneBase, row\.volumeRuneBase\)/);
   assert.match(chart, /wheel: \{ enabled: false \}/);
   assert.match(chart, /pinch: \{ enabled: true \}/);
   assert.match(chart, /cumulativeFeesUsd/);

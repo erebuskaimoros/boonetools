@@ -62,6 +62,10 @@ function baseRatioPercent(numerator, denominator, multiplier = 100) {
   return (Number(top) / Number(bottom)) * multiplier;
 }
 
+export function poolAnalysisFeeVolumeBps(feesBase, volumeBase) {
+  return baseRatioPercent(feesBase, volumeBase, 10_000);
+}
+
 function normalizePeriodMetric(value = {}, period, volumeDepthScale = 1, balanceRuneBase = null) {
   const volumeDepthPercent = finite(value.volume_depth_percent);
   const periodFeesBase = baseString(value.fees_rune_e8);
