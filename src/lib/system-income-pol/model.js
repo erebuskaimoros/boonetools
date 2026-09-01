@@ -37,28 +37,50 @@ function addBase(...values) {
   return values.reduce((total, value) => total + BigInt(base(value)), 0n).toString();
 }
 
+function ratioBps(numerator, denominator) {
+  const top = optionalBase(numerator);
+  const bottom = optionalBase(denominator);
+  if (top === null || bottom === null || BigInt(bottom) <= 0n) return null;
+  return Number((BigInt(top) * 1_000_000n) / BigInt(bottom)) / 100;
+}
+
 export function e8ToNumber(value) {
   const normalized = optionalBase(value);
   return normalized === null ? null : Number(normalized) / E8;
 }
 
 function normalizeSummary(summary = {}) {
+  const systemIncomePolShareBps = finite(summary.system_income_pol_share_bps);
+  const runeHeldSystemIncomeShareBps = finite(summary.rune_held_system_income_share_bps);
   return {
     totalFundedE8: base(summary.total_funded_e8 ?? summary.funded_rune_e8),
+    totalSystemIncomeE8: optionalBase(summary.total_system_income_e8),
+    systemIncomePolShareBps,
+    systemIncomePolSharePercent: systemIncomePolShareBps === null ? null : systemIncomePolShareBps / 100,
     totalDeployedE8: base(summary.total_deployed_e8 ?? summary.deployed_rune_e8),
     undeployedRuneE8: optionalBase(summary.undeployed_rune_e8),
     totalPositionValueRuneE8: optionalBase(summary.total_position_value_rune_e8 ?? summary.position_rune_e8),
+    totalPositionValueUsdE8: optionalBase(summary.total_position_value_usd_e8),
     totalRuneHeldE8: optionalBase(summary.total_rune_held_e8),
+    totalRuneHeldUsdE8: optionalBase(summary.total_rune_held_usd_e8),
+    runeHeldSystemIncomeShareBps,
+    runeHeldSystemIncomeSharePercent: runeHeldSystemIncomeShareBps === null ? null : runeHeldSystemIncomeShareBps / 100,
     totalAssetValueRuneE8: optionalBase(summary.total_asset_value_rune_e8),
+    totalAssetValueUsdE8: optionalBase(summary.total_asset_value_usd_e8),
     totalEstimatedFeesE8: optionalBase(summary.total_estimated_fees_e8 ?? summary.estimated_fees_rune_e8),
+    totalEstimatedFeesUsdE8: optionalBase(summary.total_estimated_fees_usd_e8),
+    runePriceUsdE8: optionalBase(summary.rune_price_usd_e8),
+    feeEstimateComplete: Boolean(summary.fee_estimate_complete),
     activePoolCount: Math.max(0, Math.trunc(finite(summary.active_pool_count, 0))),
     totalFundedRune: e8ToNumber(summary.total_funded_e8 ?? summary.funded_rune_e8),
     totalDeployedRune: e8ToNumber(summary.total_deployed_e8 ?? summary.deployed_rune_e8),
     undeployedRune: e8ToNumber(summary.undeployed_rune_e8),
     totalPositionValueRune: e8ToNumber(summary.total_position_value_rune_e8 ?? summary.position_rune_e8),
+    totalPositionValueUsd: e8ToNumber(summary.total_position_value_usd_e8),
     totalRuneHeld: e8ToNumber(summary.total_rune_held_e8),
     totalAssetValueRune: e8ToNumber(summary.total_asset_value_rune_e8),
-    totalEstimatedFeesRune: e8ToNumber(summary.total_estimated_fees_e8 ?? summary.estimated_fees_rune_e8)
+    totalEstimatedFeesRune: e8ToNumber(summary.total_estimated_fees_e8 ?? summary.estimated_fees_rune_e8),
+    totalEstimatedFeesUsd: e8ToNumber(summary.total_estimated_fees_usd_e8)
   };
 }
 
@@ -76,8 +98,12 @@ function normalizePool(pool = {}) {
     assetHeldE8: optionalBase(pool.asset_held_e8 ?? pool.asset_redeem_e8),
     assetPriceRune: finite(pool.asset_price_rune),
     assetValueRuneE8: optionalBase(pool.asset_value_rune_e8),
+    assetValueUsdE8: optionalBase(pool.asset_value_usd_e8),
     positionValueRuneE8: optionalBase(pool.position_value_rune_e8 ?? pool.position_rune_e8),
+    positionValueUsdE8: optionalBase(pool.position_value_usd_e8),
     estimatedFeesE8: optionalBase(pool.estimated_fees_e8 ?? pool.estimated_fees_rune_e8),
+    estimatedFeesUsdE8: optionalBase(pool.estimated_fees_usd_e8),
+    feeEstimateComplete: Boolean(pool.fee_estimate_complete),
     rollingLiquidityFeeRuneE8: optionalBase(pool.rolling_liquidity_fee_rune_e8),
     freshness: pool.freshness && typeof pool.freshness === 'object' ? pool.freshness : {}
   };
@@ -85,14 +111,17 @@ function normalizePool(pool = {}) {
 
 function normalizeDaily(row = {}) {
   const fundedE8 = optionalBase(row.funded_e8 ?? row.funded_rune_e8);
+  const systemIncomeE8 = optionalBase(row.system_income_e8);
   const deployedE8 = optionalBase(row.deployed_e8 ?? row.deployed_rune_e8);
   const estimatedFeesE8 = optionalBase(row.estimated_fees_e8 ?? row.estimated_fees_rune_e8);
   return {
     day: utcDay(row.day),
     fundedE8,
+    systemIncomeE8,
     deployedE8,
     estimatedFeesE8,
     cumulativeFundedE8: optionalBase(row.cumulative_funded_e8),
+    cumulativeSystemIncomeE8: optionalBase(row.cumulative_system_income_e8),
     cumulativeDeployedE8: optionalBase(row.cumulative_deployed_e8),
     fundedRune: e8ToNumber(fundedE8),
     deployedRune: e8ToNumber(deployedE8),
@@ -136,6 +165,7 @@ export function applySystemIncomePolHead(payload = {}, head = {}) {
   if (height <= throughHeight || height <= 0) return payload;
 
   const rewardE8 = base(head.pol_reserve_reward_e8);
+  const systemIncomeE8 = optionalBase(head.system_income_e8);
   const deployments = (Array.isArray(head.pol_reserve_deployments) ? head.pol_reserve_deployments : [])
     .map((deployment) => ({
       asset: String(deployment?.asset || deployment?.pool || '').trim(),
@@ -146,6 +176,17 @@ export function applySystemIncomePolHead(payload = {}, head = {}) {
   const deployedE8 = addBase(...deployments.map((deployment) => deployment.runeE8));
   const summary = { ...(payload.summary || {}) };
   summary.total_funded_e8 = addBase(summary.total_funded_e8 ?? summary.funded_rune_e8, rewardE8);
+  summary.total_system_income_e8 = summary.total_system_income_e8 == null || systemIncomeE8 === null
+    ? null
+    : addBase(summary.total_system_income_e8, systemIncomeE8);
+  summary.system_income_pol_share_bps = ratioBps(
+    summary.total_funded_e8,
+    summary.total_system_income_e8
+  );
+  summary.rune_held_system_income_share_bps = ratioBps(
+    summary.total_rune_held_e8,
+    summary.total_system_income_e8
+  );
   summary.total_deployed_e8 = addBase(summary.total_deployed_e8 ?? summary.deployed_rune_e8, deployedE8);
   const pools = (Array.isArray(payload.pools) ? payload.pools : []).map((pool) => ({ ...pool }));
   for (const deployment of deployments) {
@@ -163,13 +204,21 @@ export function applySystemIncomePolHead(payload = {}, head = {}) {
   if (day) {
     let row = daily.find((candidate) => utcDay(candidate.day) === day);
     if (!row) {
-      row = { day, funded_e8: '0', deployed_e8: '0', estimated_fees_e8: null, partial: true };
+      row = { day, funded_e8: '0', system_income_e8: '0', deployed_e8: '0', estimated_fees_e8: null, partial: true };
       daily.push(row);
     }
     row.funded_e8 = addBase(row.funded_e8 ?? row.funded_rune_e8, rewardE8);
+    row.system_income_e8 = row.system_income_e8 == null || systemIncomeE8 === null
+      ? null
+      : addBase(row.system_income_e8, systemIncomeE8);
     row.deployed_e8 = addBase(row.deployed_e8 ?? row.deployed_rune_e8, deployedE8);
     if (row.cumulative_funded_e8 !== undefined && row.cumulative_funded_e8 !== null) {
       row.cumulative_funded_e8 = addBase(row.cumulative_funded_e8, rewardE8);
+    }
+    if (row.cumulative_system_income_e8 !== undefined && row.cumulative_system_income_e8 !== null) {
+      row.cumulative_system_income_e8 = systemIncomeE8 === null
+        ? null
+        : addBase(row.cumulative_system_income_e8, systemIncomeE8);
     }
     if (row.cumulative_deployed_e8 !== undefined && row.cumulative_deployed_e8 !== null) {
       row.cumulative_deployed_e8 = addBase(row.cumulative_deployed_e8, deployedE8);
@@ -260,6 +309,34 @@ export function formatE8Rune(value, compact = false) {
 
 export function formatE8Asset(value) {
   return formatE8(value, { maximumFractionDigits: 6 });
+}
+
+export function formatE8Usd(value, compact = false) {
+  const formatted = formatE8(value, {
+    compact,
+    minimumFractionDigits: compact ? 0 : 2,
+    maximumFractionDigits: 2
+  });
+  return formatted === '—' ? formatted : `$${formatted}`;
+}
+
+export function buildSystemIncomePolAssetInventory(summary = {}, pools = []) {
+  const inventory = [{
+    asset: 'THOR.RUNE',
+    ticker: 'RUNE',
+    amountE8: summary.totalRuneHeldE8,
+    valueUsdE8: summary.totalRuneHeldUsdE8
+  }];
+  for (const pool of pools) {
+    if (pool.assetHeldE8 === null) continue;
+    inventory.push({
+      asset: pool.asset,
+      ticker: String(pool.asset || '').split('.')[1]?.split('-')[0] || String(pool.asset || ''),
+      amountE8: pool.assetHeldE8,
+      valueUsdE8: pool.assetValueUsdE8
+    });
+  }
+  return inventory;
 }
 
 export function formatPercent(value) {

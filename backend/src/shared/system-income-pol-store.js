@@ -13,23 +13,25 @@ export async function saveSystemIncomePolBlocks(client, blocks = []) {
     height: Math.max(1, Math.trunc(Number(row.height)) || 1),
     block_time: iso(row.blockTime ?? row.block_time),
     reward_e8: row.rewardE8 ?? row.reward_e8 ?? null,
+    system_income_e8: row.systemIncomeE8 ?? row.system_income_e8 ?? null,
     deployments: row.deployments || [],
     pool_fees: row.poolFees ?? row.pool_fees ?? [],
     source: String(row.source || 'liquify-ws')
   }));
   const result = await client.query(
     `insert into system_income_pol_blocks as current (
-       height, block_time, reward_e8, deployments, pool_fees, source
+       height, block_time, reward_e8, system_income_e8, deployments, pool_fees, source
      )
-     select incoming.height, incoming.block_time, incoming.reward_e8,
+     select incoming.height, incoming.block_time, incoming.reward_e8, incoming.system_income_e8,
             incoming.deployments, incoming.pool_fees, incoming.source
      from jsonb_to_recordset($1::jsonb) as incoming (
-       height bigint, block_time timestamptz, reward_e8 numeric,
+       height bigint, block_time timestamptz, reward_e8 numeric, system_income_e8 numeric,
        deployments jsonb, pool_fees jsonb, source text
      )
      on conflict (height) do update set
        block_time = excluded.block_time,
        reward_e8 = excluded.reward_e8,
+       system_income_e8 = excluded.system_income_e8,
        deployments = excluded.deployments,
        pool_fees = excluded.pool_fees,
        source = case when excluded.source = 'liquify-ws' then excluded.source else current.source end,
@@ -69,12 +71,15 @@ export async function compactSystemIncomePolEvents(client, options = {}) {
     `with source as (
        select height, block_time,
               coalesce(reward_e8, 0) as funded_e8,
+              system_income_e8,
               deployments
        from system_income_pol_blocks
        where height >= $1 and height <= $2
      ), aggregated as (
        select (block_time at time zone 'UTC')::date as day,
               sum(funded_e8) as funded_e8,
+              case when count(*) filter (where system_income_e8 is null) > 0 then null
+                   else sum(system_income_e8) end as system_income_e8,
               coalesce(sum((select sum(coalesce(item->>'runeE8', item->>'rune_e8')::numeric)
                             from jsonb_array_elements(coalesce(deployments, '[]'::jsonb)) item)), 0) as deployed_e8,
               case when count(*) filter (where exists (
@@ -92,16 +97,17 @@ export async function compactSystemIncomePolEvents(client, options = {}) {
        group by (block_time at time zone 'UTC')::date
      )
      insert into system_income_pol_daily as current (
-       day, funded_e8, deployed_e8, minted_units_e8, first_height, last_height,
+       day, funded_e8, system_income_e8, deployed_e8, minted_units_e8, first_height, last_height,
        observed_blocks, expected_blocks, partial, source_updated_at
      )
-     select day, funded_e8, deployed_e8, minted_units_e8, first_height, last_height,
+     select day, funded_e8, system_income_e8, deployed_e8, minted_units_e8, first_height, last_height,
             observed_blocks, expected_blocks,
             observed_blocks < expected_blocks or day = (now() at time zone 'UTC')::date,
             source_updated_at
      from aggregated
      on conflict (day) do update set
        funded_e8 = excluded.funded_e8,
+       system_income_e8 = excluded.system_income_e8,
        deployed_e8 = excluded.deployed_e8,
        minted_units_e8 = excluded.minted_units_e8,
        first_height = excluded.first_height,
@@ -229,6 +235,7 @@ export async function saveSystemIncomePolPositions(client, positions = [], meta 
       activationHeight: meta.activationHeight,
       moduleAddress: meta.moduleAddress,
       undeployedRuneE8: meta.undeployedRuneE8,
+      runePriceUsdE8: meta.runePriceUsdE8,
       positionsUpdatedAt: meta.observedAt,
       stats: { positions: result.rowCount || rows.length }
     });
@@ -240,6 +247,7 @@ export async function saveSystemIncomePolPositions(client, positions = [], meta 
     activationHeight: meta.activationHeight,
     moduleAddress: meta.moduleAddress,
     undeployedRuneE8: meta.undeployedRuneE8,
+    runePriceUsdE8: meta.runePriceUsdE8,
     positionsUpdatedAt: meta.observedAt,
     stats: { positions: 0 }
   });
@@ -269,17 +277,10 @@ export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
        group by asset, (observed_at at time zone 'UTC')::date
      ), activation as (
        select min(block_time) as activated_at from system_income_pol_blocks
-     ), deployment_days as (
-       select distinct item->>'asset' as asset,
-              (blocks.block_time at time zone 'UTC')::date as day
-       from system_income_pol_blocks blocks
-       cross join lateral jsonb_array_elements(coalesce(blocks.deployments, '[]'::jsonb)) item
-       where coalesce(item->>'asset', '') <> ''
      ), estimates as (
        select fees.asset, fees.day, fees.fees_rune_e8,
               case
                 when fees.day = (activation.activated_at at time zone 'UTC')::date then null
-                when deployment_days.asset is not null then null
                 when weighted.covered_seconds < 0.95 * extract(epoch from (
                   least((fees.day + 1)::timestamptz, $1::timestamptz)
                   - greatest(fees.day::timestamptz, activation.activated_at)
@@ -288,7 +289,6 @@ export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
               end as estimated_fees_e8,
               case
                 when fees.day = (activation.activated_at at time zone 'UTC')::date
-                  or deployment_days.asset is not null
                   or weighted.covered_seconds < 0.95 * extract(epoch from (
                     least((fees.day + 1)::timestamptz, $1::timestamptz)
                     - greatest(fees.day::timestamptz, activation.activated_at)
@@ -297,7 +297,6 @@ export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
               end as fee_share_ppm,
               case when weighted.share is null
                      or fees.day = (activation.activated_at at time zone 'UTC')::date
-                     or deployment_days.asset is not null
                      or weighted.covered_seconds < 0.95 * extract(epoch from (
                        least((fees.day + 1)::timestamptz, $1::timestamptz)
                        - greatest(fees.day::timestamptz, activation.activated_at)
@@ -308,8 +307,6 @@ export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
        from pool_analysis_daily fees
        join weighted on weighted.asset = fees.asset and weighted.day = fees.day
        cross join activation
-       left join deployment_days
-         on deployment_days.asset = fees.asset and deployment_days.day = fees.day
        where fees.fees_rune_e8 is not null
      )
      insert into system_income_pol_pool_daily as current (
@@ -350,13 +347,14 @@ export async function updateSystemIncomePolState(client, input = {}) {
   );
   await client.query(
     `insert into system_income_pol_state as current (
-       state_key, module_address, undeployed_rune_e8, activation_height,
+       state_key, module_address, undeployed_rune_e8, rune_price_usd_e8, activation_height,
        last_event_height, events_updated_at, positions_updated_at,
        fees_updated_at, last_error, stats_json
-     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
      on conflict (state_key) do update set
        module_address = case when excluded.module_address <> '' then excluded.module_address else current.module_address end,
        undeployed_rune_e8 = coalesce(excluded.undeployed_rune_e8, current.undeployed_rune_e8),
+       rune_price_usd_e8 = coalesce(excluded.rune_price_usd_e8, current.rune_price_usd_e8),
        activation_height = least(current.activation_height, excluded.activation_height),
        last_event_height = greatest(current.last_event_height, excluded.last_event_height),
        events_updated_at = coalesce(excluded.events_updated_at, current.events_updated_at),
@@ -369,6 +367,7 @@ export async function updateSystemIncomePolState(client, input = {}) {
       SYSTEM_INCOME_POL_STATE_KEY,
       String(input.moduleAddress || ''),
       input.undeployedRuneE8 ?? null,
+      input.runePriceUsdE8 ?? null,
       activationHeight,
       Math.max(0, Math.trunc(Number(input.lastEventHeight)) || 0),
       iso(input.eventsUpdatedAt),
@@ -382,7 +381,8 @@ export async function updateSystemIncomePolState(client, input = {}) {
 
 export async function loadSystemIncomePolDaily(client) {
   const { rows } = await client.query(
-    `select day::text as day, funded_e8::text, deployed_e8::text, minted_units_e8::text,
+    `select day::text as day, funded_e8::text, system_income_e8::text,
+            deployed_e8::text, minted_units_e8::text,
             first_height::text, last_height::text, observed_blocks, expected_blocks,
             partial, source_updated_at
      from system_income_pol_daily order by day`
@@ -415,7 +415,7 @@ export async function loadSystemIncomePolPositions(client) {
 
 export async function getSystemIncomePolState(client) {
   const { rows } = await client.query(
-    `select state_key, module_address, undeployed_rune_e8::text,
+    `select state_key, module_address, undeployed_rune_e8::text, rune_price_usd_e8::text,
             activation_height::text, last_event_height::text,
             events_updated_at, positions_updated_at, fees_updated_at,
             last_error, stats_json, updated_at
@@ -428,7 +428,8 @@ export async function getSystemIncomePolState(client) {
 export async function loadSystemIncomePolLiveOverlay(client, afterHeight) {
   const baselineHeight = Math.max(0, Math.trunc(Number(afterHeight)) || 0);
   const { rows } = await client.query(
-    `select height::text, block_time, system_income_pol_reward_e8::text,
+    `select height::text, block_time, system_income_total_e8::text,
+            system_income_pol_reward_e8::text,
             system_income_pol_deployments
      from chain_block_headers
      where height > $1::bigint and system_income_pol_observed
@@ -436,9 +437,13 @@ export async function loadSystemIncomePolLiveOverlay(client, afterHeight) {
     [baselineHeight]
   );
   let reward = 0n;
+  let systemIncome = 0n;
+  let systemIncomeComplete = true;
   const byAsset = new Map();
   for (const row of rows) {
     reward += BigInt(row.system_income_pol_reward_e8 || '0');
+    if (row.system_income_total_e8 == null) systemIncomeComplete = false;
+    else systemIncome += BigInt(row.system_income_total_e8);
     for (const item of Array.isArray(row.system_income_pol_deployments)
       ? row.system_income_pol_deployments : []) {
       const asset = String(item.asset || '');
@@ -454,6 +459,7 @@ export async function loadSystemIncomePolLiveOverlay(client, afterHeight) {
   const latest = rows.at(-1) || {};
   return {
     reward_e8: reward.toString(),
+    system_income_e8: systemIncomeComplete ? systemIncome.toString() : null,
     deployments: [...byAsset.values()].map((row) => ({
       asset: row.asset,
       rune_e8: row.rune_e8.toString(),

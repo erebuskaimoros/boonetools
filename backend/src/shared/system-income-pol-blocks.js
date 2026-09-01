@@ -48,6 +48,28 @@ function feeCounts(events = []) {
   return counts;
 }
 
+const SYSTEM_INCOME_REWARD_KEYS = new Set([
+  'bond_reward',
+  'dev_fund_reward',
+  'income_burn',
+  'tcy_stake_reward',
+  'marketing_fund_reward',
+  'pol_reserve_reward'
+]);
+
+function systemIncomeFromRewards(attributes = {}) {
+  let observed = false;
+  let total = 0n;
+  for (const [key, value] of Object.entries(attributes)) {
+    if (!SYSTEM_INCOME_REWARD_KEYS.has(key) && !key.includes('.')) continue;
+    const amount = integerString(value);
+    if (amount === null) continue;
+    observed = true;
+    total += BigInt(amount);
+  }
+  return observed ? total : null;
+}
+
 export function collectSystemIncomePolEvents(data = {}) {
   const finalize = data?.result_finalize_block || data?.result_end_block || data?.result || data;
   const finalizeEvents = Array.isArray(finalize?.events)
@@ -67,6 +89,7 @@ export function collectSystemIncomePolEvents(data = {}) {
 export function parseSystemIncomePolEvents(events = [], options = {}) {
   const decoded = (Array.isArray(events) ? events : []).map(decodedEvent);
   let reward = null;
+  let systemIncome = null;
   const adds = [];
   const deployments = [];
 
@@ -75,6 +98,10 @@ export function parseSystemIncomePolEvents(events = [], options = {}) {
     if (current.type === 'rewards') {
       const amount = integerString(current.attributes.pol_reserve_reward);
       if (amount !== null) reward = (BigInt(reward || '0') + BigInt(amount)).toString();
+      const eventSystemIncome = systemIncomeFromRewards(current.attributes);
+      if (eventSystemIncome !== null) {
+        systemIncome = (BigInt(systemIncome || '0') + eventSystemIncome).toString();
+      }
     } else if (current.type === 'add_liquidity') {
       const runeE8 = integerString(current.attributes.rune_amount);
       const assetE8 = integerString(current.attributes.asset_amount);
@@ -136,6 +163,7 @@ export function parseSystemIncomePolEvents(events = [], options = {}) {
   return {
     observed: true,
     rewardE8: reward,
+    systemIncomeE8: systemIncome,
     deployments,
     poolFees: [...feesByPool.entries()].map(([asset, feeE8]) => ({
       asset,

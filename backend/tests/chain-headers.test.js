@@ -50,6 +50,7 @@ test('chain header parser extracts the live timing and compact event hints', () 
     block_hash: 'HASH123',
     has_swap_events: true,
     income_burn_e8: null,
+    system_income_e8: null,
     pol_reserve_reward_e8: null,
     pol_reserve_deployments: [],
     pol_reserve_pool_fees: [],
@@ -128,6 +129,7 @@ test('header upsert recalculates intervals around inserted ranges', async () => 
       blockTime: '2026-08-05T12:00:06Z',
       hasSwapEvents: true,
       systemIncomePolObserved: true,
+      systemIncomeTotalE8: '19',
       systemIncomePolRewardE8: '7',
       systemIncomePolDeployments: [{ asset: 'BTC.BTC', runeE8: '5', unitsE8: '2' }],
       systemIncomePolPoolFees: [{ asset: 'BTC.BTC', feeE8: '3' }]
@@ -138,11 +140,12 @@ test('header upsert recalculates intervals around inserted ranges', async () => 
   assert.equal(stored.length, 2);
   assert.equal(stored[1].intervalMs, 6000);
   assert.match(queries[0].sql, /on conflict \(height\) do update/i);
-  assert.equal(typeof queries[0].params[18], 'string');
-  assert.deepEqual(JSON.parse(queries[0].params[18]), [{
+  assert.equal(queries[0].params[17], '19');
+  assert.equal(typeof queries[0].params[20], 'string');
+  assert.deepEqual(JSON.parse(queries[0].params[20]), [{
     asset: 'BTC.BTC', runeE8: '5', unitsE8: '2', runeAddress: ''
   }]);
-  assert.deepEqual(JSON.parse(queries[0].params[19]), [{ asset: 'BTC.BTC', feeE8: '3' }]);
+  assert.deepEqual(JSON.parse(queries[0].params[21]), [{ asset: 'BTC.BTC', feeE8: '3' }]);
   assert.match(queries[1].sql, /previous\.height = current\.height - 1/i);
   assert.deepEqual(queries[1].params, [100, 102]);
 });

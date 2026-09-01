@@ -365,9 +365,12 @@ missing day, then exits unsuccessfully so systemd retries it every 15 minutes.
 old rows cannot reset the dashboard to healthy; `target_end_date`, coverage,
 warnings, and `stale` expose the gap until the target day succeeds.
 
-Migration `054_system_income_pol.sql` adds the block-live System Income POL
+Migrations `054_system_income_pol.sql` and
+`055_system_income_pol_headlines.sql` add the block-live System Income POL
 ledger, daily and per-pool rollups, current positions, ownership samples, and
-sync state. `boonetools-system-income-pol.timer` repairs missing block results
+sync state. The latter enriches finalized reward events with the exact total
+system-income denominator and persists the shared core RUNE/USD price for the
+headline and position USD values. `boonetools-system-income-pol.timer` repairs missing block results
 from the activation height and publishes `system-income-pol:v1` every two
 minutes. The chain listener writes live reward/deployment events continuously;
 the scheduler reconciles the `pol_reserve` module balance and deposited-pool LP

@@ -31,7 +31,7 @@ function rpcHead(payload = {}) {
 async function ensureHeaderRange(client, startHeight, endHeight, options = {}) {
   const existing = await client.query(
     `select height, block_hash, block_time, has_swap_events, source,
-            system_income_burn_e8, system_income_pol_observed,
+            system_income_burn_e8, system_income_total_e8, system_income_pol_observed,
             system_income_pol_reward_e8, system_income_pol_deployments,
             system_income_pol_pool_fees
      from chain_block_headers where height between $1 and $2`,
@@ -56,7 +56,7 @@ async function ensureHeaderRange(client, startHeight, endHeight, options = {}) {
   if (headers.length) await upsertChainHeaders(client, headers);
   const resolved = await client.query(
     `select height, block_hash, block_time, has_swap_events, source,
-            system_income_burn_e8, system_income_pol_observed,
+            system_income_burn_e8, system_income_total_e8, system_income_pol_observed,
             system_income_pol_reward_e8, system_income_pol_deployments,
             system_income_pol_pool_fees
      from chain_block_headers where height between $1 and $2 order by height`,
@@ -79,16 +79,9 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
   if (headHeight < activationHeight) {
     return { activationHeight, headHeight, requested: 0, repaired: 0, complete: true };
   }
-  const stateResult = await client.query(
-    `select last_event_height::text
-     from system_income_pol_state where state_key = 'system-income-pol:v1'`,
-    []
-  );
-  const durableCursor = Math.max(
-    activationHeight - 1,
-    Math.trunc(Number(stateResult.rows[0]?.last_event_height)) || activationHeight - 1
-  );
-  const repairStartHeight = Math.min(headHeight, Math.max(activationHeight, durableCursor + 1));
+  // Revisit the full activation range so schema upgrades can enrich durable
+  // legacy rows without discarding the already-captured funding ledger.
+  const repairStartHeight = activationHeight;
   const limit = Math.max(
     1,
     Math.trunc(Number(options.limit)) || config.systemIncomePolRepairBlocksPerRun
@@ -97,7 +90,7 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
     `select candidate.height::bigint
      from generate_series($1::bigint, $2::bigint) candidate(height)
      left join system_income_pol_blocks blocks on blocks.height = candidate.height
-     where blocks.height is null
+     where blocks.height is null or blocks.system_income_e8 is null
      order by candidate.height
      limit $3`,
     [repairStartHeight, headHeight, limit]
@@ -128,6 +121,7 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
         height,
         blockTime: header.block_time,
         rewardE8: parsed.rewardE8,
+        systemIncomeE8: parsed.systemIncomeE8,
         deployments: parsed.deployments,
         poolFees: parsed.poolFees,
         source: 'liquify-rpc-repair',
@@ -144,6 +138,7 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
     hasSwapEvents: block.header.has_swap_events,
     source: block.header.source,
     incomeBurnE8: block.header.system_income_burn_e8,
+    systemIncomeTotalE8: block.parsed.systemIncomeE8,
     systemIncomePolObserved: true,
     systemIncomePolRewardE8: block.parsed.rewardE8,
     systemIncomePolDeployments: block.parsed.deployments,
@@ -153,7 +148,7 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
     `select exists (
        select 1 from generate_series($1::bigint, $2::bigint) candidate(height)
        left join system_income_pol_blocks blocks on blocks.height = candidate.height
-       where blocks.height is null
+       where blocks.height is null or blocks.system_income_e8 is null
      ) as missing`,
     [repairStartHeight, headHeight]
   );

@@ -6,9 +6,11 @@
   import {
     SYSTEM_INCOME_POL_RANGES,
     applySystemIncomePolHead,
+    buildSystemIncomePolAssetInventory,
     buildSystemIncomePolChart,
     formatE8Asset,
     formatE8Rune,
+    formatE8Usd,
     formatPercent,
     normalizeSystemIncomePolPayload,
     selectSystemIncomePolRange
@@ -30,6 +32,7 @@
   $: rows = selectSystemIncomePolRange(dashboard.daily, rangeId);
   $: chart = buildSystemIncomePolChart(rows);
   $: coverage = dashboard.coverage;
+  $: assetInventory = buildSystemIncomePolAssetInventory(dashboard.summary, dashboard.pools);
   $: latestDay = dashboard.daily.at(-1) || null;
 
   async function load(forceRefresh = false) {
@@ -178,39 +181,33 @@
   <section class="metric-grid" aria-label="System Income POL summary">
     <article class="metric metric--accent">
       <span class="metric-index">01</span>
-      <span class="metric-label">SYSTEM INCOME FUNDED</span>
-      <strong>{formatE8Rune(dashboard.summary.totalFundedE8, true)}</strong>
-      <small>RUNE · EXACT BLOCK FLOW</small>
+      <span class="metric-label">POL TVL</span>
+      <strong>{formatE8Usd(dashboard.summary.totalPositionValueUsdE8, true)}</strong>
+      <small>CURRENT LP POSITION VALUE</small>
     </article>
     <article class="metric">
       <span class="metric-index">02</span>
-      <span class="metric-label">DEPLOYED TO POOLS</span>
+      <span class="metric-label">RUNE DEPOSITED</span>
       <strong>{formatE8Rune(dashboard.summary.totalDeployedE8, true)}</strong>
-      <small>RUNE · {dashboard.summary.activePoolCount} ACTIVE POOLS</small>
-    </article>
-    <article class="metric">
-      <span class="metric-index">03</span>
-      <span class="metric-label">UNDEPLOYED</span>
-      <strong>{formatE8Rune(dashboard.summary.undeployedRuneE8, true)}</strong>
-      <small>RUNE · POL_RESERVE MODULE</small>
-    </article>
-    <article class="metric metric--position">
-      <span class="metric-index">04</span>
-      <span class="metric-label">CURRENT POSITION VALUE</span>
-      <strong>{formatE8Rune(dashboard.summary.totalPositionValueRuneE8, true)}</strong>
-      <small>RUNE · RECONCILED OWNERSHIP</small>
-    </article>
-    <article class="metric">
-      <span class="metric-index">05</span>
-      <span class="metric-label">ASSETS HELD</span>
-      <strong>{formatE8Rune(dashboard.summary.totalAssetValueRuneE8, true)}</strong>
-      <small>RUNE VALUE · EXTERNAL ASSET LEGS</small>
+      <small>TOTAL · EXACT BLOCK FLOW</small>
     </article>
     <article class="metric metric--fees">
-      <span class="metric-index">06</span>
-      <span class="metric-label">ESTIMATED FEES EARNED</span>
-      <strong>{formatE8Rune(dashboard.summary.totalEstimatedFeesE8, true)}</strong>
-      <small>RUNE · OWNERSHIP-WEIGHTED SWAP FEES</small>
+      <span class="metric-index">03</span>
+      <span class="metric-label">EST. FEES EARNED</span>
+      <strong>{formatE8Usd(dashboard.summary.totalEstimatedFeesUsdE8, true)}</strong>
+      <small>{dashboard.summary.feeEstimateComplete ? 'OWNERSHIP-WEIGHTED · COMPLETE' : 'KNOWN COVERAGE · PARTIAL ESTIMATE'}</small>
+    </article>
+    <article class="metric">
+      <span class="metric-index">04</span>
+      <span class="metric-label">SYSTEM INCOME → POL</span>
+      <strong>{formatPercent(dashboard.summary.systemIncomePolSharePercent)}</strong>
+      <small>{formatE8Rune(dashboard.summary.totalFundedE8, true)} RUNE OF SYSTEM INCOME</small>
+    </article>
+    <article class="metric metric--position">
+      <span class="metric-index">05</span>
+      <span class="metric-label">RUNE “BURNED”</span>
+      <strong>{formatE8Rune(dashboard.summary.totalRuneHeldE8, true)}</strong>
+      <small>RUNE HELD · {formatPercent(dashboard.summary.runeHeldSystemIncomeSharePercent)} OF SYSTEM INCOME</small>
     </article>
   </section>
 
@@ -223,11 +220,32 @@
     </section>
   {/if}
 
+  <section class="panel asset-panel" aria-labelledby="assets-title">
+    <div class="panel-heading">
+      <div>
+        <h2 id="assets-title">CURRENT ASSETS HELD BY POL</h2>
+        <p>Redeemable LP inventory at the latest position reconciliation.</p>
+      </div>
+      <span class="panel-meta">{assetInventory.length} ASSETS · {displayTimestamp(dashboard.freshness.positions_as_of)}</span>
+    </div>
+    <div class="asset-grid">
+      {#each assetInventory as asset}
+        <article>
+          <span>{asset.asset}</span>
+          <strong>{asset.ticker === 'RUNE' ? formatE8Rune(asset.amountE8) : formatE8Asset(asset.amountE8)}</strong>
+          <small>{asset.ticker} · {formatE8Usd(asset.valueUsdE8)}</small>
+        </article>
+      {:else}
+        <p class="empty">NO CURRENT POL ASSETS OBSERVED</p>
+      {/each}
+    </div>
+  </section>
+
   <section class="panel" aria-labelledby="positions-title">
     <div class="panel-heading">
       <div>
         <span class="section-index">[01]</span>
-        <h2 id="positions-title">CURRENT POOL POSITIONS + ASSETS HELD</h2>
+        <h2 id="positions-title">CURRENT POOL POSITIONS</h2>
         <p>LP ownership and redeemable pool legs. Deployments update per block; values reconcile with the current pool snapshot.</p>
       </div>
       <span class="panel-meta">{dashboard.pools.length} POOLS · {displayTimestamp(dashboard.freshness.positions_as_of)}</span>
@@ -237,11 +255,11 @@
         <thead>
           <tr>
             <th>POOL</th>
-            <th>GROSS DEPLOYED</th>
+            <th>POSITION VALUE</th>
             <th>POL SHARE</th>
             <th>RUNE HELD</th>
             <th>ASSET HELD</th>
-            <th>POSITION VALUE</th>
+            <th>GROSS DEPLOYED</th>
             <th>EST. FEES</th>
           </tr>
         </thead>
@@ -252,12 +270,12 @@
                 <strong>{pool.asset}</strong>
                 <small>{pool.status || 'UNKNOWN'}</small>
               </td>
-              <td class="accent">{formatE8Rune(pool.runeDepositedE8)} <small>RUNE</small></td>
+              <td class="accent">{formatE8Usd(pool.positionValueUsdE8)} <small>USD · CURRENT</small></td>
               <td>{formatPercent(pool.sharePercent)} <small>{pool.shareBps === null ? '—' : `${pool.shareBps.toLocaleString('en-US')} BPS`}</small></td>
               <td>{formatE8Rune(pool.runeHeldE8)} <small>RUNE</small></td>
               <td>{formatE8Asset(pool.assetHeldE8)} <small>{assetTicker(pool.asset)}</small></td>
-              <td>{formatE8Rune(pool.positionValueRuneE8)} <small>RUNE</small></td>
-              <td class="fee">{formatE8Rune(pool.estimatedFeesE8)} <small>RUNE · EST.</small></td>
+              <td>{formatE8Rune(pool.runeDepositedE8)} <small>RUNE</small></td>
+              <td class="fee">{formatE8Usd(pool.estimatedFeesUsdE8)} <small>USD · EST.</small></td>
             </tr>
           {:else}
             <tr><td class="empty" colspan="7">NO SYSTEM INCOME POL POSITIONS OBSERVED</td></tr>
@@ -417,7 +435,7 @@
   :global(.sipol-shell > .terminal-alert) { max-width: 1440px; margin-left: auto; margin-right: auto; }
   .metric-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     max-width: 1440px;
     margin: 0 auto 14px;
     border: 1px solid var(--term-border);
@@ -428,10 +446,8 @@
     min-height: 112px;
     padding: 17px 18px;
     border-right: 1px solid var(--term-border);
-    border-bottom: 1px solid var(--term-border);
   }
-  .metric:nth-child(3n) { border-right: 0; }
-  .metric:nth-child(n+4) { border-bottom: 0; }
+  .metric:last-child { border-right: 0; }
   .metric:hover { background: var(--term-surface-hover); }
   .metric-index { position: absolute; top: 10px; right: 11px; color: var(--term-green); font-size: 9px; }
   .metric-label { display: block; margin-bottom: 12px; color: var(--term-text-4); }
@@ -473,6 +489,28 @@
   .section-index { position: absolute; left: 0; top: 2px; }
   h2 { margin: 0 0 5px; color: var(--term-text); font: 700 13px/1.2 'JetBrains Mono', monospace; letter-spacing: .07em; }
   .panel-meta { color: var(--term-text-5); font-size: 11px; white-space: nowrap; }
+  .asset-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  }
+  .asset-grid article {
+    min-height: 96px;
+    padding: 15px 18px;
+    border-right: 1px solid var(--term-border-faint);
+  }
+  .asset-grid article:last-child { border-right: 0; }
+  .asset-grid span, .asset-grid small {
+    display: block;
+    color: var(--term-text-5);
+    font-size: 10px;
+    letter-spacing: .08em;
+  }
+  .asset-grid strong {
+    display: block;
+    margin: 9px 0 6px;
+    color: var(--term-green);
+    font-size: 23px;
+  }
   .table-scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font: 12px/1.4 'JetBrains Mono', monospace; }
   th, td { padding: 11px 14px; border-bottom: 1px solid var(--term-border-faint); text-align: right; white-space: nowrap; }
@@ -525,6 +563,9 @@
     .freshness-strip > div:last-child { border-bottom: 0; }
     .metric { border-right: 0; border-bottom: 1px solid var(--term-border) !important; }
     .metric:last-child { border-bottom: 0 !important; }
+    .asset-grid { grid-template-columns: 1fr; }
+    .asset-grid article { border-right: 0; border-bottom: 1px solid var(--term-border-faint); }
+    .asset-grid article:last-child { border-bottom: 0; }
     .coverage-grid { grid-template-columns: 1fr; }
     .deployment-tape { grid-template-columns: auto auto; }
     .deployment-tape small { text-align: left; }

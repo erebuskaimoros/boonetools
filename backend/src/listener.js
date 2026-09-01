@@ -432,6 +432,7 @@ async function processConsolidatedBlock(data) {
     const storedHeader = await upsertChainHeader(client, {
       ...parsed.header,
       incomeBurnE8: parsed.incomeBurnE8,
+      systemIncomeTotalE8: parsed.systemIncomePol.systemIncomeE8,
       systemIncomePolObserved: parsed.systemIncomePol.observed,
       systemIncomePolRewardE8: parsed.systemIncomePol.rewardE8,
       systemIncomePolDeployments: parsed.systemIncomePol.deployments,
@@ -443,6 +444,7 @@ async function processConsolidatedBlock(data) {
         height: storedHeader.height,
         blockTime: storedHeader.blockTime,
         rewardE8: parsed.systemIncomePol.rewardE8,
+        systemIncomeE8: parsed.systemIncomePol.systemIncomeE8,
         deployments: parsed.systemIncomePol.deployments,
         poolFees: parsed.systemIncomePol.poolFees,
         source: 'liquify-ws'

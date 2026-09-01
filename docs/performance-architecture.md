@@ -64,14 +64,17 @@ solely for reconciliation and is not selected into the read model. The latest
 pool breakdown derives each legacy Reserve POL value with THORNode's rounded
 safe-share formula and requires the pool sum to equal `runepool.pol.value`.
 
-System Income POL uses migration `054_system_income_pol.sql`. The consolidated
+System Income POL uses migrations `054_system_income_pol.sql` and
+`055_system_income_pol_headlines.sql`. The consolidated
 listener persists exact `rewards.pol_reserve_reward`, `pol_reserve_deploy`, and
 paired internal `add_liquidity` units in a durable per-height ledger and emits
-a compact block overlay through `/chain-events`. Its two-minute publisher
+a compact block overlay through `/chain-events`. The finalized `rewards` event
+also supplies the exact total-system-income denominator. Its two-minute publisher
 repairs missing RPC block results from the activation height, compacts UTC flow
 history, consumes the shared two-minute core pool snapshot, and makes only the
 feature-specific module-balance and deposited-pool LP calls. Position samples
-time-weight ownership against canonical `pool_analysis_daily` fees; incomplete
+time-weight ownership against canonical `pool_analysis_daily` fees and the core
+network RUNE price produces provider-free USD values; incomplete pool-day
 ownership coverage remains null. `/pol-tracker` reads only Postgres and overlays
 committed blocks newer than `system-income-pol:v1`.
 

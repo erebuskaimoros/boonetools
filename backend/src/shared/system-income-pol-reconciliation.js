@@ -97,7 +97,10 @@ export async function reconcileSystemIncomePolState(client, options = {}) {
   const core = await getCore({ client, allowStale: true });
   const pools = coreSnapshotValue(core, 'pools', []);
   const lastblock = coreSnapshotValue(core, 'lastblock', []);
+  const network = coreSnapshotValue(core, 'network', {});
   if (!Array.isArray(pools)) throw new Error('SIPOL reconciliation requires thornode-core pools');
+  const runePriceUsdE8 = integer(network?.rune_price_in_tor);
+  if (runePriceUsdE8 <= 0n) throw new Error('SIPOL reconciliation requires a current THORNode RUNE price');
   const module = await fetchThor('/thorchain/balance/module/pol_reserve', {
     cooldownClient: client,
     timeoutMs: config.systemIncomePolTimeoutMs
@@ -139,6 +142,7 @@ export async function reconcileSystemIncomePolState(client, options = {}) {
     activationHeight: config.systemIncomePolActivationHeight,
     moduleAddress: built.moduleAddress,
     undeployedRuneE8: built.undeployedRuneE8,
+    runePriceUsdE8: runePriceUsdE8.toString(),
     observedAt: timestamp(observedAt),
     observedHeight: height
   });
@@ -146,6 +150,7 @@ export async function reconcileSystemIncomePolState(client, options = {}) {
     height,
     positions: built.positions.length,
     module_address: built.moduleAddress,
-    undeployed_rune_e8: built.undeployedRuneE8
+    undeployed_rune_e8: built.undeployedRuneE8,
+    rune_price_usd_e8: runePriceUsdE8.toString()
   };
 }

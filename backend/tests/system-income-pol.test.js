@@ -32,7 +32,15 @@ function event(type, attributes) {
 
 test('SIPOL parser extracts exact rewards and pairs deployments with internal LP unit events', () => {
   const parsed = parseSystemIncomePolEvents([
-    event('rewards', { bond_reward: 9, pol_reserve_reward: '9007199254740993' }),
+    event('rewards', {
+      bond_reward: 9,
+      dev_fund_reward: 4,
+      income_burn: 3,
+      tcy_stake_reward: 2,
+      marketing_fund_reward: 1,
+      pol_reserve_reward: '9007199254740993',
+      'TRON.USDT-XYZ': 8
+    }),
     event('add_liquidity', {
       pool: 'BTC.BTC',
       liquidity_provider_units: '456',
@@ -47,6 +55,7 @@ test('SIPOL parser extracts exact rewards and pairs deployments with internal LP
   assert.deepEqual(parsed, {
     observed: true,
     rewardE8: '9007199254740993',
+    systemIncomeE8: '9007199254741020',
     deployments: [{
       asset: 'BTC.BTC',
       runeE8: '123',
@@ -77,6 +86,7 @@ test('SIPOL parser supports encoded RPC attributes and leaves unmatched units ex
   assert.deepEqual(parseSystemIncomePolRpcBlock(payload), {
     observed: true,
     rewardE8: '7',
+    systemIncomeE8: '7',
     deployments: [{ asset: 'ETH.ETH', runeE8: '5', unitsE8: null, runeAddress: '' }],
     poolFees: []
   });
@@ -187,6 +197,7 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
     now: new Date('2026-08-31T12:00:00Z'),
     getCoreSnapshot: async () => ({ payload: {
       lastblock: [{ chain: 'THOR', thorchain: '1000' }],
+      network: { rune_price_in_tor: '200000000' },
       pools: [{
         asset: 'BTC.BTC', status: 'Available', balance_rune: '1000', balance_asset: '100',
         pool_units: '100', pol_reserve_rune_deposited: '25'
@@ -209,13 +220,15 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
   assert.equal(saved.length, 1);
   assert.equal(result.positions, 1);
   assert.equal(result.undeployed_rune_e8, '4');
+  assert.equal(result.rune_price_usd_e8, '200000000');
+  assert.equal(saved[0].meta.runePriceUsdE8, '200000000');
 });
 
 test('SIPOL read model combines exact daily flows, reconciled positions, and Pool Analysis fee shares', async () => {
   const model = await buildSystemIncomePolReadModel({ id: 'db' }, {
     now: new Date('2026-08-31T12:05:00Z'),
     loadDaily: async () => [{
-      day: '2026-08-31', funded_e8: '100', deployed_e8: '60', minted_units_e8: '5',
+      day: '2026-08-31', funded_e8: '100', system_income_e8: '1000', deployed_e8: '60', minted_units_e8: '5',
       first_height: '10', last_height: '20', partial: true
     }],
     loadPoolDaily: async () => [{
@@ -229,7 +242,7 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and Poo
       observed_height: '20', observed_at: '2026-08-31T12:04:00Z'
     }],
     loadState: async () => ({
-      module_address: 'thor1pol', undeployed_rune_e8: '40', last_event_height: '20',
+      module_address: 'thor1pol', undeployed_rune_e8: '40', rune_price_usd_e8: '200000000', last_event_height: '20',
       events_updated_at: '2026-08-31T12:04:30Z', positions_updated_at: '2026-08-31T12:04:00Z',
       fees_updated_at: '2026-08-31T12:03:00Z', last_error: ''
     })
@@ -237,12 +250,21 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and Poo
 
   assert.deepEqual(model.payload.summary, {
     total_funded_e8: '100',
+    total_system_income_e8: '1000',
+    system_income_pol_share_bps: 1000,
     total_deployed_e8: '60',
     undeployed_rune_e8: '40',
+    rune_price_usd_e8: '200000000',
     total_position_value_rune_e8: '60',
+    total_position_value_usd_e8: '120',
     total_rune_held_e8: '30',
+    total_rune_held_usd_e8: '60',
+    rune_held_system_income_share_bps: 300,
     total_asset_value_rune_e8: '30',
+    total_asset_value_usd_e8: '60',
     total_estimated_fees_e8: '3',
+    total_estimated_fees_usd_e8: '6',
+    fee_estimate_complete: true,
     active_pool_count: 1
   });
   assert.equal(model.payload.pools[0].share_bps, 500);
@@ -251,7 +273,7 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and Poo
   assert.equal(model.payload.freshness.positions_as_of, '2026-08-31T12:04:00.000Z');
 });
 
-test('SIPOL read model leaves fee totals unknown when any pool-day estimate is unavailable', async () => {
+test('SIPOL read model exposes known fee estimates and marks incomplete coverage', async () => {
   const model = await buildSystemIncomePolReadModel({ id: 'db' }, {
     now: new Date('2026-09-01T12:05:00Z'),
     loadDaily: async () => [{
@@ -279,10 +301,11 @@ test('SIPOL read model leaves fee totals unknown when any pool-day estimate is u
     })
   });
 
-  assert.equal(model.payload.summary.total_estimated_fees_e8, null);
+  assert.equal(model.payload.summary.total_estimated_fees_e8, '3');
+  assert.equal(model.payload.summary.fee_estimate_complete, false);
   assert.equal(model.payload.daily[0].estimated_fees_e8, null);
   assert.equal(model.payload.pools.find((row) => row.asset === 'ETH.ETH').estimated_fees_e8, null);
-  assert.match(model.payload.warnings.join(' '), /awaiting pre-block ownership coverage/);
+  assert.match(model.payload.warnings.join(' '), /only days with sufficient ownership coverage/);
 });
 
 test('SIPOL compaction pins one exact durable watermark for every aggregate', async () => {
@@ -311,19 +334,21 @@ test('SIPOL live overlay advances funded/deployed totals and preserves precise p
     as_of: '2026-08-31T12:00:00Z',
     summary: {
       total_funded_e8: '100', total_deployed_e8: '60', undeployed_rune_e8: '40',
-      total_estimated_fees_e8: '0'
+      total_system_income_e8: '1000', total_rune_held_e8: '30', total_estimated_fees_e8: '0'
     },
     pools: [{ asset: 'BTC.BTC', units_e8: '10', rune_deposited_e8: '60' }],
     daily: [{ day: '2026-08-31', funded_e8: '100', deployed_e8: '60',
       cumulative_funded_e8: '100', cumulative_deployed_e8: '60' }]
   }, {
     reward_e8: '9',
+    system_income_e8: '90',
     deployments: [{ asset: 'BTC.BTC', rune_e8: '7', units_e8: '2' }],
     through_height: 22,
     through_time: '2026-08-31T12:00:06Z'
   });
   assert.equal(payload.summary.total_funded_e8, '109');
   assert.equal(payload.summary.total_deployed_e8, '67');
+  assert.equal(payload.summary.total_system_income_e8, '1090');
   assert.equal(payload.summary.undeployed_rune_e8, '40');
   assert.equal(payload.pools[0].rune_deposited_e8, '67');
   assert.equal(payload.pools[0].units_e8, '10');
@@ -334,7 +359,7 @@ test('SIPOL live overlay advances funded/deployed totals and preserves precise p
 test('SIPOL live overlay starts a new UTC day without waiting for reconciliation', () => {
   const payload = applySystemIncomePolLiveOverlay({
     summary: {
-      total_funded_e8: '100', total_deployed_e8: '60', undeployed_rune_e8: '40'
+      total_funded_e8: '100', total_system_income_e8: '1000', total_deployed_e8: '60', undeployed_rune_e8: '40'
     },
     pools: [],
     daily: [{
@@ -342,17 +367,19 @@ test('SIPOL live overlay starts a new UTC day without waiting for reconciliation
       cumulative_funded_e8: '100', cumulative_deployed_e8: '60'
     }]
   }, {
-    reward_e8: '9', deployments: [], through_height: 22,
+    reward_e8: '9', system_income_e8: '90', deployments: [], through_height: 22,
     through_time: '2026-09-01T00:00:06Z'
   });
 
   assert.deepEqual(payload.daily.at(-1), {
     day: '2026-09-01',
     funded_e8: '9',
+    system_income_e8: '90',
     deployed_e8: '0',
     minted_units_e8: null,
     estimated_fees_e8: null,
     cumulative_funded_e8: '109',
+    cumulative_system_income_e8: '1090',
     cumulative_deployed_e8: '60',
     first_height: null,
     last_height: 22,
@@ -382,7 +409,7 @@ test('SIPOL fee freshness follows the Pool Analysis source rather than scheduler
   });
 
   assert.match(queries[0].sql, /fees\.observed_at as source_updated_at/);
-  assert.equal(queries[1].params[7], '2026-08-31T12:00:00.000Z');
+  assert.equal(queries[1].params[8], '2026-08-31T12:00:00.000Z');
   assert.equal(result.sourceUpdatedAt, '2026-08-31T12:00:00.000Z');
 });
 
@@ -476,8 +503,9 @@ test('SIPOL handler serves only the durable model plus chain-header overlay', as
 });
 
 test('SIPOL production contract keeps legacy POL at pol-tvl and serves SIPOL from pol-tracker', async () => {
-  const [migration, server, runJob, repair, service, timer, deploy, smoke] = await Promise.all([
+  const [migration, headlineMigration, server, runJob, repair, service, timer, deploy, smoke] = await Promise.all([
     readFile(new URL('../migrations/054_system_income_pol.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/055_system_income_pol_headlines.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/shared/system-income-pol-repair.js', import.meta.url), 'utf8'),
@@ -489,10 +517,13 @@ test('SIPOL production contract keeps legacy POL at pol-tvl and serves SIPOL fro
   assert.match(migration, /system_income_pol_observed/);
   assert.match(migration, /create table if not exists public\.system_income_pol_blocks/);
   assert.match(migration, /create table if not exists public\.system_income_pol_positions/);
+  assert.match(headlineMigration, /system_income_total_e8/);
+  assert.match(headlineMigration, /rune_price_usd_e8/);
   assert.match(server, /\['\/pol-tracker', route\(handleSystemIncomePol, 1, 64\)\]/);
   assert.match(server, /\['\/pol-tvl', route\(handlePolTracker, 1, 64\)\]/);
   assert.match(runJob, /'system-income-pol-scheduler': runSystemIncomePolScheduler/);
   assert.match(repair, /cooldownScope: 'system-income-pol-repair'/);
+  assert.match(repair, /blocks\.system_income_e8 is null/);
   assert.match(service, /src\/run-job\.js system-income-pol-scheduler/);
   assert.match(timer, /OnUnitActiveSec=2min/);
   assert.match(deploy, /boonetools-system-income-pol\.service/);

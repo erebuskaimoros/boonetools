@@ -11,6 +11,7 @@ export function parseChainHeadEvent(value) {
     if (!Number.isFinite(height) || height <= 0 || !Number.isFinite(Date.parse(time))) return null;
     const intervalMs = Number(payload?.interval_ms);
     const incomeBurn = String(payload?.income_burn_e8 ?? '').trim();
+    const systemIncome = String(payload?.system_income_e8 ?? '').trim();
     const polReserveReward = String(payload?.pol_reserve_reward_e8 ?? '').trim();
     const polReserveDeployments = (Array.isArray(payload?.pol_reserve_deployments)
       ? payload.pol_reserve_deployments
@@ -35,6 +36,7 @@ export function parseChainHeadEvent(value) {
       block_hash: String(payload?.block_hash || ''),
       has_swap_events: Boolean(payload?.has_swap_events),
       income_burn_e8: /^\d+$/.test(incomeBurn) ? BigInt(incomeBurn).toString() : null,
+      system_income_e8: /^\d+$/.test(systemIncome) ? BigInt(systemIncome).toString() : null,
       pol_reserve_reward_e8: /^\d+$/.test(polReserveReward) ? BigInt(polReserveReward).toString() : null,
       pol_reserve_deployments: polReserveDeployments,
       source: String(payload?.source || 'liquify-ws')

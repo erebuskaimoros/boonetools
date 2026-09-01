@@ -72,6 +72,11 @@ export function normalizeChainHeader(input = {}) {
       ?? input.pol_reserve_reward_e8
       ?? input.system_income_pol_reward_e8
   );
+  const systemIncomeTotalE8 = baseUnitString(
+    input.systemIncomeTotalE8
+      ?? input.system_income_total_e8
+      ?? input.system_income_e8
+  );
   const systemIncomePolDeployments = normalizeSystemIncomePolDeployments(
     input.systemIncomePolDeployments
       ?? input.pol_reserve_deployments
@@ -91,6 +96,7 @@ export function normalizeChainHeader(input = {}) {
     hasSwapEvents: Boolean(input.hasSwapEvents ?? input.has_swap_events),
     source: String(input.source || 'liquify-ws'),
     ...(incomeBurnE8 === null ? {} : { incomeBurnE8 }),
+    ...(systemIncomeTotalE8 === null ? {} : { systemIncomeTotalE8 }),
     ...(hasPolObserved ? {
       systemIncomePolObserved: Boolean(
         input.systemIncomePolObserved ?? input.system_income_pol_observed
@@ -143,6 +149,7 @@ function buildHeaderUpsert(headers) {
       header.hasSwapEvents,
       header.source,
       header.incomeBurnE8 ?? null,
+      header.systemIncomeTotalE8 ?? null,
       header.systemIncomePolObserved === true,
       header.systemIncomePolRewardE8 ?? null,
       header.systemIncomePolDeployments == null
@@ -152,13 +159,14 @@ function buildHeaderUpsert(headers) {
         ? null
         : JSON.stringify(header.systemIncomePolPoolFees)
     );
-    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}::jsonb, $${offset + 10}::jsonb, now(), now())`;
+    return `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10}::jsonb, $${offset + 11}::jsonb, now(), now())`;
   });
 
   return {
     text: `insert into chain_block_headers
       (height, block_hash, block_time, has_swap_events, source,
-       system_income_burn_e8, system_income_pol_observed, system_income_pol_reward_e8,
+       system_income_burn_e8, system_income_total_e8,
+       system_income_pol_observed, system_income_pol_reward_e8,
        system_income_pol_deployments, system_income_pol_pool_fees,
        received_at, updated_at)
      values ${tuples.join(', ')}
@@ -172,6 +180,10 @@ function buildHeaderUpsert(headers) {
        system_income_burn_e8 = coalesce(
          excluded.system_income_burn_e8,
          chain_block_headers.system_income_burn_e8
+       ),
+       system_income_total_e8 = coalesce(
+         excluded.system_income_total_e8,
+         chain_block_headers.system_income_total_e8
        ),
        system_income_pol_observed = chain_block_headers.system_income_pol_observed
          or excluded.system_income_pol_observed,
@@ -225,7 +237,7 @@ export async function upsertChainHeaders(client, inputs = []) {
   await recomputeIntervals(client, headers[0].height, headers.at(-1).height);
   const stored = await client.query(
     `select height, block_hash, block_time, interval_ms, has_swap_events, source,
-            system_income_burn_e8, system_income_pol_observed,
+            system_income_burn_e8, system_income_total_e8, system_income_pol_observed,
             system_income_pol_reward_e8, system_income_pol_deployments,
             system_income_pol_pool_fees
      from chain_block_headers
@@ -289,6 +301,7 @@ export function serializeChainHead(header = {}) {
     block_hash: normalized.blockHash,
     has_swap_events: normalized.hasSwapEvents,
     income_burn_e8: normalized.incomeBurnE8 ?? null,
+    system_income_e8: normalized.systemIncomeTotalE8 ?? null,
     pol_reserve_reward_e8: normalized.systemIncomePolRewardE8 ?? null,
     pol_reserve_deployments: (normalized.systemIncomePolDeployments || []).map((row) => ({
       asset: row.asset,
@@ -314,7 +327,7 @@ export async function notifyChainHead(client, header) {
 export async function loadLatestChainHead(client) {
   const result = await client.query(
     `select height, block_hash, block_time, interval_ms, has_swap_events, source,
-            system_income_burn_e8, system_income_pol_observed,
+            system_income_burn_e8, system_income_total_e8, system_income_pol_observed,
             system_income_pol_reward_e8, system_income_pol_deployments,
             system_income_pol_pool_fees
      from chain_block_headers
