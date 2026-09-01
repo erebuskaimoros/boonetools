@@ -90,6 +90,20 @@ test('System Income POL coverage rendering exposes coverage as a template depend
   assert.doesNotMatch(dashboardSource, /const value = coverage\?\.\[key\]/);
 });
 
+test('System Income POL muted copy keeps a readable contrast and type floor', async () => {
+  const dashboardSource = await readFile(
+    new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(dashboardSource, /\.metric-label \{[^}]*color: var\(--term-text-3\)/);
+  assert.match(dashboardSource, /\.metric small \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
+  assert.match(dashboardSource, /\.panel-meta \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
+  assert.match(dashboardSource, /\.asset-grid span, \.asset-grid small \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
+  assert.match(dashboardSource, /\.y-label, \.x-label \{[^}]*fill: var\(--term-text-3\);[^}]*font: 12px/);
+  assert.match(dashboardSource, /\.method-panel > p \{[^}]*color: var\(--term-text-2\);[^}]*font: 14px/);
+});
+
 test('System Income POL normalization preserves exact base-unit accounting', () => {
   const dashboard = normalizeSystemIncomePolPayload({
     as_of: '2026-08-31T12:00:00Z',
