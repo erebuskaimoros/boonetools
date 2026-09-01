@@ -19,7 +19,7 @@
   } from './system-income-pol/model.js';
 
   const REFRESH_MS = 2 * 60 * 1000;
-  const REDUNDANT_FEE_WARNING = 'Estimated fees include only days with sufficient ownership coverage';
+  const REDUNDANT_FEE_WARNING = 'Estimated fees exclude hours without an ownership seed';
   let payload = null;
   let loading = true;
   let refreshing = false;
@@ -163,6 +163,16 @@
       maximumFractionDigits: 2
     }).format(value);
     return chartUnit === 'usd' ? `$${formatted}` : formatted;
+  }
+
+  function feeEstimateLabel(summary) {
+    if (summary.feeEstimateComplete) return 'HOURLY · COMPLETE';
+    if (summary.feeHoursTotal <= 0) return 'HOURLY SEED · WARMING';
+    const state = [];
+    if (summary.feeHoursSeeded > 0) state.push('SEEDED');
+    if (summary.feeHoursProvisional > 0) state.push('LIVE');
+    const prefix = state.length ? `HOURLY · ${state.join(' + ')}` : 'HOURLY ESTIMATE';
+    return `${prefix} · ${summary.feeHoursCovered}/${summary.feeHoursTotal} HOURS`;
   }
 
   function setChartUnit(nextUnit) {
@@ -348,7 +358,7 @@
       <span class="metric-index">03</span>
       <span class="metric-label">EST. FEES EARNED</span>
       <strong>{formatE8Usd(dashboard.summary.totalEstimatedFeesUsdE8, true)}</strong>
-      <small>{dashboard.summary.feeEstimateComplete ? 'OWNERSHIP-WEIGHTED · COMPLETE' : 'KNOWN COVERAGE · PARTIAL ESTIMATE'}</small>
+      <small>{feeEstimateLabel(dashboard.summary)}</small>
     </article>
     <article class="metric">
       <span class="metric-index">04</span>

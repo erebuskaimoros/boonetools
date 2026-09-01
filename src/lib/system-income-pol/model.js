@@ -80,6 +80,10 @@ function normalizeSummary(summary = {}) {
     totalEstimatedFeesUsdE8: optionalBase(summary.total_estimated_fees_usd_e8),
     runePriceUsdE8: optionalBase(summary.rune_price_usd_e8),
     feeEstimateComplete: Boolean(summary.fee_estimate_complete),
+    feeHoursCovered: Math.max(0, Math.trunc(finite(summary.fee_hours_covered, 0))),
+    feeHoursTotal: Math.max(0, Math.trunc(finite(summary.fee_hours_total, 0))),
+    feeHoursSeeded: Math.max(0, Math.trunc(finite(summary.fee_hours_seeded, 0))),
+    feeHoursProvisional: Math.max(0, Math.trunc(finite(summary.fee_hours_provisional, 0))),
     activePoolCount: Math.max(0, Math.trunc(finite(summary.active_pool_count, 0))),
     totalFundedRune: e8ToNumber(summary.total_funded_e8 ?? summary.funded_rune_e8),
     totalDeployedRune: e8ToNumber(summary.total_deployed_e8 ?? summary.deployed_rune_e8),
@@ -113,6 +117,10 @@ function normalizePool(pool = {}) {
     estimatedFeesE8: optionalBase(pool.estimated_fees_e8 ?? pool.estimated_fees_rune_e8),
     estimatedFeesUsdE8: optionalBase(pool.estimated_fees_usd_e8),
     feeEstimateComplete: Boolean(pool.fee_estimate_complete),
+    feeHoursCovered: Math.max(0, Math.trunc(finite(pool.fee_hours_covered, 0))),
+    feeHoursTotal: Math.max(0, Math.trunc(finite(pool.fee_hours_total, 0))),
+    feeHoursSeeded: Math.max(0, Math.trunc(finite(pool.fee_hours_seeded, 0))),
+    feeHoursProvisional: Math.max(0, Math.trunc(finite(pool.fee_hours_provisional, 0))),
     rollingLiquidityFeeRuneE8: optionalBase(pool.rolling_liquidity_fee_rune_e8),
     freshness: pool.freshness && typeof pool.freshness === 'object' ? pool.freshness : {}
   };

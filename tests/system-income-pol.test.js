@@ -38,6 +38,7 @@ test('System Income POL owns /pol-tracker and appears in navigation', async () =
   assert.match(dashboardSource, /window\.setTimeout\([\s\S]*?, 1000\)/);
   assert.doesNotMatch(dashboardSource, /deployment-tape/);
   assert.match(dashboardSource, /EST\. FEES EARNED/);
+  assert.match(dashboardSource, /HOURLY/);
   assert.match(dashboardSource, /SYSTEM INCOME → POL/);
   assert.match(dashboardSource, /polReserveSystemIncomePercent/);
   assert.match(dashboardSource, /POLRESERVESYSTEMINCOMEBPS/);
@@ -108,6 +109,10 @@ test('System Income POL normalization preserves exact base-unit accounting', () 
       total_asset_value_rune_e8: '490000000',
       total_estimated_fees_e8: '60000000',
       total_estimated_fees_usd_e8: '120000000',
+      fee_hours_covered: 17,
+      fee_hours_total: 18,
+      fee_hours_seeded: 4,
+      fee_hours_provisional: 1,
       active_pool_count: 2
     },
     pools: [{
@@ -143,6 +148,9 @@ test('System Income POL normalization preserves exact base-unit accounting', () 
   assert.equal(dashboard.summary.systemIncomePolSharePercent, 10);
   assert.equal(dashboard.summary.polReserveSystemIncomePercent, 20);
   assert.equal(dashboard.summary.activePoolCount, 2);
+  assert.equal(dashboard.summary.feeHoursCovered, 17);
+  assert.equal(dashboard.summary.feeHoursSeeded, 4);
+  assert.equal(dashboard.summary.feeHoursProvisional, 1);
   assert.equal(dashboard.pools[0].assetHeldE8, '1234567');
   assert.equal(dashboard.daily[0].cumulativeDeployedE8, '900000000');
   assert.equal(dashboard.daily[0].cumulativeEstimatedFeesRune, 0.6);

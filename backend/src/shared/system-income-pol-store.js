@@ -264,73 +264,104 @@ export async function saveSystemIncomePolPositions(client, positions = [], meta 
 export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
   const now = iso(options.now) || new Date().toISOString();
   const result = await client.query(
-    `with ordered as (
-       select samples.*,
-              lead(observed_at) over (partition by asset order by observed_at) as next_at
+    `with bounds as (
+       select coalesce(
+                (select max(hour) - interval '2 hours' from system_income_pol_pool_hourly),
+                date_trunc('hour', (select min(block_time) from system_income_pol_blocks))
+              ) as start_hour,
+              date_trunc('hour', $1::timestamptz) as end_hour
+     ), assets as (
+       select item->>'asset' as asset, min(blocks.block_time) as deployed_at
+       from system_income_pol_blocks blocks
+       cross join lateral jsonb_array_elements(coalesce(blocks.deployments, '[]'::jsonb)) item
+       where coalesce(item->>'asset', '') <> ''
+       group by item->>'asset'
+     ), hours as (
+       select assets.asset, assets.deployed_at, generated.hour
+       from assets cross join bounds
+       cross join lateral generate_series(
+         greatest(bounds.start_hour, date_trunc('hour', assets.deployed_at)),
+         bounds.end_hour,
+         interval '1 hour'
+       ) generated(hour)
+       where bounds.start_hour is not null
+     ), raw_fees as (
+       select item->>'asset' as asset,
+              date_trunc('hour', blocks.block_time) as hour,
+              sum(coalesce(item->>'feeE8', item->>'fee_e8')::numeric) as pool_fees_e8,
+              max(blocks.block_time) as source_updated_at
+       from system_income_pol_blocks blocks
+       cross join bounds
+       cross join lateral jsonb_array_elements(coalesce(blocks.pool_fees, '[]'::jsonb)) item
+       where blocks.block_time >= bounds.start_hour
+         and blocks.block_time <= $1::timestamptz
+         and coalesce(item->>'asset', '') <> ''
+       group by item->>'asset', date_trunc('hour', blocks.block_time)
+     ), sampled as (
+       select samples.asset, date_trunc('hour', samples.observed_at) as hour,
+              avg(samples.units_e8 / nullif(samples.pool_units_e8, 0)) as share,
+              max(samples.observed_at) as source_updated_at
        from system_income_pol_position_samples samples
-     ), weighted as (
-       select asset, (observed_at at time zone 'UTC')::date as day,
-              sum((units_e8 / nullif(pool_units_e8, 0)) * greatest(0,
-                extract(epoch from least(coalesce(next_at, $1::timestamptz),
-                  ((observed_at at time zone 'UTC')::date + 1)::timestamptz) - observed_at)
-              )) / nullif(sum(greatest(0,
-                extract(epoch from least(coalesce(next_at, $1::timestamptz),
-                  ((observed_at at time zone 'UTC')::date + 1)::timestamptz) - observed_at)
-              )), 0) as share,
-              sum(greatest(0, extract(epoch from least(coalesce(next_at, $1::timestamptz),
-                ((observed_at at time zone 'UTC')::date + 1)::timestamptz) - observed_at))) as covered_seconds
-       from ordered
-       where observed_at <= $1::timestamptz and pool_units_e8 > 0
-       group by asset, (observed_at at time zone 'UTC')::date
-     ), activation as (
-       select min(block_time) as activated_at from system_income_pol_blocks
+       cross join bounds
+       where samples.observed_at >= bounds.start_hour
+         and samples.observed_at <= $1::timestamptz
+         and samples.pool_units_e8 > 0
+       group by samples.asset, date_trunc('hour', samples.observed_at)
+     ), attributed as (
+       select hours.asset, hours.hour,
+              coalesce(raw_fees.pool_fees_e8, 0) as pool_fees_e8,
+              coalesce(sampled.share, seed.share) as share,
+              sampled.share is null and seed.share is not null as used_seed,
+              hours.hour = date_trunc('hour', $1::timestamptz) as provisional,
+              greatest(raw_fees.source_updated_at, sampled.source_updated_at,
+                seed.source_updated_at, hours.deployed_at) as source_updated_at
+       from hours
+       left join raw_fees using (asset, hour)
+       left join sampled using (asset, hour)
+       left join lateral (
+         select anchor.units_e8 / nullif(anchor.pool_units_e8, 0) as share,
+                anchor.observed_at as source_updated_at
+         from system_income_pol_position_samples anchor
+         where anchor.asset = hours.asset and anchor.pool_units_e8 > 0
+         order by
+           case when anchor.observed_at <= hours.hour + interval '1 hour' then 0 else 1 end,
+           case when anchor.observed_at <= hours.hour + interval '1 hour'
+             then extract(epoch from hours.hour + interval '1 hour' - anchor.observed_at)
+             else extract(epoch from anchor.observed_at - hours.hour)
+           end
+         limit 1
+       ) seed on sampled.share is null
      ), estimates as (
-       select fees.asset, fees.day, fees.fees_rune_e8,
-              case
-                when fees.day = (activation.activated_at at time zone 'UTC')::date then null
-                when weighted.covered_seconds < 0.95 * extract(epoch from (
-                  least((fees.day + 1)::timestamptz, $1::timestamptz)
-                  - greatest(fees.day::timestamptz, activation.activated_at)
-                )) then null
-                else floor(fees.fees_rune_e8 * weighted.share)
-              end as estimated_fees_e8,
-              case
-                when fees.day = (activation.activated_at at time zone 'UTC')::date
-                  or weighted.covered_seconds < 0.95 * extract(epoch from (
-                    least((fees.day + 1)::timestamptz, $1::timestamptz)
-                    - greatest(fees.day::timestamptz, activation.activated_at)
-                  )) then null
-                else weighted.share * 1000000
-              end as fee_share_ppm,
-              case when weighted.share is null
-                     or fees.day = (activation.activated_at at time zone 'UTC')::date
-                     or weighted.covered_seconds < 0.95 * extract(epoch from (
-                       least((fees.day + 1)::timestamptz, $1::timestamptz)
-                       - greatest(fees.day::timestamptz, activation.activated_at)
-                     )) then 'unavailable'
-                   when fees.partial or weighted.covered_seconds < 82800 then 'partial'
+       select asset, hour, pool_fees_e8,
+              case when share is null then null else floor(pool_fees_e8 * share) end as estimated_fees_e8,
+              case when share is null then null else share * 1000000 end as fee_share_ppm,
+              case when share is null then 'unavailable'
+                   when provisional then 'partial'
+                   when used_seed then 'seeded'
                    else 'complete' end as fee_coverage,
-              fees.partial, fees.observed_at as source_updated_at
-       from pool_analysis_daily fees
-       join weighted on weighted.asset = fees.asset and weighted.day = fees.day
-       cross join activation
-       where fees.fees_rune_e8 is not null
+              provisional,
+              case when used_seed then 'system-income-pol-block-fees:seeded-ownership'
+                   else 'system-income-pol-block-fees:hourly-ownership' end as source,
+              source_updated_at
+       from attributed
      )
-     insert into system_income_pol_pool_daily as current (
-       asset, day, deployed_e8, estimated_fees_e8, fee_share_ppm,
-       fee_coverage, partial, source_updated_at
+     insert into system_income_pol_pool_hourly as current (
+       asset, hour, pool_fees_e8, estimated_fees_e8, fee_share_ppm,
+       fee_coverage, provisional, source, source_updated_at
      )
-     select asset, day, 0, estimated_fees_e8, fee_share_ppm,
-            fee_coverage, partial, source_updated_at
+     select asset, hour, pool_fees_e8, estimated_fees_e8, fee_share_ppm,
+            fee_coverage, provisional, source, source_updated_at
      from estimates
-     on conflict (asset, day) do update set
+     on conflict (asset, hour) do update set
+       pool_fees_e8 = excluded.pool_fees_e8,
        estimated_fees_e8 = excluded.estimated_fees_e8,
        fee_share_ppm = excluded.fee_share_ppm,
        fee_coverage = excluded.fee_coverage,
-       partial = current.partial or excluded.partial,
-       source_updated_at = greatest(current.source_updated_at, excluded.source_updated_at),
+       provisional = excluded.provisional,
+       source = excluded.source,
+       source_updated_at = excluded.source_updated_at,
        updated_at = now()
-     returning asset, day, source_updated_at`,
+     returning asset, hour, source_updated_at`,
     [now]
   );
   const sourceTimes = result.rows
@@ -403,6 +434,15 @@ export async function loadSystemIncomePolPoolDaily(client) {
             estimated_fees_e8::text, fee_share_ppm::text, fee_coverage,
             partial, source_updated_at
      from system_income_pol_pool_daily order by day, asset`
+  );
+  return rows;
+}
+
+export async function loadSystemIncomePolPoolHourly(client) {
+  const { rows } = await client.query(
+    `select asset, hour, pool_fees_e8::text, estimated_fees_e8::text,
+            fee_share_ppm::text, fee_coverage, provisional, source, source_updated_at
+     from system_income_pol_pool_hourly order by hour, asset`
   );
   return rows;
 }

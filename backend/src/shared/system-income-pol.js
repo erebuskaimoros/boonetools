@@ -3,11 +3,12 @@ import {
   getSystemIncomePolState,
   loadSystemIncomePolDaily,
   loadSystemIncomePolPoolDaily,
+  loadSystemIncomePolPoolHourly,
   loadSystemIncomePolPositions
 } from './system-income-pol-store.js';
 
 export const SYSTEM_INCOME_POL_MODEL_KEY = 'system-income-pol:v1';
-export const SYSTEM_INCOME_POL_SCHEMA_VERSION = 2;
+export const SYSTEM_INCOME_POL_SCHEMA_VERSION = 3;
 export const SYSTEM_INCOME_POL_TTL_MS = 5 * 60 * 1000;
 
 function integer(value, fallback = '0') {
@@ -90,8 +91,10 @@ function publicPosition(row, fees, deployedE8, runePriceUsdE8) {
     estimated_fees_e8: estimatedFeesE8,
     estimated_fees_usd_e8: multiplyE8(estimatedFeesE8, runePriceUsdE8),
     fee_estimate_complete: Boolean(fees?.complete && fees?.rows > 0),
-    fee_pool_days: fees?.covered || 0,
-    fee_pool_days_total: fees?.rows || 0,
+    fee_hours_covered: fees?.covered || 0,
+    fee_hours_total: fees?.rows || 0,
+    fee_hours_seeded: fees?.seeded || 0,
+    fee_hours_provisional: fees?.provisional || 0,
     rolling_liquidity_fee_rune_e8: integer(row.rolling_liquidity_fee_rune_e8),
     status: String(row.status || ''),
     observed_height: Number(row.observed_height) || null,
@@ -110,6 +113,7 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
   // remains compatible with pg@9's single-query-per-client contract.
   const dailyRows = await (options.loadDaily || loadSystemIncomePolDaily)(client);
   const poolDailyRows = await (options.loadPoolDaily || loadSystemIncomePolPoolDaily)(client);
+  const poolHourlyRows = await (options.loadPoolHourly || loadSystemIncomePolPoolHourly)(client);
   const positionRows = await (options.loadPositions || loadSystemIncomePolPositions)(client);
   const state = await (options.loadState || getSystemIncomePolState)(client);
   const runePriceUsdE8 = state?.rune_price_usd_e8 == null ? null : integer(state.rune_price_usd_e8);
@@ -117,13 +121,20 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
   const poolDeployments = new Map();
   for (const row of poolDailyRows) {
     poolDeployments.set(row.asset, add(poolDeployments.get(row.asset), row.deployed_e8));
-    const current = poolFees.get(row.asset) || { total: '0', complete: true, covered: 0, rows: 0 };
+  }
+  for (const row of poolHourlyRows) {
+    const current = poolFees.get(row.asset) || {
+      total: '0', complete: true, covered: 0, rows: 0, seeded: 0, provisional: 0
+    };
     current.rows += 1;
+    if (row.fee_coverage === 'seeded') current.seeded += 1;
+    if (row.provisional) current.provisional += 1;
     if (row.estimated_fees_e8 == null) current.complete = false;
     else {
       current.total = add(current.total, row.estimated_fees_e8);
       current.covered += 1;
     }
+    if (row.fee_coverage !== 'complete' || row.provisional) current.complete = false;
     poolFees.set(row.asset, current);
   }
   const pools = positionRows.map((row) => {
@@ -155,8 +166,10 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
       estimated_fees_e8: fees?.covered > 0 ? fees.total : null,
       estimated_fees_usd_e8: fees?.covered > 0 ? multiplyE8(fees.total, runePriceUsdE8) : null,
       fee_estimate_complete: Boolean(fees?.complete && fees?.rows > 0),
-      fee_pool_days: fees?.covered || 0,
-      fee_pool_days_total: fees?.rows || 0,
+      fee_hours_covered: fees?.covered || 0,
+      fee_hours_total: fees?.rows || 0,
+      fee_hours_seeded: fees?.seeded || 0,
+      fee_hours_provisional: fees?.provisional || 0,
       rolling_liquidity_fee_rune_e8: null,
       status: 'reconciling',
       observed_height: null,
@@ -164,17 +177,21 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
       freshness: { positions_as_of: null, observed_height: null }
     });
   }
-  const poolDailyByDay = new Map();
-  for (const row of poolDailyRows) {
-    const key = day(row.day);
+  const poolHourlyByDay = new Map();
+  for (const row of poolHourlyRows) {
+    const key = day(row.hour);
     if (!key) continue;
-    const current = poolDailyByDay.get(key) || { estimated: 0n, covered: 0, total: 0 };
+    const current = poolHourlyByDay.get(key) || {
+      estimated: 0n, covered: 0, total: 0, seeded: 0, provisional: 0
+    };
     current.total += 1;
+    if (row.fee_coverage === 'seeded') current.seeded += 1;
+    if (row.provisional) current.provisional += 1;
     if (row.estimated_fees_e8 != null) {
       current.estimated += BigInt(integer(row.estimated_fees_e8));
       current.covered += 1;
     }
-    poolDailyByDay.set(key, current);
+    poolHourlyByDay.set(key, current);
   }
   let cumulativeFunded = 0n;
   let cumulativeSystemIncome = 0n;
@@ -188,7 +205,7 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
     if (row.system_income_e8 == null) systemIncomeComplete = false;
     else if (systemIncomeComplete) cumulativeSystemIncome += BigInt(integer(row.system_income_e8));
     cumulativeDeployed += BigInt(integer(row.deployed_e8));
-    const fee = poolDailyByDay.get(key);
+    const fee = poolHourlyByDay.get(key);
     const estimatedFees = fee?.total > 0 && fee.covered === fee.total
       ? fee.estimated.toString()
       : null;
@@ -208,7 +225,12 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
       first_height: Number(row.first_height) || null,
       last_height: Number(row.last_height) || null,
       partial: Boolean(row.partial),
-      fee_coverage: fee ? { covered_pools: fee.covered, total_pools: fee.total } : null
+      fee_coverage: fee ? {
+        covered_hours: fee.covered,
+        total_hours: fee.total,
+        seeded_hours: fee.seeded,
+        provisional_hours: fee.provisional
+      } : null
     };
   });
   const feeStates = [...poolFees.values()];
@@ -223,8 +245,8 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
   const warnings = [];
   if (!state) warnings.push('SIPOL reconciliation is warming');
   if (state?.last_error) warnings.push(`SIPOL reconciliation: ${state.last_error}`);
-  if (poolDailyRows.some((row) => row.estimated_fees_e8 == null)) {
-    warnings.push('Estimated fees include only days with sufficient ownership coverage');
+  if (poolHourlyRows.some((row) => row.estimated_fees_e8 == null)) {
+    warnings.push('Estimated fees exclude hours without an ownership seed');
   }
   if (!systemIncomeComplete) warnings.push('System income share is warming while legacy blocks are enriched');
   const generatedAt = now.toISOString();
@@ -247,8 +269,10 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
     repaired_blocks: Math.max(0, Number(state?.stats_json?.repaired_blocks) || 0),
     position_pools: pools.length,
     through_day: daily.at(-1)?.day || null,
-    fee_pool_days: poolDailyRows.filter((row) => row.estimated_fees_e8 != null).length,
-    fee_pool_days_total: poolDailyRows.length
+    fee_hours_covered: poolHourlyRows.filter((row) => row.estimated_fees_e8 != null).length,
+    fee_hours_total: poolHourlyRows.length,
+    fee_hours_seeded: poolHourlyRows.filter((row) => row.fee_coverage === 'seeded').length,
+    fee_hours_provisional: poolHourlyRows.filter((row) => row.provisional).length
   };
   const totalPositionValueRuneE8 = add(...pools.map((row) => row.position_value_rune_e8));
   const totalRuneHeldE8 = add(...pools.map((row) => row.rune_held_e8));
@@ -281,6 +305,10 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
         total_estimated_fees_e8: totalEstimatedFees,
         total_estimated_fees_usd_e8: multiplyE8(totalEstimatedFees, runePriceUsdE8),
         fee_estimate_complete: feeEstimateComplete,
+        fee_hours_covered: coverage.fee_hours_covered,
+        fee_hours_total: coverage.fee_hours_total,
+        fee_hours_seeded: coverage.fee_hours_seeded,
+        fee_hours_provisional: coverage.fee_hours_provisional,
         active_pool_count: pools.filter((row) => BigInt(integer(row.units_e8)) > 0n).length
       },
       pools,
@@ -298,14 +326,14 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
       sources: [
         { lane: 'events', source: 'thorchain-block-results:rewards,pol_reserve_deploy,add_liquidity,swap' },
         { lane: 'positions', source: 'thornode-core:pools+network-price+mimir+thornode:pol_reserve-module-lp' },
-        { lane: 'fees', source: 'pool_analysis_daily:liquidity-fees×time-weighted-share' }
+        { lane: 'fees', source: 'system-income-pol-block-fees:hourly×sampled-ownership' }
       ],
       warnings
     },
     generatedAt,
     sourceUpdatedAt: latestTime(eventsAsOf, positionsAsOf, feesAsOf),
     metadata: { warnings, partial: warnings.length > 0 },
-    stats: { days: daily.length, pools: pools.length }
+    stats: { days: daily.length, pools: pools.length, feeHours: poolHourlyRows.length }
   };
 }
 

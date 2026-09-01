@@ -227,7 +227,7 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
   assert.equal(saved[0].meta.polReserveSystemIncomeBps, '2000');
 });
 
-test('SIPOL read model combines exact daily flows, reconciled positions, and Pool Analysis fee shares', async () => {
+test('SIPOL read model combines exact daily flows, reconciled positions, and hourly block-fee shares', async () => {
   const model = await buildSystemIncomePolReadModel({ id: 'db' }, {
     now: new Date('2026-08-31T12:05:00Z'),
     loadDaily: async () => [{
@@ -236,7 +236,11 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and Poo
     }],
     loadPoolDaily: async () => [{
       asset: 'BTC.BTC', day: '2026-08-31', deployed_e8: '60', minted_units_e8: '5',
-      estimated_fees_e8: '3', partial: true
+      partial: true
+    }],
+    loadPoolHourly: async () => [{
+      asset: 'BTC.BTC', hour: '2026-08-31T12:00:00Z', pool_fees_e8: '60',
+      estimated_fees_e8: '3', fee_coverage: 'complete', provisional: false
     }],
     loadPositions: async () => [{
       asset: 'BTC.BTC', units_e8: '5', pool_units_e8: '100', rune_deposited_e8: '55',
@@ -270,15 +274,21 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and Poo
     total_estimated_fees_e8: '3',
     total_estimated_fees_usd_e8: '6',
     fee_estimate_complete: true,
+    fee_hours_covered: 1,
+    fee_hours_total: 1,
+    fee_hours_seeded: 0,
+    fee_hours_provisional: 0,
     active_pool_count: 1
   });
   assert.equal(model.payload.pools[0].share_bps, 500);
   assert.equal(model.payload.pools[0].rune_deposited_e8, '60');
+  assert.equal(model.payload.pools[0].fee_hours_covered, 1);
+  assert.equal(model.payload.coverage.fee_hours_total, 1);
   assert.equal(model.payload.daily[0].cumulative_funded_e8, '100');
   assert.equal(model.payload.freshness.positions_as_of, '2026-08-31T12:04:00.000Z');
 });
 
-test('SIPOL read model exposes known fee estimates and marks incomplete coverage', async () => {
+test('SIPOL read model exposes seeded hourly estimates and marks provisional coverage', async () => {
   const model = await buildSystemIncomePolReadModel({ id: 'db' }, {
     now: new Date('2026-09-01T12:05:00Z'),
     loadDaily: async () => [{
@@ -286,9 +296,19 @@ test('SIPOL read model exposes known fee estimates and marks incomplete coverage
       first_height: '10', last_height: '20', observed_blocks: 11, expected_blocks: 11
     }],
     loadPoolDaily: async () => [{
-      asset: 'BTC.BTC', day: '2026-08-31', estimated_fees_e8: '3'
+      asset: 'BTC.BTC', day: '2026-08-31', deployed_e8: '60'
     }, {
-      asset: 'ETH.ETH', day: '2026-08-31', estimated_fees_e8: null
+      asset: 'ETH.ETH', day: '2026-08-31', deployed_e8: '20'
+    }],
+    loadPoolHourly: async () => [{
+      asset: 'BTC.BTC', hour: '2026-08-31T12:00:00Z', estimated_fees_e8: '3',
+      fee_coverage: 'seeded', provisional: false
+    }, {
+      asset: 'ETH.ETH', hour: '2026-08-31T12:00:00Z', estimated_fees_e8: null,
+      fee_coverage: 'unavailable', provisional: false
+    }, {
+      asset: 'BTC.BTC', hour: '2026-09-01T12:00:00Z', estimated_fees_e8: '1',
+      fee_coverage: 'partial', provisional: true
     }],
     loadPositions: async () => [{
       asset: 'BTC.BTC', units_e8: '5', pool_units_e8: '100', rune_deposited_e8: '60',
@@ -306,11 +326,13 @@ test('SIPOL read model exposes known fee estimates and marks incomplete coverage
     })
   });
 
-  assert.equal(model.payload.summary.total_estimated_fees_e8, '3');
+  assert.equal(model.payload.summary.total_estimated_fees_e8, '4');
   assert.equal(model.payload.summary.fee_estimate_complete, false);
   assert.equal(model.payload.daily[0].estimated_fees_e8, null);
   assert.equal(model.payload.pools.find((row) => row.asset === 'ETH.ETH').estimated_fees_e8, null);
-  assert.match(model.payload.warnings.join(' '), /only days with sufficient ownership coverage/);
+  assert.equal(model.payload.coverage.fee_hours_seeded, 1);
+  assert.equal(model.payload.coverage.fee_hours_provisional, 1);
+  assert.match(model.payload.warnings.join(' '), /hours without an ownership seed/);
 });
 
 test('SIPOL compaction pins one exact durable watermark for every aggregate', async () => {
@@ -393,12 +415,12 @@ test('SIPOL live overlay starts a new UTC day without waiting for reconciliation
   });
 });
 
-test('SIPOL fee freshness follows the Pool Analysis source rather than scheduler time', async () => {
+test('SIPOL hourly fee refresh seeds from durable block fees and preserves source freshness', async () => {
   const queries = [];
   const client = {
     query: async (sql, params = []) => {
       queries.push({ sql, params });
-      if (/with ordered as/i.test(sql)) {
+      if (/with bounds as/i.test(sql)) {
         return {
           rowCount: 1,
           rows: [{ source_updated_at: '2026-08-31T12:00:00Z' }]
@@ -413,7 +435,11 @@ test('SIPOL fee freshness follows the Pool Analysis source rather than scheduler
     now: '2026-08-31T12:05:00Z'
   });
 
-  assert.match(queries[0].sql, /fees\.observed_at as source_updated_at/);
+  assert.match(queries[0].sql, /date_trunc\('hour'/);
+  assert.match(queries[0].sql, /jsonb_array_elements\(coalesce\(blocks\.pool_fees/);
+  assert.match(queries[0].sql, /system_income_pol_pool_hourly/);
+  assert.match(queries[0].sql, /'seeded'/);
+  assert.doesNotMatch(queries[0].sql, /pool_analysis_daily/);
   assert.equal(queries[1].params[8], '2026-08-31T12:00:00.000Z');
   assert.equal(result.sourceUpdatedAt, '2026-08-31T12:00:00.000Z');
 });
@@ -508,9 +534,10 @@ test('SIPOL handler serves only the durable model plus chain-header overlay', as
 });
 
 test('SIPOL production contract keeps legacy POL at pol-tvl and serves SIPOL from pol-tracker', async () => {
-  const [migration, headlineMigration, server, runJob, repair, service, timer, deploy, smoke] = await Promise.all([
+  const [migration, headlineMigration, hourlyMigration, server, runJob, repair, service, timer, deploy, smoke] = await Promise.all([
     readFile(new URL('../migrations/054_system_income_pol.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/055_system_income_pol_headlines.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/057_system_income_pol_hourly_fees.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/shared/system-income-pol-repair.js', import.meta.url), 'utf8'),
@@ -524,6 +551,8 @@ test('SIPOL production contract keeps legacy POL at pol-tvl and serves SIPOL fro
   assert.match(migration, /create table if not exists public\.system_income_pol_positions/);
   assert.match(headlineMigration, /system_income_total_e8/);
   assert.match(headlineMigration, /rune_price_usd_e8/);
+  assert.match(hourlyMigration, /create table if not exists public\.system_income_pol_pool_hourly/);
+  assert.match(hourlyMigration, /provisional boolean not null/);
   assert.match(server, /\['\/pol-tracker', route\(handleSystemIncomePol, 1, 64\)\]/);
   assert.match(server, /\['\/pol-tvl', route\(handlePolTracker, 1, 64\)\]/);
   assert.match(runJob, /'system-income-pol-scheduler': runSystemIncomePolScheduler/);
