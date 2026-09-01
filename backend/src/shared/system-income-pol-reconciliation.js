@@ -3,6 +3,8 @@ import { fetchThorchain } from './thornode.js';
 import { coreSnapshotValue, getThorNodeCoreSnapshot } from './thornode-core-snapshot.js';
 import { saveSystemIncomePolPositions } from './system-income-pol-store.js';
 
+const RECONCILIATION_COOLDOWN_SCOPE = 'system-income-pol-reconciliation';
+
 function integer(value, fallback = '0') {
   const normalized = String(value ?? '').trim();
   return /^\d+$/.test(normalized) ? BigInt(normalized) : BigInt(fallback);
@@ -112,6 +114,7 @@ export async function reconcileSystemIncomePolState(client, options = {}) {
   if (runePriceUsdE8 <= 0n) throw new Error('SIPOL reconciliation requires a current THORNode RUNE price');
   const module = await fetchThor('/thorchain/balance/module/pol_reserve', {
     cooldownClient: client,
+    cooldownScope: RECONCILIATION_COOLDOWN_SCOPE,
     timeoutMs: config.systemIncomePolTimeoutMs
   });
   if (!module?.address || !Array.isArray(module?.coins)) {
@@ -126,6 +129,7 @@ export async function reconcileSystemIncomePolState(client, options = {}) {
       try {
         return [pool.asset, await fetchThor(endpoint, {
           cooldownClient: client,
+          cooldownScope: RECONCILIATION_COOLDOWN_SCOPE,
           timeoutMs: config.systemIncomePolTimeoutMs
         })];
       } catch (error) {

@@ -205,8 +205,8 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
         pool_units: '100', pol_reserve_rune_deposited: '25'
       }]
     } }),
-    fetchThorchain: async (path) => {
-      calls.push(path);
+    fetchThorchain: async (path, requestOptions) => {
+      calls.push({ path, requestOptions });
       if (path === '/thorchain/balance/module/pol_reserve') {
         return { address: 'thor1pol', coins: [{ denom: 'rune', amount: '4' }] };
       }
@@ -215,10 +215,14 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
     savePositions: async (_client, rows, meta) => saved.push({ rows, meta })
   });
 
-  assert.deepEqual(calls, [
+  assert.deepEqual(calls.map((call) => call.path), [
     '/thorchain/balance/module/pol_reserve',
     '/thorchain/pool/BTC.BTC/liquidity_provider/thor1pol'
   ]);
+  assert.deepEqual(
+    calls.map((call) => call.requestOptions.cooldownScope),
+    ['system-income-pol-reconciliation', 'system-income-pol-reconciliation']
+  );
   assert.equal(saved.length, 1);
   assert.equal(result.positions, 1);
   assert.equal(result.undeployed_rune_e8, '4');
