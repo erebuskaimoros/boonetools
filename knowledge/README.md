@@ -11,6 +11,7 @@ This directory contains website/backend-specific protocol notes and session hist
 - [pol-tracker.md](./pol-tracker.md) — `/pol-tvl` same-height daily synth backing, locked Treasury LP, legacy Reserve POL, and System Income POL accounting.
 - [system-income-pol.md](./system-income-pol.md) — `/pol-tracker` block-live funding, deployments, reconciled positions, and estimated fee share.
 - [burn-tracker.md](./burn-tracker.md) — route-specific system-income RUNE burn metrics, daily ingestion, cumulative accounting, and source semantics.
+- [tc-fee-dash.md](./tc-fee-dash.md) — `/tc-fee-dash` historical fee-capture metrics plus its live Mimir/default system-income allocation and Sankey flow contract.
 - [slow-block-consensus-wasm-report-2026-08-06.md](./slow-block-consensus-wasm-report-2026-08-06.md) — three-window analysis of >10-second block intervals, scheduled proposer failures, final commit behavior, and Wasm/FIN activity.
 - [architecture-consolidation.md](./architecture-consolidation.md) — runtime ownership, unified API/backend contract, canonical provenance, queued reads, archive policy, and CI ratchets.
 - Use the shared [BooneTools project page](../../../knowledge/projects/boonetools.md) for durable product context.

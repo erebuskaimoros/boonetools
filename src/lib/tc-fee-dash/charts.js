@@ -1,4 +1,5 @@
 import Chart from 'chart.js/auto';
+import { Flow, SankeyController } from 'chartjs-chart-sankey';
 import { formatNumber, formatUSD } from '../utils/formatting.js';
 import { TERMINAL_CHART_PALETTE } from '../charts/terminal.js';
 import {
@@ -6,6 +7,8 @@ import {
   formatTcFeeUsdCompact,
   tcFeePointColor
 } from './presentation.js';
+
+Chart.register(SankeyController, Flow);
 
 const chartWithTooltip = /** @type {any} */ (Chart);
 const tooltipPlugin = Chart?.registry?.plugins?.get?.('tooltip') || chartWithTooltip.Tooltip;
@@ -471,6 +474,61 @@ export function createTcFeeIncomeVolumeChart(canvas, { series, rollingSeries }) 
           }
         }
       }
+    }
+  });
+}
+
+export function createSystemIncomeDistributionChart(canvas, flows = []) {
+  if (!canvas || !flows.length) return null;
+  const labelByNode = Object.fromEntries([
+    ['System Income', 'SYSTEM INCOME · 100%'],
+    ...flows.map((flow) => [flow.to, `${flow.to} · ${flow.flow}%`])
+  ]);
+
+  return new Chart(canvas.getContext('2d'), {
+    type: 'sankey',
+    data: {
+      datasets: [{
+        data: flows,
+        colorFrom: () => 'rgba(0, 204, 102, 0.78)',
+        colorTo: (context) => {
+          const dataset = /** @type {any} */ (context.dataset);
+          return dataset.data[context.dataIndex]?.color || '#c8c8c8';
+        },
+        colorMode: 'gradient',
+        labels: labelByNode,
+        color: TERMINAL_CHART_PALETTE.text,
+        font: { family: "'JetBrains Mono', monospace", size: 11, weight: 700 },
+        size: 'max'
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#080808',
+          borderColor: '#1a1a1a',
+          borderWidth: 1,
+          titleColor: '#ffffff',
+          bodyColor: '#f5f5f5',
+          displayColors: false,
+          padding: 10,
+          titleFont: { family: 'JetBrains Mono', size: 12, weight: 700 },
+          bodyFont: { family: 'JetBrains Mono', size: 12, weight: 500 },
+          callbacks: {
+            title: () => 'SYSTEM INCOME FLOW',
+            label(context) {
+              const dataset = /** @type {any} */ (context.dataset);
+              const item = dataset.data[context.dataIndex];
+              return `${item.label}: ${item.flow}%`;
+            }
+          }
+        }
+      },
+      layout: { padding: { top: 12, right: 88, bottom: 12, left: 8 } }
     }
   });
 }

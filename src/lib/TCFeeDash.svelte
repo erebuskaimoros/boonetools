@@ -1,6 +1,8 @@
 <script>
   import { onDestroy, onMount, tick } from 'svelte';
   import { fetchTcFeeDash } from './tc-fee-dash/api.js';
+  import { clearCoreSnapshotCache } from '$lib/api/core-snapshot.js';
+  import { fetchJSONWithFallback } from '$lib/utils/api.js';
   import {
     aggregateTcFeeRows,
     buildIncomeVolumeRollingAverageSeries,
@@ -12,6 +14,7 @@
   import { formatNumber, formatUSD } from '$lib/utils/formatting';
   import { TerminalAlert } from '$lib/components/terminal';
   import {
+    createSystemIncomeDistributionChart,
     createTcFeeChart,
     createTcFeeIncomeVolumeChart,
     drawTcFeeNavigator,
@@ -22,6 +25,11 @@
     formatTcFeeDate as formatDate,
     formatTcFeeUsdCompact as formatUsdCompact
   } from './tc-fee-dash/presentation.js';
+  import {
+    buildSystemIncomeDistribution,
+    formatSystemIncomePercent,
+    systemIncomeDistributionFlows
+  } from './tc-fee-dash/distribution.js';
 
   const GRANULARITIES = [
     { value: 'day', label: 'day' },
@@ -37,6 +45,12 @@
   let loading = true;
   let refreshing = false;
   let error = '';
+  let systemIncomeDistribution = buildSystemIncomeDistribution();
+  let distributionLoading = true;
+  let distributionRefreshing = false;
+  let distributionError = '';
+  let distributionCanvas;
+  let distributionChartInstance;
   let chartCanvas;
   let chartShell;
   let incomeVolumeCanvas;
@@ -82,6 +96,10 @@
   $: selectedStartRow = rows[normalizedStartIndex] || null;
   $: selectedEndRow = rows[normalizedEndIndex] || null;
   $: isFullWindow = rows.length > 0 && normalizedStartIndex === 0 && normalizedEndIndex === maxWindowIndex;
+  $: distributionFlows = systemIncomeDistributionFlows(systemIncomeDistribution);
+  $: hasDashboardError = Boolean(error || distributionError);
+  $: isDashboardLoading = loading || distributionLoading;
+  $: isDashboardRefreshing = refreshing || distributionRefreshing;
 
   $: if (typeof window !== 'undefined' && navCanvas && rows.length >= 0) {
     void normalizedStartIndex;
@@ -93,6 +111,7 @@
   onMount(() => {
     window.addEventListener('resize', handleResize);
     loadDashboard();
+    loadSystemIncomeDistribution();
   });
 
   onDestroy(() => {
@@ -123,6 +142,36 @@
     }
   }
 
+  async function loadSystemIncomeDistribution(options = {}) {
+    distributionLoading = !systemIncomeDistribution.complete;
+    distributionRefreshing = systemIncomeDistribution.complete;
+    distributionError = '';
+
+    try {
+      if (options.forceRefresh) clearCoreSnapshotCache();
+      const [mimir, constants] = await Promise.all([
+        fetchJSONWithFallback('/thorchain/mimir'),
+        fetchJSONWithFallback('/thorchain/constants')
+      ]);
+      systemIncomeDistribution = buildSystemIncomeDistribution(mimir, constants);
+      if (!systemIncomeDistribution.complete) {
+        throw new Error('one or more allocation levers are unavailable');
+      }
+      await tick();
+      renderSystemIncomeDistributionChart();
+    } catch (loadError) {
+      distributionError = loadError.message || String(loadError);
+    } finally {
+      distributionLoading = false;
+      distributionRefreshing = false;
+    }
+  }
+
+  function refreshDashboard() {
+    loadDashboard({ forceRefresh: true });
+    loadSystemIncomeDistribution({ forceRefresh: true });
+  }
+
   function destroyChart() {
     if (chartInstance) {
       chartInstance.destroy();
@@ -137,9 +186,17 @@
     }
   }
 
+  function destroySystemIncomeDistributionChart() {
+    if (distributionChartInstance) {
+      distributionChartInstance.destroy();
+      distributionChartInstance = null;
+    }
+  }
+
   function destroyCharts() {
     destroyChart();
     destroyIncomeVolumeChart();
+    destroySystemIncomeDistributionChart();
   }
 
   function handleResize() {
@@ -357,6 +414,7 @@
   function renderCharts() {
     renderChart();
     renderIncomeVolumeChart();
+    renderSystemIncomeDistributionChart();
   }
 
   function renderChart() {
@@ -380,6 +438,18 @@
     });
   }
 
+  function renderSystemIncomeDistributionChart() {
+    if (!distributionCanvas || !distributionFlows.length) {
+      destroySystemIncomeDistributionChart();
+      return;
+    }
+    destroySystemIncomeDistributionChart();
+    distributionChartInstance = createSystemIncomeDistributionChart(
+      distributionCanvas,
+      distributionFlows
+    );
+  }
+
 </script>
 
 <div class="tc-fee-dashboard">
@@ -392,13 +462,13 @@
       </div>
       <div class="head-right">
         <span class="status">
-          <span class="dot" class:warn={Boolean(error)} class:ok={!error && !loading}></span>
-          {error ? 'DEGRADED' : loading ? 'SYNCING' : 'LIVE'}
+          <span class="dot" class:warn={hasDashboardError} class:ok={!hasDashboardError && !isDashboardLoading}></span>
+          {hasDashboardError ? 'DEGRADED' : isDashboardLoading ? 'SYNCING' : 'LIVE'}
         </span>
         <span class="sep">│</span>
-        <button class="refresh" on:click={() => loadDashboard()} disabled={refreshing}>
+        <button class="refresh" on:click={refreshDashboard} disabled={isDashboardRefreshing}>
           <span class="bracket">[</span><span class="key">R</span><span class="bracket">]</span>
-          {refreshing ? 'refreshing' : 'refresh'}
+          {isDashboardRefreshing ? 'refreshing' : 'refresh'}
         </button>
       </div>
     </div>
@@ -414,6 +484,12 @@
   {#if error}
     <div class="alerts">
       <TerminalAlert tone="err">tc fee series — {error}</TerminalAlert>
+    </div>
+  {/if}
+
+  {#if distributionError}
+    <div class="alerts">
+      <TerminalAlert tone="warn">system income distribution — {distributionError}</TerminalAlert>
     </div>
   {/if}
 
@@ -453,6 +529,103 @@
       </article>
     </div>
   {/if}
+
+  <section class="distribution-section" aria-labelledby="system-income-distribution-title">
+    <div class="distribution-section-head">
+      <div class="block-title" id="system-income-distribution-title">
+        <span class="block-marker">▌</span>
+        <span>SYSTEM INCOME DISTRIBUTION</span>
+      </div>
+      <div class="meta-strip">
+        <span>[CURRENT]</span>
+        <span>POST-REVSHARE</span>
+        <span>10,000 BPS</span>
+      </div>
+    </div>
+
+    <div class="distribution-grid">
+      <article class="distribution-card distribution-card--allocations">
+        <div class="block-head distribution-card-head">
+          <div class="block-title">
+            <span class="card-index">05A</span>
+            <span>ACTIVE ALLOCATION</span>
+          </div>
+          <div class="meta-strip"><span>[MIMIR + DEFAULTS]</span></div>
+        </div>
+
+        <p class="distribution-note">
+          Active Mimirs override compiled protocol defaults. Burn, Dev, TCY, Marketing, and POL
+          are explicit deductions; Bond Providers receive the remainder.
+        </p>
+
+        {#if distributionLoading && !systemIncomeDistribution.complete}
+          <div class="distribution-state">
+            <div class="loader-bar"><span></span></div>
+            <span>RESOLVING ACTIVE MIMIRS</span>
+          </div>
+        {:else if systemIncomeDistribution.complete}
+          <div class="allocation-list" role="list" aria-label="Current system income allocations">
+            {#each systemIncomeDistribution.allocations as allocation}
+              <div
+                class="allocation-row"
+                style="--allocation-color: {allocation.color}; --allocation-width: {Math.min(100, allocation.percent || 0)}%;"
+                role="listitem"
+              >
+                <div class="allocation-main">
+                  <span class="allocation-swatch" aria-hidden="true"></span>
+                  <span class="allocation-name">{allocation.label}</span>
+                  <span class="allocation-source" class:allocation-source--mimir={allocation.source === 'mimir'}>
+                    [{allocation.source === 'constant' ? 'DEFAULT' : allocation.source.toUpperCase()}]
+                  </span>
+                </div>
+                <strong class="allocation-value">{formatSystemIncomePercent(allocation.percent)}</strong>
+                <span class="allocation-key">
+                  {allocation.mimirKey || '10,000 BPS − EXPLICIT LANES'}
+                </span>
+                <div class="allocation-track" aria-hidden="true"><span></span></div>
+              </div>
+            {/each}
+          </div>
+          {#if systemIncomeDistribution.overflowBps > 0}
+            <p class="distribution-warning">
+              WRN · EXPLICIT ALLOCATIONS EXCEED 10,000 BPS BY {systemIncomeDistribution.overflowBps} BPS
+            </p>
+          {/if}
+        {:else}
+          <div class="distribution-state distribution-state--error">ALLOCATION DATA UNAVAILABLE</div>
+        {/if}
+      </article>
+
+      <article class="distribution-card distribution-card--chart">
+        <div class="block-head distribution-card-head">
+          <div class="block-title">
+            <span class="card-index">05B</span>
+            <span>DISTRIBUTION FLOW</span>
+          </div>
+          <div class="meta-strip"><span>[100% SYSTEM INCOME]</span></div>
+        </div>
+
+        {#if distributionLoading && !systemIncomeDistribution.complete}
+          <div class="distribution-state">
+            <div class="loader-bar"><span></span></div>
+            <span>BUILDING FLOW</span>
+          </div>
+        {:else if distributionFlows.length}
+          <div class="distribution-chart-shell">
+            <canvas
+              bind:this={distributionCanvas}
+              aria-label="Flow chart of current THORChain system income distribution"
+            ></canvas>
+          </div>
+          <p class="distribution-chart-foot">
+            SYSTEM INCOME 100% → EXPLICIT ALLOCATIONS + BOND PROVIDER REMAINDER
+          </p>
+        {:else}
+          <div class="distribution-state distribution-state--error">FLOW DATA UNAVAILABLE</div>
+        {/if}
+      </article>
+    </div>
+  </section>
 
   <section class="chart-block">
     <div class="block-head">
@@ -848,6 +1021,194 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     color: var(--term-text-4, #949494);
+  }
+
+  /* ========== SYSTEM INCOME DISTRIBUTION ========== */
+
+  .distribution-section {
+    margin-bottom: 18px;
+  }
+
+  .distribution-section-head {
+    align-items: center;
+    display: flex;
+    gap: 16px;
+    justify-content: space-between;
+    padding: 4px 2px 10px;
+  }
+
+  .distribution-grid {
+    align-items: stretch;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .distribution-card {
+    background: #0a0a0a;
+    border: 1px solid #1a1a1a;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .distribution-card-head {
+    min-height: 52px;
+    padding: 12px 14px;
+  }
+
+  .card-index {
+    color: #00cc66;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+  }
+
+  .distribution-note {
+    color: var(--term-text-2, #b8b8b8);
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 0;
+    padding: 13px 16px;
+  }
+
+  .allocation-list {
+    border-top: 1px solid #111111;
+  }
+
+  .allocation-row {
+    display: grid;
+    gap: 5px 12px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 10px 16px 11px;
+    transition: background 0.15s ease;
+  }
+
+  .allocation-row + .allocation-row {
+    border-top: 1px solid #111111;
+  }
+
+  .allocation-row:hover {
+    background: #0d0d0d;
+  }
+
+  .allocation-main {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .allocation-swatch {
+    background: var(--allocation-color);
+    flex: 0 0 auto;
+    height: 8px;
+    width: 8px;
+  }
+
+  .allocation-name,
+  .allocation-source,
+  .allocation-value,
+  .allocation-key,
+  .distribution-warning,
+  .distribution-chart-foot,
+  .distribution-state {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .allocation-name {
+    color: var(--term-text-body, #e8e8e8);
+    font-size: 12px;
+    font-weight: 700;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .allocation-source {
+    color: var(--term-text-4, #949494);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+  }
+
+  .allocation-source--mimir {
+    color: #00cc66;
+  }
+
+  .allocation-value {
+    color: var(--allocation-color);
+    font-size: 18px;
+    line-height: 1;
+  }
+
+  .allocation-key {
+    color: var(--term-text-4, #949494);
+    font-size: 11px;
+    grid-column: 1 / -1;
+    overflow-wrap: anywhere;
+  }
+
+  .allocation-track {
+    background: #111111;
+    grid-column: 1 / -1;
+    height: 2px;
+    overflow: hidden;
+  }
+
+  .allocation-track span {
+    background: var(--allocation-color);
+    display: block;
+    height: 100%;
+    opacity: 0.82;
+    width: var(--allocation-width);
+  }
+
+  .distribution-warning {
+    border-top: 1px solid #1a1a1a;
+    color: #d4a017;
+    font-size: 11px;
+    margin: 0;
+    padding: 11px 16px;
+  }
+
+  .distribution-chart-shell {
+    flex: 1;
+    height: 440px;
+    min-height: 390px;
+    padding: 12px 10px 4px;
+  }
+
+  .distribution-chart-shell canvas {
+    height: 100%;
+    width: 100%;
+  }
+
+  .distribution-chart-foot {
+    border-top: 1px solid #111111;
+    color: var(--term-text-4, #949494);
+    font-size: 11px;
+    letter-spacing: 0.04em;
+    margin: 0;
+    padding: 10px 14px;
+  }
+
+  .distribution-state {
+    align-items: center;
+    color: var(--term-text-3, #a3a3a3);
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    font-size: 11px;
+    gap: 14px;
+    justify-content: center;
+    letter-spacing: 0.08em;
+    min-height: 390px;
+  }
+
+  .distribution-state--error {
+    color: #e05260;
   }
 
   /* ========== CHART BLOCK ========== */
@@ -1281,6 +1642,10 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .distribution-grid {
+      grid-template-columns: 1fr;
+    }
+
     .metric-value {
       font-size: clamp(20px, 5.2vw, 24px);
       overflow-wrap: normal;
@@ -1295,6 +1660,7 @@
 
     .head-top,
     .block-head,
+    .distribution-section-head,
     .chart-controls {
       align-items: stretch;
       flex-direction: column;
@@ -1327,6 +1693,12 @@
       height: 380px;
       min-height: 320px;
       padding: 12px 8px 14px;
+    }
+
+    .distribution-chart-shell {
+      height: 390px;
+      min-height: 340px;
+      padding: 8px 4px 2px;
     }
   }
 </style>

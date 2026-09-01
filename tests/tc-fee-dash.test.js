@@ -11,6 +11,64 @@ import {
   normalizeTcFeeRows,
   summarizeTcFeeRows
 } from '../src/lib/tc-fee-dash/model.js';
+import {
+  buildSystemIncomeDistribution,
+  formatSystemIncomePercent,
+  systemIncomeDistributionFlows
+} from '../src/lib/tc-fee-dash/distribution.js';
+
+test('system income distribution resolves active Mimirs over protocol defaults', () => {
+  const distribution = buildSystemIncomeDistribution({
+    SYSTEMINCOMEBURNRATEBPS: 500,
+    POLRESERVESYSTEMINCOMEBPS: 2000
+  }, {
+    int_64_values: {
+      SystemIncomeBurnRateBps: 1,
+      DevFundSystemIncomeBps: 500,
+      TCYStakeSystemIncomeBps: 1000,
+      MarketingFundSystemIncomeBps: 500,
+      POLReserveSystemIncomeBps: 0
+    }
+  });
+
+  assert.equal(distribution.complete, true);
+  assert.equal(distribution.explicitBps, 4500);
+  assert.equal(distribution.totalBps, 10_000);
+  assert.equal(distribution.overflowBps, 0);
+  assert.deepEqual(
+    distribution.allocations.map(({ id, bps, source }) => ({ id, bps, source })),
+    [
+      { id: 'burn', bps: 500, source: 'mimir' },
+      { id: 'dev', bps: 500, source: 'constant' },
+      { id: 'tcy', bps: 1000, source: 'constant' },
+      { id: 'marketing', bps: 500, source: 'constant' },
+      { id: 'ip', bps: 5500, source: 'derived' },
+      { id: 'pol', bps: 2000, source: 'mimir' }
+    ]
+  );
+});
+
+test('system income distribution accepts zero overrides and builds chart flows', () => {
+  const distribution = buildSystemIncomeDistribution({
+    systemincomeburnratebps: 0,
+    devfundsystemincomebps: 500,
+    tcystakesystemincomebps: 1000,
+    marketingfundsystemincomebps: 500,
+    polreservesystemincomebps: 0
+  });
+
+  assert.equal(distribution.allocations.find(({ id }) => id === 'burn').source, 'mimir');
+  assert.equal(distribution.allocations.find(({ id }) => id === 'ip').bps, 8000);
+  assert.deepEqual(systemIncomeDistributionFlows(distribution).map(({ to, flow }) => ({ to, flow })), [
+    { to: 'DEV', flow: 5 },
+    { to: 'TCY', flow: 10 },
+    { to: 'MKT', flow: 5 },
+    { to: 'BOND PROVIDERS', flow: 80 }
+  ]);
+  assert.equal(formatSystemIncomePercent(5), '5%');
+  assert.equal(formatSystemIncomePercent(5.125), '5.13%');
+  assert.equal(formatSystemIncomePercent(null), '—');
+});
 
 test('computeFeesPerBillionUsd normalizes fees against global exchange volume', () => {
   assert.equal(Math.round(computeFeesPerBillionUsd(375_700, 1_033_000_000_000)), 364);
