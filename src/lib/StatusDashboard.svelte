@@ -571,7 +571,7 @@
                       </tr>
                     </thead>
                     <tbody>
-                      {#each bundle.transactions as transaction (transaction.tx_id)}
+                      {#each bundle.transactions as transaction (transaction.renderKey)}
                         <tr class="stuck-row">
                           <td>
                             <a class="tx-id" href={txUrl(transaction.tx_id)} target="_blank" rel="noopener noreferrer" title={transaction.tx_id}>

@@ -52,7 +52,7 @@ test('stuck transactions render as expandable chain bundles', () => {
   assert.match(source, /\{#each stuckTransactionGroups as bundle \(bundle\.chain\)\}/);
   assert.match(source, /<details class="stuck-bundle">/);
   assert.match(source, /<summary[^>]*>[\s\S]*bundle\.count[\s\S]*bundle\.maxOverdueBlocks/);
-  assert.match(source, /\{#each bundle\.transactions as transaction \(transaction\.tx_id\)\}/);
+  assert.match(source, /\{#each bundle\.transactions as transaction \(transaction\.renderKey\)\}/);
   assert.match(source, /Open \{number\.format\(bundle\.count\)\} transaction/);
 });
 

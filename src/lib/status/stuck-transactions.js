@@ -25,7 +25,12 @@ export function groupStuckTransactionsByChain(transactions) {
 
   return [...byChain.entries()]
     .map(([chain, chainTransactions]) => {
-      const sortedTransactions = [...chainTransactions].sort(compareTransactions);
+      const sortedTransactions = [...chainTransactions]
+        .sort(compareTransactions)
+        .map((transaction) => ({
+          ...transaction,
+          renderKey: `${String(transaction?.tx_id || '')}:${String(transaction?.stage || '')}`
+        }));
       const stageLabels = [...new Set(sortedTransactions.map((transaction) => (
         String(transaction?.stage_label || '').trim() || 'Unknown stage'
       )))];

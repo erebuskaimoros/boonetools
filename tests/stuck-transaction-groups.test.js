@@ -50,3 +50,29 @@ test('invalid stuck transaction input produces no chain bundles', () => {
   assert.deepEqual(groupStuckTransactionsByChain(null), []);
   assert.deepEqual(groupStuckTransactionsByChain({}), []);
 });
+
+test('multiple stuck stages for one transaction expose unique render keys', () => {
+  const [group] = groupStuckTransactionsByChain([
+    {
+      tx_id: 'DUPLICATE-TX',
+      chain: 'ETH',
+      stage: 'outbound_signing',
+      stage_label: 'Outbound signing',
+      overdue_blocks: 120
+    },
+    {
+      tx_id: 'DUPLICATE-TX',
+      chain: 'ETH',
+      stage: 'scheduled_outbound',
+      stage_label: 'Scheduled outbound',
+      overdue_blocks: 120
+    }
+  ]);
+
+  const renderKeys = group.transactions.map((transaction) => transaction.renderKey);
+  assert.equal(new Set(renderKeys).size, group.transactions.length);
+  assert.deepEqual(renderKeys, [
+    'DUPLICATE-TX:outbound_signing',
+    'DUPLICATE-TX:scheduled_outbound'
+  ]);
+});
