@@ -360,6 +360,11 @@ The System Income POL lane resolves the `pol_reserve` module and deposited-pool
 LPs at the same historical anchor and values both sides using same-height pool
 depth and RUNE/TOR price. It remains a distinct chart value to prevent the two
 forms of POL from being conflated.
+The public handler supplements that daily history with
+`current.system_income_pol` from the cached `system-income-pol:v1` model. Its
+headline USD value is rebuilt as the sum of the reconciled RUNE-leg and
+asset-leg USD values; the historical chart remains completed-day and
+same-height.
 
 Scheduled and default backfill runs use `POL_TRACKER_HEAD_LAG_DAYS=0`, so the
 target is the latest completed UTC day. Raise the value only when a configured

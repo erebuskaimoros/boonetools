@@ -41,6 +41,62 @@ test('POL Tracker handler is cache-only and supports conditional responses', asy
   assert.equal(second.status, 304);
   assert.equal(second.body, null);
 });
+
+test('POL Tracker handler publishes the current full two-sided System Income POL value', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { handlePolTracker } = await import('../src/handlers/pol-tracker.js');
+  const result = await handlePolTracker({ headers: {} }, null, {
+    now: NOW,
+    getReadModel: async () => ({
+      key: 'pol-tracker:v3',
+      schemaVersion: 3,
+      payload: {
+        as_of: '2026-08-18T23:59:58.000Z',
+        latest: {
+          day: '2026-08-18',
+          system_income_pol: { position_rune: 717.82, position_usd: 345.01 }
+        },
+        daily: [],
+        warnings: []
+      },
+      etag: 'stored',
+      generatedAt: NOW.toISOString(),
+      publishedAt: NOW.toISOString(),
+      ageSeconds: 2,
+      stale: false
+    }),
+    getSystemIncomePolReadModel: async () => ({
+      payload: {
+        as_of: '2026-08-19T11:59:00.000Z',
+        summary: {
+          total_rune_held_e8: '64541143934',
+          total_rune_held_usd_e8: '31026335531',
+          total_asset_value_rune_e8: '64575047021',
+          total_asset_value_usd_e8: '31042633484',
+          // These totals should agree, but the two independently reconciled
+          // LP legs are the accounting boundary this regression protects.
+          total_position_value_rune_e8: '129116190955',
+          total_position_value_usd_e8: '62068969015'
+        }
+      },
+      etag: 'system-income-pol',
+      stale: false
+    })
+  });
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.current.system_income_pol, {
+    as_of: '2026-08-19T11:59:00.000Z',
+    position_rune: 1291.16190955,
+    position_usd: 620.68969015,
+    rune_leg_usd: 310.26335531,
+    asset_leg_usd: 310.42633484
+  });
+  assert.notEqual(
+    result.body.current.system_income_pol.position_usd,
+    result.body.latest.system_income_pol.position_usd
+  );
+});
 test('POL Tracker handler returns a warming response instead of doing provider work', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { handlePolTracker } = await import('../src/handlers/pol-tracker.js');

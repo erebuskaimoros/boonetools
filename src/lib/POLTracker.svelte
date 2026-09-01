@@ -45,6 +45,9 @@
   $: displayedTotal = totalPolTrackerValue(hovered);
   $: relevantPools = relevantPolTrackerPools(dashboard.latestPools);
   $: latest = dashboard.latest;
+  $: currentSystemIncomePol = dashboard.currentSystemIncomePol;
+  $: systemIncomePolUsd = currentSystemIncomePol?.positionUsd ?? latest?.systemIncomePolUsd;
+  $: systemIncomePolRune = currentSystemIncomePol?.positionRune ?? latest?.systemIncomePolRune;
   $: latestTotal = totalPolTrackerValue(latest);
   $: coveragePercent = dashboard.coverage.expected_days
     ? (dashboard.coverage.observed_days / dashboard.coverage.expected_days) * 100
@@ -241,9 +244,9 @@
         <small>{formatPolTrackerRune(latest?.reservePolRune)} legacy-module gross</small>
       </article>
       <article class="metric metric--system-income-pol">
-        <span class="metric-label">SYSTEM INCOME POL</span>
-        <strong>{formatPolTrackerUsd(latest?.systemIncomePolUsd, true)}</strong>
-        <small>{formatPolTrackerRune(latest?.systemIncomePolRune)} pol_reserve position</small>
+        <span class="metric-label">SYSTEM INCOME POL{currentSystemIncomePol ? ' · LIVE' : ''}</span>
+        <strong>{formatPolTrackerUsd(systemIncomePolUsd, true)}</strong>
+        <small>{formatPolTrackerRune(systemIncomePolRune)} · FULL TWO-SIDED POSITION</small>
       </article>
       <article class="metric">
         <span class="metric-label">LATEST DAY</span>

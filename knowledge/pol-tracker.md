@@ -15,6 +15,13 @@ public API fields. Provider-owned RUNEPool value is stored only as a private
 reconciliation input. The dashboard combines the four tracked values into one
 stacked area chart. Its hover total is their arithmetic sum.
 
+The chart and its total remain completed-day, same-height accounting. The
+System Income POL headline additionally reads the current provider-free
+`system-income-pol:v1` model and reconstructs the live position from both
+reconciled LP legs (`RUNE held + external asset value`). This avoids presenting
+yesterday's day-end SIPOL value as the current position without contaminating
+the historical chart with mixed-height data.
+
 Savers value is intentionally absent from the dashboard, public API, and newly
 collected rows. Migration `046_pol_tracker.sql` retains nullable legacy Saver
 columns for forward-compatible rollback, but the v3 read model never selects or
@@ -59,4 +66,7 @@ timestamp from making old source data appear `READY` or 100% covered.
 This completed-day TVL accounting remains separate from the live System Income
 POL funding dashboard at `/pol-tracker`. Its `pol_tracker_*` tables,
 `pol-tracker:v3` read model, and scheduled history collector retain their
-internal names for backward-compatible operations.
+internal names for backward-compatible operations. The `/pol-tvl` handler's
+additive `current.system_income_pol` field is sourced only from the cached live
+read model; if it is unavailable, the frontend falls back to the latest stored
+day-end value.

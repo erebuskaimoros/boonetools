@@ -55,6 +55,7 @@ export function normalizePolTrackerPayload(payload = {}) {
     .map(normalizePolTrackerDailyRow)
     .filter((row) => row.day)
     .sort((left, right) => left.day.localeCompare(right.day));
+  const currentSystemIncomePol = payload.current?.system_income_pol;
   return {
     asOf: payload.as_of || null,
     startDate: day(payload.start_date),
@@ -63,6 +64,15 @@ export function normalizePolTrackerPayload(payload = {}) {
     coverage: payload.coverage || {},
     daily,
     latest: daily.filter((row) => row.height !== null).at(-1) || null,
+    currentSystemIncomePol: currentSystemIncomePol && typeof currentSystemIncomePol === 'object'
+      ? {
+          asOf: currentSystemIncomePol.as_of || null,
+          positionRune: finite(currentSystemIncomePol.position_rune),
+          positionUsd: finite(currentSystemIncomePol.position_usd),
+          runeLegUsd: finite(currentSystemIncomePol.rune_leg_usd),
+          assetLegUsd: finite(currentSystemIncomePol.asset_leg_usd)
+        }
+      : null,
     latestPools: (Array.isArray(payload.latest_pools) ? payload.latest_pools : []).map((pool) => ({
       day: day(pool.day),
       asset: String(pool.asset || ''),

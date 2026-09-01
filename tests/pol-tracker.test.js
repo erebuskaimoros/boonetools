@@ -60,6 +60,15 @@ test('POL Tracker exposes the requested date-range presets above the chart', () 
 
 test('POL Tracker normalization ignores Savers, Treasury legs, and RUNEPool ownership', () => {
   const dashboard = normalizePolTrackerPayload({
+    current: {
+      system_income_pol: {
+        as_of: '2026-08-19T11:59:00.000Z',
+        position_rune: 1291.16190955,
+        position_usd: 620.68969015,
+        rune_leg_usd: 310.26335531,
+        asset_leg_usd: 310.42633484
+      }
+    },
     daily: [{
       day: '2025-02-01',
       height: 123,
@@ -104,6 +113,20 @@ test('POL Tracker normalization ignores Savers, Treasury legs, and RUNEPool owne
   assert.equal(dashboard.latestPools[0].reservePolUsd, 20);
   assert.equal(dashboard.latestPools[0].systemIncomePolRune, 12);
   assert.equal(dashboard.latestPools[0].systemIncomePolUsd, 24);
+  assert.deepEqual(dashboard.currentSystemIncomePol, {
+    asOf: '2026-08-19T11:59:00.000Z',
+    positionRune: 1291.16190955,
+    positionUsd: 620.68969015,
+    runeLegUsd: 310.26335531,
+    assetLegUsd: 310.42633484
+  });
+});
+
+test('POL TVL headline prefers the current full System Income POL position while history stays daily', async () => {
+  const trackerSource = await readFile(new URL('../src/lib/POLTracker.svelte', import.meta.url), 'utf8');
+  assert.match(trackerSource, /currentSystemIncomePol\?\.positionUsd \?\? latest\?\.systemIncomePolUsd/);
+  assert.match(trackerSource, /currentSystemIncomePol\?\.positionRune \?\? latest\?\.systemIncomePolRune/);
+  assert.match(trackerSource, /FULL TWO-SIDED POSITION/);
 });
 
 test('the latest-pool table keeps pools whose only tracked value is either form of POL', () => {
