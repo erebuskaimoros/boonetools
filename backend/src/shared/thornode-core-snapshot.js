@@ -38,7 +38,13 @@ function objectOrArray(value) {
 }
 
 function oraclePricesValue(value) {
-  return objectValue(value) && Array.isArray(value.prices);
+  return objectValue(value)
+    && Array.isArray(value.prices)
+    && value.prices.some((row) => {
+      const symbol = String(row?.symbol || '').trim();
+      const price = Number(row?.price);
+      return symbol && Number.isFinite(price) && price > 0;
+    });
 }
 
 function runeSupplyValue(value) {
@@ -64,6 +70,8 @@ function previousPayload(modelOrPayload) {
 }
 
 function isDue(field, previous, nowMs) {
+  if (!previous || !Object.prototype.hasOwnProperty.call(previous, field.key)) return true;
+  if (!field.valid(previous[field.key])) return true;
   const fetchedAt = timestampMs(previous?.field_meta?.[field.key]?.fetched_at);
   return fetchedAt <= 0 || nowMs - fetchedAt >= field.cadenceMs;
 }
@@ -139,7 +147,9 @@ export async function buildThorNodeCoreSnapshot(options = {}) {
     warnings: []
   };
   for (const field of THORNODE_CORE_FIELDS) {
-    if (previous && Object.prototype.hasOwnProperty.call(previous, field.key)) {
+    if (previous
+      && Object.prototype.hasOwnProperty.call(previous, field.key)
+      && field.valid(previous[field.key])) {
       payload[field.key] = previous[field.key];
       if (!dueFields.includes(field) && payload.field_meta[field.key]) {
         payload.field_meta[field.key] = {

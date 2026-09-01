@@ -97,6 +97,55 @@ test('durable core snapshot preserves values but marks provider-total failure st
   assert.match(failed.warnings.join(' '), /reused last successful value/);
 });
 
+test('durable core snapshot rejects an empty oracle price set and reuses the last-good value', async () => {
+  const first = await buildThorNodeCoreSnapshot({
+    now: () => START,
+    fetchThorchain: async (path) => payloadFor(path),
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({ nextChurnHeight: '123456' }),
+    fetchBifrostScannerInfo: async () => scannerPayload()
+  });
+  const refreshed = await buildThorNodeCoreSnapshot({
+    now: () => new Date(START.getTime() + 120_001),
+    previousSnapshot: first,
+    fetchThorchain: async (path) => (
+      path === '/thorchain/oracle/prices' ? { prices: [] } : payloadFor(path)
+    ),
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({ nextChurnHeight: '123456' }),
+    fetchBifrostScannerInfo: async () => scannerPayload()
+  });
+
+  assert.deepEqual(refreshed.oracle_prices, first.oracle_prices);
+  assert.equal(refreshed.field_meta.oracle_prices.status, 'reused');
+  assert.match(refreshed.warnings.join(' '), /oracle\/prices.*reused last successful value/);
+});
+
+test('durable core snapshot does not reuse an already-invalid oracle price set', async () => {
+  const previous = await buildThorNodeCoreSnapshot({
+    now: () => START,
+    fetchThorchain: async (path) => payloadFor(path),
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({ nextChurnHeight: '123456' }),
+    fetchBifrostScannerInfo: async () => scannerPayload()
+  });
+  previous.oracle_prices = { prices: [] };
+  const refreshed = await buildThorNodeCoreSnapshot({
+    now: () => new Date(START.getTime() + 120_001),
+    previousSnapshot: previous,
+    fetchThorchain: async (path) => (
+      path === '/thorchain/oracle/prices' ? { prices: [] } : payloadFor(path)
+    ),
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({ nextChurnHeight: '123456' }),
+    fetchBifrostScannerInfo: async () => scannerPayload()
+  });
+
+  assert.equal(Object.hasOwn(refreshed, 'oracle_prices'), false);
+  assert.equal(refreshed.field_meta.oracle_prices.status, 'error');
+  assert.doesNotMatch(refreshed.warnings.join(' '), /oracle\/prices.*reused last successful value/);
+});
+
 test('durable core snapshot refuses a first publication without required THORNode fields', async () => {
   await assert.rejects(() => buildThorNodeCoreSnapshot({
     now: () => START,

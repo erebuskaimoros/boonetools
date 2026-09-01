@@ -112,7 +112,12 @@ function sourceTime(...values) {
   return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
 }
 
-export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregates = [] } = {}) {
+export function buildPoolAnalysisRows({
+  pools = [],
+  oraclePayload = {},
+  networkPayload = {},
+  aggregates = []
+} = {}) {
   const aggregatesByAsset = new Map();
   for (const aggregate of aggregates) {
     const asset = assetIdentity(aggregate.asset).asset;
@@ -122,7 +127,10 @@ export function buildPoolAnalysisRows({ pools = [], oraclePayload = {}, aggregat
     aggregatesByAsset.get(asset).set(periodId, aggregate);
   }
   const oracles = normalizeOraclePrices(oraclePayload);
-  const runePriceUsd = positive(oracles.get('RUNE'));
+  const oracleRunePriceUsd = positive(oracles.get('RUNE'));
+  const networkRunePriceBase = positive(networkPayload?.rune_price_in_tor);
+  const networkRunePriceUsd = networkRunePriceBase === null ? null : networkRunePriceBase / 1e8;
+  const runePriceUsd = oracleRunePriceUsd ?? networkRunePriceUsd;
 
   return (Array.isArray(pools) ? pools : [])
     .filter((pool) => ['available', 'staged'].includes(String(pool?.status || '').toLowerCase()))
@@ -231,11 +239,24 @@ export async function buildPoolAnalysisReadModel(client, options = {}) {
   ]);
   const pools = coreSnapshotValue(core, 'pools', []);
   const oraclePayload = coreSnapshotValue(core, 'oracle_prices', {});
-  const rows = buildPoolAnalysisRows({ pools, oraclePayload, aggregates });
+  const networkPayload = coreSnapshotValue(core, 'network', {});
+  const oracleRunePriceUsd = positive(normalizeOraclePrices(oraclePayload).get('RUNE'));
+  const networkRunePriceBase = positive(networkPayload?.rune_price_in_tor);
+  const networkRunePriceUsd = networkRunePriceBase === null ? null : networkRunePriceBase / 1e8;
+  const runePriceUsd = oracleRunePriceUsd ?? networkRunePriceUsd;
+  const runePriceSource = oracleRunePriceUsd !== null
+    ? 'oracle_prices'
+    : networkRunePriceUsd !== null
+      ? 'network'
+      : null;
+  const rows = buildPoolAnalysisRows({ pools, oraclePayload, networkPayload, aggregates });
   if (!rows.length) throw new Error('Pool Analysis found no Available or Staged pools');
   const warnings = [];
-  if (isThorNodeCoreSnapshotStale(core, ['pools', 'oracle_prices'])) {
-    warnings.push('Current THORNode pool or oracle state is stale');
+  if (isThorNodeCoreSnapshotStale(core, ['pools', runePriceSource || 'oracle_prices'])) {
+    warnings.push('Current THORNode pool or RUNE price state is stale');
+  }
+  if (runePriceSource === 'network') {
+    warnings.push('Using THORNode network RUNE price fallback because the oracle RUNE price is unavailable');
   }
   const syncErrors = syncStates.filter((row) => row.last_error);
   if (syncErrors.length) warnings.push(`${syncErrors.length} pool history sync(s) reported an error`);
@@ -260,10 +281,12 @@ export async function buildPoolAnalysisReadModel(client, options = {}) {
         through_day: completedDay,
         available: POOL_ANALYSIS_TABLE_PERIODS
       },
-      rune_price_usd: positive(normalizeOraclePrices(oraclePayload).get('RUNE')),
+      rune_price_usd: runePriceUsd,
       pools: rows,
       sources: {
-        current: 'thornode-core:pools+oracle_prices',
+        current: runePriceSource
+          ? `thornode-core:pools+${runePriceSource}`
+          : 'thornode-core:pools',
         history: 'liquify-midgard:history/swaps'
       },
       warnings

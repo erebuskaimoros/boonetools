@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 import {
   POOL_ANALYSIS_TABLE_PERIODS,
+  buildPoolAnalysisReadModel,
   buildPoolAnalysisRows,
   buildPoolAnalysisSeries,
   parsePoolAnalysisSwapInterval
@@ -77,6 +78,40 @@ test('Pool Analysis builds every selectable table period from exact daily aggreg
   assert.equal(rows[0].period_metrics['30d'].fee_depth_percent, 1.5);
   assert.equal(rows[0].period_metrics['90d'].volume_usd, null);
   assert.equal(rows[0].period_metrics['90d'].coverage.expected_days, 90);
+});
+
+test('Pool Analysis falls back to the THORNode network RUNE price when oracle prices are unavailable', async () => {
+  const result = await buildPoolAnalysisReadModel({ id: 'db' }, {
+    now: new Date('2026-09-01T06:22:17Z'),
+    getCoreSnapshot: async () => ({
+      stale: false,
+      sourceUpdatedAt: '2026-09-01T06:22:00Z',
+      payload: {
+        pools: [{
+          asset: 'BTC.BTC',
+          status: 'Available',
+          asset_tor_price: '8000000000000',
+          balance_asset: '100000000',
+          balance_rune: '100000000000'
+        }],
+        oracle_prices: { prices: [] },
+        network: { rune_price_in_tor: '50000000' },
+        field_meta: {
+          pools: { status: 'fresh' },
+          oracle_prices: { status: 'fresh' },
+          network: { status: 'fresh' }
+        }
+      }
+    }),
+    loadAggregates: async () => [],
+    loadSyncStates: async () => []
+  });
+
+  assert.equal(result.payload.rune_price_usd, 0.5);
+  assert.equal(result.payload.pools[0].depth_usd, 500);
+  assert.equal(result.payload.pools[0].total_depth_usd, 1000);
+  assert.match(result.payload.sources.current, /network/);
+  assert.match(result.payload.warnings.join(' '), /network RUNE price fallback/i);
 });
 
 test('Pool Analysis aggregate query requests all table windows in one database round trip', async () => {
