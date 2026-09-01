@@ -8,14 +8,15 @@ export const POL_TRACKER_RANGES = Object.freeze([
 export const POL_TRACKER_SERIES = Object.freeze([
   { id: 'synth', label: 'SYNTH BACKING', group: 'overview', color: '#5588cc', value: (row) => row?.synthBackingUsd ?? null },
   { id: 'treasury_total', label: 'TREASURY LOCKED LP', group: 'overview', color: '#d4a017', value: (row) => row?.treasuryTotalUsd ?? null },
-  { id: 'reserve_pol', label: 'RESERVE POL', group: 'overview', color: '#00cc66', value: (row) => row?.reservePolUsd ?? null }
+  { id: 'reserve_pol', label: 'RESERVE POL', group: 'overview', color: '#00cc66', value: (row) => row?.reservePolUsd ?? null },
+  { id: 'system_income_pol', label: 'SYSTEM INCOME POL', group: 'overview', color: '#ff8a3d', value: (row) => row?.systemIncomePolUsd ?? null }
 ]);
 
 export const POL_TRACKER_GROUPS = Object.freeze([
   {
     id: 'overview',
     title: 'Daily tracked values',
-    description: 'Three same-height values stacked as shaded areas from each completed UTC day end.'
+    description: 'Four same-height values stacked as shaded areas from each completed UTC day end.'
   }
 ]);
 
@@ -41,6 +42,8 @@ export function normalizePolTrackerDailyRow(row = {}) {
     treasuryTotalUsd: finite(row.treasury_lp?.total_usd),
     reservePolRune: finite(row.reserve_pol?.deployed_rune),
     reservePolUsd: finite(row.reserve_pol?.deployed_usd),
+    systemIncomePolRune: finite(row.system_income_pol?.position_rune),
+    systemIncomePolUsd: finite(row.system_income_pol?.position_usd),
     complete: Boolean(row.complete),
     status: row.status && typeof row.status === 'object' ? row.status : {},
     warnings: Array.isArray(row.warnings) ? row.warnings : []
@@ -72,7 +75,9 @@ export function normalizePolTrackerPayload(payload = {}) {
       treasuryLpUnits: String(pool.treasury_lp_units || '0'),
       treasuryTotalUsd: finite(pool.treasury_total_usd),
       reservePolRune: finite(pool.reserve_pol_rune),
-      reservePolUsd: finite(pool.reserve_pol_usd)
+      reservePolUsd: finite(pool.reserve_pol_usd),
+      systemIncomePolRune: finite(pool.system_income_pol_rune),
+      systemIncomePolUsd: finite(pool.system_income_pol_usd)
     })),
     warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
     methodology: payload.methodology || {}
@@ -199,6 +204,7 @@ export function relevantPolTrackerPools(pools = []) {
     (pool.synthBackingUsd || 0) > 0
     || (pool.treasuryTotalUsd || 0) > 0
     || (pool.reservePolUsd || 0) > 0
+    || (pool.systemIncomePolUsd || 0) > 0
   );
 }
 

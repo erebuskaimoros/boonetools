@@ -43,7 +43,7 @@ presentation-only field.
 | `/pool-dislocation` | `pool-dislocation-summary:v1` | `boonetools-pool-dislocation` | exact 5m UTC / 15m |
 | `/pool-analysis` | `pool-analysis:v2` | `boonetools-pool-analysis` | 15m / 20m |
 | `/pool-analysis-series` | bounded `pool_analysis_daily` query | same canonical writer | lazy public read |
-| `/pol-tvl` | `pol-tracker:v2` | `boonetools-pol-tracker` | daily at 00:10 UTC / 36h |
+| `/pol-tvl` | `pol-tracker:v3` | `boonetools-pol-tracker` | daily at 00:10 UTC / 36h |
 | `/pol-tracker` | `system-income-pol:v1` + block overlay | chain listener / `boonetools-system-income-pol` | every block + 2m reconcile / 5m |
 | `/burn-tracker` | `system-income-burn:v1` + block overlay | chain listener / `boonetools-burn-tracker` | every block + 5m reconcile / 15m |
 
@@ -53,8 +53,9 @@ publisher. It never runs on a public request path. Reconstructed THORChain pool
 and oracle prices share one historical height; reconstructed Binance prices
 are provenance-labeled five-minute kline closes rather than live BBO midpoints.
 
-POL TVL uses migrations `046_pol_tracker.sql` and
-`047_pol_tracker_pool_breakdown.sql` for one same-height snapshot per completed
+POL TVL uses migrations `046_pol_tracker.sql`,
+`047_pol_tracker_pool_breakdown.sql`, and `056_pol_tvl_system_income_pol.sql`
+for one same-height snapshot per completed
 UTC day plus its per-pool inputs. The scheduled job revisits the latest seven
 days, atomically replaces each day, and publishes one bounded read model; the
 manual resumable backfill begins on 2025-02-01. Public GETs never query
@@ -63,6 +64,9 @@ not public lanes. Provider-owned RUNEPool value is retained in the daily table
 solely for reconciliation and is not selected into the read model. The latest
 pool breakdown derives each legacy Reserve POL value with THORNode's rounded
 safe-share formula and requires the pool sum to equal `runepool.pol.value`.
+System Income POL is a separate fourth lane: the collector resolves the
+`pol_reserve` module and its deployed-pool LP positions at that same height and
+values both sides independently, so it is not folded into legacy Reserve POL.
 
 System Income POL uses migrations `054_system_income_pol.sql` and
 `055_system_income_pol_headlines.sql`. The consolidated

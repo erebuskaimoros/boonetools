@@ -147,6 +147,7 @@ export async function collectPolTrackerDay(anchor, options = {}) {
     thornodeUrls: options.thornodeUrls || config.polTrackerThornodeUrls,
     moduleAddress: options.moduleAddress,
     reserveModuleAddress: options.reserveModuleAddress,
+    systemIncomePolActivationHeight: options.systemIncomePolActivationHeight,
     concurrency: options.lpConcurrency,
     requestDelayMs: options.requestDelayMs,
     timeoutMs: options.timeoutMs || config.polTrackerTimeoutMs

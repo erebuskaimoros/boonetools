@@ -8,15 +8,16 @@ block at or before each completed UTC day end. It tracks:
 - Synth-unit backing: `2 * balance_asset * asset_price * synth_units / pool_units`.
 - The locked Treasury module `...6r2p` LP total redeemable value.
 - Gross legacy Reserve-module LP value from `runepool.pol.value`.
+- The separate `pol_reserve` module's System Income-funded LP position value.
 
 RUNEPool provider and Reserve ownership shares are not dashboard series or
 public API fields. Provider-owned RUNEPool value is stored only as a private
-reconciliation input. The dashboard combines the three tracked values into one
+reconciliation input. The dashboard combines the four tracked values into one
 stacked area chart. Its hover total is their arithmetic sum.
 
 Savers value is intentionally absent from the dashboard, public API, and newly
 collected rows. Migration `046_pol_tracker.sql` retains nullable legacy Saver
-columns for forward-compatible rollback, but the v2 read model never selects or
+columns for forward-compatible rollback, but the v3 read model never selects or
 publishes them.
 
 ## Data contract
@@ -27,7 +28,11 @@ creating a partial sum. Missing dates are explicit null chart gaps. Migration
 `046_pol_tracker.sql` owns the original daily rows, per-pool audit inputs, and
 resumable sync state. Migration `047_pol_tracker_pool_breakdown.sql` adds the
 legacy Reserve module and its per-pool LP units, gross RUNE value, and USD
-value. Each pool uses the same round-half-up safe-share calculation as
+value. Migration `056_pol_tvl_system_income_pol.sql` adds the independently
+valued System Income POL module position. The collector resolves the module and
+its active LPs at the same historical height as every other lane, then values
+both sides with the same pool depths and RUNE/TOR price used by the live SIPOL
+read model. Each legacy Reserve pool uses the same round-half-up safe-share calculation as
 THORNode: `2 * safeShare(reserve_lp_units, pool_units, balance_rune)`. The
 per-pool RUNE values must reconcile exactly to `runepool.pol.value`; otherwise
 the Reserve lane remains partial and eligible for repair. The daily timer
@@ -51,7 +56,7 @@ independently compares the stored source day with the expected target and
 expands coverage for any unpublished days, preventing a recent republish
 timestamp from making old source data appear `READY` or 100% covered.
 
-This legacy TVL accounting is intentionally separate from the System Income
-POL dashboard at `/pol-tracker`. Its `pol_tracker_*` tables, `pol-tracker:v2`
-read model, and scheduled history collector retain their internal names for
-backward-compatible operations.
+This completed-day TVL accounting remains separate from the live System Income
+POL funding dashboard at `/pol-tracker`. Its `pol_tracker_*` tables,
+`pol-tracker:v3` read model, and scheduled history collector retain their
+internal names for backward-compatible operations.

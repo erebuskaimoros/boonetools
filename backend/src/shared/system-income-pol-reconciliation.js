@@ -8,6 +8,13 @@ function integer(value, fallback = '0') {
   return /^\d+$/.test(normalized) ? BigInt(normalized) : BigInt(fallback);
 }
 
+function mimirBasisPoints(mimir, key) {
+  const normalized = String(mimir?.[key] ?? '').trim();
+  // POLReserveSystemIncomeBps defaults to zero in Thornode when no effective
+  // Mimir is present, so mirror the protocol's resolved value here.
+  return /^\d+$/.test(normalized) ? normalized : '0';
+}
+
 function timestamp(value) {
   const parsed = new Date(value || '');
   return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : new Date().toISOString();
@@ -98,8 +105,10 @@ export async function reconcileSystemIncomePolState(client, options = {}) {
   const pools = coreSnapshotValue(core, 'pools', []);
   const lastblock = coreSnapshotValue(core, 'lastblock', []);
   const network = coreSnapshotValue(core, 'network', {});
+  const mimir = coreSnapshotValue(core, 'mimir', {});
   if (!Array.isArray(pools)) throw new Error('SIPOL reconciliation requires thornode-core pools');
   const runePriceUsdE8 = integer(network?.rune_price_in_tor);
+  const polReserveSystemIncomeBps = mimirBasisPoints(mimir, 'POLRESERVESYSTEMINCOMEBPS');
   if (runePriceUsdE8 <= 0n) throw new Error('SIPOL reconciliation requires a current THORNode RUNE price');
   const module = await fetchThor('/thorchain/balance/module/pol_reserve', {
     cooldownClient: client,
@@ -143,6 +152,7 @@ export async function reconcileSystemIncomePolState(client, options = {}) {
     moduleAddress: built.moduleAddress,
     undeployedRuneE8: built.undeployedRuneE8,
     runePriceUsdE8: runePriceUsdE8.toString(),
+    polReserveSystemIncomeBps,
     observedAt: timestamp(observedAt),
     observedHeight: height
   });
@@ -151,6 +161,7 @@ export async function reconcileSystemIncomePolState(client, options = {}) {
     positions: built.positions.length,
     module_address: built.moduleAddress,
     undeployed_rune_e8: built.undeployedRuneE8,
-    rune_price_usd_e8: runePriceUsdE8.toString()
+    rune_price_usd_e8: runePriceUsdE8.toString(),
+    pol_reserve_system_income_bps: Number(polReserveSystemIncomeBps)
   };
 }

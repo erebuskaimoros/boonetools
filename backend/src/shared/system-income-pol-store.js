@@ -168,6 +168,13 @@ export async function compactSystemIncomePolEvents(client, options = {}) {
 
 export async function saveSystemIncomePolPositions(client, positions = [], meta = {}) {
   const rows = Array.isArray(positions) ? positions : [];
+  const positionStats = (count) => ({
+    positions: count,
+    pol_reserve_system_income_bps: Math.max(
+      0,
+      Math.trunc(Number(meta.polReserveSystemIncomeBps)) || 0
+    )
+  });
   if (rows.length) {
     const result = await client.query(
       `insert into system_income_pol_positions as current (
@@ -237,7 +244,7 @@ export async function saveSystemIncomePolPositions(client, positions = [], meta 
       undeployedRuneE8: meta.undeployedRuneE8,
       runePriceUsdE8: meta.runePriceUsdE8,
       positionsUpdatedAt: meta.observedAt,
-      stats: { positions: result.rowCount || rows.length }
+      stats: positionStats(result.rowCount || rows.length)
     });
     return result.rowCount || rows.length;
   }
@@ -249,7 +256,7 @@ export async function saveSystemIncomePolPositions(client, positions = [], meta 
     undeployedRuneE8: meta.undeployedRuneE8,
     runePriceUsdE8: meta.runePriceUsdE8,
     positionsUpdatedAt: meta.observedAt,
-    stats: { positions: 0 }
+    stats: positionStats(0)
   });
   return 0;
 }

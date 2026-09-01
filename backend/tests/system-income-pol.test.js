@@ -198,6 +198,7 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
     getCoreSnapshot: async () => ({ payload: {
       lastblock: [{ chain: 'THOR', thorchain: '1000' }],
       network: { rune_price_in_tor: '200000000' },
+      mimir: { POLRESERVESYSTEMINCOMEBPS: 2000 },
       pools: [{
         asset: 'BTC.BTC', status: 'Available', balance_rune: '1000', balance_asset: '100',
         pool_units: '100', pol_reserve_rune_deposited: '25'
@@ -221,7 +222,9 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
   assert.equal(result.positions, 1);
   assert.equal(result.undeployed_rune_e8, '4');
   assert.equal(result.rune_price_usd_e8, '200000000');
+  assert.equal(result.pol_reserve_system_income_bps, 2000);
   assert.equal(saved[0].meta.runePriceUsdE8, '200000000');
+  assert.equal(saved[0].meta.polReserveSystemIncomeBps, '2000');
 });
 
 test('SIPOL read model combines exact daily flows, reconciled positions, and Pool Analysis fee shares', async () => {
@@ -244,7 +247,8 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and Poo
     loadState: async () => ({
       module_address: 'thor1pol', undeployed_rune_e8: '40', rune_price_usd_e8: '200000000', last_event_height: '20',
       events_updated_at: '2026-08-31T12:04:30Z', positions_updated_at: '2026-08-31T12:04:00Z',
-      fees_updated_at: '2026-08-31T12:03:00Z', last_error: ''
+      fees_updated_at: '2026-08-31T12:03:00Z', last_error: '',
+      stats_json: { pol_reserve_system_income_bps: 2000 }
     })
   });
 
@@ -252,6 +256,7 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and Poo
     total_funded_e8: '100',
     total_system_income_e8: '1000',
     system_income_pol_share_bps: 1000,
+    pol_reserve_system_income_bps: 2000,
     total_deployed_e8: '60',
     undeployed_rune_e8: '40',
     rune_price_usd_e8: '200000000',

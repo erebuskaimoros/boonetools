@@ -10,7 +10,7 @@ import {
   loadPolTrackerStoredDays
 } from './pol-tracker-store.js';
 
-export const POL_TRACKER_MODEL_KEY = 'pol-tracker:v2';
+export const POL_TRACKER_MODEL_KEY = 'pol-tracker:v3';
 export const POL_TRACKER_TTL_MS = 36 * 60 * 60 * 1000;
 export { POL_TRACKER_SCHEMA_VERSION };
 
@@ -18,7 +18,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const PUBLIC_LANES = Object.freeze([
   'synth',
   'treasury',
-  'reserve_pol'
+  'reserve_pol',
+  'system_income_pol'
 ]);
 
 function dateString(value) {
@@ -64,8 +65,11 @@ function publicLaneWarnings(status) {
 }
 
 function publicRowComplete(row, status) {
-  if (!PUBLIC_LANES.every((key) => status[key])) return Boolean(row.complete);
-  return PUBLIC_LANES.every((key) => status[key].status === 'complete');
+  const required = Number(row.anchor_height) >= config.systemIncomePolActivationHeight
+    ? PUBLIC_LANES
+    : PUBLIC_LANES.filter((key) => key !== 'system_income_pol');
+  if (!required.every((key) => status[key])) return Boolean(row.complete) && required.length < PUBLIC_LANES.length;
+  return required.every((key) => status[key].status === 'complete');
 }
 
 function publicDailyRow(row, day) {
@@ -78,12 +82,14 @@ function publicDailyRow(row, day) {
       synth: { backing_usd: null, face_usd: null },
       treasury_lp: { total_usd: null },
       reserve_pol: { deployed_rune: null, deployed_usd: null },
+      system_income_pol: { position_rune: null, position_usd: null },
       complete: false,
       status: { state: 'missing' },
       warnings: ['No completed same-height observation is stored for this UTC day']
     };
   }
   const status = publicLaneStatus(row.lane_status);
+  const systemIncomePolActive = Number(row.anchor_height) >= config.systemIncomePolActivationHeight;
   return {
     day,
     height: Number(row.anchor_height) || null,
@@ -100,13 +106,17 @@ function publicDailyRow(row, day) {
       deployed_rune: e8ToNumber(row.reserve_pol_rune_e8),
       deployed_usd: e8ToNumber(row.reserve_pol_usd_e8)
     },
+    system_income_pol: {
+      position_rune: systemIncomePolActive ? e8ToNumber(row.system_income_pol_rune_e8) : 0,
+      position_usd: systemIncomePolActive ? e8ToNumber(row.system_income_pol_usd_e8) : 0
+    },
     complete: publicRowComplete(row, status),
     status,
     warnings: publicLaneWarnings(status)
   };
 }
 
-function publicPoolRow(row) {
+function publicPoolRow(row, systemIncomePolActive) {
   return {
     day: dateString(row.day),
     asset: String(row.asset || ''),
@@ -119,7 +129,13 @@ function publicPoolRow(row) {
     treasury_lp_units: String(row.treasury_lp_units || '0'),
     treasury_total_usd: e8ToNumber(row.treasury_total_usd_e8),
     reserve_pol_rune: e8ToNumber(row.reserve_pol_rune_e8),
-    reserve_pol_usd: e8ToNumber(row.reserve_pol_usd_e8)
+    reserve_pol_usd: e8ToNumber(row.reserve_pol_usd_e8),
+    system_income_pol_rune: systemIncomePolActive
+      ? e8ToNumber(row.system_income_pol_rune_e8)
+      : 0,
+    system_income_pol_usd: systemIncomePolActive
+      ? e8ToNumber(row.system_income_pol_usd_e8)
+      : 0
   };
 }
 
@@ -152,7 +168,10 @@ export function buildPolTrackerPayload(rows = [], poolRows = [], options = {}) {
     },
     latest,
     daily,
-    latest_pools: poolRows.map(publicPoolRow),
+    latest_pools: poolRows.map((row) => publicPoolRow(
+      row,
+      Number(latest?.height) >= config.systemIncomePolActivationHeight
+    )),
     warnings,
     methodology: {
       sampling: 'Latest finalized THORChain block at or before 23:59:59.999 UTC for each completed day.',
@@ -160,7 +179,8 @@ export function buildPolTrackerPayload(rows = [], poolRows = [], options = {}) {
       treasury: 'Combined same-height redeemable value of locked Treasury module LP positions.',
       synth: 'Synth-unit share of pool liquidity, valued as 2 × asset depth × synth_units / pool_units.',
       reserve_pol: 'Gross value of LP positions held at the legacy Reserve module. The daily total comes from runepool.pol.value; each latest-pool value applies THORNode\'s rounded safe share to the module LP units and same-height RUNE depth, doubles it, and reconciles to the total.',
-      aggregation: 'The tooltip total is the arithmetic sum of synth backing, Treasury locked LP, and Reserve POL.'
+      system_income_pol: 'Two-sided value of LP positions held by the pol_reserve module and funded from System Income, valued independently at the same daily anchor height.',
+      aggregation: 'The tooltip total is the arithmetic sum of synth backing, Treasury locked LP, legacy Reserve POL, and System Income POL.'
     }
   };
 }

@@ -8,9 +8,10 @@ This directory contains website/backend-specific protocol notes and session hist
 - [fee-collector-accounting.md](./fee-collector-accounting.md) — balance-delta method for auditing on-chain fee collectors when senders aren't enumerable or the collector converts assets internally.
 - [wasm-arb-economics.md](./wasm-arb-economics.md) — `/wasm-arb-economics` metric definitions, transaction-scoped Rujira fee attribution, post-change time-series compaction, and monitoring guardrails.
 - [status-dashboard.md](./status-dashboard.md) — `/status` data sources, chain/LP state derivation, historical vote lane, and failure behavior.
-- [pol-tracker.md](./pol-tracker.md) — `/pol-tvl` same-height daily synth backing, locked Treasury LP total, and legacy Reserve POL accounting.
+- [pol-tracker.md](./pol-tracker.md) — `/pol-tvl` same-height daily synth backing, locked Treasury LP, legacy Reserve POL, and System Income POL accounting.
 - [system-income-pol.md](./system-income-pol.md) — `/pol-tracker` block-live funding, deployments, reconciled positions, and estimated fee share.
 - [burn-tracker.md](./burn-tracker.md) — route-specific system-income RUNE burn metrics, daily ingestion, cumulative accounting, and source semantics.
+- [slow-block-consensus-wasm-report-2026-08-06.md](./slow-block-consensus-wasm-report-2026-08-06.md) — three-window analysis of >10-second block intervals, scheduled proposer failures, final commit behavior, and Wasm/FIN activity.
 - [architecture-consolidation.md](./architecture-consolidation.md) — runtime ownership, unified API/backend contract, canonical provenance, queued reads, archive policy, and CI ratchets.
 - Use the shared [BooneTools project page](../../../knowledge/projects/boonetools.md) for durable product context.
 - Use the shared [analytics and tooling workstream](../../../knowledge/workstreams/analytics-and-tooling.md) for cross-project relationships.

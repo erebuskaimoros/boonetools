@@ -183,7 +183,7 @@
 
 <svelte:head>
   <title>POL TVL | BooneTools</title>
-  <meta name="description" content="Daily THORChain synth backing, locked Treasury LP, and Reserve POL history." />
+  <meta name="description" content="Daily THORChain synth backing, Treasury LP, legacy Reserve POL, and System Income POL history." />
 </svelte:head>
 
 <main class="pol-shell">
@@ -223,7 +223,7 @@
       <article class="metric metric--total">
         <span class="metric-label">TOTAL TRACKED VALUE</span>
         <strong>{formatPolTrackerUsd(latestTotal, true)}</strong>
-        <small>synth backing + Treasury locked LP + Reserve POL</small>
+        <small>synth backing + Treasury locked LP + both POL forms</small>
       </article>
       <article class="metric">
         <span class="metric-label">SYNTH BACKING</span>
@@ -239,6 +239,11 @@
         <span class="metric-label">RESERVE POL</span>
         <strong>{formatPolTrackerUsd(latest?.reservePolUsd, true)}</strong>
         <small>{formatPolTrackerRune(latest?.reservePolRune)} legacy-module gross</small>
+      </article>
+      <article class="metric metric--system-income-pol">
+        <span class="metric-label">SYSTEM INCOME POL</span>
+        <strong>{formatPolTrackerUsd(latest?.systemIncomePolUsd, true)}</strong>
+        <small>{formatPolTrackerRune(latest?.systemIncomePolRune)} pol_reserve position</small>
       </article>
       <article class="metric">
         <span class="metric-label">LATEST DAY</span>
@@ -371,7 +376,7 @@
         <div>
           <span class="prompt">$ inspect --latest --by-pool</span>
           <h2>Latest pool breakdown</h2>
-          <p>Only pools with synth backing, a locked Treasury position, or Reserve POL are shown.</p>
+          <p>Only pools with synth backing, a locked Treasury position, or either form of POL are shown.</p>
         </div>
         <span class="row-count">{relevantPools.length} POOLS</span>
       </div>
@@ -383,6 +388,7 @@
               <th>SYNTH BACKING</th>
               <th>TREASURY LOCKED LP</th>
               <th>RESERVE POL</th>
+              <th>SYSTEM INCOME POL</th>
             </tr>
           </thead>
           <tbody>
@@ -395,9 +401,13 @@
                   {formatPolTrackerUsd(pool.reservePolUsd, true)}
                   <small>{formatPolTrackerRune(pool.reservePolRune)}</small>
                 </td>
+                <td>
+                  {formatPolTrackerUsd(pool.systemIncomePolUsd, true)}
+                  <small>{formatPolTrackerRune(pool.systemIncomePolRune)}</small>
+                </td>
               </tr>
             {:else}
-              <tr><td colspan="4" class="empty">No per-pool observation is available yet.</td></tr>
+              <tr><td colspan="5" class="empty">No per-pool observation is available yet.</td></tr>
             {/each}
           </tbody>
         </table>
@@ -408,11 +418,11 @@
       <span class="prompt">$ methodology --accounting-boundaries</span>
       <p>
         All lanes use one historical block per completed UTC day. Synth backing is the pool share
-        attributable to outstanding synth units. The tooltip total is the arithmetic sum of the three
-        shaded areas: synth backing, Treasury locked LP, and Reserve POL. RUNEPool ownership shares
-        are absent.
+        attributable to outstanding synth units. The tooltip total is the arithmetic sum of the four
+        shaded areas: synth backing, Treasury locked LP, legacy Reserve POL, and the independently
+        valued System Income POL position. RUNEPool ownership shares are absent.
       </p>
-      <p class="source-line">TREASURY MODULE · …6r2p &nbsp;|&nbsp; RESERVE MODULE · …xtxt &nbsp;|&nbsp; PRICES · SAME-HEIGHT TOR &nbsp;|&nbsp; GAPS · NEVER INTERPOLATED</p>
+      <p class="source-line">TREASURY MODULE · …6r2p &nbsp;|&nbsp; LEGACY RESERVE · …xtxt &nbsp;|&nbsp; SYSTEM INCOME · POL_RESERVE &nbsp;|&nbsp; PRICES · SAME-HEIGHT TOR &nbsp;|&nbsp; GAPS · NEVER INTERPOLATED</p>
     </section>
   {/if}
 </main>
@@ -478,6 +488,7 @@
   }
   .metric--total .metric-label, .metric--total strong { color: #00cc66; }
   .metric--total small { color: #7fc49f; }
+  .metric--system-income-pol strong { color: #ff8a3d; }
 
   .range-bar { flex-wrap: wrap; gap: 6px; padding: 10px 0; color: #777; font-size: 10px; }
   .range-bar button { min-width: 48px; padding: 6px 9px; font-size: 10px; }

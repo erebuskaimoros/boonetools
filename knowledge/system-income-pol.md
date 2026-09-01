@@ -28,7 +28,8 @@ reward-only or missed block remains distinguishable from an observed zero.
 `boonetools-system-income-pol.timer` runs every two minutes. It consumes the
 shared `thornode-core:v1` pools, then performs only the feature-specific module
 balance and deposited-pool LP lookups. It also captures
-`network.rune_price_in_tor` from the shared snapshot so public USD values do
+`network.rune_price_in_tor` and the effective `POLRESERVESYSTEMINCOMEBPS` Mimir
+from the shared snapshot so public USD values and the configured allocation do
 not require a request-time provider call. Current ownership is LP units divided
 by total `pool_units`, including synth dilution. Current holdings use the LP
 endpoint's RUNE and asset redeem values; position value is separate from the
@@ -41,8 +42,9 @@ remains `null`, never zero. Funding/deployment history compacts from the durable
 ledger, not the retention-pruned header overlay.
 
 The five headlines are current POL TVL in USD, total RUNE deposited, estimated
-fees in USD, POL's share of system income, and current RUNE held (the dashboard's
-quoted “burned” measure) as a share of all system income since activation. The
+fees in USD, the current `POLRESERVESYSTEMINCOMEBPS` allocation, and current RUNE
+held (the dashboard's quoted “burned” measure) as a share of all system income
+since activation. The
 asset inventory lists the reconciled RUNE and external asset legs separately.
 
 The public handler is provider-free: it reads `system-income-pol:v1` and

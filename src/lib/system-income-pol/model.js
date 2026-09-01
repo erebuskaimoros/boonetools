@@ -51,12 +51,21 @@ export function e8ToNumber(value) {
 
 function normalizeSummary(summary = {}) {
   const systemIncomePolShareBps = finite(summary.system_income_pol_share_bps);
+  // Fall back to the historical share during a staggered backend/frontend
+  // rollout; the explicit Mimir field always wins once the read model has it.
+  const polReserveSystemIncomeBps = finite(
+    summary.pol_reserve_system_income_bps ?? summary.system_income_pol_share_bps
+  );
   const runeHeldSystemIncomeShareBps = finite(summary.rune_held_system_income_share_bps);
   return {
     totalFundedE8: base(summary.total_funded_e8 ?? summary.funded_rune_e8),
     totalSystemIncomeE8: optionalBase(summary.total_system_income_e8),
     systemIncomePolShareBps,
     systemIncomePolSharePercent: systemIncomePolShareBps === null ? null : systemIncomePolShareBps / 100,
+    polReserveSystemIncomeBps,
+    polReserveSystemIncomePercent: polReserveSystemIncomeBps === null
+      ? null
+      : polReserveSystemIncomeBps / 100,
     totalDeployedE8: base(summary.total_deployed_e8 ?? summary.deployed_rune_e8),
     undeployedRuneE8: optionalBase(summary.undeployed_rune_e8),
     totalPositionValueRuneE8: optionalBase(summary.total_position_value_rune_e8 ?? summary.position_rune_e8),
@@ -114,15 +123,23 @@ function normalizeDaily(row = {}) {
   const systemIncomeE8 = optionalBase(row.system_income_e8);
   const deployedE8 = optionalBase(row.deployed_e8 ?? row.deployed_rune_e8);
   const estimatedFeesE8 = optionalBase(row.estimated_fees_e8 ?? row.estimated_fees_rune_e8);
+  const cumulativeFundedE8 = optionalBase(row.cumulative_funded_e8);
+  const cumulativeSystemIncomeE8 = optionalBase(row.cumulative_system_income_e8);
+  const cumulativeDeployedE8 = optionalBase(row.cumulative_deployed_e8);
+  const cumulativeEstimatedFeesE8 = optionalBase(row.cumulative_estimated_fees_e8);
   return {
     day: utcDay(row.day),
     fundedE8,
     systemIncomeE8,
     deployedE8,
     estimatedFeesE8,
-    cumulativeFundedE8: optionalBase(row.cumulative_funded_e8),
-    cumulativeSystemIncomeE8: optionalBase(row.cumulative_system_income_e8),
-    cumulativeDeployedE8: optionalBase(row.cumulative_deployed_e8),
+    cumulativeFundedE8,
+    cumulativeSystemIncomeE8,
+    cumulativeDeployedE8,
+    cumulativeEstimatedFeesE8,
+    cumulativeFundedRune: e8ToNumber(cumulativeFundedE8),
+    cumulativeDeployedRune: e8ToNumber(cumulativeDeployedE8),
+    cumulativeEstimatedFeesRune: e8ToNumber(cumulativeEstimatedFeesE8),
     fundedRune: e8ToNumber(fundedE8),
     deployedRune: e8ToNumber(deployedE8),
     estimatedFeesRune: e8ToNumber(estimatedFeesE8),
@@ -144,6 +161,7 @@ export function normalizeSystemIncomePolPayload(payload = {}) {
   return {
     schemaVersion: finite(payload.schema_version, 1),
     asOf: timestamp(payload.as_of),
+    moduleAddress: String(payload.module_address || ''),
     config: payload.config && typeof payload.config === 'object' ? payload.config : {},
     summary: normalizeSummary(payload.summary),
     pools,
@@ -237,11 +255,31 @@ export function applySystemIncomePolHead(payload = {}, head = {}) {
   };
 }
 
-export function selectSystemIncomePolRange(rows = [], rangeId = '90d') {
+export function selectSystemIncomePolRange(rows = [], rangeId = '30d') {
   const range = SYSTEM_INCOME_POL_RANGES.find((candidate) => candidate.id === rangeId)
-    || SYSTEM_INCOME_POL_RANGES[1];
+    || SYSTEM_INCOME_POL_RANGES[0];
   if (!range.days || rows.length <= range.days) return rows;
   return rows.slice(-range.days);
+}
+
+export function projectSystemIncomePolChartSelection(options = {}) {
+  const count = Math.max(0, Math.trunc(Number(options.rowCount)) || 0);
+  const left = Number(options.plotLeft);
+  const right = Number(options.plotRight);
+  const first = Number(options.startX);
+  const last = Number(options.endX);
+  if (count < 2 || ![left, right, first, last].every(Number.isFinite) || right <= left) return null;
+
+  const clamp = (value) => Math.max(left, Math.min(right, value));
+  const selectionLeft = Math.min(clamp(first), clamp(last));
+  const selectionRight = Math.max(clamp(first), clamp(last));
+  if (selectionRight - selectionLeft < Math.max(0, Number(options.minDrag ?? 12) || 0)) return null;
+
+  const span = right - left;
+  const startIndex = Math.round(((selectionLeft - left) / span) * (count - 1));
+  const endIndex = Math.round(((selectionRight - left) / span) * (count - 1));
+  if (endIndex <= startIndex) return null;
+  return { startIndex, endIndex };
 }
 
 function niceCeiling(value) {
@@ -262,32 +300,67 @@ function linePath(points, key, y) {
 export function buildSystemIncomePolChart(rows = [], options = {}) {
   const width = options.width || 1000;
   const height = options.height || 260;
-  const plot = { left: 72, right: width - 18, top: 18, bottom: height - 34 };
-  const points = rows.map((row, index) => ({
-    ...row,
-    x: plot.left + ((plot.right - plot.left) * (rows.length <= 1 ? 0 : index / (rows.length - 1)))
-  }));
-  const yMax = niceCeiling(Math.max(1, ...points.flatMap((point) => [
-    point.fundedRune || 0,
-    point.deployedRune || 0,
-    point.estimatedFeesRune || 0
-  ])));
+  const unit = options.unit === 'usd' ? 'usd' : 'rune';
+  const runePriceUsd = e8ToNumber(options.runePriceUsdE8);
+  const unitAvailable = unit === 'rune' || (Number.isFinite(runePriceUsd) && runePriceUsd > 0);
+  const unitMultiplier = unit === 'usd' && unitAvailable ? runePriceUsd : 1;
+  const denominate = (runeValue) => unitAvailable ? runeValue * unitMultiplier : null;
+  const plot = { left: 72, right: width - 72, top: 18, bottom: height - 34 };
+  const slotWidth = (plot.right - plot.left) / Math.max(1, rows.length);
+  const barWidth = Math.max(1, Math.min(28, slotWidth * 0.72));
+  let cumulativeRunning = 0;
+  const points = rows.map((row, index) => {
+    const depositedPlotRune = Number.isFinite(row.deployedRune) ? Math.max(0, row.deployedRune) : 0;
+    const cumulativeDepositedRune = Number.isFinite(row.cumulativeDeployedRune)
+      ? Math.max(0, row.cumulativeDeployedRune)
+      : cumulativeRunning + depositedPlotRune;
+    cumulativeRunning = cumulativeDepositedRune;
+    return {
+      ...row,
+      depositedPlotRune,
+      cumulativeDepositedRune,
+      depositedPlotValue: denominate(depositedPlotRune),
+      cumulativeDepositedValue: denominate(cumulativeDepositedRune),
+      x: plot.left + slotWidth * (index + 0.5)
+    };
+  });
+  const yMax = niceCeiling(Math.max(1, ...points.map((point) => point.depositedPlotValue || 0)));
   const y = (value) => plot.bottom - (Math.max(0, value) / yMax) * (plot.bottom - plot.top);
+  const cumulativeYMax = niceCeiling(Math.max(1, ...points.map((point) => point.cumulativeDepositedValue || 0)));
+  const cumulativeY = (value) => plot.bottom - (Math.max(0, value) / cumulativeYMax) * (plot.bottom - plot.top);
+  const depositBars = points.map((point) => {
+    const top = y(point.depositedPlotValue || 0);
+    return {
+      day: point.day,
+      value: point.depositedPlotValue,
+      x: point.x - barWidth / 2,
+      y: top,
+      width: barWidth,
+      height: Math.max(0, plot.bottom - top)
+    };
+  });
   const tickIndexes = [...new Set(Array.from({ length: Math.min(5, rows.length) }, (_, index) =>
     Math.round((index / Math.max(1, Math.min(5, rows.length) - 1)) * Math.max(0, rows.length - 1))
   ))];
   return {
     width,
     height,
+    unit,
+    unitAvailable,
+    runePriceUsd,
     plot,
     points,
+    depositBars,
     yMax,
-    fundedPath: linePath(points, 'fundedRune', y),
-    deployedPath: linePath(points, 'deployedRune', y),
-    feesPath: linePath(points, 'estimatedFeesRune', y),
+    cumulativeYMax,
+    cumulativeDepositedPath: linePath(points, 'cumulativeDepositedValue', cumulativeY),
     yTicks: Array.from({ length: 5 }, (_, index) => {
       const value = yMax * (index / 4);
       return { value, y: y(value) };
+    }),
+    cumulativeYTicks: Array.from({ length: 5 }, (_, index) => {
+      const value = cumulativeYMax * (index / 4);
+      return { value, y: cumulativeY(value) };
     }),
     xTicks: tickIndexes.map((index) => ({ x: points[index]?.x || plot.left, day: rows[index]?.day || '' }))
   };
@@ -339,6 +412,14 @@ export function buildSystemIncomePolAssetInventory(summary = {}, pools = []) {
   return inventory;
 }
 
-export function formatPercent(value) {
-  return Number.isFinite(value) ? `${value.toLocaleString('en-US', { maximumFractionDigits: 4 })}%` : '—';
+export function formatPercent(value, fractionDigits) {
+  if (!Number.isFinite(value)) return '—';
+  const hasFixedPrecision = Number.isInteger(fractionDigits);
+  const digits = hasFixedPrecision
+    ? Math.max(0, Math.min(20, fractionDigits))
+    : 4;
+  return `${value.toLocaleString('en-US', {
+    minimumFractionDigits: hasFixedPrecision ? digits : 0,
+    maximumFractionDigits: digits
+  })}%`;
 }

@@ -1,4 +1,4 @@
-export const POL_TRACKER_SCHEMA_VERSION = 2;
+export const POL_TRACKER_SCHEMA_VERSION = 3;
 export const POL_TRACKER_START_DATE = '2025-02-01';
 export const POL_TRACKER_TREASURY_MODULE = 'thor1vmafl8f3s6uuzwnxkqz0eza47v6ecn0t086r2p';
 export const POL_TRACKER_RESERVE_MODULE = 'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
@@ -72,9 +72,19 @@ export function buildPolTrackerObservation(input = {}) {
   const treasuryErrorAssets = new Set(treasuryErrors.map((entry) => normalizedAsset(entry?.asset)));
   const reserveErrors = Array.isArray(input.reserveErrors) ? input.reserveErrors : [];
   const reserveErrorAssets = new Set(reserveErrors.map((entry) => normalizedAsset(entry?.asset)));
+  const systemIncomePolActive = Boolean(input.systemIncomePolActive);
+  const systemIncomePolErrors = Array.isArray(input.systemIncomePolErrors)
+    ? input.systemIncomePolErrors
+    : [];
+  const systemIncomePolErrorAssets = new Set(
+    systemIncomePolErrors.map((entry) => normalizedAsset(entry?.asset)).filter(Boolean)
+  );
+  const systemIncomePolModuleAddress = String(input.systemIncomePolModuleAddress || '');
   let synthComplete = true;
   let treasuryAssetComplete = treasuryErrors.length === 0;
   let treasuryRuneComplete = treasuryErrors.length === 0;
+  let systemIncomePolComplete = !systemIncomePolActive
+    || (Boolean(systemIncomePolModuleAddress) && systemIncomePolErrors.length === 0);
 
   const poolRows = pools.map((pool) => {
     const asset = normalizedAsset(pool.asset);
@@ -94,6 +104,33 @@ export function buildPolTrackerObservation(input = {}) {
       ? 2n * safeShare(reserveLpUnits, pool.pool_units, pool.balance_rune)
       : null;
     const reservePolUsd = reservePolRune === null ? null : e8Product(reservePolRune, runePrice);
+    const systemIncomeLp = lpForAsset(input.systemIncomePolLps, asset);
+    const systemIncomeLookupComplete = !systemIncomePolErrorAssets.has(asset);
+    const systemIncomeLpUnits = systemIncomePolActive ? positive(systemIncomeLp?.units) : 0n;
+    const systemIncomeAssetRedeem = systemIncomePolActive
+      ? positive(systemIncomeLp?.asset_redeem_value)
+      : 0n;
+    const systemIncomeRuneRedeem = systemIncomePolActive
+      ? positive(systemIncomeLp?.rune_redeem_value)
+      : 0n;
+    const poolAssetDepth = positive(pool.balance_asset);
+    const systemIncomeAssetValueRune = !systemIncomePolActive
+      ? 0n
+      : !systemIncomeLookupComplete
+        ? null
+        : poolAssetDepth > 0n
+          ? (systemIncomeAssetRedeem * positive(pool.balance_rune)) / poolAssetDepth
+          : systemIncomeAssetRedeem === 0n ? 0n : null;
+    const systemIncomePolRune = !systemIncomePolActive
+      ? 0n
+      : !systemIncomeLookupComplete || systemIncomeAssetValueRune === null
+        ? null
+        : systemIncomeRuneRedeem + systemIncomeAssetValueRune;
+    const systemIncomePolUsd = systemIncomePolRune === null
+      ? null
+      : e8Product(systemIncomePolRune, runePrice);
+
+    if (systemIncomePolRune === null) systemIncomePolComplete = false;
 
     if (synthUnits > 0n && (price === 0n || positive(pool.pool_units) === 0n)) synthComplete = false;
     if ((treasuryUnits > 0n || assetRedeem > 0n) && price === 0n) treasuryAssetComplete = false;
@@ -130,7 +167,12 @@ export function buildPolTrackerObservation(input = {}) {
         : (treasuryAssetUsd + treasuryRuneUsd).toString(),
       reserve_pol_lp_units: reserveLookupComplete ? reserveLpUnits.toString() : null,
       reserve_pol_rune_e8: reservePolRune?.toString() ?? null,
-      reserve_pol_usd_e8: reservePolUsd?.toString() ?? null
+      reserve_pol_usd_e8: reservePolUsd?.toString() ?? null,
+      system_income_pol_lp_units: systemIncomeLookupComplete
+        ? systemIncomeLpUnits.toString()
+        : null,
+      system_income_pol_rune_e8: systemIncomePolRune?.toString() ?? null,
+      system_income_pol_usd_e8: systemIncomePolUsd?.toString() ?? null
     };
   });
 
@@ -168,10 +210,21 @@ export function buildPolTrackerObservation(input = {}) {
       : !reserveReconciles
         ? 'Per-pool Reserve POL did not reconcile to runepool.pol.value'
         : '';
+  const systemIncomePolWarning = systemIncomePolComplete
+    ? ''
+    : !systemIncomePolModuleAddress
+      ? 'System Income POL module lookup was unavailable'
+      : systemIncomePolErrors.length
+        ? `${systemIncomePolErrors.length} System Income POL LP lookup(s) were incomplete`
+        : 'One or more System Income POL positions lacked same-height pool depth';
   const laneStatus = {
     synth: lane(synthComplete ? 'complete' : 'partial', synthComplete ? '' : 'One or more synth pools lacked same-height units or price data'),
     treasury: lane(treasuryComplete ? 'complete' : 'partial', treasuryWarning),
-    reserve_pol: lane(reserveStatus, reserveWarning)
+    reserve_pol: lane(reserveStatus, reserveWarning),
+    system_income_pol: lane(
+      systemIncomePolComplete ? 'complete' : systemIncomePolModuleAddress ? 'partial' : 'unavailable',
+      systemIncomePolWarning
+    )
   };
   const complete = Object.values(laneStatus).every(({ status }) => status === 'complete');
   const warnings = Object.values(laneStatus).map((item) => item.warning).filter(Boolean);
@@ -183,6 +236,9 @@ export function buildPolTrackerObservation(input = {}) {
       anchor_block_time: input.anchor?.blockTime || null,
       treasury_module_address: input.moduleAddress || POL_TRACKER_TREASURY_MODULE,
       reserve_module_address: input.reserveModuleAddress || POL_TRACKER_RESERVE_MODULE,
+      system_income_pol_module_address: systemIncomePolActive
+        ? systemIncomePolModuleAddress || null
+        : '',
       rune_price_usd_e8: runePrice.toString(),
       synth_backing_usd_e8: totalOrNull(poolRows.map((row) => row.synth_backing_usd_e8), synthComplete),
       synth_face_usd_e8: totalOrNull(poolRows.map((row) => row.synth_face_usd_e8), synthComplete),
@@ -191,10 +247,21 @@ export function buildPolTrackerObservation(input = {}) {
       treasury_total_usd_e8: totalOrNull(poolRows.map((row) => row.treasury_total_usd_e8), treasuryComplete),
       reserve_pol_rune_e8: reservePolRune?.toString() ?? null,
       reserve_pol_usd_e8: reservePolRune === null ? null : e8Product(reservePolRune, runePrice).toString(),
+      system_income_pol_rune_e8: totalOrNull(
+        poolRows.map((row) => row.system_income_pol_rune_e8),
+        systemIncomePolComplete
+      ),
+      system_income_pol_usd_e8: totalOrNull(
+        poolRows.map((row) => row.system_income_pol_usd_e8),
+        systemIncomePolComplete
+      ),
       runepool_provider_owned_rune_e8: providerOwnedRune?.toString() ?? null,
       pool_count: poolRows.length,
       treasury_pool_count: poolRows.filter((row) => positive(row.treasury_lp_units) > 0n).length,
       reserve_pool_count: poolRows.filter((row) => positive(row.reserve_pol_lp_units) > 0n).length,
+      system_income_pol_pool_count: poolRows.filter(
+        (row) => positive(row.system_income_pol_lp_units) > 0n
+      ).length,
       complete,
       lane_status: laneStatus,
       warnings,

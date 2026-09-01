@@ -31,6 +31,12 @@ function ratioBps(numerator, denominator) {
   return Number((BigInt(integer(numerator)) * 1_000_000n) / divisor) / 100;
 }
 
+function optionalNonnegativeNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
 function day(value) {
   const normalized = String(value || '').slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return normalized;
@@ -257,6 +263,9 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
         total_funded_e8: cumulativeFunded.toString(),
         total_system_income_e8: totalSystemIncome,
         system_income_pol_share_bps: ratioBps(cumulativeFunded.toString(), totalSystemIncome),
+        pol_reserve_system_income_bps: optionalNonnegativeNumber(
+          state?.stats_json?.pol_reserve_system_income_bps
+        ),
         total_deployed_e8: cumulativeDeployed.toString(),
         undeployed_rune_e8: state?.undeployed_rune_e8 == null
           ? null
@@ -288,7 +297,7 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
       },
       sources: [
         { lane: 'events', source: 'thorchain-block-results:rewards,pol_reserve_deploy,add_liquidity,swap' },
-        { lane: 'positions', source: 'thornode-core:pools+network-price+thornode:pol_reserve-module-lp' },
+        { lane: 'positions', source: 'thornode-core:pools+network-price+mimir+thornode:pol_reserve-module-lp' },
         { lane: 'fees', source: 'pool_analysis_daily:liquidity-fees×time-weighted-share' }
       ],
       warnings

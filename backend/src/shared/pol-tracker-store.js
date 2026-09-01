@@ -1,9 +1,12 @@
+import { config } from '../lib/config.js';
+
 const DAILY_COLUMNS = [
   'day',
   'anchor_height',
   'anchor_block_time',
   'treasury_module_address',
   'reserve_module_address',
+  'system_income_pol_module_address',
   'rune_price_usd_e8',
   'synth_backing_usd_e8',
   'synth_face_usd_e8',
@@ -12,10 +15,13 @@ const DAILY_COLUMNS = [
   'treasury_total_usd_e8',
   'reserve_pol_rune_e8',
   'reserve_pol_usd_e8',
+  'system_income_pol_rune_e8',
+  'system_income_pol_usd_e8',
   'runepool_provider_owned_rune_e8',
   'pool_count',
   'treasury_pool_count',
   'reserve_pool_count',
+  'system_income_pol_pool_count',
   'complete',
   'lane_status',
   'warnings',
@@ -29,7 +35,8 @@ const POOL_COLUMNS = [
   'synth_face_usd_e8', 'treasury_lp_units', 'treasury_asset_redeem_e8',
   'treasury_rune_redeem_e8', 'treasury_asset_usd_e8', 'treasury_rune_usd_e8',
   'treasury_total_usd_e8', 'reserve_pol_lp_units', 'reserve_pol_rune_e8',
-  'reserve_pol_usd_e8'
+  'reserve_pol_usd_e8', 'system_income_pol_lp_units',
+  'system_income_pol_rune_e8', 'system_income_pol_usd_e8'
 ];
 
 function values(row, columns) {
@@ -71,7 +78,8 @@ export async function persistPolTrackerObservation(client, observation) {
            treasury_rune_redeem_e8 numeric, treasury_asset_usd_e8 numeric,
            treasury_rune_usd_e8 numeric, treasury_total_usd_e8 numeric,
            reserve_pol_lp_units numeric, reserve_pol_rune_e8 numeric,
-           reserve_pol_usd_e8 numeric
+           reserve_pol_usd_e8 numeric, system_income_pol_lp_units numeric,
+           system_income_pol_rune_e8 numeric, system_income_pol_usd_e8 numeric
          )`,
         [JSON.stringify(pools)]
       );
@@ -86,10 +94,13 @@ export async function persistPolTrackerObservation(client, observation) {
 export async function loadPolTrackerStoredDays(client, startDate, endDate) {
   const { rows } = await client.query(
     `select day, anchor_height, anchor_block_time, treasury_module_address,
+            system_income_pol_module_address,
             rune_price_usd_e8, synth_backing_usd_e8,
             synth_face_usd_e8, treasury_total_usd_e8,
             reserve_pol_rune_e8, reserve_pol_usd_e8,
-            pool_count, treasury_pool_count, complete, lane_status, warnings,
+            system_income_pol_rune_e8, system_income_pol_usd_e8,
+            pool_count, treasury_pool_count, system_income_pol_pool_count,
+            complete, lane_status, warnings,
             source, updated_at
      from pol_tracker_daily
      where day between $1::date and $2::date
@@ -114,11 +125,27 @@ export async function loadPolTrackerExistingDays(client, startDate, endDate) {
                     or pool.reserve_pol_rune_e8 is null
                     or pool.reserve_pol_usd_e8 is null
                   )
+              )
+              and (
+                daily.anchor_height < $3::bigint
+                or (
+                  daily.system_income_pol_module_address is not null
+                  and daily.system_income_pol_pool_count is not null
+                  and not exists (
+                    select 1
+                    from pol_tracker_pool_daily pool
+                    where pool.day = daily.day
+                      and (
+                        pool.system_income_pol_rune_e8 is null
+                        or pool.system_income_pol_usd_e8 is null
+                      )
+                  )
+                )
               ) as complete
      from pol_tracker_daily daily
      where daily.day between $1::date and $2::date
      order by daily.day`,
-    [startDate, endDate]
+    [startDate, endDate, config.systemIncomePolActivationHeight]
   );
   return rows;
 }
@@ -129,13 +156,16 @@ export async function loadLatestPolTrackerPools(client) {
             synth_supply_e8,
             synth_backing_usd_e8, synth_face_usd_e8, treasury_lp_units,
             treasury_total_usd_e8, reserve_pol_lp_units,
-            reserve_pol_rune_e8, reserve_pol_usd_e8
+            reserve_pol_rune_e8, reserve_pol_usd_e8,
+            system_income_pol_lp_units, system_income_pol_rune_e8,
+            system_income_pol_usd_e8
      from pol_tracker_pool_daily
      where day = (select max(day) from pol_tracker_daily)
      order by greatest(
        coalesce(synth_backing_usd_e8, 0),
        coalesce(treasury_total_usd_e8, 0),
-       coalesce(reserve_pol_usd_e8, 0)
+       coalesce(reserve_pol_usd_e8, 0),
+       coalesce(system_income_pol_usd_e8, 0)
      ) desc, asset`,
   );
   return rows;

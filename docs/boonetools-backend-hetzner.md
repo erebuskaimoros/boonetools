@@ -7,6 +7,7 @@ BooneTools now has a dedicated Hetzner-hosted backend stack for all current DB-b
 - `nodeop-leaderboard`
 - `nodeop-meta`
 - `rapid-swaps`
+- `currency-rates`
 - `stock-prices`
 - `app-layer-base-layer-earnings`
 - compact Status, Treasury, Node Votes, App Layer, Rapid Swaps, TC Fee, Pool
@@ -335,9 +336,10 @@ It writes in bounded transactions, preserves any live row at a conflicting
 timestamp, verifies every planned bucket, and refreshes the public read model.
 It has no timer and does not run automatically during future deploys.
 
-Migrations `046_pol_tracker.sql` and `047_pol_tracker_pool_breakdown.sql` add
-daily and per-pool POL Tracker history, including the legacy Reserve module's
-gross value in each pool.
+Migrations `046_pol_tracker.sql`, `047_pol_tracker_pool_breakdown.sql`, and
+`056_pol_tvl_system_income_pol.sql` add daily and per-pool POL Tracker history,
+including the legacy Reserve module's gross value and the separate System
+Income-funded `pol_reserve` module position in each pool.
 The `boonetools-pol-tracker.timer` samples the latest completed UTC day at
 00:10 UTC and republishes `/pol-tvl`. Configure `POL_TRACKER_THORNODE_URLS`
 with a historical-height THORNode endpoint and `POL_TRACKER_RPC_URLS` with an
@@ -354,6 +356,10 @@ model. Provider-owned RUNEPool value remains a private database reconciliation
 field. The gross legacy Reserve POL total comes from `runepool.pol.value`; its
 per-pool rows apply THORNode's rounded safe-share calculation to Reserve-module
 LP units and RUNE depth, double the share, and must reconcile to that total.
+The System Income POL lane resolves the `pol_reserve` module and deposited-pool
+LPs at the same historical anchor and values both sides using same-height pool
+depth and RUNE/TOR price. It remains a distinct chart value to prevent the two
+forms of POL from being conflated.
 
 Scheduled and default backfill runs use `POL_TRACKER_HEAD_LAG_DAYS=0`, so the
 target is the latest completed UTC day. Raise the value only when a configured

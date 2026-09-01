@@ -127,6 +127,13 @@ standard `meta` object. Clients can request the versioned `{ data, meta }`
 envelope with `?schema_version=2` or `Accept:
 application/vnd.boonetools.v2+json`.
 
+Current non-USD display conversions come from
+`/functions/v1/currency-rates`. The backend coalesces concurrent requests and
+caches CoinGecko-backed rates for ten minutes, so dashboard visitors do not
+contact CoinGecko directly. RUNE/USD remains sourced from THORNode's on-chain
+`rune_price_in_tor`; external-rate failures therefore degrade optional currency
+conversion without blanking USD values.
+
 Bond History serves existing cached rows immediately and coalesces refreshes in
 `bond_history_refresh_queue`. `boonetools-bond-history-refresh.timer` processes
 the queue under per-address advisory locks. All normal reads are cache-only:

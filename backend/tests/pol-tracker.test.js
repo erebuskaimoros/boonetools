@@ -87,6 +87,29 @@ test('same-height formulas preserve the requested accounting lanes without Saver
   assert.equal(observation.daily.complete, true);
 });
 
+test('same-height System Income POL is valued as a distinct two-sided LP position', () => {
+  const observation = buildPolTrackerObservation({
+    ...DAY_INPUT,
+    systemIncomePolActive: true,
+    systemIncomePolModuleAddress: 'thor1sipolmodule',
+    systemIncomePolLps: new Map([['BTC.BTC', {
+      units: '5',
+      asset_redeem_value: '400000000',
+      rune_redeem_value: '300000000'
+    }]]),
+    systemIncomePolErrors: []
+  });
+
+  assert.equal(observation.daily.system_income_pol_module_address, 'thor1sipolmodule');
+  assert.equal(e8ToNumber(observation.daily.system_income_pol_rune_e8), 11);
+  assert.equal(e8ToNumber(observation.daily.system_income_pol_usd_e8), 33);
+  assert.equal(observation.daily.system_income_pol_pool_count, 1);
+  assert.equal(e8ToNumber(observation.pools[0].system_income_pol_rune_e8), 11);
+  assert.equal(e8ToNumber(observation.pools[0].system_income_pol_usd_e8), 33);
+  assert.equal(observation.daily.lane_status.system_income_pol.status, 'complete');
+  assert.equal(observation.daily.complete, true);
+});
+
 test('public payload strips legacy Savers and all RUNEPool ownership values', () => {
   const observation = buildPolTrackerObservation(DAY_INPUT);
   const legacyDaily = {
@@ -128,6 +151,9 @@ test('public payload strips legacy Savers and all RUNEPool ownership values', ()
   assert.equal(Object.hasOwn(payload.latest_pools[0], 'treasury_rune_usd'), false);
   assert.equal(payload.latest_pools[0].reserve_pol_rune, 100);
   assert.equal(payload.latest_pools[0].reserve_pol_usd, 300);
+  assert.deepEqual(payload.daily[0].system_income_pol, { position_rune: 0, position_usd: 0 });
+  assert.equal(payload.latest_pools[0].system_income_pol_rune, 0);
+  assert.equal(payload.latest_pools[0].system_income_pol_usd, 0);
   assert.equal(Object.hasOwn(payload.methodology, 'savers'), false);
   assert.equal(Object.hasOwn(payload.methodology, 'runepool'), false);
   assert.equal(Object.keys(payload.methodology).some((key) => key.includes('runepool')), false);
@@ -238,6 +264,36 @@ test('historical provider requests pin every source and LP query to one height',
   assert.equal(state.runepoolError, '');
 });
 
+test('historical provider resolves the System Income POL module and only its deployed pools', async () => {
+  const paths = [];
+  const state = await fetchHistoricalPolTrackerState(456, {
+    systemIncomePolActivationHeight: 100,
+    requestDelayMs: 0,
+    fetchHistorical: async (path) => {
+      paths.push(path);
+      if (path.startsWith('/thorchain/network')) return { rune_price_in_tor: '300000000' };
+      if (path.startsWith('/thorchain/pools')) return [
+        { asset: 'BTC.BTC', pol_reserve_rune_deposited: '1' },
+        { asset: 'ETH.ETH', pol_reserve_rune_deposited: '0' }
+      ];
+      if (path.startsWith('/thorchain/runepool')) {
+        return { pol: { value: '1' }, providers: { value: '0' } };
+      }
+      if (path.startsWith('/thorchain/balance/module/pol_reserve')) {
+        return { address: 'thor1sipolmodule', coins: [] };
+      }
+      return { units: '0', asset_redeem_value: '0', rune_redeem_value: '0' };
+    }
+  });
+
+  assert.equal(state.systemIncomePolActive, true);
+  assert.equal(state.systemIncomePolModuleAddress, 'thor1sipolmodule');
+  assert.equal(state.systemIncomePolLps.size, 1);
+  assert.deepEqual(state.systemIncomePolErrors, []);
+  assert.equal(paths.filter((path) => path.includes('thor1sipolmodule')).length, 1);
+  assert.ok(paths.every((path) => path.endsWith('?height=456')));
+});
+
 test('legacy rows without a per-pool Reserve POL value remain eligible for backfill', async () => {
   let query = '';
   const rows = await loadPolTrackerExistingDays({
@@ -249,6 +305,9 @@ test('legacy rows without a per-pool Reserve POL value remain eligible for backf
   assert.equal(rows[0].complete, false);
   assert.match(query, /reserve_module_address is not null/i);
   assert.match(query, /reserve_pol_rune_e8 is null/i);
+  assert.match(query, /system_income_pol_module_address is not null/i);
+  assert.match(query, /system_income_pol_rune_e8 is null/i);
+  assert.match(query, /anchor_height < \$3::bigint/i);
 });
 
 test('daily planning uses completed UTC day-end points and resumes missing or partial rows', async () => {
@@ -475,9 +534,10 @@ test('POL Tracker retries transient history failures', async () => {
 });
 
 test('migration, jobs, route, timer, and deployment encode the POL Tracker production contract', async () => {
-  const [migration, poolBreakdownMigration, runJob, server, timer, service, backfill, deploy] = await Promise.all([
+  const [migration, poolBreakdownMigration, systemIncomeMigration, runJob, server, timer, service, backfill, deploy] = await Promise.all([
     readFile(new URL('../migrations/046_pol_tracker.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/047_pol_tracker_pool_breakdown.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/056_pol_tvl_system_income_pol.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pol-tracker.timer', import.meta.url), 'utf8'),
@@ -492,6 +552,9 @@ test('migration, jobs, route, timer, and deployment encode the POL Tracker produ
   assert.match(poolBreakdownMigration, /reserve_pol_lp_units/);
   assert.match(poolBreakdownMigration, /reserve_pol_rune_e8/);
   assert.match(poolBreakdownMigration, /reserve_pol_usd_e8/);
+  assert.match(systemIncomeMigration, /system_income_pol_module_address/);
+  assert.match(systemIncomeMigration, /system_income_pol_rune_e8/);
+  assert.match(systemIncomeMigration, /system_income_pol_usd_e8/);
   assert.match(runJob, /'pol-tracker-backfill': runPolTrackerBackfill/);
   assert.match(runJob, /'pol-tracker-scheduler': runPolTrackerScheduler/);
   assert.match(server, /\['\/pol-tvl', route\(handlePolTracker, 1, 64\)\]/);
@@ -586,7 +649,7 @@ test('scheduled and manual POL jobs lag archive ingestion by one completed UTC d
     { type: 'lock', key: 'boonetools:pol-tracker' },
     { type: 'ingest', startDate: '2026-08-11', endDate: '2026-08-17' },
     { type: 'build', startDate: '2025-02-01', endDate: '2026-08-17' },
-    { type: 'publish', key: 'pol-tracker:v2' }
+    { type: 'publish', key: 'pol-tracker:v3' }
   ]);
 
   calls.length = 0;

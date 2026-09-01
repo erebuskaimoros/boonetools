@@ -10,7 +10,9 @@ import {
   formatE8Asset,
   formatE8Rune,
   formatE8Usd,
+  formatPercent,
   normalizeSystemIncomePolPayload,
+  projectSystemIncomePolChartSelection,
   selectSystemIncomePolRange
 } from '../src/lib/system-income-pol/model.js';
 
@@ -28,14 +30,49 @@ test('System Income POL owns /pol-tracker but stays out of navigation', async ()
   assert.equal(hiddenApps.includes('systemIncomePolApp'), true);
   assert.match(dashboardSource, /SYSTEM INCOME POL/);
   assert.match(dashboardSource, /subscribeChainHeads/);
-  assert.match(dashboardSource, /LIVE · BLOCK/);
-  assert.match(dashboardSource, /POSITIONS/);
-  assert.match(dashboardSource, /FEES/);
+  assert.doesNotMatch(dashboardSource, /freshness-strip/);
+  assert.doesNotMatch(dashboardSource, /LIVE · BLOCK/);
   assert.match(dashboardSource, /POL TVL/);
   assert.match(dashboardSource, /RUNE DEPOSITED/);
+  assert.match(dashboardSource, /class="deployment-pulse"/);
+  assert.match(dashboardSource, /window\.setTimeout\([\s\S]*?, 1000\)/);
+  assert.doesNotMatch(dashboardSource, /deployment-tape/);
   assert.match(dashboardSource, /EST\. FEES EARNED/);
   assert.match(dashboardSource, /SYSTEM INCOME → POL/);
+  assert.match(dashboardSource, /polReserveSystemIncomePercent/);
+  assert.match(dashboardSource, /POLRESERVESYSTEMINCOMEBPS/);
   assert.match(dashboardSource, /RUNE “BURNED”/);
+  assert.match(dashboardSource, /runeHeldSystemIncomeSharePercent, 1/);
+  assert.match(dashboardSource, /DAILY \+ CUMULATIVE POL DEPOSITS/);
+  assert.match(dashboardSource, /let chartUnit = 'rune'/);
+  assert.match(dashboardSource, /aria-label="Chart denomination"/);
+  assert.match(dashboardSource, />\[RUNE\]<\/button>/);
+  assert.match(dashboardSource, />\[\$\]<\/button>/);
+  assert.match(dashboardSource, /runePriceUsdE8: dashboard\.summary\.runePriceUsdE8/);
+  assert.match(dashboardSource, /USD values use the current RUNE price/);
+  assert.match(dashboardSource, /<rect class="bar deposited"/);
+  assert.match(dashboardSource, /<path class="series cumulative"/);
+  assert.match(dashboardSource, /class="chart-tooltip"/);
+  assert.match(dashboardSource, /class="zoom-capture"/);
+  assert.match(dashboardSource, /on:pointerdown=\{startZoomSelection\}/);
+  assert.match(dashboardSource, /on:dblclick=\{resetChartZoom\}/);
+  assert.match(dashboardSource, />\[RESET\]<\/button>/);
+  assert.match(dashboardSource, /class="token-name"/);
+  assert.match(dashboardSource, /getAssetLogo\('THOR\.RUNE'\)/);
+  assert.match(dashboardSource, /getAssetLogo\(pool\.asset\)/);
+  assert.match(dashboardSource, /metric-separator[^>]*>\/<\/span>/);
+  assert.match(dashboardSource, /class="metric-rune-icon"[^>]*RUNE-ICON\.svg/);
+  assert.match(dashboardSource, /\.asset-panel \.panel-heading > div:first-child \{ padding-left: 0; \}/);
+  assert.match(dashboardSource, /let rangeId = '30d'/);
+  assert.match(dashboardSource, /visibleWarnings/);
+  assert.doesNotMatch(dashboardSource, /#each dashboard\.warnings/);
+  assert.match(dashboardSource, /metric-value--orange/);
+  assert.match(dashboardSource, /metric-value--green/);
+  assert.match(dashboardSource, /getAssetLogo/);
+  assert.match(dashboardSource, /https:\/\/thorchain\.net\/pool\//);
+  assert.match(dashboardSource, /https:\/\/thorchain\.net\/address\//);
+  assert.match(dashboardSource, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(dashboardSource, /--term-green/);
   assert.match(dashboardSource, /CURRENT ASSETS HELD BY POL/);
   assert.match(dashboardSource, /formatE8Usd\(pool\.positionValueUsdE8\)/);
   assert.match(dashboardSource, /DATA COVERAGE/);
@@ -55,10 +92,12 @@ test('System Income POL coverage rendering exposes coverage as a template depend
 test('System Income POL normalization preserves exact base-unit accounting', () => {
   const dashboard = normalizeSystemIncomePolPayload({
     as_of: '2026-08-31T12:00:00Z',
+    module_address: 'thor1polmodule',
     summary: {
       total_funded_e8: '1200000000',
       total_system_income_e8: '12000000000',
       system_income_pol_share_bps: 1000,
+      pol_reserve_system_income_bps: 2000,
       total_deployed_e8: '900000000',
       undeployed_rune_e8: '300000000',
       total_position_value_rune_e8: '960000000',
@@ -91,22 +130,28 @@ test('System Income POL normalization preserves exact base-unit accounting', () 
       deployed_e8: '900000000',
       estimated_fees_e8: '60000000',
       cumulative_funded_e8: '1200000000',
-      cumulative_deployed_e8: '900000000'
+      cumulative_deployed_e8: '900000000',
+      cumulative_estimated_fees_e8: '60000000'
     }],
     live: { through_height: 123, through_time: '2026-08-31T12:00:00Z' },
     freshness: { events_as_of: '2026-08-31T12:00:00Z' }
   });
 
   assert.equal(dashboard.summary.totalFundedE8, '1200000000');
+  assert.equal(dashboard.moduleAddress, 'thor1polmodule');
   assert.equal(dashboard.summary.totalPositionValueUsdE8, '1920000000');
   assert.equal(dashboard.summary.systemIncomePolSharePercent, 10);
+  assert.equal(dashboard.summary.polReserveSystemIncomePercent, 20);
   assert.equal(dashboard.summary.activePoolCount, 2);
   assert.equal(dashboard.pools[0].assetHeldE8, '1234567');
   assert.equal(dashboard.daily[0].cumulativeDeployedE8, '900000000');
+  assert.equal(dashboard.daily[0].cumulativeEstimatedFeesRune, 0.6);
   assert.equal(dashboard.liveHeight, 123);
   assert.equal(formatE8Rune('1200000000'), '12.00');
   assert.equal(formatE8Asset('1234567'), '0.012346');
   assert.equal(formatE8Usd('1920000000'), '$19.20');
+  assert.equal(formatPercent(9.94, 1), '9.9%');
+  assert.equal(formatPercent(9.9883, 1), '10.0%');
   assert.deepEqual(buildSystemIncomePolAssetInventory(dashboard.summary, dashboard.pools), [{
     asset: 'THOR.RUNE', ticker: 'RUNE', amountE8: '470000000', valueUsdE8: '940000000'
   }, {
@@ -214,11 +259,88 @@ test('System Income POL history exposes ranges and chart geometry', () => {
     deployedRune: index / 2,
     estimatedFeesRune: index / 10
   }));
-  assert.equal(selectSystemIncomePolRange(rows).length, 90);
+  assert.equal(selectSystemIncomePolRange(rows).length, 30);
   assert.equal(selectSystemIncomePolRange(rows, 'all').length, 200);
   const chart = buildSystemIncomePolChart(rows.slice(0, 30));
   assert.equal(chart.points.length, 30);
-  assert.match(chart.fundedPath, /^M/);
-  assert.match(chart.deployedPath, /^M/);
-  assert.match(chart.feesPath, /^M/);
+  assert.equal(chart.depositBars.length, 30);
+});
+
+test('System Income POL history charts each day\'s POL deposit as a bar', () => {
+  const chart = buildSystemIncomePolChart([{
+    day: '2026-08-31',
+    fundedRune: 700,
+    deployedRune: 690,
+    estimatedFeesRune: 2,
+    cumulativeFundedRune: 700,
+    cumulativeDeployedRune: 690,
+    cumulativeEstimatedFeesRune: 2
+  }, {
+    day: '2026-09-01',
+    fundedRune: 60,
+    deployedRune: 55,
+    estimatedFeesRune: 1,
+    cumulativeFundedRune: 760,
+    cumulativeDeployedRune: 745,
+    cumulativeEstimatedFeesRune: 3
+  }]);
+
+  assert.deepEqual(chart.points.map((point) => point.depositedPlotRune), [690, 55]);
+  assert.deepEqual(chart.points.map((point) => point.cumulativeDepositedRune), [690, 745]);
+  assert.deepEqual(chart.depositBars.map((bar) => bar.value), [690, 55]);
+  assert.ok(chart.depositBars.every((bar) => bar.height >= 0));
+  assert.match(chart.cumulativeDepositedPath, /^M/);
+  assert.equal(chart.cumulativeYTicks.length, 5);
+});
+
+test('System Income POL history can denominate daily and cumulative deposits in current-price USD', () => {
+  const rows = [{
+    day: '2026-08-31',
+    deployedRune: 690,
+    cumulativeDeployedRune: 690
+  }, {
+    day: '2026-09-01',
+    deployedRune: 55,
+    cumulativeDeployedRune: 745
+  }];
+  const chart = buildSystemIncomePolChart(rows, {
+    unit: 'usd',
+    runePriceUsdE8: '200000000'
+  });
+
+  assert.equal(chart.unit, 'usd');
+  assert.equal(chart.unitAvailable, true);
+  assert.equal(chart.runePriceUsd, 2);
+  assert.deepEqual(chart.points.map((point) => point.depositedPlotValue), [1380, 110]);
+  assert.deepEqual(chart.points.map((point) => point.cumulativeDepositedValue), [1380, 1490]);
+  assert.deepEqual(chart.depositBars.map((bar) => bar.value), [1380, 110]);
+  assert.deepEqual(chart.points.map((point) => point.depositedPlotRune), [690, 55]);
+  assert.match(chart.cumulativeDepositedPath, /^M/);
+});
+
+test('System Income POL chart selection projects drag zoom in either direction', () => {
+  const forward = projectSystemIncomePolChartSelection({
+    rowCount: 31,
+    plotLeft: 72,
+    plotRight: 928,
+    startX: 286,
+    endX: 714
+  });
+  const reverse = projectSystemIncomePolChartSelection({
+    rowCount: 31,
+    plotLeft: 72,
+    plotRight: 928,
+    startX: 714,
+    endX: 286
+  });
+
+  assert.deepEqual(forward, { startIndex: 8, endIndex: 23 });
+  assert.deepEqual(reverse, forward);
+  assert.equal(projectSystemIncomePolChartSelection({
+    rowCount: 31,
+    plotLeft: 72,
+    plotRight: 928,
+    startX: 400,
+    endX: 405
+  }), null);
 });
