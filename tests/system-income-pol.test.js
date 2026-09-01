@@ -16,7 +16,7 @@ import {
   selectSystemIncomePolRange
 } from '../src/lib/system-income-pol/model.js';
 
-test('System Income POL owns /pol-tracker but stays out of navigation', async () => {
+test('System Income POL owns /pol-tracker and appears in navigation', async () => {
   const [appSource, dashboardSource] = await Promise.all([
     readFile(new URL('../src/App.svelte', import.meta.url), 'utf8'),
     readFile(new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url), 'utf8')
@@ -26,8 +26,8 @@ test('System Income POL owns /pol-tracker but stays out of navigation', async ()
 
   assert.match(appSource, /const systemIncomePolApp = \{/);
   assert.match(appSource, /path: "pol-tracker"/);
-  assert.equal(visibleApps.includes('systemIncomePolApp'), false);
-  assert.equal(hiddenApps.includes('systemIncomePolApp'), true);
+  assert.equal(visibleApps.includes('systemIncomePolApp'), true);
+  assert.equal(hiddenApps.includes('systemIncomePolApp'), false);
   assert.match(dashboardSource, /SYSTEM INCOME POL/);
   assert.match(dashboardSource, /subscribeChainHeads/);
   assert.doesNotMatch(dashboardSource, /freshness-strip/);

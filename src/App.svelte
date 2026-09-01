@@ -173,6 +173,7 @@
     poolDislocationApp,
     poolAnalysisApp,
     polTvlApp,
+    systemIncomePolApp,
     burnTrackerApp,
     bondTrackerApp,
     vaultExplorerApp,
@@ -184,7 +185,7 @@
     briefingsApp
   ];
   // Direct-route previews resolve normally but stay out of desktop/mobile nav.
-  const hiddenApps = [wasmArbEconomicsApp, systemIncomePolApp];
+  const hiddenApps = [wasmArbEconomicsApp];
 
   // The site has no homepage: unknown paths and `/` land on the status page.
   const defaultApp = statusApp;
