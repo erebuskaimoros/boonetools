@@ -35,14 +35,24 @@ by total `pool_units`, including synth dilution. Current holdings use the LP
 endpoint's RUNE and asset redeem values; position value is separate from the
 estimated swap-fee share.
 
-Position samples time-weight ownership. Completed and partial pool-fee totals
-come from canonical `pool_analysis_daily`; the headline sums known estimates
-and explicitly marks incomplete coverage, while a pool-day with no estimate
-remains `null`, never zero. Funding/deployment history compacts from the durable block
+Position samples time-weight ownership and now retain the reconciled SIPOL
+position value in RUNE. Durable block swap fees are compacted into UTC hours and
+multiplied by each hour's sampled ownership share; the open hour remains
+provisional and a missing estimate remains `null`, never zero. The initial
+pre-value samples are explicitly seeded from the current reconciled position
+and age out as measured hours arrive.
+
+Estimated fee APR uses only completed UTC hours. For each 24-hour, 7-day, and
+30-day window it divides total attributed fees by total average SIPOL
+position-value hours, then multiplies the hourly rate by 8,760 without
+compounding. The read model reports available, covered, measured, and seeded
+hours so the frontend can distinguish warming, partial, seeded, and complete
+windows. Funding/deployment history still compacts from the durable block
 ledger, not the retention-pruned header overlay.
 
 The five headlines are current POL TVL in USD, total RUNE deposited, estimated
-fees in USD, the current `POLRESERVESYSTEMINCOMEBPS` allocation, and current RUNE
+fees in USD with its 24-hour estimated fee APR, the current
+`POLRESERVESYSTEMINCOMEBPS` allocation, and current RUNE
 held (the dashboard's quoted “burned” measure) as a share of all system income
 since activation. The
 asset inventory lists the reconciled RUNE and external asset legs separately.

@@ -56,6 +56,9 @@
   });
   $: hoveredChartPoint = hoverIndex >= 0 ? chart.points[hoverIndex] || null : null;
   $: coverage = dashboard.coverage;
+  $: feeApr24h = dashboard.summary.feeAprWindows['24h'];
+  $: feeApr7d = dashboard.summary.feeAprWindows['7d'];
+  $: feeApr30d = dashboard.summary.feeAprWindows['30d'];
   $: assetInventory = buildSystemIncomePolAssetInventory(dashboard.summary, dashboard.pools);
   $: visibleWarnings = dashboard.warnings.filter((warning) => warning !== REDUNDANT_FEE_WARNING);
   $: latestDay = dashboard.daily.at(-1) || null;
@@ -173,6 +176,13 @@
     if (summary.feeHoursProvisional > 0) state.push('LIVE');
     const prefix = state.length ? `HOURLY · ${state.join(' + ')}` : 'HOURLY ESTIMATE';
     return `${prefix} · ${summary.feeHoursCovered}/${summary.feeHoursTotal} HOURS`;
+  }
+
+  function feeAprCoverageLabel(window) {
+    if (!window || window.aprPercent === null) return 'WARMING · NO COMPLETE CAPITAL HOURS';
+    const parts = [window.status.toUpperCase(), `${window.coveredHours}/${window.targetHours}H`];
+    if (window.seededHours > 0) parts.push(`${window.seededHours} SEEDED`);
+    return parts.join(' · ');
   }
 
   function setChartUnit(nextUnit) {
@@ -357,8 +367,18 @@
     <article class="metric metric--fees">
       <span class="metric-index">03</span>
       <span class="metric-label">EST. FEES EARNED</span>
-      <strong>{formatE8Usd(dashboard.summary.totalEstimatedFeesUsdE8, true)}</strong>
-      <small>{feeEstimateLabel(dashboard.summary)}</small>
+      <div class="metric-pair fee-metric-pair">
+        <span>
+          <strong>{formatE8Usd(dashboard.summary.totalEstimatedFeesUsdE8, true)}</strong>
+          <small>TOTAL EST.</small>
+        </span>
+        <span class="metric-separator" aria-hidden="true">/</span>
+        <span>
+          <strong>{formatPercent(feeApr24h?.aprPercent, 1)}</strong>
+          <small>24H EST. APR</small>
+        </span>
+      </div>
+      <small class="metric-foot">{feeAprCoverageLabel(feeApr24h)}</small>
     </article>
     <article class="metric">
       <span class="metric-index">04</span>
@@ -587,6 +607,9 @@
         <div><dt>MISSING / REPAIRED</dt><dd>{coverageValue(coverage, 'missing_blocks')} / {coverageValue(coverage, 'repaired_blocks')}</dd></div>
         <div><dt>POSITION POOLS</dt><dd>{coverageValue(coverage, 'position_pools', 'pools_observed', 'active_pool_count')}</dd></div>
         <div><dt>HISTORY THROUGH</dt><dd>{displayDay(coverageValue(coverage, 'through_day', 'history_through_day') === '—' ? latestDay?.day : coverageValue(coverage, 'through_day', 'history_through_day'))}</dd></div>
+        <div><dt>24H EST. FEE APR</dt><dd>{formatPercent(feeApr24h?.aprPercent, 1)} · {feeAprCoverageLabel(feeApr24h)}</dd></div>
+        <div><dt>7D EST. FEE APR</dt><dd>{formatPercent(feeApr7d?.aprPercent, 1)} · {feeAprCoverageLabel(feeApr7d)}</dd></div>
+        <div><dt>30D EST. FEE APR</dt><dd>{formatPercent(feeApr30d?.aprPercent, 1)} · {feeAprCoverageLabel(feeApr30d)}</dd></div>
       </dl>
     </article>
     <article class="panel method-panel">
@@ -596,6 +619,7 @@
       <p><b>Exact flows:</b> system income funding and deployments are read from finalized block events and replayed after stream gaps.</p>
       <p><b>Current holdings:</b> LP units, pool ownership, RUNE held, and external assets held reconcile against THORNode pool state.</p>
       <p><b>Fee estimate:</b> pool liquidity fees are multiplied by SIPOL’s time-weighted pool share. This is not position P&amp;L.</p>
+      <p><b>Estimated APR:</b> completed hourly fee estimates are divided by matching average SIPOL position-value hours and annualized without compounding. Seeded hours are labeled until measured values replace them.</p>
       <span class="source-line">SOURCE · THORNODE BLOCK EVENTS + CORE POOL SNAPSHOT + POOL ANALYSIS READ MODEL</span>
     </article>
   </section>
@@ -686,6 +710,10 @@
   .metric-pair { display: grid; grid-template-columns: auto auto auto; align-items: flex-start; justify-content: start; gap: 10px; }
   .metric-pair > span { min-width: 0; }
   .metric-pair strong { font-size: clamp(21px, 1.6vw, 25px); white-space: nowrap; }
+  .fee-metric-pair { gap: 8px; }
+  .metric-pair.fee-metric-pair strong { font-size: clamp(18px, 1.35vw, 23px); }
+  .fee-metric-pair small { margin-top: 6px; }
+  .metric .metric-foot { margin-top: 7px; font-size: 10px; white-space: nowrap; }
   .metric-pair small { white-space: nowrap; }
   .metric-pair .metric-separator { color: var(--term-amber); font-size: clamp(21px, 1.6vw, 25px); font-weight: 700; line-height: 1.1; }
   .metric-link, .pool-link { color: inherit; text-decoration: none; }

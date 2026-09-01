@@ -220,18 +220,22 @@ export async function saveSystemIncomePolPositions(client, positions = [], meta 
     );
     await client.query(
       `insert into system_income_pol_position_samples (
-         asset, observed_height, observed_at, units_e8, pool_units_e8
+         asset, observed_height, observed_at, units_e8, pool_units_e8,
+         position_value_rune_e8, position_value_seeded
        )
        select incoming.asset, incoming.observed_height, incoming.observed_at,
-              incoming.units_e8, incoming.pool_units_e8
+              incoming.units_e8, incoming.pool_units_e8,
+              incoming.position_value_rune_e8, false
        from jsonb_to_recordset($1::jsonb) as incoming (
          asset text, observed_height bigint, observed_at timestamptz,
-         units_e8 numeric, pool_units_e8 numeric
+         units_e8 numeric, pool_units_e8 numeric, position_value_rune_e8 numeric
        )
        on conflict (asset, observed_height) do update set
          observed_at = excluded.observed_at,
          units_e8 = excluded.units_e8,
-         pool_units_e8 = excluded.pool_units_e8`,
+         pool_units_e8 = excluded.pool_units_e8,
+         position_value_rune_e8 = excluded.position_value_rune_e8,
+         position_value_seeded = false`,
       [JSON.stringify(rows)]
     );
     await client.query(
@@ -266,6 +270,8 @@ export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
   const result = await client.query(
     `with bounds as (
        select coalesce(
+                (select min(hour) from system_income_pol_pool_hourly
+                 where position_value_rune_e8 is null),
                 (select max(hour) - interval '2 hours' from system_income_pol_pool_hourly),
                 date_trunc('hour', (select min(block_time) from system_income_pol_blocks))
               ) as start_hour,
@@ -300,6 +306,8 @@ export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
      ), sampled as (
        select samples.asset, date_trunc('hour', samples.observed_at) as hour,
               avg(samples.units_e8 / nullif(samples.pool_units_e8, 0)) as share,
+              avg(samples.position_value_rune_e8) as position_value_rune_e8,
+              bool_or(samples.position_value_seeded) as position_value_seeded,
               max(samples.observed_at) as source_updated_at
        from system_income_pol_position_samples samples
        cross join bounds
@@ -312,6 +320,11 @@ export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
               coalesce(raw_fees.pool_fees_e8, 0) as pool_fees_e8,
               coalesce(sampled.share, seed.share) as share,
               sampled.share is null and seed.share is not null as used_seed,
+              coalesce(sampled.position_value_rune_e8, seed.position_value_rune_e8)
+                as position_value_rune_e8,
+              coalesce(sampled.position_value_seeded, seed.position_value_seeded, false)
+                or (sampled.position_value_rune_e8 is null and seed.position_value_rune_e8 is not null)
+                as position_value_seeded,
               hours.hour = date_trunc('hour', $1::timestamptz) as provisional,
               greatest(raw_fees.source_updated_at, sampled.source_updated_at,
                 seed.source_updated_at, hours.deployed_at) as source_updated_at
@@ -320,6 +333,8 @@ export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
        left join sampled using (asset, hour)
        left join lateral (
          select anchor.units_e8 / nullif(anchor.pool_units_e8, 0) as share,
+                anchor.position_value_rune_e8,
+                anchor.position_value_seeded,
                 anchor.observed_at as source_updated_at
          from system_income_pol_position_samples anchor
          where anchor.asset = hours.asset and anchor.pool_units_e8 > 0
@@ -330,9 +345,10 @@ export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
              else extract(epoch from anchor.observed_at - hours.hour)
            end
          limit 1
-       ) seed on sampled.share is null
+       ) seed on sampled.share is null or sampled.position_value_rune_e8 is null
      ), estimates as (
-       select asset, hour, pool_fees_e8,
+       select asset, hour, pool_fees_e8, position_value_rune_e8,
+              position_value_seeded,
               case when share is null then null else floor(pool_fees_e8 * share) end as estimated_fees_e8,
               case when share is null then null else share * 1000000 end as fee_share_ppm,
               case when share is null then 'unavailable'
@@ -346,15 +362,19 @@ export async function refreshSystemIncomePolFeeEstimates(client, options = {}) {
        from attributed
      )
      insert into system_income_pol_pool_hourly as current (
-       asset, hour, pool_fees_e8, estimated_fees_e8, fee_share_ppm,
-       fee_coverage, provisional, source, source_updated_at
+       asset, hour, pool_fees_e8, estimated_fees_e8, position_value_rune_e8,
+       position_value_seeded, fee_share_ppm, fee_coverage, provisional, source,
+       source_updated_at
      )
-     select asset, hour, pool_fees_e8, estimated_fees_e8, fee_share_ppm,
-            fee_coverage, provisional, source, source_updated_at
+     select asset, hour, pool_fees_e8, estimated_fees_e8, position_value_rune_e8,
+            position_value_seeded, fee_share_ppm, fee_coverage, provisional, source,
+            source_updated_at
      from estimates
      on conflict (asset, hour) do update set
        pool_fees_e8 = excluded.pool_fees_e8,
        estimated_fees_e8 = excluded.estimated_fees_e8,
+       position_value_rune_e8 = excluded.position_value_rune_e8,
+       position_value_seeded = excluded.position_value_seeded,
        fee_share_ppm = excluded.fee_share_ppm,
        fee_coverage = excluded.fee_coverage,
        provisional = excluded.provisional,
@@ -441,6 +461,7 @@ export async function loadSystemIncomePolPoolDaily(client) {
 export async function loadSystemIncomePolPoolHourly(client) {
   const { rows } = await client.query(
     `select asset, hour, pool_fees_e8::text, estimated_fees_e8::text,
+            position_value_rune_e8::text, position_value_seeded,
             fee_share_ppm::text, fee_coverage, provisional, source, source_updated_at
      from system_income_pol_pool_hourly order by hour, asset`
   );

@@ -8,8 +8,15 @@ import {
 } from './system-income-pol-store.js';
 
 export const SYSTEM_INCOME_POL_MODEL_KEY = 'system-income-pol:v1';
-export const SYSTEM_INCOME_POL_SCHEMA_VERSION = 3;
+export const SYSTEM_INCOME_POL_SCHEMA_VERSION = 4;
 export const SYSTEM_INCOME_POL_TTL_MS = 5 * 60 * 1000;
+
+const FEE_APR_WINDOWS = Object.freeze([
+  { id: '24h', hours: 24 },
+  { id: '7d', hours: 7 * 24 },
+  { id: '30d', hours: 30 * 24 }
+]);
+const HOUR_MS = 60 * 60 * 1000;
 
 function integer(value, fallback = '0') {
   const normalized = String(value ?? '').trim();
@@ -106,6 +113,83 @@ function publicPosition(row, fees, deployedE8, runePriceUsdE8) {
   };
 }
 
+function annualizedAprBps(feesE8, positionValueHoursE8) {
+  if (feesE8 <= 0n || positionValueHoursE8 <= 0n) return null;
+  const hundredthBps = (
+    feesE8 * 8_760n * 10_000n * 100n
+  ) / positionValueHoursE8;
+  return Number(hundredthBps) / 100;
+}
+
+export function buildSystemIncomePolAprWindows(poolHourlyRows = [], nowValue = new Date()) {
+  const now = nowValue instanceof Date ? nowValue : new Date(nowValue || Date.now());
+  const parsedNow = Number.isFinite(now.getTime()) ? now.getTime() : Date.now();
+  const currentHour = Math.floor(parsedNow / HOUR_MS) * HOUR_MS;
+  const grouped = new Map();
+
+  for (const row of Array.isArray(poolHourlyRows) ? poolHourlyRows : []) {
+    const parsedHour = Date.parse(row?.hour || '');
+    if (!Number.isFinite(parsedHour)) continue;
+    const hour = Math.floor(parsedHour / HOUR_MS) * HOUR_MS;
+    if (hour >= currentHour) continue;
+    const current = grouped.get(hour) || [];
+    current.push(row);
+    grouped.set(hour, current);
+  }
+
+  return Object.fromEntries(FEE_APR_WINDOWS.map(({ id, hours }) => {
+    const cutoff = currentHour - hours * HOUR_MS;
+    const hourGroups = [...grouped.entries()]
+      .filter(([hour]) => hour >= cutoff)
+      .sort(([left], [right]) => left - right)
+      .map(([, rows]) => rows);
+    const covered = hourGroups.filter((rows) => rows.length > 0 && rows.every((row) => (
+      !row.provisional
+      && row.estimated_fees_e8 != null
+      && row.position_value_rune_e8 != null
+      && BigInt(integer(row.position_value_rune_e8)) > 0n
+    )));
+    const fees = covered.reduce(
+      (total, rows) => total + rows.reduce(
+        (hourTotal, row) => hourTotal + BigInt(integer(row.estimated_fees_e8)),
+        0n
+      ),
+      0n
+    );
+    const positionValueHours = covered.reduce(
+      (total, rows) => total + rows.reduce(
+        (hourTotal, row) => hourTotal + BigInt(integer(row.position_value_rune_e8)),
+        0n
+      ),
+      0n
+    );
+    const seededHours = covered.filter((rows) => rows.some((row) => (
+      row.position_value_seeded || row.fee_coverage === 'seeded'
+    ))).length;
+    const availableHours = hourGroups.length;
+    const coveredHours = covered.length;
+    const aprBps = annualizedAprBps(fees, positionValueHours);
+    let status = 'complete';
+    if (aprBps === null) status = 'unavailable';
+    else if (availableHours < hours) status = 'warming';
+    else if (coveredHours < availableHours) status = 'partial';
+    else if (seededHours > 0) status = 'seeded';
+
+    return [id, {
+      estimated_fee_apr_bps: aprBps,
+      fees_e8: fees.toString(),
+      position_value_hours_e8: positionValueHours.toString(),
+      target_hours: hours,
+      available_hours: availableHours,
+      covered_hours: coveredHours,
+      measured_hours: Math.max(0, coveredHours - seededHours),
+      seeded_hours: seededHours,
+      status,
+      complete: status === 'complete'
+    }];
+  }));
+}
+
 export async function buildSystemIncomePolReadModel(client, options = {}) {
   const nowValue = typeof options.now === 'function' ? options.now() : options.now;
   const now = nowValue instanceof Date ? nowValue : new Date(nowValue || Date.now());
@@ -117,6 +201,7 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
   const positionRows = await (options.loadPositions || loadSystemIncomePolPositions)(client);
   const state = await (options.loadState || getSystemIncomePolState)(client);
   const runePriceUsdE8 = state?.rune_price_usd_e8 == null ? null : integer(state.rune_price_usd_e8);
+  const feeAprWindows = buildSystemIncomePolAprWindows(poolHourlyRows, now);
   const poolFees = new Map();
   const poolDeployments = new Map();
   for (const row of poolDailyRows) {
@@ -309,6 +394,7 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
         fee_hours_total: coverage.fee_hours_total,
         fee_hours_seeded: coverage.fee_hours_seeded,
         fee_hours_provisional: coverage.fee_hours_provisional,
+        estimated_fee_apr: feeAprWindows,
         active_pool_count: pools.filter((row) => BigInt(integer(row.units_e8)) > 0n).length
       },
       pools,

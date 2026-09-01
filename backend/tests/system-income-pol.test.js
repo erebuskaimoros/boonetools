@@ -14,6 +14,7 @@ const {
 } = await import('../src/shared/system-income-pol-reconciliation.js');
 const {
   applySystemIncomePolLiveOverlay,
+  buildSystemIncomePolAprWindows,
   buildSystemIncomePolReadModel
 } = await import('../src/shared/system-income-pol.js');
 const {
@@ -227,6 +228,75 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
   assert.equal(saved[0].meta.polReserveSystemIncomeBps, '2000');
 });
 
+test('SIPOL APR annualizes complete capital-weighted hours and reports seeded coverage', () => {
+  const rows = [{
+    asset: 'BTC.BTC', hour: '2026-09-02T11:00:00Z', estimated_fees_e8: '1',
+    position_value_rune_e8: '10000', fee_coverage: 'complete',
+    position_value_seeded: false, provisional: false
+  }, {
+    asset: 'ETH.ETH', hour: '2026-09-02T11:00:00Z', estimated_fees_e8: '1',
+    position_value_rune_e8: '10000', fee_coverage: 'complete',
+    position_value_seeded: false, provisional: false
+  }, {
+    asset: 'BTC.BTC', hour: '2026-09-02T10:00:00Z', estimated_fees_e8: '2',
+    position_value_rune_e8: '10000', fee_coverage: 'complete',
+    position_value_seeded: true, provisional: false
+  }, {
+    asset: 'ETH.ETH', hour: '2026-09-02T10:00:00Z', estimated_fees_e8: '2',
+    position_value_rune_e8: '10000', fee_coverage: 'complete',
+    position_value_seeded: true, provisional: false
+  }, {
+    asset: 'BTC.BTC', hour: '2026-09-02T09:00:00Z', estimated_fees_e8: null,
+    position_value_rune_e8: '10000', fee_coverage: 'unavailable',
+    position_value_seeded: false, provisional: false
+  }, {
+    asset: 'ETH.ETH', hour: '2026-09-02T09:00:00Z', estimated_fees_e8: '1',
+    position_value_rune_e8: '10000', fee_coverage: 'complete',
+    position_value_seeded: false, provisional: false
+  }, {
+    asset: 'BTC.BTC', hour: '2026-09-02T12:00:00Z', estimated_fees_e8: '100',
+    position_value_rune_e8: '1', fee_coverage: 'partial',
+    position_value_seeded: false, provisional: true
+  }];
+
+  const windows = buildSystemIncomePolAprWindows(rows, new Date('2026-09-02T12:05:00Z'));
+
+  assert.deepEqual(windows['24h'], {
+    estimated_fee_apr_bps: 13140,
+    fees_e8: '6',
+    position_value_hours_e8: '40000',
+    target_hours: 24,
+    available_hours: 3,
+    covered_hours: 2,
+    measured_hours: 1,
+    seeded_hours: 1,
+    status: 'warming',
+    complete: false
+  });
+  assert.equal(windows['7d'].estimated_fee_apr_bps, 13140);
+  assert.equal(windows['30d'].status, 'warming');
+});
+
+test('SIPOL APR becomes complete after 24 measured completed hours', () => {
+  const rows = Array.from({ length: 24 }, (_, index) => ({
+    asset: 'BTC.BTC',
+    hour: new Date(Date.UTC(2026, 8, 2, 11 - index)).toISOString(),
+    estimated_fees_e8: '1',
+    position_value_rune_e8: '10000',
+    fee_coverage: 'complete',
+    position_value_seeded: false,
+    provisional: false
+  }));
+
+  const windows = buildSystemIncomePolAprWindows(rows, new Date('2026-09-02T12:05:00Z'));
+
+  assert.equal(windows['24h'].estimated_fee_apr_bps, 8760);
+  assert.equal(windows['24h'].covered_hours, 24);
+  assert.equal(windows['24h'].status, 'complete');
+  assert.equal(windows['24h'].complete, true);
+  assert.equal(windows['7d'].status, 'warming');
+});
+
 test('SIPOL read model combines exact daily flows, reconciled positions, and hourly block-fee shares', async () => {
   const model = await buildSystemIncomePolReadModel({ id: 'db' }, {
     now: new Date('2026-08-31T12:05:00Z'),
@@ -239,8 +309,9 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and hou
       partial: true
     }],
     loadPoolHourly: async () => [{
-      asset: 'BTC.BTC', hour: '2026-08-31T12:00:00Z', pool_fees_e8: '60',
-      estimated_fees_e8: '3', fee_coverage: 'complete', provisional: false
+      asset: 'BTC.BTC', hour: '2026-08-31T11:00:00Z', pool_fees_e8: '60',
+      estimated_fees_e8: '3', position_value_rune_e8: '60',
+      position_value_seeded: false, fee_coverage: 'complete', provisional: false
     }],
     loadPositions: async () => [{
       asset: 'BTC.BTC', units_e8: '5', pool_units_e8: '100', rune_deposited_e8: '55',
@@ -278,6 +349,44 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and hou
     fee_hours_total: 1,
     fee_hours_seeded: 0,
     fee_hours_provisional: 0,
+    estimated_fee_apr: {
+      '24h': {
+        estimated_fee_apr_bps: 4380000,
+        fees_e8: '3',
+        position_value_hours_e8: '60',
+        target_hours: 24,
+        available_hours: 1,
+        covered_hours: 1,
+        measured_hours: 1,
+        seeded_hours: 0,
+        status: 'warming',
+        complete: false
+      },
+      '7d': {
+        estimated_fee_apr_bps: 4380000,
+        fees_e8: '3',
+        position_value_hours_e8: '60',
+        target_hours: 168,
+        available_hours: 1,
+        covered_hours: 1,
+        measured_hours: 1,
+        seeded_hours: 0,
+        status: 'warming',
+        complete: false
+      },
+      '30d': {
+        estimated_fee_apr_bps: 4380000,
+        fees_e8: '3',
+        position_value_hours_e8: '60',
+        target_hours: 720,
+        available_hours: 1,
+        covered_hours: 1,
+        measured_hours: 1,
+        seeded_hours: 0,
+        status: 'warming',
+        complete: false
+      }
+    },
     active_pool_count: 1
   });
   assert.equal(model.payload.pools[0].share_bps, 500);
@@ -438,6 +547,8 @@ test('SIPOL hourly fee refresh seeds from durable block fees and preserves sourc
   assert.match(queries[0].sql, /date_trunc\('hour'/);
   assert.match(queries[0].sql, /jsonb_array_elements\(coalesce\(blocks\.pool_fees/);
   assert.match(queries[0].sql, /system_income_pol_pool_hourly/);
+  assert.match(queries[0].sql, /position_value_rune_e8/);
+  assert.match(queries[0].sql, /position_value_seeded/);
   assert.match(queries[0].sql, /'seeded'/);
   assert.doesNotMatch(queries[0].sql, /pool_analysis_daily/);
   assert.equal(queries[1].params[8], '2026-08-31T12:00:00.000Z');
@@ -534,10 +645,11 @@ test('SIPOL handler serves only the durable model plus chain-header overlay', as
 });
 
 test('SIPOL production contract keeps legacy POL at pol-tvl and serves SIPOL from pol-tracker', async () => {
-  const [migration, headlineMigration, hourlyMigration, server, runJob, repair, service, timer, deploy, smoke] = await Promise.all([
+  const [migration, headlineMigration, hourlyMigration, aprMigration, server, runJob, repair, service, timer, deploy, smoke] = await Promise.all([
     readFile(new URL('../migrations/054_system_income_pol.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/055_system_income_pol_headlines.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/057_system_income_pol_hourly_fees.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../migrations/058_system_income_pol_fee_apr.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/shared/system-income-pol-repair.js', import.meta.url), 'utf8'),
@@ -553,6 +665,9 @@ test('SIPOL production contract keeps legacy POL at pol-tvl and serves SIPOL fro
   assert.match(headlineMigration, /rune_price_usd_e8/);
   assert.match(hourlyMigration, /create table if not exists public\.system_income_pol_pool_hourly/);
   assert.match(hourlyMigration, /provisional boolean not null/);
+  assert.match(aprMigration, /position_value_rune_e8/);
+  assert.match(aprMigration, /position_value_seeded/);
+  assert.match(aprMigration, /update public\.system_income_pol_position_samples/);
   assert.match(server, /\['\/pol-tracker', route\(handleSystemIncomePol, 1, 64\)\]/);
   assert.match(server, /\['\/pol-tvl', route\(handlePolTracker, 1, 64\)\]/);
   assert.match(runJob, /'system-income-pol-scheduler': runSystemIncomePolScheduler/);

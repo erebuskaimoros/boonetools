@@ -376,8 +376,8 @@ missing day, then exits unsuccessfully so systemd retries it every 15 minutes.
 old rows cannot reset the dashboard to healthy; `target_end_date`, coverage,
 warnings, and `stale` expose the gap until the target day succeeds.
 
-Migrations `054_system_income_pol.sql` and
-`055_system_income_pol_headlines.sql` add the block-live System Income POL
+Migrations `054_system_income_pol.sql` through
+`058_system_income_pol_fee_apr.sql` add the block-live System Income POL
 ledger, daily and per-pool rollups, current positions, ownership samples, and
 sync state. The latter enriches finalized reward events with the exact total
 system-income denominator and persists the shared core RUNE/USD price for the
@@ -386,8 +386,11 @@ from the activation height and publishes `system-income-pol:v1` every two
 minutes. The chain listener writes live reward/deployment events continuously;
 the scheduler reconciles the `pol_reserve` module balance and deposited-pool LP
 positions against `thornode-core:v1`, then derives ownership-weighted fee
-estimates from `pool_analysis_daily`. `/pol-tracker` remains provider-free and
-adds committed block events newer than its model watermark.
+estimates from durable hourly block fees. Reconciled position-value samples
+form the capital-hours denominator for the non-compounding 24-hour, 7-day, and
+30-day estimated fee APR windows; older hours are explicitly seeded until they
+age out. `/pol-tracker` remains provider-free and adds committed block events
+newer than its model watermark.
 
 Optional controls are `SYSTEM_INCOME_POL_ACTIVATION_HEIGHT`,
 `SYSTEM_INCOME_POL_REPAIR_BLOCKS_PER_RUN`,

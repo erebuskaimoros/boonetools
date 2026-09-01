@@ -7,6 +7,12 @@ export const SYSTEM_INCOME_POL_RANGES = Object.freeze([
   { id: 'all', label: 'ALL', days: null }
 ]);
 
+const FEE_APR_WINDOWS = Object.freeze([
+  { id: '24h', targetHours: 24 },
+  { id: '7d', targetHours: 7 * 24 },
+  { id: '30d', targetHours: 30 * 24 }
+]);
+
 function base(value, fallback = '0') {
   const normalized = String(value ?? '').trim();
   return /^-?\d+$/.test(normalized) ? BigInt(normalized).toString() : fallback;
@@ -42,6 +48,40 @@ function ratioBps(numerator, denominator) {
   const bottom = optionalBase(denominator);
   if (top === null || bottom === null || BigInt(bottom) <= 0n) return null;
   return Number((BigInt(top) * 1_000_000n) / BigInt(bottom)) / 100;
+}
+
+function normalizeFeeAprWindows(source = {}) {
+  const input = source && typeof source === 'object' ? source : {};
+  return Object.fromEntries(FEE_APR_WINDOWS.map(({ id, targetHours }) => {
+    const row = input[id] && typeof input[id] === 'object' ? input[id] : {};
+    const aprBps = finite(row.estimated_fee_apr_bps ?? row.apr_bps);
+    const normalizedTarget = Math.max(1, Math.trunc(finite(row.target_hours, targetHours)));
+    const availableHours = Math.max(0, Math.trunc(finite(row.available_hours, 0)));
+    const coveredHours = Math.max(0, Math.trunc(finite(row.covered_hours, 0)));
+    const seededHours = Math.max(0, Math.trunc(finite(row.seeded_hours, 0)));
+    const measuredHours = Math.max(
+      0,
+      Math.trunc(finite(row.measured_hours, coveredHours - seededHours))
+    );
+    const allowedStatuses = new Set(['unavailable', 'warming', 'partial', 'seeded', 'complete']);
+    const status = allowedStatuses.has(String(row.status || ''))
+      ? String(row.status)
+      : (aprBps === null ? 'unavailable' : 'warming');
+    return [id, {
+      id,
+      aprBps,
+      aprPercent: aprBps === null ? null : aprBps / 100,
+      feesE8: optionalBase(row.fees_e8),
+      positionValueHoursE8: optionalBase(row.position_value_hours_e8),
+      targetHours: normalizedTarget,
+      availableHours,
+      coveredHours,
+      measuredHours,
+      seededHours,
+      status,
+      complete: Boolean(row.complete) && status === 'complete'
+    }];
+  }));
 }
 
 export function e8ToNumber(value) {
@@ -84,6 +124,7 @@ function normalizeSummary(summary = {}) {
     feeHoursTotal: Math.max(0, Math.trunc(finite(summary.fee_hours_total, 0))),
     feeHoursSeeded: Math.max(0, Math.trunc(finite(summary.fee_hours_seeded, 0))),
     feeHoursProvisional: Math.max(0, Math.trunc(finite(summary.fee_hours_provisional, 0))),
+    feeAprWindows: normalizeFeeAprWindows(summary.estimated_fee_apr ?? summary.fee_apr),
     activePoolCount: Math.max(0, Math.trunc(finite(summary.active_pool_count, 0))),
     totalFundedRune: e8ToNumber(summary.total_funded_e8 ?? summary.funded_rune_e8),
     totalDeployedRune: e8ToNumber(summary.total_deployed_e8 ?? summary.deployed_rune_e8),

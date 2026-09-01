@@ -38,6 +38,9 @@ test('System Income POL owns /pol-tracker and appears in navigation', async () =
   assert.match(dashboardSource, /window\.setTimeout\([\s\S]*?, 1000\)/);
   assert.doesNotMatch(dashboardSource, /deployment-tape/);
   assert.match(dashboardSource, /EST\. FEES EARNED/);
+  assert.match(dashboardSource, /24H EST\. APR/);
+  assert.match(dashboardSource, /7D EST\. FEE APR/);
+  assert.match(dashboardSource, /30D EST\. FEE APR/);
   assert.match(dashboardSource, /HOURLY/);
   assert.match(dashboardSource, /SYSTEM INCOME → POL/);
   assert.match(dashboardSource, /polReserveSystemIncomePercent/);
@@ -127,6 +130,38 @@ test('System Income POL normalization preserves exact base-unit accounting', () 
       fee_hours_total: 18,
       fee_hours_seeded: 4,
       fee_hours_provisional: 1,
+      estimated_fee_apr: {
+        '24h': {
+          estimated_fee_apr_bps: 6543.21,
+          target_hours: 24,
+          available_hours: 18,
+          covered_hours: 17,
+          measured_hours: 13,
+          seeded_hours: 4,
+          status: 'warming',
+          complete: false
+        },
+        '7d': {
+          estimated_fee_apr_bps: 6000,
+          target_hours: 168,
+          available_hours: 18,
+          covered_hours: 17,
+          measured_hours: 13,
+          seeded_hours: 4,
+          status: 'warming',
+          complete: false
+        },
+        '30d': {
+          estimated_fee_apr_bps: 5500,
+          target_hours: 720,
+          available_hours: 18,
+          covered_hours: 17,
+          measured_hours: 13,
+          seeded_hours: 4,
+          status: 'warming',
+          complete: false
+        }
+      },
       active_pool_count: 2
     },
     pools: [{
@@ -165,6 +200,9 @@ test('System Income POL normalization preserves exact base-unit accounting', () 
   assert.equal(dashboard.summary.feeHoursCovered, 17);
   assert.equal(dashboard.summary.feeHoursSeeded, 4);
   assert.equal(dashboard.summary.feeHoursProvisional, 1);
+  assert.equal(dashboard.summary.feeAprWindows['24h'].aprPercent, 65.4321);
+  assert.equal(dashboard.summary.feeAprWindows['24h'].status, 'warming');
+  assert.equal(dashboard.summary.feeAprWindows['7d'].targetHours, 168);
   assert.equal(dashboard.pools[0].assetHeldE8, '1234567');
   assert.equal(dashboard.daily[0].cumulativeDeployedE8, '900000000');
   assert.equal(dashboard.daily[0].cumulativeEstimatedFeesRune, 0.6);

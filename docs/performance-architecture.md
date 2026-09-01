@@ -71,8 +71,8 @@ The handler also adds a current SIPOL headline from the provider-free
 `system-income-pol:v1` model, explicitly summing the reconciled RUNE and asset
 legs. That current value does not replace or mutate the same-height daily chart.
 
-System Income POL uses migrations `054_system_income_pol.sql` and
-`055_system_income_pol_headlines.sql`. The consolidated
+System Income POL uses migrations `054_system_income_pol.sql` through
+`058_system_income_pol_fee_apr.sql`. The consolidated
 listener persists exact `rewards.pol_reserve_reward`, `pol_reserve_deploy`, and
 paired internal `add_liquidity` units in a durable per-height ledger and emits
 a compact block overlay through `/chain-events`. The finalized `rewards` event
@@ -80,10 +80,12 @@ also supplies the exact total-system-income denominator. Its two-minute publishe
 repairs missing RPC block results from the activation height, compacts UTC flow
 history, consumes the shared two-minute core pool snapshot, and makes only the
 feature-specific module-balance and deposited-pool LP calls. Position samples
-time-weight ownership against canonical `pool_analysis_daily` fees and the core
-network RUNE price produces provider-free USD values; incomplete pool-day
-ownership coverage remains null. `/pol-tracker` reads only Postgres and overlays
-committed blocks newer than `system-income-pol:v1`.
+time-weight ownership and reconciled position value against durable hourly
+block-fee totals. Completed capital-hours produce non-compounding 24-hour,
+7-day, and 30-day estimated fee APR, while seeded and incomplete coverage stays
+explicit. The core network RUNE price produces provider-free USD values.
+`/pol-tracker` reads only Postgres and overlays committed blocks newer than
+`system-income-pol:v1`.
 
 Burn Tracker uses migrations `049_system_income_burn_tracker.sql` and
 `050_system_income_burn_blocks.sql`. Its provider job backfills UTC earnings
