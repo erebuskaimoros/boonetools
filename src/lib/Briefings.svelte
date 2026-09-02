@@ -30,8 +30,8 @@
 
   const polBriefing = {
     slug: POL_SLUG,
-    title: "THORChain's new POL",
-    description: 'How System Income POL turns protocol revenue into permanent, productive Base Layer liquidity.',
+    title: "THORChain's New POL",
+    description: 'The new Liquidity Black Hole',
     published: 'September 1, 2026',
     window: 'System Income POL',
     readTime: '4 min read'
