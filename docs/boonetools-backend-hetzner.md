@@ -350,6 +350,13 @@ database named `acquisition_test*` or `boonetools_acquisition_test*`, then run
 `ACQUISITION_TEST_DATABASE_URL=... node backend/scripts/check-acquisition-integration.mjs`.
 The script rejects production database names and blocks provider fetches.
 
+Migration 065 indexes only unpriced non-Dune Base Fee events. Pricing exits
+before acquisition or event updates when no included event needs a price; late
+events reuse the matching cached UTC week, and existing nonzero valuations stay
+unchanged. Updates include unpriced excluded events only within those needed
+weeks and use indexed UTC time ranges. Run the focused SQL regression with
+`ACQUISITION_TEST_DATABASE_URL=... node --test backend/tests/base-fee-price-bounds.test.js`.
+
 Migration `026_event_provenance.sql` gives Rapid Swaps, node votes, and Rujira
 Reserve payments a unique canonical identity plus per-provider observation
 history. Canonical upserts enforce source precedence and monotonic first/last

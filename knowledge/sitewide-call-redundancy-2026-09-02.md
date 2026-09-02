@@ -266,3 +266,27 @@ The final working-tree suites passed 510 backend tests and 288 frontend tests;
 the production build and architecture/surface checks passed. Svelte reported
 zero errors and 56 existing warnings. The workspace ownership audit reported
 zero errors and warnings. Deployment uses the normal clean-commit CI gate.
+
+### Deployment verification follow-up
+
+The first rollout exposed two issues before the frontend was switched. The
+normal mandatory warmup gate restored the previous verified backend release.
+
+- Base Fees avoided unchanged writes but still scanned its approximately
+  7.8 GB event heap to reconsider historical valuations. Pricing now returns
+  immediately without unpriced included events, preserves assigned values,
+  and updates only pending rows in the required UTC weeks. Migration 065 adds
+  a partial index for finding those rows without reading completed history.
+  Three PostgreSQL regressions cover idle history, late events, existing
+  weekly observations, UTC boundaries, and preservation of prior valuations.
+- Visitor snapshots require fresh core data. With timers stopped, earlier
+  deployment primes could outlast the core TTL. Each mandatory visitor prime
+  now refreshes core immediately before use and allows the queue's one-minute
+  retry delay to elapse before retrying. Five executable deployment tests
+  cover slow primes, deferred work, repeated recoverable failures, and bounded
+  failure without weakening freshness or deployment gates.
+
+The revised backend suite passed all 518 tests with the three pricing checks
+enabled against PostgreSQL. All eleven integration groups also passed after
+migration 065. Read-only production EXPLAIN confirmed the bounded pricing
+update uses a time index; the new partial index supports the empty-work check.

@@ -1897,10 +1897,12 @@ export async function refreshRujiraBaseFeePrices(client, options = {}) {
     `select distinct to_char(date_trunc('week', block_time at time zone 'UTC'), 'YYYY-MM-DD') as bucket_start
      from rujira_base_fee_events
      where block_time is not null and included = true and source <> 'dune'
+       and rune_price_usd = 0
      order by bucket_start`
   );
   if (!rows.length) return { weeks: 0, priced_events: 0 };
-  const loaded = await (options.loadPrices || loadRujiraRunePrices)(client, rows.map((row) => row.bucket_start), {
+  const neededWeeks = rows.map((row) => row.bucket_start);
+  const loaded = await (options.loadPrices || loadRujiraRunePrices)(client, neededWeeks, {
     ...options, interval: 'week', bases: config.rujiraBaseFeesMidgardUrls
   });
   const prices = Array.isArray(loaded) ? loaded : loaded.rows;
@@ -1914,13 +1916,20 @@ export async function refreshRujiraBaseFeePrices(client, options = {}) {
        is distinct from (excluded.week_end, excluded.rune_price_usd, excluded.source_json, excluded.fetched_at)`,
     [JSON.stringify(prices)]
   );
+  // Historical event valuations are preserved once assigned. An included
+  // unpriced event triggers only its matching week; excluded events in that
+  // same week retain the previous pricing behavior. The explicit boolean keys
+  // allow both sides of the pending-price index to use bounded UTC time ranges.
   const updateResult = await client.query(
     `update rujira_base_fee_events event
      set rune_price_usd = price.rune_price_usd, liquidity_fee_usd = event.liquidity_fee_rune * price.rune_price_usd, updated_at = now()
      from rujira_base_fee_rune_price_weeks price
-     where event.block_time is not null and event.source <> 'dune' and price.rune_price_usd > 0
-       and date_trunc('week', event.block_time at time zone 'UTC')::date = price.week_start
-       and (event.rune_price_usd, event.liquidity_fee_usd) is distinct from (price.rune_price_usd, event.liquidity_fee_rune * price.rune_price_usd)`
+     where price.week_start = any($1::date[]) and price.rune_price_usd > 0
+       and event.block_time is not null and event.source <> 'dune' and event.rune_price_usd = 0
+       and event.included = any(array[true, false])
+       and event.block_time >= (price.week_start::timestamp at time zone 'UTC')
+       and event.block_time < ((price.week_start + 7)::timestamp at time zone 'UTC')`,
+    [neededWeeks]
   );
   return { weeks: prices.length, priced_events: Number(updateResult.rowCount) || 0,
     requests: loaded.requests || 0, pending_buckets: loaded.pending_buckets || 0,

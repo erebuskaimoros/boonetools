@@ -304,6 +304,10 @@ start_unit_with_retry() {
 
 prime_read_model_unit() {
   local unit="$1"
+  if [[ "$unit" == boonetools-visitor-data.service ]]; then
+    refresh_core_and_visitor_models
+    return
+  fi
   if [[ "$unit" == boonetools-pool-dislocation-repair.service ]]; then
     if ! systemctl start "$unit"; then
       log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
@@ -348,6 +352,26 @@ refresh_core_and_app_layer_models() {
     fi
     if [[ "$attempt" -lt 3 ]]; then
       echo "Core/App Layer refresh attempt $attempt failed; retrying in ${retry_delay_seconds} seconds..." >&2
+      sleep "$retry_delay_seconds"
+    fi
+  done
+  return 1
+}
+
+refresh_core_and_visitor_models() {
+  local attempt
+  # Failed snapshot work is deferred for one minute. A shorter retry skips
+  # the queued work and can exhaust the mandatory warmup without acquiring it.
+  local retry_delay_seconds=65
+  for attempt in 1 2 3; do
+    # Timers remain quiesced during deployment. Earlier primes and this retry
+    # delay can both outlive the core TTL, so refresh immediately before use.
+    systemctl start boonetools-thornode-core-snapshot.service || true
+    if systemctl start boonetools-visitor-data.service; then
+      return
+    fi
+    if [[ "$attempt" -lt 3 ]]; then
+      echo "Core/visitor refresh attempt $attempt failed; retrying in ${retry_delay_seconds} seconds..." >&2
       sleep "$retry_delay_seconds"
     fi
   done
