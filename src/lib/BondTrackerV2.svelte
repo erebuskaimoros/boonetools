@@ -130,9 +130,6 @@
     if (savedAddress) {
       my_bond_address = savedAddress;
       bondAddressSuffix = getAddressSuffix(savedAddress, 4);
-      showData = true;
-      if (!urlBondAddress) updateURLBondOnly(); // sync URL if loaded from localStorage
-      localStorage.setItem('bond_tracker_address', savedAddress);
       fetchBondData();
     }
   };
@@ -289,7 +286,6 @@
       includeHistorical = false;
       loadedBondAddress = requestedBondAddress;
     }
-    const wasEmpty = noCurrentBonds;
     resetCurrentBond();
     noCurrentBonds = false;
     bondDataError = null;
@@ -319,13 +315,11 @@
         noCurrentBonds = true;
         resetBondHistory();
         includeHistorical = false;
-        historyLoaded = true;
+        showData = false;
         isLoading = false;
-        showContent = true;
+        clearSavedBondQuery();
         return;
       }
-
-      if (wasEmpty && churnHistory.length === 0) resetBondHistory();
       
       if (nodesWithBond.length === 1) {
         // Single node - use existing UI
@@ -340,7 +334,12 @@
         await fetchMultiNodeData(nodesWithBond, allNodesData, requestGeneration);
       }
       if (requestGeneration !== bondRequestGeneration) return;
-      
+
+      showData = true;
+      bondAddressSuffix = getAddressSuffix(requestedBondAddress, 4);
+      localStorage.setItem('bond_tracker_address', requestedBondAddress);
+      updateURLBondOnly();
+
       // Data loaded, start transition
       isLoading = false;
       setTimeout(() => {
@@ -880,12 +879,17 @@
     event.preventDefault();
     if (my_bond_address) {
       bondAddressSuffix = getAddressSuffix(my_bond_address, 4);
-      showData = true;
-      updateURLBondOnly();
-      localStorage.setItem('bond_tracker_address', my_bond_address);
       fetchBondData();
     }
   };
+
+  function clearSavedBondQuery() {
+    localStorage.removeItem('bond_tracker_address');
+    const url = new URL(window.location.href);
+    url.searchParams.delete('bond_address');
+    url.searchParams.delete('node_address');
+    window.history.replaceState({}, '', url);
+  }
 
   const switchAddress = () => {
     bondRequestGeneration += 1;
@@ -900,11 +904,7 @@
     includeHistorical = false;
     isLoading = false;
     showContent = true;
-    localStorage.removeItem('bond_tracker_address');
-    const url = new URL(window.location.href);
-    url.searchParams.delete('bond_address');
-    url.searchParams.delete('node_address');
-    window.history.pushState({}, '', url);
+    clearSavedBondQuery();
   };
 
   function buildChurnCsvRows() {
@@ -954,7 +954,7 @@
     } else {
       url.searchParams.delete("currency");
     }
-    window.history.pushState({}, '', url);
+    if (url.href !== window.location.href) window.history.pushState({}, '', url);
   };
 
   let showToast = false;
@@ -1005,6 +1005,9 @@
 
   async function pickRandomNode() {
     const requestGeneration = ++bondRequestGeneration;
+    isLoading = true;
+    noCurrentBonds = false;
+    bondDataError = null;
     try {
       const nodes = await thornode.getNodes();
       if (requestGeneration !== bondRequestGeneration) return;
@@ -1018,19 +1021,15 @@
       const randomBondProvider = bondProviders[Math.floor(Math.random() * bondProviders.length)];
 
       my_bond_address = randomBondProvider.bond_address;
-
-      // Update suffix and URL
       bondAddressSuffix = getAddressSuffix(my_bond_address, 4);
-      const url = new URL(window.location.href);
-      url.searchParams.set('bond_address', my_bond_address);
-      url.searchParams.delete('node_address'); // Let fetchBondData determine the node
-      window.history.pushState({}, '', url);
 
       // Use the standard data flow which handles single/multi-node detection
-      showData = true;
       await fetchBondData();
     } catch (error) {
+      if (requestGeneration !== bondRequestGeneration) return;
       console.error('Error picking random node:', error);
+      isLoading = false;
+      bondDataError = 'Unable to load current bond data. Please try again.';
     }
   }
 
@@ -1056,9 +1055,9 @@
       <form on:submit={handleSubmit}>
         <div class="entry-label">BOND ADDRESS</div>
         <div class="entry-row">
-          <input type="text" bind:value={my_bond_address} required placeholder="thor1..." />
-          <button type="submit">TRACK</button>
-          <button type="button" class="dice-btn" on:click={pickRandomNode} title="Random">
+          <input type="text" bind:value={my_bond_address} required placeholder="thor1..." disabled={isLoading} />
+          <button type="submit" disabled={isLoading}>TRACK</button>
+          <button type="button" class="dice-btn" on:click={pickRandomNode} title="Random" disabled={isLoading}>
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
               <circle cx="8.5" cy="8.5" r="1.5"></circle>
@@ -1066,6 +1065,13 @@
             </svg>
           </button>
         </div>
+        {#if isLoading}
+          <p class="entry-status" role="status">Checking bond...</p>
+        {:else if noCurrentBonds}
+          <p class="entry-status" role="status">No bond found</p>
+        {:else if bondDataError}
+          <p class="entry-status err" role="alert">{bondDataError}</p>
+        {/if}
       </form>
     </div>
   {:else}
@@ -1074,16 +1080,6 @@
         <span>ERR · {bondDataError}</span>
         <button class="hist-toggle" on:click={fetchBondData}>Retry</button>
         <button class="hist-toggle" on:click={switchAddress}>Change address</button>
-      </div>
-    {:else if noCurrentBonds}
-      <div class="position-status" role="status">
-        <span>No current bond position for ...{bondAddressSuffix}.</span>
-        <button class="hist-toggle" on:click={switchAddress}>Change address</button>
-        <button
-          class="hist-toggle"
-          disabled={historyLoading || isLoading}
-          on:click={() => { includeHistorical = true; fetchBondHistory(); }}
-        >View past bonds</button>
       </div>
     {/if}
     <!-- Metrics strip -->
@@ -1163,7 +1159,7 @@
           {/if}
         </span>
         <span class="section-actions">
-          {#if hasHistoricalNodes && !noCurrentBonds}
+          {#if hasHistoricalNodes}
             <button
               class="hist-toggle"
               class:active={includeHistorical}
@@ -1196,7 +1192,7 @@
         {:else if !historyLoaded}
           <div class="chart-msg dim">Loading bond history...</div>
         {:else if churnHistory.length === 0}
-          <div class="chart-msg dim">{noCurrentBonds && !includeHistorical ? 'No current bond position. View past bonds to check earlier history.' : 'No bond history found.'}</div>
+          <div class="chart-msg dim">No bond history found.</div>
         {/if}
         <canvas bind:this={historyChartCanvas} class:hidden={!historyLoaded || churnHistory.length === 0 || !!bondDataError}></canvas>
       </div>
@@ -1220,7 +1216,7 @@
       {:else if !historyLoaded}
         <div class="empty dim">{historyLoading ? 'Loading...' : 'Waiting for history data...'}</div>
       {:else if churnReversed.length === 0}
-        <div class="empty dim">{noCurrentBonds && !includeHistorical ? 'No current bond position.' : 'No churn earnings found.'}</div>
+        <div class="empty dim">No churn earnings found.</div>
       {:else}
         <div class="table-wrap">
           <table>
@@ -1343,8 +1339,15 @@
     font-size: 12px;
   }
 
-  .position-status.err {
+  .position-status.err,
+  .entry-status.err {
     color: var(--term-error);
+  }
+
+  .entry-status {
+    margin: 12px 0 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
   }
 
   /* ---- ENTRY FORM ---- */

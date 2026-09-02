@@ -1,24 +1,26 @@
 # Bond Tracker empty positions
 
-The September 2, 2026 empty-address fix treats a successful node lookup with no
-matching current bond position as a completed result. Bond, next award, and APY
-show zero; no automatic bond-history request or refresh polling starts. The
-dashboard explains the empty result and offers **Change address** and **View past
-bonds**. The latter explicitly requests historical nodes for former bond providers.
+The September 2, 2026 empty-address fix keeps the address form visible while
+checking for a current bond. A successful lookup with no matching position shows
+**No bond found** beside the editable query. It does not open the dashboard or
+request bond history. Only a confirmed bond position opens the tracker and saves
+the address for future visits.
 
 Previously, the empty result threw into the error handler, which started the
 history refresh queue anyway. The address remained in local storage, so reopening
 the tracker repeated the loading state. Switching addresses also left previous
 amounts and in-flight work alive.
 
-Changing addresses now clears the saved address and bond/node URL parameters,
-resets position/history state, and invalidates late current-position, history,
+An empty lookup also clears any saved address and bond/node URL parameters, so
+reopening a previously saved empty query returns to the form. Changing addresses
+resets position/history state and invalidates late current-position, history,
 and historical-rate responses. Failed or malformed node data produces a retryable
-error rather than reporting an empty position. THORNode's legitimate null provider
-lists remain valid.
+error rather than reporting no bond. THORNode's legitimate null provider lists
+remain valid. The former zero-valued dashboard and its optional past-bonds action
+have been removed; bonded positions retain their existing HIST toggle.
 
 Regression coverage is in `tests/bond-tracker-empty-state.test.js`. It executes
 the component's async handlers with controlled provider responses and covers
-empty results, stale totals, saved-address recovery, malformed/fallback responses,
-null provider lists, and late completions after changing addresses. Browser checks
-cover the empty state at mobile width and recovery after reloading.
+pending and empty lookups, stale totals, saved-address recovery, malformed/fallback
+responses, null provider lists, and late completions after changing addresses.
+Browser checks cover the form at mobile width and recovery after reloading.

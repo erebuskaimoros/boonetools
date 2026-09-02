@@ -20,6 +20,10 @@ function createTracker({ savedAddress = '', search = '', getSnapshot, getNodes, 
   const location = new URL(`https://boone.tools/bond-tracker${search}`);
   const tracker = runInNewContext(`${handlers}\n({
     fetchBondData, fetchBondHistory, updateAddressesFromURL, switchAddress,
+    submit(address) {
+      my_bond_address = address;
+      handleSubmit({ preventDefault() {} });
+    },
     seedPreviousPosition() {
       my_bond_address = 'thor1empty';
       my_bond = 500e8; my_award = 5e8; APY = 0.12;
@@ -39,7 +43,10 @@ function createTracker({ savedAddress = '', search = '', getSnapshot, getNodes, 
     URL, URLSearchParams,
     window: {
       location,
-      history: { pushState(_state, _title, url) { location.href = String(url); } }
+      history: {
+        pushState(_state, _title, url) { location.href = String(url); },
+        replaceState(_state, _title, url) { location.href = String(url); }
+      }
     },
     localStorage: {
       getItem: (key) => storage.get(key) ?? null,
@@ -64,20 +71,38 @@ function createTracker({ savedAddress = '', search = '', getSnapshot, getNodes, 
   return { tracker, calls, storage, location };
 }
 
-test('an address with no current bonds finishes loading without queuing history', async () => {
-  const { tracker, calls } = createTracker();
-  await tracker.fetchBondData();
+test('an address with no current bonds stays on the form without queuing history', async () => {
+  const { tracker, calls, storage, location } = createTracker();
+  tracker.submit('thor1empty');
+  await new Promise((resolve) => setImmediate(resolve));
   const state = tracker.state();
   assert.equal(state.isLoading, false);
-  assert.equal(state.showContent, true);
+  assert.equal(state.showData, false, 'no-bond results must not mount the dashboard');
+  assert.equal(state.my_bond_address, 'thor1empty', 'keep the query editable');
   assert.equal(state.my_bond, 0);
   assert.equal(state.my_award, 0);
   assert.equal(state.historyLoading, false, 'empty addresses must not be stuck loading history');
-  assert.equal(state.historyLoaded, true);
+  assert.equal(state.historyLoaded, false);
   assert.equal(state.churnHistory.length, 0);
   assert.equal(state.noCurrentBonds, true);
   assert.equal(state.bondDataError, null);
+  assert.equal(storage.has('bond_tracker_address'), false);
+  assert.equal(location.searchParams.has('bond_address'), false);
   assert.deepEqual(calls, ['/network-snapshot']);
+});
+
+test('the address form remains visible while checking whether a bond exists', async () => {
+  let finishSnapshot;
+  const { tracker } = createTracker({
+    getSnapshot: () => new Promise((resolve) => { finishSnapshot = resolve; })
+  });
+  tracker.submit('thor1empty');
+  assert.equal(tracker.state().showData, false);
+  assert.equal(tracker.state().isLoading, true);
+  finishSnapshot({ value: [], field_meta: {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(tracker.state().showData, false);
+  assert.equal(tracker.state().noCurrentBonds, true);
 });
 
 test('an empty lookup clears amounts and nodes left by a previous bond position', async () => {
@@ -93,20 +118,23 @@ test('an empty lookup clears amounts and nodes left by a previous bond position'
   assert.equal(state.churnHistory.length, 0);
 });
 
-test('a restored empty address settles and changing it clears persistent auto-load state', async () => {
-  const { tracker, storage, location } = createTracker({ savedAddress: 'thor1empty' });
+test('a restored empty address returns to the form and clears persistent auto-load state', async () => {
+  const { tracker, storage, location } = createTracker({
+    savedAddress: 'thor1empty',
+    search: '?bond_address=thor1empty&node_address=thor1oldnode'
+  });
   tracker.updateAddressesFromURL();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(tracker.state().my_bond_address, 'thor1empty');
   assert.equal(tracker.state().historyLoading, false);
-  assert.equal(tracker.state().historyLoaded, true);
-  tracker.switchAddress();
+  assert.equal(tracker.state().historyLoaded, false);
   assert.equal(tracker.state().showData, false);
   assert.equal(storage.has('bond_tracker_address'), false);
   assert.equal(location.searchParams.has('bond_address'), false);
+  assert.equal(location.searchParams.has('node_address'), false);
 });
 
-test('a malformed snapshot and failed fallback show an error instead of a false zero position', async () => {
+test('a malformed snapshot and failed fallback show an error instead of a false no-bond result', async () => {
   for (const value of [null, {}, [{ node_address: 'thor1node' }]]) {
     const { tracker, calls } = createTracker({ getSnapshot: async () => ({ value }) });
     await tracker.fetchBondData();
