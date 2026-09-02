@@ -1,10 +1,12 @@
 <script>
   import SsDynamicFeeBriefing from './SsDynamicFeeBriefing.svelte';
+  import SystemIncomePolBriefing from './SystemIncomePolBriefing.svelte';
 
   const BASE_PATH = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
   const BRIEFINGS_ROOT = `${BASE_PATH}/briefings`;
   const TRON_SLUG = 'tron-performance-since-launch';
   const SS_SLUG = 'ss-dynamic-fee-impact';
+  const POL_SLUG = 'thorchain-new-pol';
   const ASSET_ROOT = `${BASE_PATH}/assets/briefings/${TRON_SLUG}`;
   const SS_ASSET_ROOT = `${BASE_PATH}/assets/briefings/${SS_SLUG}`;
 
@@ -26,7 +28,16 @@
     readTime: '10 min read'
   };
 
-  const briefings = [ssBriefing, briefing];
+  const polBriefing = {
+    slug: POL_SLUG,
+    title: "THORChain's new POL",
+    description: 'How System Income POL turns protocol revenue into permanent, productive Base Layer liquidity.',
+    published: 'September 1, 2026',
+    window: 'System Income POL',
+    readTime: '4 min read'
+  };
+
+  const briefings = [polBriefing, ssBriefing, briefing];
 
   function briefingPath(slug) {
     return `${BRIEFINGS_ROOT}/${slug}`;
@@ -120,6 +131,8 @@
   </div>
 {:else if activeSlug === SS_SLUG}
   <SsDynamicFeeBriefing assetRoot={SS_ASSET_ROOT} briefingsRoot={BRIEFINGS_ROOT} {navigate} />
+{:else if activeSlug === POL_SLUG}
+  <SystemIncomePolBriefing briefing={polBriefing} briefingsRoot={BRIEFINGS_ROOT} {navigate} />
 {:else if activeSlug === TRON_SLUG}
   <article class="briefings-page report-page">
     <nav class="breadcrumbs" aria-label="Breadcrumb">
