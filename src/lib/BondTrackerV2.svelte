@@ -56,6 +56,10 @@
   let aggregateAPY = 0;
   let isLoading = false;
   let showContent = true; // Show content by default
+  let noCurrentBonds = false;
+  let bondDataError = null;
+  let bondRequestGeneration = 0;
+  let loadedBondAddress = '';
 
   // Churn indicator variables
   let allNodes = []; // All nodes for churn comparison
@@ -101,7 +105,7 @@
   $: formattedBondValue = formatCurrency($exchangeRates, (my_bond / 1e8) * runePriceUSD, $currentCurrency);
   $: formattedNextAward = formatCurrency($exchangeRates, (my_award / 1e8) * runePriceUSD, $currentCurrency);
   $: formattedAPY = formatCurrency($exchangeRates, ((APY * my_bond) / 1e8) * runePriceUSD, $currentCurrency);
-  $: nextAwardBtcValue = (my_award * bondvaluebtc) / my_bond;
+  $: nextAwardBtcValue = my_bond > 0 ? (my_award * bondvaluebtc) / my_bond : 0;
 
   // Using shared formatNumber from $lib/utils/formatting
 
@@ -205,9 +209,69 @@
       .filter(Boolean);
   }
 
-  const fetchBtcPoolData = async () => {
+  function validateBondNodes(nodes) {
+    if (!Array.isArray(nodes) || nodes.some((node) => (
+      !node?.node_address || (node.bond_providers?.providers !== null && !Array.isArray(node.bond_providers?.providers))
+      || (node.bond_providers.providers || []).some((provider) => (
+        !provider?.bond_address || !/^\d+$/.test(String(provider.bond ?? ''))
+      ))
+    ))) {
+      throw new Error('Current bond data is unavailable. Please try again.');
+    }
+    return nodes;
+  }
+
+  function resetCurrentBond() {
+    my_bond = 0;
+    my_bond_ownership_percentage = 0;
+    current_award = 0;
+    my_award = 0;
+    APY = 0;
+    totalBond = 0;
+    totalAward = 0;
+    aggregateAPY = 0;
+    nodeOperatorFee = 0;
+    bondvaluebtc = 0;
+    runePriceUSD = 0;
+    nextChurnTime = 0;
+    countdown = '';
+    isChurningHalted = false;
+    recentChurnTimestamp = 0;
+    node_address = '';
+    nodeAddressSuffix = '';
+    nodeStatus = '';
+    bondNodes = [];
+    isMultiNode = false;
+    allNodes = [];
+    nodesObservation = {};
+    leaveStatus = null;
+    forcedToLeave = false;
+    showNodeListModal = false;
+  }
+
+  function resetBondHistory() {
+    historyRequestGeneration += 1;
+    historyLoaded = false;
+    historyLoading = false;
+    historyError = null;
+    historyProgressCurrent = 0;
+    historyProgressTotal = 0;
+    churnHistory = [];
+    churnPage = 1;
+    bondTxMap = {};
+    hasHistoricalNodes = false;
+    historicalRatesCache = {};
+    currencyLoading = false;
+    if (historyChartInstance) {
+      historyChartInstance.destroy();
+      historyChartInstance = null;
+    }
+  }
+
+  const fetchBtcPoolData = async (requestGeneration = bondRequestGeneration) => {
     try {
       const btcPoolData = await thornode.getPool('BTC.BTC');
+      if (requestGeneration !== bondRequestGeneration) return;
       const balanceAsset = btcPoolData.balance_asset;
       const balanceRune = btcPoolData.balance_rune;
       const btcruneprice = balanceAsset / balanceRune;
@@ -218,6 +282,17 @@
   };
 
   const fetchBondData = async () => {
+    const requestGeneration = ++bondRequestGeneration;
+    const requestedBondAddress = my_bond_address;
+    if (loadedBondAddress !== requestedBondAddress) {
+      resetBondHistory();
+      includeHistorical = false;
+      loadedBondAddress = requestedBondAddress;
+    }
+    const wasEmpty = noCurrentBonds;
+    resetCurrentBond();
+    noCurrentBonds = false;
+    bondDataError = null;
     try {
       isLoading = true;
       showContent = false;
@@ -225,20 +300,32 @@
       // Discover current bond nodes from THORNode instead of Midgard /bonds,
       // which has been intermittently returning 500s in browser traffic.
       let allNodesData;
+      let observation = {};
       try {
         const snapshot = await booneToolsApi.get('/network-snapshot', { query: { field: 'nodes', include_meta: 'true' } });
-        allNodesData = snapshot.value;
-        nodesObservation = snapshot.stale ? {} : snapshot.field_meta;
+        if (requestGeneration !== bondRequestGeneration) return;
+        allNodesData = validateBondNodes(snapshot.value);
+        observation = snapshot.stale ? {} : snapshot.field_meta;
       } catch {
-        allNodesData = await getNodes({ cache: false });
-        nodesObservation = {};
+        if (requestGeneration !== bondRequestGeneration) return;
+        allNodesData = validateBondNodes(await getNodes({ cache: false }));
       }
+      if (requestGeneration !== bondRequestGeneration) return;
+      nodesObservation = observation;
       allNodes = allNodesData;
-      const nodesWithBond = getBondNodesFromThorNodes(allNodesData, my_bond_address);
+      const nodesWithBond = getBondNodesFromThorNodes(allNodesData, requestedBondAddress);
 
       if (nodesWithBond.length === 0) {
-        throw new Error('No active bonds found for this address');
+        noCurrentBonds = true;
+        resetBondHistory();
+        includeHistorical = false;
+        historyLoaded = true;
+        isLoading = false;
+        showContent = true;
+        return;
       }
+
+      if (wasEmpty && churnHistory.length === 0) resetBondHistory();
       
       if (nodesWithBond.length === 1) {
         // Single node - use existing UI
@@ -246,17 +333,18 @@
         const singleNode = nodesWithBond[0];
         node_address = singleNode.address;
         nodeAddressSuffix = getAddressSuffix(node_address, 4);
-        await fetchData(allNodesData);
+        await fetchData(allNodesData, requestGeneration);
       } else if (nodesWithBond.length > 1) {
         // Multiple nodes - use new UI
         isMultiNode = true;
-        await fetchMultiNodeData(nodesWithBond, allNodesData);
+        await fetchMultiNodeData(nodesWithBond, allNodesData, requestGeneration);
       }
+      if (requestGeneration !== bondRequestGeneration) return;
       
       // Data loaded, start transition
       isLoading = false;
       setTimeout(() => {
-        showContent = true;
+        if (requestGeneration === bondRequestGeneration) showContent = true;
       }, 200);
 
       // Auto-load bond history
@@ -264,16 +352,17 @@
         fetchBondHistory();
       }
     } catch (error) {
+      if (requestGeneration !== bondRequestGeneration) return;
       console.error("Error fetching bond data:", error);
       isLoading = false;
-      showContent = true;
-      if (!historyLoaded && !historyLoading) {
-        fetchBondHistory();
-      }
+      showContent = false;
+      bondDataError = 'Unable to load current bond data. Please try again or change the address.';
     }
   };
 
-  const fetchMultiNodeData = async (nodes, preloadedAllNodes = null) => {
+  const fetchMultiNodeData = async (nodes, preloadedAllNodes = null, requestGeneration = bondRequestGeneration) => {
+    const requestedBondAddress = my_bond_address;
+    const observation = nodesObservation;
     try {
       // Fetch common data first
       const [churnState, runePriceData, btcPoolData, allNodesData] = await Promise.all([
@@ -282,6 +371,7 @@
         thornode.getPool('BTC.BTC'),
         preloadedAllNodes || getNodes()
       ]);
+      if (requestGeneration !== bondRequestGeneration) return;
 
       allNodes = allNodesData;
       recentChurnTimestamp = churnState?.lastChurnTimestamp || 0;
@@ -294,7 +384,7 @@
 
       // Fetch detailed data for each node
       const nodeDataPromises = nodes.map(async (node) => {
-        const nodeData = selectReusableBondNode(allNodesData, node.address, nodesObservation)
+        const nodeData = selectReusableBondNode(allNodesData, node.address, observation)
           || await thornode.fetch(`/thorchain/node/${node.address}`);
         const bondProviders = nodeData.bond_providers.providers;
 
@@ -302,7 +392,7 @@
         let totalBond = 0;
 
         for (const provider of bondProviders) {
-          if (provider.bond_address === my_bond_address) {
+          if (provider.bond_address.toLowerCase() === requestedBondAddress.toLowerCase()) {
             userBond = Number(provider.bond);
           }
           totalBond += Number(provider.bond);
@@ -314,8 +404,8 @@
         const userAward = bondOwnershipPercentage * currentAward;
 
         // Get leave status for churn indicator
-        const fullNodeData = allNodes.find(n => n.node_address === node.address);
-        const nodeLeaveStatus = fullNodeData ? getLeaveStatus(fullNodeData, allNodes) : null;
+        const fullNodeData = allNodesData.find(n => n.node_address === node.address);
+        const nodeLeaveStatus = fullNodeData ? getLeaveStatus(fullNodeData, allNodesData) : null;
         const nodeForcedToLeave = fullNodeData?.forced_to_leave || false;
 
         return {
@@ -334,6 +424,7 @@
       });
 
       const resolvedBondNodes = await Promise.all(nodeDataPromises);
+      if (requestGeneration !== bondRequestGeneration) return;
 
       applyChurnInfo(churnState);
 
@@ -363,20 +454,23 @@
       bondvaluebtc = bondNodes.reduce((sum, node) => sum + node.btcValue, 0);
       
     } catch (error) {
-      console.error("Error fetching multi-node data:", error);
+      throw error;
     }
   };
 
-  const fetchData = async (preloadedAllNodes = null) => {
+  const fetchData = async (preloadedAllNodes = null, requestGeneration = bondRequestGeneration) => {
+    const requestedBondAddress = my_bond_address;
+    const requestedNodeAddress = node_address;
     try {
       // Parallelize independent API calls
       const [nodeData, churnState, runePriceData, allNodesData] = await Promise.all([
-        selectReusableBondNode(preloadedAllNodes, node_address, nodesObservation)
-          || thornode.fetch(`/thorchain/node/${node_address}`),
+        selectReusableBondNode(preloadedAllNodes, requestedNodeAddress, nodesObservation)
+          || thornode.fetch(`/thorchain/node/${requestedNodeAddress}`),
         getChurnState().catch(() => null),
         thornode.getNetwork(),
         preloadedAllNodes || getNodes()
       ]);
+      if (requestGeneration !== bondRequestGeneration) return;
 
       allNodes = allNodesData;
 
@@ -384,7 +478,7 @@
       nodeStatus = nodeData.status;
 
       // Check leave status for churn indicator
-      const fullNodeData = allNodes.find(n => n.node_address === node_address);
+      const fullNodeData = allNodes.find(n => n.node_address === requestedNodeAddress);
       if (fullNodeData) {
         leaveStatus = getLeaveStatus(fullNodeData, allNodes);
         forcedToLeave = fullNodeData.forced_to_leave || false;
@@ -395,7 +489,7 @@
       const bondProviders = nodeData.bond_providers.providers;
       let total_bond = 0;
       for (const provider of bondProviders) {
-        if (provider.bond_address === my_bond_address) my_bond = Number(provider.bond);
+        if (provider.bond_address.toLowerCase() === requestedBondAddress.toLowerCase()) my_bond = Number(provider.bond);
         total_bond += Number(provider.bond);
       }
       my_bond_ownership_percentage = my_bond / total_bond;
@@ -417,9 +511,9 @@
       runePriceUSD = fromBaseUnit(runePriceData.rune_price_in_tor);
 
       // Fetch additional data (these also run in parallel with each other)
-      fetchBtcPoolData();
+      fetchBtcPoolData(requestGeneration);
     } catch (error) {
-      console.error("Error fetching or processing data:", error);
+      throw error;
     }
   };
 
@@ -528,10 +622,12 @@
     if (currency === 'USD' || historicalRatesCache[currency]) return;
     if (!churnHistory.length) return;
 
+    const requestGeneration = historyRequestGeneration;
     currencyLoading = true;
     const fromTs = churnHistory[0].timestampSec;
     const toTs = Math.floor(Date.now() / 1000);
     const points = await fetchHistoricalRates(currency, fromTs, toTs);
+    if (requestGeneration !== historyRequestGeneration) return;
     historicalRatesCache[currency] = points;
     currencyLoading = false;
 
@@ -792,14 +888,22 @@
   };
 
   const switchAddress = () => {
+    bondRequestGeneration += 1;
+    resetCurrentBond();
+    resetBondHistory();
     showData = false;
     my_bond_address = '';
-    churnHistory = [];
-    historyLoaded = false;
-    churnPage = 1;
-    if (historyChartInstance) { historyChartInstance.destroy(); historyChartInstance = null; }
+    bondAddressSuffix = '';
+    loadedBondAddress = '';
+    noCurrentBonds = false;
+    bondDataError = null;
+    includeHistorical = false;
+    isLoading = false;
+    showContent = true;
+    localStorage.removeItem('bond_tracker_address');
     const url = new URL(window.location.href);
     url.searchParams.delete('bond_address');
+    url.searchParams.delete('node_address');
     window.history.pushState({}, '', url);
   };
 
@@ -900,8 +1004,10 @@
   };
 
   async function pickRandomNode() {
+    const requestGeneration = ++bondRequestGeneration;
     try {
       const nodes = await thornode.getNodes();
+      if (requestGeneration !== bondRequestGeneration) return;
       const activeNodes = nodes.filter(node => node.status === 'Active');
       if (activeNodes.length === 0) {
         throw new Error('No active nodes found');
@@ -935,6 +1041,7 @@
   });
 
   onDestroy(() => {
+    bondRequestGeneration += 1;
     historyRequestGeneration += 1;
     if (historyChartInstance) {
       historyChartInstance.destroy();
@@ -962,6 +1069,23 @@
       </form>
     </div>
   {:else}
+    {#if bondDataError}
+      <div class="position-status err" role="alert">
+        <span>ERR · {bondDataError}</span>
+        <button class="hist-toggle" on:click={fetchBondData}>Retry</button>
+        <button class="hist-toggle" on:click={switchAddress}>Change address</button>
+      </div>
+    {:else if noCurrentBonds}
+      <div class="position-status" role="status">
+        <span>No current bond position for ...{bondAddressSuffix}.</span>
+        <button class="hist-toggle" on:click={switchAddress}>Change address</button>
+        <button
+          class="hist-toggle"
+          disabled={historyLoading || isLoading}
+          on:click={() => { includeHistorical = true; fetchBondHistory(); }}
+        >View past bonds</button>
+      </div>
+    {/if}
     <!-- Metrics strip -->
     <div class="metrics">
       <div class="metric">
@@ -990,7 +1114,7 @@
         <div class="metric-sub">{showContent ? formattedAPY + '/yr' : ''}</div>
       </div>
       <div class="metric">
-        <div class="metric-val">{showContent ? formattedRunePrice : '--'}</div>
+        <div class="metric-val">{showContent && runePriceUSD > 0 ? formattedRunePrice : '--'}</div>
         <div class="metric-key">RUNE PRICE</div>
       </div>
       <div class="metric">
@@ -1002,7 +1126,7 @@
         {#if !isMultiNode}
           <div class="metric-val">{showContent ? (nodeOperatorFee * 100).toFixed(1) + '%' : '--'}</div>
           <div class="metric-key">NODE FEE</div>
-          <div class="metric-sub"><a class="node-link" href="https://thorchain.net/node/{node_address}" target="_blank" rel="noreferrer">{nodeAddressSuffix}</a> <button class="change-btn" on:click={switchAddress}>change</button></div>
+          <div class="metric-sub">{#if node_address}<a class="node-link" href="https://thorchain.net/node/{node_address}" target="_blank" rel="noreferrer">{nodeAddressSuffix}</a>{:else}{bondAddressSuffix}{/if} <button class="change-btn" on:click={switchAddress}>change</button></div>
         {:else}
           <!-- svelte-ignore a11y-click-events-have-key-events -->
           <div class="metric-val metric-val--clickable" on:click={() => showNodeListModal = !showNodeListModal}>{showContent ? bondNodes.length : '--'}</div>
@@ -1039,7 +1163,7 @@
           {/if}
         </span>
         <span class="section-actions">
-          {#if hasHistoricalNodes}
+          {#if hasHistoricalNodes && !noCurrentBonds}
             <button
               class="hist-toggle"
               class:active={includeHistorical}
@@ -1061,7 +1185,9 @@
       </div>
 
       <div class="chart-area">
-        {#if historyLoading}
+        {#if bondDataError}
+          <div class="chart-msg dim">Current bond data unavailable.</div>
+        {:else if historyLoading}
           <div class="chart-loading">
             <div class="progress-bar"><div class="progress-fill indeterminate"></div></div>
           </div>
@@ -1069,8 +1195,10 @@
           <div class="chart-msg err">{historyError}</div>
         {:else if !historyLoaded}
           <div class="chart-msg dim">Loading bond history...</div>
+        {:else if churnHistory.length === 0}
+          <div class="chart-msg dim">{noCurrentBonds && !includeHistorical ? 'No current bond position. View past bonds to check earlier history.' : 'No bond history found.'}</div>
         {/if}
-        <canvas bind:this={historyChartCanvas} class:hidden={!historyLoaded}></canvas>
+        <canvas bind:this={historyChartCanvas} class:hidden={!historyLoaded || churnHistory.length === 0 || !!bondDataError}></canvas>
       </div>
     </section>
 
@@ -1087,8 +1215,12 @@
         {/if}
       </div>
 
-      {#if !historyLoaded}
+      {#if bondDataError}
+        <div class="empty dim">Current bond data unavailable.</div>
+      {:else if !historyLoaded}
         <div class="empty dim">{historyLoading ? 'Loading...' : 'Waiting for history data...'}</div>
+      {:else if churnReversed.length === 0}
+        <div class="empty dim">{noCurrentBonds && !includeHistorical ? 'No current bond position.' : 'No churn earnings found.'}</div>
       {:else}
         <div class="table-wrap">
           <table>
@@ -1197,6 +1329,22 @@
     gap: 0;
     font-family: 'DM Sans', -apple-system, sans-serif;
     color: var(--term-text-body);
+  }
+
+  .position-status {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--term-border);
+    background: var(--term-surface);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+  }
+
+  .position-status.err {
+    color: var(--term-error);
   }
 
   /* ---- ENTRY FORM ---- */
