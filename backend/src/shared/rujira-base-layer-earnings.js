@@ -2,8 +2,12 @@ import { readFile } from 'node:fs/promises';
 
 import { withAdvisoryLock } from '../db/lock.js';
 import { query } from '../db/pool.js';
-import { fetchNodeVotesBlockTime } from './node-votes.js';
-import { extractThorHeight, fetchThorchain } from './thornode.js';
+import {
+  fetchNodeVotesBlockTime,
+  fetchNodeVotesRpcStatus,
+  findNodeVotesStartHeight
+} from './node-votes.js';
+import { fetchThorchain } from './thornode.js';
 
 const LOCK_KEY = 'boonetools:rujira-base-layer-earnings';
 const BASE_LAYER_COLLECTOR =
@@ -234,38 +238,82 @@ async function readSeed() {
   return seedPromise;
 }
 
-async function estimateHeightAt(client, targetTime) {
+async function findDayBaselineBlock(client, targetTime) {
+  const targetMs = targetTime.getTime();
+  // Consecutive headers prove the starting inventory even if the chain halted
+  // across midnight. A nearby header alone could hide activity in a data gap.
   const { rows } = await client.query(
-    `select height, block_time
-     from rujira_reserve_payment_events
-     order by abs(extract(epoch from (block_time - $1::timestamptz))) asc
-     limit 1`,
+    `with previous as (
+       select height, block_time
+       from chain_block_headers
+       where block_time < $1::timestamptz
+       order by block_time desc
+       limit 1
+     )
+     select previous.height, previous.block_time
+     from previous
+     join chain_block_headers following on following.height = previous.height + 1
+     where following.block_time >= $1::timestamptz`,
     [targetTime.toISOString()]
   );
-  const anchor = rows[0];
-  let estimate;
-  if (anchor) {
-    const anchorTime = new Date(anchor.block_time);
-    const offsetBlocks = Math.round((targetTime.getTime() - anchorTime.getTime()) / 6000);
-    estimate = Math.max(1, safeNumber(anchor.height) + offsetBlocks);
-  } else {
-    const lastblock = await fetchThorchain('/thorchain/lastblock');
-    estimate = Math.max(1, extractThorHeight(lastblock));
+  if (rows[0]) {
+    return { height: Number(rows[0].height), time: new Date(rows[0].block_time).toISOString() };
   }
 
-  // Six-second interpolation gets us close. Real RPC block times correct for
-  // halts and variable cadence so each baseline lands within a few blocks of
-  // UTC midnight instead of slowly drifting across the day boundary.
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const blockTime = await fetchNodeVotesBlockTime(estimate);
-    const blockTimeMs = Date.parse(blockTime || '');
-    if (!Number.isFinite(blockTimeMs)) break;
-    const offsetBlocks = Math.round((targetTime.getTime() - blockTimeMs) / 6000);
-    if (Math.abs(offsetBlocks) <= 2) return estimate;
-    estimate = Math.max(1, estimate + offsetBlocks);
+  // Settlement execution can stop for days while blocks keep advancing. Use
+  // the RPC's available range and real timestamps, never a payout projection.
+  const status = await fetchNodeVotesRpcStatus();
+  const syncInfo = status?.result?.sync_info || {};
+  const earliestHeight = Number(syncInfo.earliest_block_height);
+  const latestHeight = Number(syncInfo.latest_block_height);
+  if (
+    !Number.isSafeInteger(earliestHeight) || earliestHeight <= 0 ||
+    !Number.isSafeInteger(latestHeight) || latestHeight < earliestHeight
+  ) {
+    throw new Error('Unable to read Base Layer earnings RPC block height bounds');
   }
 
-  return estimate;
+  const blockTimes = new Map();
+  for (const [height, time] of [
+    [earliestHeight, syncInfo.earliest_block_time],
+    [latestHeight, syncInfo.latest_block_time]
+  ]) {
+    if (Number.isFinite(Date.parse(time || ''))) blockTimes.set(height, time);
+  }
+  const fetchBlockTime = async (height) => {
+    if (height < earliestHeight || height > latestHeight) {
+      throw new Error(`Base Layer earnings baseline height ${height} is outside RPC coverage`);
+    }
+    if (!blockTimes.has(height)) {
+      const time = await fetchNodeVotesBlockTime(height);
+      if (!Number.isFinite(Date.parse(time || ''))) {
+        throw new Error(`Unable to read Base Layer earnings block time for height ${height}`);
+      }
+      blockTimes.set(height, time);
+    }
+    return blockTimes.get(height);
+  };
+  const earliestTime = await fetchBlockTime(earliestHeight);
+  const latestTime = await fetchBlockTime(latestHeight);
+  if (Date.parse(earliestTime) >= targetMs || Date.parse(latestTime) < targetMs) {
+    throw new Error(`RPC block times do not bracket Base Layer earnings midnight ${targetTime.toISOString()}`);
+  }
+
+  const firstHeight = await findNodeVotesStartHeight(targetTime.toISOString(), {
+    result: { sync_info: {
+      ...syncInfo,
+      earliest_block_time: earliestTime,
+      latest_block_time: latestTime
+    } }
+  }, { fetchBlockTime });
+  const time = await fetchBlockTime(firstHeight - 1);
+  const followingTime = await fetchBlockTime(firstHeight);
+  // The shared search can approximate an unavailable block from its neighbor.
+  // Require the actual adjacent timestamps before using a financial baseline.
+  if (Date.parse(time) >= targetMs || Date.parse(followingTime) < targetMs) {
+    throw new Error('Unable to verify Base Layer earnings midnight block boundary');
+  }
+  return { height: firstHeight - 1, time };
 }
 
 async function fetchHistoricalCollectorBalances(height) {
@@ -295,14 +343,14 @@ async function ensureDayBaseline(client, dayStart) {
   if (existing.rows[0]) return existing.rows[0];
 
   const targetTime = new Date(`${day}T00:00:00Z`);
-  const height = await estimateHeightAt(client, targetTime);
+  const { height, time } = await findDayBaselineBlock(client, targetTime);
   const collectorBalances = await fetchHistoricalCollectorBalances(height);
   await client.query(
     `insert into rujira_base_layer_earnings_day_baselines
        (day_start, snapshot_height, snapshot_time, collector_balances, source, updated_at)
      values ($1, $2, $3, $4, 'thornode-archive', now())
      on conflict (day_start) do nothing`,
-    [day, height, targetTime.toISOString(), collectorBalances]
+    [day, height, time, collectorBalances]
   );
 
   const { rows } = await client.query(

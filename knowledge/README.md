@@ -6,6 +6,7 @@ This directory contains website/backend-specific protocol notes and session hist
 - Primary local API references are [the Thornode API guide](../docs/thornode-api-reference.md), [the consumer OpenAPI snapshot](../docs/thornode-openapi.yaml), and [the Midgard Swagger snapshot](../docs/midgard-swagger.json).
 - Start with [sessions/_index.md](./sessions/_index.md) for the local execution trail.
 - [fee-collector-accounting.md](./fee-collector-accounting.md) — balance-delta method for auditing on-chain fee collectors when senders aren't enumerable or the collector converts assets internally.
+- [app-layer-post-unfreeze-2026-09-02.md](./app-layer-post-unfreeze-2026-09-02.md) — stale earnings midnight lookup and missing on-chain collector schedules after the Wasm unfreeze.
 - [wasm-arb-economics.md](./wasm-arb-economics.md) — `/wasm-arb-economics` metric definitions, transaction-scoped Rujira fee attribution, post-change time-series compaction, and monitoring guardrails.
 - [status-dashboard.md](./status-dashboard.md) — `/status` data sources, chain/LP state derivation, historical vote lane, and failure behavior.
 - [pol-tracker.md](./pol-tracker.md) — `/pol-tvl` same-height daily synth backing, locked Treasury LP, legacy Reserve POL, and System Income POL accounting.

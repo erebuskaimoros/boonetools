@@ -135,6 +135,17 @@ the immutable historical bootstrap, and DB rows override matching seed days.
 The public request is served from `app-layer-base-layer-earnings:v1`; the
 analytics publisher materializes it from those canonical rows.
 
+Midnight baselines use the last confirmed block before the UTC boundary.
+Adjacent persisted block headers prove that boundary when available; otherwise
+the collector searches actual RPC timestamps within the provider's available
+height range. It rejects unavailable or unverifiable history instead of
+extrapolating from the last Reserve payout. A successful live-state job exit
+alone is insufficient: check the earnings endpoint's `meta.lastDay`,
+`meta.generatedAt`, and `meta.stale` independently. Missing earnings days need
+historical inventory reconstruction; the live refresh only writes its current
+UTC day. Also check `/schedules?sender=<collector>` when Reserve/POL payouts
+stop: clearing a Wasm halt does not recreate missing collector schedules.
+
 The performance and freshness contract for every dashboard read model is in
 [`performance-architecture.md`](./performance-architecture.md).
 
