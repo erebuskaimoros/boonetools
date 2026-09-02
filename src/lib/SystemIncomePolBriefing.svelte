@@ -5,6 +5,9 @@
 
   const SOURCE_URL = 'https://x.com/BooneW/status/2094724612860813417';
   const TRACKER_URL = 'https://boone.tools/pol-tracker';
+  const BASE_PATH = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+  const COVER_URL = `${BASE_PATH}/assets/briefings/thorchain-new-pol/cover.jpg`;
+  const IP_CHART_URL = `${BASE_PATH}/assets/briefings/thorchain-new-pol/ip-chart.jpg`;
 </script>
 
 <article class="briefings-page">
@@ -15,6 +18,13 @@
   </nav>
 
   <header>
+    <img
+      class="article-cover"
+      src={COVER_URL}
+      alt="Turquoise THORChain logo at the center of a swirling blue and teal black hole"
+      width="846"
+      height="338"
+    />
     <h1>THORChain's New POL</h1>
     <p class="subtitle">The new Liquidity Black Hole</p>
     <p class="report-meta">boone · {briefing.published}</p>
@@ -22,6 +32,17 @@
 
   <div class="article-body">
     <h2>Background</h2>
+
+    <figure>
+      <img
+        class="article-chart"
+        src={IP_CHART_URL}
+        alt="THORChain Incentive Pendulum since mainnet: LP and Bond reward shares, with estimated 7-day Bond APY, from June 2022 to March 2026"
+        width="1200"
+        height="675"
+      />
+      <figcaption>Shows where TC rewards have gone historically. Note LPs have gotten nothing since ThorFi.</figcaption>
+    </figure>
 
     <p>
       Ever since the ThorFi collapse there has been essentially no rewards going to Base Layer liquidity pool LPs and
@@ -137,6 +158,13 @@
     color: var(--term-text, #f5f5f5);
   }
 
+  .article-cover {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-bottom: 24px;
+  }
+
   h1 {
     margin: 0 0 12px;
     color: var(--term-text, #f5f5f5);
@@ -170,6 +198,23 @@
     margin: 0 0 22px;
     font-size: 17px;
     line-height: 1.75;
+  }
+
+  figure {
+    margin: 0 0 22px;
+  }
+
+  .article-chart {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  figcaption {
+    margin-top: 8px;
+    color: var(--term-text-3, #c8c8c8);
+    font-size: 14px;
+    line-height: 1.6;
   }
 
   footer {
