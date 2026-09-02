@@ -1,20 +1,23 @@
 import { config } from '../lib/config.js';
 import { sleep } from '../lib/utils.js';
-import { fetchMidgard } from './midgard.js';
+import { fetchMidgard, MIDGARD_BASES } from './midgard.js';
 import { coreSnapshotValue, getThorNodeCoreSnapshot } from './thornode-core-snapshot.js';
 import {
   POOL_ANALYSIS_START_DATE,
   assetIdentity,
+  nonNegativeBaseString,
   parsePoolAnalysisDepthInterval,
   parsePoolAnalysisSwapInterval
 } from './pool-analysis.js';
 import {
+  loadPoolAnalysisPendingDays,
   updatePoolAnalysisSyncState,
   upsertPoolAnalysisDepthDays,
   upsertPoolAnalysisDays
 } from './pool-analysis-store.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const HISTORY_DAYS = { swaps: 100, depth: 400 };
 
 function dateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -27,7 +30,7 @@ function unixStart(day) {
 }
 
 function shiftDay(day, amount) {
-  return dateKey(new Date(Date.parse(`${dateKey(day)}T00:00:00Z`) + (amount * DAY_MS)));
+  return dateKey(new Date((unixStart(day) * 1000) + (amount * DAY_MS)));
 }
 
 function resolvedNow(value) {
@@ -37,87 +40,67 @@ function resolvedNow(value) {
 }
 
 async function historyRequest(path, options = {}) {
-  const fetcher = options.fetchMidgard || fetchMidgard;
-  return fetcher(path, {
+  return (options.fetchMidgard || fetchMidgard)(path, {
     cooldownClient: options.client,
+    ...(options.bases ? { bases: options.bases } : {}),
     validateResponse: (_path, payload) => !Array.isArray(payload?.intervals)
   });
 }
 
 async function dailyHistory({ path, startDate, endDate, query = {}, parse, options = {} }) {
   const count = Math.min(options.maxCount || 100, Math.max(1, Math.trunc(Number(options.count)) || 100));
-  const maxPages = Math.max(1, Math.trunc(Number(
-    options.maxPages ?? config.poolAnalysisMaxPages
-  )) || 10);
+  const maxPages = Math.max(1, Math.trunc(Number(options.maxPages ?? config.poolAnalysisMaxPages)) || 30);
   const rows = [];
+  const end = unixStart(shiftDay(endDate, 1));
   let cursor = unixStart(startDate);
   let pages = 0;
-  let complete = false;
-  while (pages < maxPages) {
-    const params = new URLSearchParams({
-      ...query,
-      interval: 'day',
-      from: String(cursor),
-      count: String(count)
-    });
+  while (cursor < end && pages < maxPages) {
+    const pageEnd = Math.min(end, cursor + count * 86400);
+    // Midgard allows only two of from/to/count. Exact bounds ensure a gap
+    // request cannot refetch the completed days beside it.
+    const params = new URLSearchParams({ ...query, interval: 'day', from: String(cursor), to: String(pageEnd) });
     const payload = await historyRequest(`${path}?${params}`, options);
-    const intervals = Array.isArray(payload?.intervals) ? payload.intervals : [];
     pages += 1;
-    rows.push(...parse(intervals));
-    if (!intervals.length) {
-      complete = true;
-      break;
-    }
-    const lastInterval = intervals.at(-1);
-    const nextCursor = Number(lastInterval?.endTime ?? lastInterval?.end_time);
-    if (!Number.isFinite(nextCursor) || nextCursor <= cursor) {
-      throw new Error(`Midgard pagination did not advance for ${path}`);
-    }
-    const nextDay = dateKey(new Date(nextCursor * 1000));
-    if (nextDay >= endDate) {
-      complete = true;
-      break;
-    }
-    cursor = nextCursor;
-    if (config.poolAnalysisRequestDelayMs > 0 && options.skipDelay !== true) {
+    rows.push(...parse(payload.intervals).filter((row) => {
+      const start = unixStart(row.day);
+      return start >= cursor && start < pageEnd;
+    }));
+    cursor = pageEnd;
+    if (cursor < end && config.poolAnalysisRequestDelayMs > 0 && options.skipDelay !== true) {
       await sleep(config.poolAnalysisRequestDelayMs);
     }
   }
-  if (pages >= maxPages && !complete) {
-    throw new Error(`Pool Analysis history exceeded ${maxPages} pages for ${path}`);
-  }
+  if (cursor < end) throw new Error(`Pool Analysis history exceeded ${maxPages} pages for ${path}`);
   return { rows, pages };
 }
 
 export async function fetchPoolAnalysisSwapHistory(asset, options = {}) {
   const normalizedAsset = assetIdentity(asset).asset;
-  const startDate = dateKey(options.startDate || POOL_ANALYSIS_START_DATE);
-  const endDate = dateKey(options.endDate || resolvedNow(options.now));
+  const today = dateKey(resolvedNow(options.now));
   return dailyHistory({
     path: '/history/swaps',
-    startDate,
-    endDate,
-    query: { pool: normalizedAsset },
-    options,
+    startDate: dateKey(options.startDate || POOL_ANALYSIS_START_DATE),
+    endDate: dateKey(options.endDate || today),
+    query: { pool: normalizedAsset }, options,
     parse: (intervals) => intervals.map((interval) => parsePoolAnalysisSwapInterval(interval, {
       asset: normalizedAsset,
-      partial: dateKey(new Date(Number(interval.startTime ?? interval.start_time) * 1000)) === endDate
+      partial: dateKey(new Date(Number(interval.startTime ?? interval.start_time) * 1000)) >= today
     }))
   });
 }
 
 export async function fetchPoolAnalysisDepthHistory(asset, options = {}) {
   const normalizedAsset = assetIdentity(asset).asset;
-  const endDate = dateKey(options.endDate || resolvedNow(options.now));
+  const today = dateKey(resolvedNow(options.now));
   return dailyHistory({
     path: `/history/depths/${encodeURIComponent(normalizedAsset)}`,
     startDate: dateKey(options.startDate || POOL_ANALYSIS_START_DATE),
-    endDate,
+    endDate: dateKey(options.endDate || today),
     options: { ...options, count: options.count ?? 400, maxCount: 400 },
     parse: (intervals) => intervals.map((interval) => parsePoolAnalysisDepthInterval(interval, {
       asset: normalizedAsset,
-      partial: dateKey(new Date(Number(interval.startTime) * 1000)) === endDate
-    })).filter((row) => row.day <= endDate)
+      partial: dateKey(new Date(Number(interval.startTime) * 1000)) >= today
+    }))
   });
 }
 
@@ -134,107 +117,213 @@ async function mapWithConcurrency(items, limit, worker) {
   return results;
 }
 
-async function upsertBatches(client, rows, upsert, batchSize = 2000) {
-  let total = 0;
-  for (let index = 0; index < rows.length; index += batchSize) {
-    total += await upsert(client, rows.slice(index, index + batchSize));
+function validPrice(value) {
+  return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value)) && Number(value) >= 0;
+}
+
+function completeHistoryRow(row, lane, today, watermark) {
+  const dayEnd = unixStart(shiftDay(row.day, 1)) * 1000;
+  const amounts = lane === 'swaps'
+    ? ['volume_rune_e8', 'volume_usd_e2', 'fees_rune_e8']
+    : ['rune_depth_e8', 'asset_depth_e8'];
+  const empty = amounts.every((key) => nonNegativeBaseString(row[key]) === '0');
+  const price = row[lane === 'swaps' ? 'rune_price_usd' : 'asset_price_usd'];
+  return row.day < today && watermark >= dayEnd && row.partial !== true
+    && Date.parse(row.interval_end) === dayEnd
+    && (lane !== 'swaps' || Date.parse(row.interval_start) === unixStart(row.day) * 1000)
+    && amounts.every((key) => nonNegativeBaseString(row[key]) !== null)
+    && (empty || (validPrice(price) && Number(price) > 0));
+}
+
+function currentDepthRows(core, assets, now, maxAgeMs) {
+  const payload = core?.payload || core;
+  const meta = payload?.field_meta?.pools;
+  const fetchedMs = Date.parse(meta?.fetched_at);
+  const today = dateKey(now);
+  if (core?.stale || payload?.stale || !meta || !['fresh', 'cached'].includes(meta.status) || !Number.isFinite(fetchedMs)
+    || fetchedMs > now.getTime() || now.getTime() - fetchedMs > maxAgeMs
+    || dateKey(new Date(fetchedMs)) !== today) return [];
+  const assetSet = new Set(assets);
+  return coreSnapshotValue(core, 'pools', []).flatMap((pool) => {
+    const asset = assetIdentity(pool.asset).asset;
+    const rune = nonNegativeBaseString(pool.balance_rune);
+    const balance = nonNegativeBaseString(pool.balance_asset);
+    const price = nonNegativeBaseString(pool.asset_tor_price);
+    if (!assetSet.has(asset) || rune === null || balance === null || price === null) return [];
+    const priceUsd = Number(price) / 1e8;
+    if (!Number.isFinite(priceUsd) || (priceUsd === 0 && (rune !== '0' || balance !== '0'))) return [];
+    return [{ asset, day: today, rune_depth_e8: rune, asset_depth_e8: balance,
+      asset_price_usd: String(priceUsd), interval_end: new Date(fetchedMs).toISOString(),
+      observed_at: new Date(fetchedMs).toISOString(), partial: true,
+      completed_at: null, source: 'thornode-core:pools' }];
+  });
+}
+
+function pendingRanges(pending, yesterday) {
+  const grouped = new Map();
+  for (const row of pending) {
+    if (!HISTORY_DAYS[row.lane] || row.day > yesterday) continue;
+    const key = `${row.asset}:${row.lane}`;
+    if (!grouped.has(key)) grouped.set(key, { asset: row.asset, lane: row.lane, days: new Set() });
+    grouped.get(key).days.add(row.day);
   }
-  return total;
+  const ranges = [];
+  for (const { asset, lane, days } of grouped.values()) {
+    let range;
+    for (const day of [...days].sort()) {
+      if (!range || day !== shiftDay(range.endDate, 1) || range.days >= HISTORY_DAYS[lane]) {
+        range = { asset, lane, startDate: day, endDate: day, days: 1 };
+        ranges.push(range);
+      } else {
+        range.endDate = day;
+        range.days += 1;
+      }
+    }
+  }
+  return ranges.sort((a, b) => Number(b.endDate === yesterday) - Number(a.endDate === yesterday)
+    || a.startDate.localeCompare(b.startDate) || a.asset.localeCompare(b.asset) || a.lane.localeCompare(b.lane));
+}
+
+async function historyWatermark(client, options, bases) {
+  const health = await (options.fetchMidgard || fetchMidgard)('/health', {
+    cooldownClient: client, bases,
+    validateResponse: (_path, payload) => !payload || typeof payload !== 'object'
+  });
+  const timestamp = Number(health?.lastAggregated?.timestamp) * 1000;
+  const receivedAt = resolvedNow(options.healthNow); // Health follows the live sweep, which can take minutes.
+  if (health.database !== true || health.inSync !== true || !(Number(health.lastAggregated?.height) > 0)
+    || !Number.isFinite(timestamp) || timestamp <= 0 || timestamp > receivedAt.getTime()) {
+    throw new Error('Midgard aggregation watermark unavailable or not in sync');
+  }
+  return timestamp;
 }
 
 export async function ingestPoolAnalysisHistory(client, options = {}) {
   const now = resolvedNow(options.now);
   const today = dateKey(now);
-  const recentDays = Math.max(30, Math.trunc(Number(
-    options.recentDays ?? config.poolAnalysisRecentLookbackDays
-  )) || 35);
+  const yesterday = shiftDay(today, -1);
+  const recentDays = Math.max(1, Math.trunc(Number(options.recentDays ?? config.poolAnalysisRecentLookbackDays)) || 35);
   const startDate = dateKey(options.startDate || (options.full
-    ? config.poolAnalysisStartDate || POOL_ANALYSIS_START_DATE
-    : shiftDay(today, -(recentDays - 1))));
+    ? config.poolAnalysisStartDate || POOL_ANALYSIS_START_DATE : shiftDay(today, -(recentDays - 1))));
   const configuredAssets = Array.isArray(options.assets) ? options.assets : null;
-  const core = options.coreSnapshot || (configuredAssets ? null : await (
-    options.getCoreSnapshot || getThorNodeCoreSnapshot
-  )({ client, allowStale: true }));
+  let core = options.coreSnapshot;
+  let coreError = '';
+  if (core === undefined) {
+    try { core = await (options.getCoreSnapshot || getThorNodeCoreSnapshot)({ client, allowStale: true }); }
+    catch (error) { coreError = error?.message || String(error); }
+  }
   const assets = [...new Set((configuredAssets || coreSnapshotValue(core, 'pools', [])
     .filter((pool) => ['available', 'staged'].includes(String(pool?.status || '').toLowerCase()))
-    .map((pool) => pool.asset))
-    .map((asset) => assetIdentity(asset).asset)
-    .filter(Boolean))].sort();
+    .map((pool) => pool.asset)).map((asset) => assetIdentity(asset).asset).filter(Boolean))].sort();
   if (!assets.length) throw new Error('Pool Analysis ingestion found no pools');
-
-  const concurrency = Math.max(1, Math.trunc(Number(
-    options.concurrency ?? config.poolAnalysisConcurrency
-  )) || 2);
-  const swapResults = await mapWithConcurrency(assets, concurrency, async (asset) => {
+  const concurrency = Math.max(1, Math.trunc(Number(options.concurrency ?? config.poolAnalysisConcurrency)) || 2);
+  const byAsset = new Map(assets.map((asset) => [asset, {
+    swaps: { rows: [], pages: 0, errors: [] }, depth: { rows: [], pages: 0, errors: [] }
+  }]));
+  let upserted = 0;
+  async function persist(lane, rows) {
+    const upsert = lane === 'swaps' ? options.upsert || upsertPoolAnalysisDays : options.upsertDepths || upsertPoolAnalysisDepthDays;
+    const count = await upsert(client, rows, { force: Boolean(options.full) });
+    if (lane === 'swaps') upserted += count;
+  }
+  async function request(task, watermark = 0, bases) {
+    const state = byAsset.get(task.asset)[task.lane];
+    state.pages += 1;
     try {
-      const result = await (options.fetchSwapHistory || fetchPoolAnalysisSwapHistory)(asset, {
-        ...options,
-        client,
-        startDate,
-        endDate: today,
-        now
+      const fetcher = task.lane === 'swaps' ? options.fetchSwapHistory || fetchPoolAnalysisSwapHistory
+        : options.fetchDepthHistory || fetchPoolAnalysisDepthHistory;
+      const result = await fetcher(task.asset, { ...options, client, now,
+        startDate: task.startDate, endDate: task.endDate, maxPages: 1, ...(bases ? { bases } : {}) });
+      const rows = result.rows.filter((row) => row.asset === task.asset
+        && row.day >= task.startDate && row.day <= task.endDate).map((row) => {
+        const complete = completeHistoryRow(row, task.lane, today, watermark);
+        return { ...row, partial: !complete, completed_at: complete ? now.toISOString() : null,
+          ...(task.lane === 'depth' ? { observed_at: now.toISOString() } : {}) };
       });
-      return { asset, ...result, error: '' };
-    } catch (error) {
-      return { asset, rows: [], pages: 0, error: error?.message || String(error) };
-    }
-  });
-  const successfulSwaps = swapResults.filter((result) => !result.error);
-  if (!successfulSwaps.length) {
-    throw new Error(`Pool Analysis swap history failed for all ${assets.length} pools`);
+      await persist(task.lane, rows);
+      state.rows.push(...rows);
+      if (task.endDate < today && rows.filter((row) => row.completed_at).length < task.days) {
+        state.errors.push(`Incomplete history ${task.startDate}..${task.endDate}`);
+      }
+    } catch (error) { state.errors.push(error?.message || String(error)); }
   }
 
-  const merged = successfulSwaps.flatMap((result) => result.rows);
-  const upsert = options.upsert || upsertPoolAnalysisDays;
-  const upserted = await upsertBatches(client, merged, upsert, options.batchSize);
-  // Depth is independent: a depth provider failure must not discard fee history.
-  const depthResults = await mapWithConcurrency(assets, concurrency, async (asset) => {
-    try {
-      const result = await (options.fetchDepthHistory || fetchPoolAnalysisDepthHistory)(asset, {
-        ...options, client, startDate, endDate: today, now
-      });
-      await upsertBatches(client, result.rows, options.upsertDepths || upsertPoolAnalysisDepthDays, options.batchSize);
-      return { asset, ...result, error: '' };
-    } catch (error) {
-      return { asset, rows: [], pages: 0, error: error?.message || String(error) };
+  // Live work always precedes recovery, so a historical backlog cannot consume
+  // its request allowance or prevent its data from reaching the read model.
+  await mapWithConcurrency(assets, concurrency, (asset) => request({ asset, lane: 'swaps', startDate: today, endDate: today, days: 1 }));
+  const currentDepth = currentDepthRows(core, assets, now, Math.max(1, Number(
+    options.coreMaxAgeMs ?? config.poolAnalysisCoreMaxAgeMs
+  ) || 300000));
+  for (const asset of assets) {
+    const row = currentDepth.find((candidate) => candidate.asset === asset);
+    if (row) {
+      try { await persist('depth', [row]); byAsset.get(asset).depth.rows.push(row); }
+      catch (error) { byAsset.get(asset).depth.errors.push(error?.message || String(error)); }
+    } else byAsset.get(asset).depth.errors.push(coreError || 'Fresh current-day core pool depth unavailable');
+  }
+
+  let pending;
+  if (options.full) {
+    pending = [];
+    for (const asset of assets) for (const lane of ['swaps', 'depth']) {
+      for (let day = startDate; day <= yesterday; day = shiftDay(day, 1)) pending.push({ asset, lane, day });
     }
-  });
-  const rowsByAsset = new Map(assets.map((asset) => [asset, []]));
-  for (const row of merged) rowsByAsset.get(row.asset)?.push(row);
-  const lastCompletedDay = shiftDay(today, -1);
-  for (const result of swapResults) {
-    const depthResult = depthResults.find((depth) => depth.asset === result.asset);
-    const rows = rowsByAsset.get(result.asset) || [];
-    const days = rows.map((row) => row.day).sort();
+  } else pending = await (options.loadPendingDays || loadPoolAnalysisPendingDays)(client, { assets, startDate, today });
+  const ranges = pendingRanges(pending, yesterday);
+  const limit = options.full ? ranges.length : Math.max(0, Math.trunc(Number(
+    options.historyRequestLimit ?? config.poolAnalysisHistoryRequestLimit
+  )) || 0);
+  let watermark = 0;
+  let watermarkError = '';
+  const bases = [options.historyBase || MIDGARD_BASES[0]];
+  if (ranges.length && limit > 0) {
+    try { watermark = await historyWatermark(client, options, bases); }
+    catch (error) { watermarkError = error?.message || String(error); }
+  }
+  // Health and closed history share exactly one provider; a different fallback
+  // must not borrow this provider's aggregation watermark.
+  const ready = ranges.filter((range) => unixStart(shiftDay(range.endDate, 1)) * 1000 <= watermark);
+  const newlyClosed = ready.filter((range) => range.endDate === yesterday);
+  const backlog = ready.filter((range) => range.endDate !== yesterday);
+  const available = Math.max(0, limit - newlyClosed.length);
+  // Empty/erroring ranges must yield to other pools on later runs, including
+  // within yesterday's priority group. The clock survives process restarts.
+  const rotate = (rangesToRotate, slots) => {
+    const offset = slots > 0 && rangesToRotate.length > slots
+      ? Math.floor(now.getTime() / 900000) % rangesToRotate.length : 0;
+    return [...rangesToRotate.slice(offset), ...rangesToRotate.slice(0, offset)];
+  };
+  const selected = [...rotate(newlyClosed, limit), ...rotate(backlog, available)].slice(0, limit);
+  await mapWithConcurrency(selected, concurrency, (task) => request(task, watermark, bases));
+  const allStates = [...byAsset.values()];
+  for (const [asset, state] of byAsset) {
+    const days = state.swaps.rows.map((row) => row.day).sort();
+    const completedDays = state.swaps.rows.filter((row) => row.completed_at).map((row) => row.day).sort();
+    const pendingForAsset = pending.filter((row) => row.asset === asset);
     await (options.updateSyncState || updatePoolAnalysisSyncState)(client, {
-      asset: result.asset,
-      firstDay: days[0] || null,
-      lastDay: days.at(-1) || null,
-      lastCompletedDay: result.error ? null : lastCompletedDay,
-      lastError: [result.error, depthResult?.error && `Depth: ${depthResult.error}`].filter(Boolean).join('; '),
-      stats: {
-        full: Boolean(options.full),
-        start_date: startDate,
-        end_date: today,
-        rows: rows.length,
-        swap_pages: result.pages,
-        depth_pages: depthResult?.pages || 0,
-        depth_rows: depthResult?.rows.length || 0
-      }
+      asset, firstDay: days[0] || null, lastDay: days.at(-1) || null,
+      lastCompletedDay: completedDays.at(-1) || null,
+      lastError: [...state.swaps.errors, ...state.depth.errors.map((error) => `Depth: ${error}`), watermarkError].filter(Boolean).join('; '),
+      stats: { full: Boolean(options.full), start_date: startDate, end_date: today,
+        rows: state.swaps.rows.length, swap_pages: state.swaps.pages, depth_pages: state.depth.pages,
+        depth_rows: state.depth.rows.length, completed_swap_days: completedDays.length,
+        completed_depth_days: state.depth.rows.filter((row) => row.completed_at).length,
+        pending_swap_days: pendingForAsset.filter((row) => row.lane === 'swaps').length - completedDays.length,
+        pending_depth_days: pendingForAsset.filter((row) => row.lane === 'depth').length - state.depth.rows.filter((row) => row.completed_at).length,
+        watermark: watermark ? new Date(watermark).toISOString() : null, watermark_error: watermarkError }
     });
   }
   return {
-    full: Boolean(options.full),
-    start_date: startDate,
-    end_date: today,
-    pools: assets.length,
-    successful_pools: successfulSwaps.length,
-    failed_pools: swapResults.length - successfulSwaps.length,
-    rows: merged.length,
-    upserted,
-    swap_pages: swapResults.reduce((total, result) => total + result.pages, 0),
-    depth_pages: depthResults.reduce((total, result) => total + result.pages, 0),
-    depth_rows: depthResults.reduce((total, result) => total + result.rows.length, 0),
-    failed_depth_pools: depthResults.filter((result) => result.error).length
+    full: Boolean(options.full), start_date: startDate, end_date: today, pools: assets.length,
+    successful_pools: allStates.filter((state) => state.swaps.rows.length).length,
+    failed_pools: allStates.filter((state) => state.swaps.errors.length).length,
+    rows: allStates.reduce((total, state) => total + state.swaps.rows.length, 0), upserted,
+    swap_pages: allStates.reduce((total, state) => total + state.swaps.pages, 0),
+    depth_pages: allStates.reduce((total, state) => total + state.depth.pages, 0),
+    depth_rows: allStates.reduce((total, state) => total + state.depth.rows.length, 0),
+    failed_depth_pools: allStates.filter((state) => state.depth.errors.length).length,
+    historical_requests: selected.length, pending_ranges: ranges.length,
+    deferred_ranges: ranges.length - selected.length, watermark_error: watermarkError,
+    live_depth_rows: currentDepth.length
   };
 }

@@ -23,6 +23,14 @@ overlay. `/chain-events` publishes compact reward and deployment fields for
 the browser. An RPC repair cursor scans every height from activation so a
 reward-only or missed block remains distinguishable from an observed zero.
 
+Repair reuses complete event headers before requesting `/block_results`.
+Incomplete accounting fields still require canonical RPC enrichment. Both
+header-page acquisition and ledger repairs persist successful work in bounded
+chunks. A failed request stops new work and drains launched requests before
+returning, so retries do not discard successes or outlive the job's database
+lock. Headers are saved before ledger rows so a failed ledger write can be
+retried from local event data.
+
 ## Reconciled state
 
 `boonetools-system-income-pol.timer` runs every two minutes. It consumes the

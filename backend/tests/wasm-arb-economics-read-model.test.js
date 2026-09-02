@@ -3,6 +3,68 @@ import test from 'node:test';
 
 import { buildWasmArbEconomicsPayload } from '../src/shared/wasm-arb-economics.js';
 
+async function collectorCoverage(states, pending = 0) {
+  const result = await buildWasmArbEconomicsPayload({
+    async query(sql) {
+      if (sql.includes('from wasm_arb_economics_sync_state')) return { rows: states };
+      if (sql.includes('from wasm_arb_economics_blocks')) return { rows: [{ pending }] };
+      return { rows: [] };
+    }
+  }, { generatedAt: '2026-09-02T12:00:00Z' });
+  return result.payload.meta.coverage;
+}
+
+function archiveStates(target = 27266716) {
+  return ['tx', 'block'].map((kind) => ({
+    sync_key: `collector-${kind}-search-backfill`, complete: true,
+    stats_json: { target_height: target }
+  }));
+}
+
+test('fee coverage stays incomplete during head catch-up even with an empty block queue', async () => {
+  const states = [...archiveStates(), ...['tx', 'block'].map((kind) => ({
+    sync_key: `collector-${kind}-search`,
+    stats_json: {
+      scanned_through_height: 27285515,
+      target_height: 27285515,
+      latest_height: 27658737,
+      max_height: 27658000
+    }
+  }))];
+  const coverage = await collectorCoverage(states);
+  assert.equal(coverage.feeBackfillComplete, false);
+  assert.equal(coverage.collectorTxHeadComplete, false);
+  assert.equal(coverage.collectorBlockHeadComplete, false);
+});
+
+test('both discovery heads must cover the newest observed tip before fee coverage is complete', async () => {
+  const states = [...archiveStates(), ...['tx', 'block'].map((kind) => ({
+    sync_key: `collector-${kind}-search`,
+    stats_json: {
+      scanned_through_height: 27658737,
+      target_height: 27658737,
+      latest_height: 27658737
+    }
+  }))];
+  assert.equal((await collectorCoverage(states)).feeBackfillComplete, true);
+  assert.equal((await collectorCoverage(states, 1)).feeBackfillComplete, false);
+
+  states[3].stats_json.latest_height = 27658780;
+  const coverage = await collectorCoverage(states);
+  assert.equal(coverage.feeBackfillComplete, false);
+  assert.equal(coverage.collectorTxHeadComplete, false);
+});
+
+test('legacy observed matches cannot prove head coverage beyond completed archive', async () => {
+  const states = [...archiveStates(), ...['tx', 'block'].map((kind) => ({
+    sync_key: `collector-${kind}-search`,
+    stats_json: { max_height: 27658000, target_height: 27658737, errors: [] }
+  }))];
+  assert.equal((await collectorCoverage(states)).feeBackfillComplete, false);
+  for (const state of states.slice(0, 2)) state.stats_json.target_height = 27658737;
+  assert.equal((await collectorCoverage(states)).feeBackfillComplete, true);
+});
+
 test('read model publishes a bounded post-zero monitoring series and retains later markers', async () => {
   const queries = [];
   const responses = [

@@ -101,8 +101,9 @@ fallback come from `thornode-core:v1`. All base-unit amounts remain decimal
 strings through the public model.
 
 Pool Analysis uses migrations `051_pool_analysis.sql` and
-`052_pool_analysis_fee_scope.sql`. Its fifteen-minute job revisits the trailing
-35 days of per-pool Midgard swap history and publishes 24-hour, 7-day, 30-day,
+`052_pool_analysis_fee_scope.sql`, plus independent depth and completion
+storage in migrations 059/060. Its fifteen-minute job requests today's per-pool
+Midgard swap totals, reuses current core pool depth, and publishes 24-hour, 7-day, 30-day,
 90-day, and 1-year table aggregates in one database read. Each window uses
 completed UTC days and supplies volume, pool-generated liquidity fees,
 coverage, ratios, and annualized generated-fee rates; volume/depth is
@@ -116,6 +117,14 @@ advisory-locked backfill fills all available swap history. Pool expansion
 executes one asset-filtered query capped at 5,000 stored daily rows; cumulative
 values are computed across the complete stored series before the 30-day view
 is selected. Missing UTC days are emitted as chart gaps, not zeros.
+
+Historical swaps and depth are sealed independently with an atomic
+`completed_at` marker after the provider's healthy aggregation watermark has
+passed the UTC day end and a complete interval is stored. Normal refreshes
+skip sealed days, prioritize newly closed days, and repair missing/incomplete
+days in bounded contiguous requests without crossing completed dates. Existing
+unverified rows undergo one-time validation; broad historical rescans require
+the explicit repair job. Live work runs before historical catch-up.
 
 The core publisher is the sole scheduled owner of reusable current THORNode
 state. It refreshes `lastblock` every 15 seconds; inbound addresses, Mimir,
@@ -145,10 +154,13 @@ sequential requests of at most 400 intervals, matching Midgard's provider cap.
 ## Response and failure contract
 
 - A failed publisher never overwrites a last-good model.
-- Provider cooldowns are shared in Postgres by provider hostname. Rate-limit or
-  breach responses cool the provider for at least one hour; ordinary transport
-  failures cool it briefly, preventing independent systemd jobs from retrying
-  the same unavailable host.
+- Provider cooldowns are shared in Postgres by gateway, service, and optional
+  acquisition scope. Confirmed HTTP 429/Retry-After responses block the gateway;
+  authenticated Liquify routes have a separate redacted namespace. Rate-limit
+  or breach responses cool the affected lane for at least one hour; ordinary
+  transport failures default to 60 seconds. Parsed Retry-After seconds are a
+  minimum delay in either case. Numeric heights/hashes containing `429` are
+  not rate-limit evidence.
 - Every THORNode, Midgard, and RPC wrapper identifies itself with the canonical
   `x-client-id: BooneTools` header.
 - `THORNODE_URLS` and `MIDGARD_URLS` accept ordered provider lists, so a

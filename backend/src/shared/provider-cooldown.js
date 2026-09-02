@@ -1,6 +1,8 @@
 import { config } from '../lib/config.js';
 
-const RATE_LIMIT_PATTERN = /429|too many requests|daily request limit|rate.?limit|rune pouch is empty|too many breaches|temporarily blocked/i;
+// Error messages include request URLs, where heights and hashes can contain
+// 429. Recognize the number only when it is written as an HTTP status.
+const RATE_LIMIT_PATTERN = /\bHTTP(?:\/\d(?:\.\d)?)?\s+429\b|\bRequest failed\s*\(429\)|too many requests|daily request limit|rate.?limit|rune pouch is empty|too many breaches|temporarily blocked/i;
 
 export class ProviderCooldownError extends Error {
   constructor(providerKey, blockedUntil, reason = '') {
@@ -129,9 +131,10 @@ export async function recordProviderFailure(base, error, options = {}) {
   if (!key) return;
   const rateLimited = isProviderRateLimitError(error);
   const retryAfterMs = Math.max(0, Number(error?.retryAfterSeconds) || 0) * 1000;
-  const cooldownMs = rateLimited
-    ? Math.max(config.providerRateLimitCooldownMs, retryAfterMs)
-    : config.providerFailureCooldownMs;
+  const cooldownMs = Math.max(
+    rateLimited ? config.providerRateLimitCooldownMs : config.providerFailureCooldownMs,
+    retryAfterMs
+  );
   const blockedUntil = new Date(Date.now() + cooldownMs).toISOString();
   try {
     await database(options).query(

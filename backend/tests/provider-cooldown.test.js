@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { config } from '../src/lib/config.js';
 
 import {
   ProviderCooldownError,
@@ -9,6 +10,42 @@ import {
   recordProviderFailure,
   recordProviderSuccess
 } from '../src/shared/provider-cooldown.js';
+
+test('provider cooldown does not mistake a block height or hash containing 429 for throttling', async () => {
+  const queries = [];
+  const client = { query: async (sql, params) => (queries.push({ sql, params }), { rows: [] }) };
+  for (const message of [
+    'Request failed (500) for /thorchain/network?height=28429400',
+    'HTTP 500 for https://gateway.liquify.com/chain/thorchain_rpc/tx?hash=0xA429B',
+    'HTTP 500 for https://gateway.liquify.com/chain/thorchain_rpc/block?height=429'
+  ]) {
+    const error = Object.assign(new Error(message), { status: 500 });
+    const before = Date.now();
+    await recordProviderFailure('https://gateway.liquify.com/chain/thorchain_rpc', error, {
+      client, enabled: true
+    });
+    const delay = Date.parse(queries.at(-1).params[3]) - before;
+    assert.ok(delay >= config.providerFailureCooldownMs && delay < config.providerFailureCooldownMs + 1000,
+      `ordinary failure should get the short cooldown, got ${delay}ms for ${message}`);
+    assert.equal(isProviderRateLimitError(error), false);
+  }
+  assert.equal(isProviderRateLimitError(new Error('HTTP 429 Too Many Requests')), true);
+  assert.equal(isProviderRateLimitError(new Error('Request failed (429)')), true);
+});
+
+test('provider cooldown honors Retry-After on a temporary 503 response', async () => {
+  const queries = [];
+  const client = { query: async (sql, params) => (queries.push({ sql, params }), { rows: [] }) };
+  const retryAfterSeconds = Math.ceil(config.providerFailureCooldownMs / 1000) + 120;
+  const before = Date.now();
+  await recordProviderFailure(
+    'https://gateway.liquify.com/chain/thorchain_rpc',
+    Object.assign(new Error('HTTP 503 Service Unavailable'), { status: 503, retryAfterSeconds }),
+    { client, enabled: true }
+  );
+  assert.equal(queries[0].params[0], 'global:gateway.liquify.com');
+  assert.ok(Date.parse(queries[0].params[3]) >= before + retryAfterSeconds * 1000);
+});
 
 test('provider cooldown keeps non-429 Liquify failures inside their service lane', async () => {
   const queries = [];

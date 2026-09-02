@@ -84,6 +84,14 @@ block-time calls use a shared `market-snapshots` ordinary-failure sub-lane, so
 an ordinary fee-discovery timeout does not suppress Oracle sampling; confirmed
 gateway 429s still block every sub-lane.
 
+Collector head discovery uses durable contiguous search coverage and bounded
+10,000-block windows. It retains the exact range/page on failure or page-budget
+exit, and only advances coverage after exhausting that interval. Recent scans
+keep a 1,200-block overlap; empty successful intervals also advance coverage.
+Legacy head `max_height` is only the highest observed match and must never seed
+coverage. Archival state supplies a safe starting boundary. Catch-up stays
+visible as incomplete fee coverage until both head searches reach their target.
+
 An otherwise valid same-height snapshot with pools but no Oracle prices is
 retried three times. Each retry evicts only that empty cached snapshot so the
 provider is queried again. If the height is still empty and the following

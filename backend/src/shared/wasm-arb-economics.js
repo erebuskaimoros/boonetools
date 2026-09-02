@@ -302,8 +302,28 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
   const sync = syncStateMap(stateResult.rows);
   const actionBackfillComplete = Boolean(sync['actions-backfill:arb:v2']?.complete);
   const pendingBlocks = safeNumber(blockResult.rows[0]?.pending);
+  const collectorLatestHeight = Math.max(0, ...['tx', 'block'].flatMap((kind) => [
+    safeNumber(sync[`collector-${kind}-search`]?.stats?.latest_height),
+    safeNumber(sync[`collector-${kind}-search`]?.stats?.target_height),
+    safeNumber(sync[`collector-${kind}-search-backfill`]?.stats?.target_height)
+  ]));
+  const collectorHeadComplete = (kind) => {
+    const head = sync[`collector-${kind}-search`];
+    const archive = sync[`collector-${kind}-search-backfill`];
+    // Legacy observed max_height does not establish contiguous coverage. A
+    // completed archive remains sufficient only when it covers the known tip.
+    const coveredHeight = Math.max(
+      safeNumber(head?.stats?.scanned_through_height),
+      archive?.complete ? safeNumber(archive.stats?.target_height) : 0
+    );
+    return collectorLatestHeight > 0 && coveredHeight >= collectorLatestHeight;
+  };
+  const collectorTxHeadComplete = collectorHeadComplete('tx');
+  const collectorBlockHeadComplete = collectorHeadComplete('block');
   const feeBackfillComplete = Boolean(sync['collector-tx-search-backfill']?.complete)
     && Boolean(sync['collector-block-search-backfill']?.complete)
+    && collectorTxHeadComplete
+    && collectorBlockHeadComplete
     && pendingBlocks === 0;
   const oracleBackfillComplete = Boolean(sync['oracle:backfill']?.complete);
   const oracleGaps = Array.isArray(sync['oracle:backfill']?.stats?.gaps)
@@ -454,6 +474,8 @@ export async function buildWasmArbEconomicsPayload(client, options = {}) {
           collectorBlockSearchComplete: Boolean(
             sync['collector-block-search-backfill']?.complete
           ),
+          collectorTxHeadComplete,
+          collectorBlockHeadComplete,
           pendingBlocks,
           fetchedBlocks: safeNumber(blockCoverage.fetched),
           oldestPendingHeight: blockCoverage.oldest_pending_height == null

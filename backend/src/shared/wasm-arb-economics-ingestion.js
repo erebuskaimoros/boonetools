@@ -22,6 +22,7 @@ const FIVE_MINUTES = 300;
 const RUNE_BASE = 1e8;
 const ACTION_PAGE_LIMIT = 50;
 const COLLECTOR_TX_PAGE_LIMIT = 100;
+const COLLECTOR_HEAD_WINDOW_BLOCKS = 10_000;
 const ACTION_OVERLAP_BLOCKS = 1_200;
 const FEE_DISCOVERY_COOLDOWN_SCOPE = 'wasm-fee-discovery';
 const FEE_BLOCK_COOLDOWN_SCOPE = 'wasm-fee-blocks';
@@ -777,25 +778,58 @@ export async function scanCollectorSearchPages(client, options = {}) {
   }
 
   const previousMaxHeight = safeNumber(state.stats_json?.max_height);
-  const stopHeight = Math.max(0, previousMaxHeight - ACTION_OVERLAP_BLOCKS);
-  const targetHeight = backfill
+  const activationHeight = config.wasmArbEconomicsStartHeight;
+  const headHeight = Math.trunc(safeNumber(latestHeight));
+  const persistedScannedHeight = Math.trunc(safeNumber(state.stats_json?.scanned_through_height));
+  let scannedThroughHeight = Math.max(activationHeight - 1, persistedScannedHeight);
+  if (!backfill && persistedScannedHeight < activationHeight - 1) {
+    // Legacy head max_height is only an observed match: truncated or failed
+    // descending scans can leave gaps below it. Only completed archive coverage
+    // can safely seed the new contiguous cursor.
+    const archive = await getSyncState(client, `${syncKey}-backfill`);
+    if (archive.complete) {
+      scannedThroughHeight = Math.max(
+        scannedThroughHeight,
+        Math.trunc(safeNumber(archive.stats_json?.target_height))
+      );
+    }
+  }
+  const resumeHead = !backfill
+    && Boolean(state.next_page_token)
+    && persistedScannedHeight >= activationHeight - 1
+    && safeNumber(state.stats_json?.scan_start_height) >= activationHeight
+    && safeNumber(state.stats_json?.target_height) >= safeNumber(state.stats_json?.scan_start_height);
+  let startHeight = backfill ? activationHeight : resumeHead
+    ? Math.trunc(safeNumber(state.stats_json.scan_start_height))
+    : Math.max(activationHeight, scannedThroughHeight - ACTION_OVERLAP_BLOCKS);
+  let targetHeight = backfill
     ? Math.trunc(safeNumber(state.stats_json?.target_height, latestHeight))
-    : latestHeight;
-  let page = backfill ? Math.max(1, Math.trunc(safeNumber(state.next_page_token, 1))) : 1;
+    : resumeHead
+      ? Math.trunc(safeNumber(state.stats_json.target_height))
+      : Math.min(headHeight, startHeight + COLLECTOR_HEAD_WINDOW_BLOCKS - 1);
+  let page = backfill || resumeHead
+    ? Math.max(1, Math.trunc(safeNumber(state.next_page_token, 1)))
+    : 1;
   let pages = 0;
   let matchCount = 0;
   let blockCount = 0;
   let maxHeight = previousMaxHeight;
   let complete = Boolean(state.complete);
+  let rangeComplete = false;
   const errors = [];
+  const pageBudget = Math.max(1, maxPages);
+  if (!backfill && (targetHeight > headHeight || targetHeight < startHeight)) {
+    // A temporarily stale tip must not change a pending query's page offsets.
+    errors.push(`Collector ${kind} search retains range ${startHeight}-${targetHeight} while latest height is ${headHeight}`);
+  }
 
-  while (pages < Math.max(1, maxPages)) {
+  while (!errors.length && pages < pageBudget) {
     let payload;
     try {
       payload = await fetchCollectorSearchPage(client, {
         kind,
         page,
-        startHeight: config.wasmArbEconomicsStartHeight,
+        startHeight,
         endHeight: targetHeight,
         orderBy: backfill ? 'asc' : 'desc',
         backfill
@@ -808,8 +842,8 @@ export async function scanCollectorSearchPages(client, options = {}) {
       ? (Array.isArray(payload?.txs) ? payload.txs : [])
       : (Array.isArray(payload?.blocks) ? payload.blocks : []);
     const total = Math.max(0, Math.trunc(safeNumber(payload?.total_count)));
-    if (!matches.length) {
-      if (backfill) complete = true;
+    if (!matches.length && backfill) {
+      complete = true;
       break;
     }
 
@@ -821,25 +855,42 @@ export async function scanCollectorSearchPages(client, options = {}) {
     blockCount += await enqueueBlocks(client, candidates);
     const heights = candidates.map((candidate) => candidate.height).filter((height) => height > 0);
     maxHeight = Math.max(maxHeight, ...heights, 0);
-    page += 1;
-
-    if (matches.length < COLLECTOR_TX_PAGE_LIMIT || (total > 0 && (page - 1) * COLLECTOR_TX_PAGE_LIMIT >= total)) {
-      if (backfill) complete = true;
-      break;
+    const exhausted = matches.length < COLLECTOR_TX_PAGE_LIMIT
+      || (total > 0 && page * COLLECTOR_TX_PAGE_LIMIT >= total);
+    if (exhausted) {
+      if (backfill) {
+        complete = true;
+        break;
+      }
+      // Empty successful windows also prove coverage; highest matched height
+      // cannot represent quiet periods or partial-page completeness.
+      scannedThroughHeight = Math.max(scannedThroughHeight, targetHeight);
+      rangeComplete = true;
+      if (targetHeight >= headHeight || pages >= pageBudget) break;
+      startHeight = targetHeight + 1;
+      targetHeight = Math.min(headHeight, startHeight + COLLECTOR_HEAD_WINDOW_BLOCKS - 1);
+      page = 1;
+      rangeComplete = false;
+    } else {
+      page += 1;
     }
-    if (!backfill && stopHeight > 0 && Math.min(...heights, Infinity) <= stopHeight) break;
-    if (config.wasmArbEconomicsRequestDelayMs > 0) {
+    if (pages < pageBudget && config.wasmArbEconomicsRequestDelayMs > 0) {
       await sleep(config.wasmArbEconomicsRequestDelayMs);
     }
   }
 
   await setSyncState(client, syncKey, {
-    cursorValue: String(maxHeight || ''),
-    nextPageToken: backfill && !complete ? String(page) : '',
+    cursorValue: String((backfill ? maxHeight : scannedThroughHeight) || ''),
+    nextPageToken: (backfill ? !complete : !rangeComplete) ? String(page) : '',
     complete: backfill ? complete : Boolean(state.complete),
     stats: {
       ...(state.stats_json || {}),
       target_height: targetHeight,
+      ...(!backfill ? {
+        scan_start_height: startHeight,
+        scanned_through_height: scannedThroughHeight,
+        latest_height: headHeight
+      } : {}),
       max_height: maxHeight,
       last_pages: pages,
       last_matches: matchCount,

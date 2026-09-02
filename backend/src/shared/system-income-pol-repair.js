@@ -8,18 +8,36 @@ import {
 } from './system-income-pol-store.js';
 
 const BLOCKCHAIN_PAGE_SIZE = 20;
+const REPAIR_PERSIST_BATCH_SIZE = 100;
 
-async function mapWithConcurrency(items, limit, worker) {
-  const results = new Array(items.length);
-  let cursor = 0;
-  async function run() {
-    while (cursor < items.length) {
-      const index = cursor++;
-      results[index] = await worker(items[index], index);
+async function persistConcurrentBatches(items, limit, worker, persist) {
+  let persisted = 0;
+  for (let offset = 0; offset < items.length; offset += REPAIR_PERSIST_BATCH_SIZE) {
+    const batch = items.slice(offset, offset + REPAIR_PERSIST_BATCH_SIZE);
+    const results = new Array(batch.length);
+    let cursor = 0;
+    let failure = null;
+    async function run() {
+      while (!failure && cursor < batch.length) {
+        const index = cursor++;
+        try {
+          results[index] = await worker(batch[index]);
+        } catch (error) {
+          failure ||= error;
+        }
+      }
     }
+    // Workers stop taking new items after a failure, but all already-started
+    // requests finish before persistence or the advisory-lock client is released.
+    await Promise.all(Array.from({ length: Math.min(batch.length, Math.max(1, limit)) }, run));
+    const successful = results.filter((result) => result !== undefined);
+    if (successful.length) {
+      await persist(successful);
+      persisted += successful.length;
+    }
+    if (failure) throw failure;
   }
-  await Promise.all(Array.from({ length: Math.min(items.length, Math.max(1, limit)) }, run));
-  return results;
+  return persisted;
 }
 
 function rpcHead(payload = {}) {
@@ -47,13 +65,12 @@ async function ensureHeaderRange(client, startHeight, endHeight, options = {}) {
     }
   }
   const fetchRpc = options.fetchRpc || fetchThorchainRpc;
-  const fetched = await mapWithConcurrency(
+  await persistConcurrentBatches(
     ranges,
     options.concurrency || config.systemIncomePolRepairConcurrency,
-    async (range) => parseChainHeaderRange(await fetchRpc('/blockchain', range), 'liquify-rpc-sipol-repair')
+    async (range) => parseChainHeaderRange(await fetchRpc('/blockchain', range), 'liquify-rpc-sipol-repair'),
+    (pages) => upsertChainHeaders(client, pages.flat())
   );
-  const headers = fetched.flat();
-  if (headers.length) await upsertChainHeaders(client, headers);
   const resolved = await client.query(
     `select height, block_hash, block_time, has_swap_events, source,
             system_income_burn_e8, system_income_total_e8, system_income_pol_observed,
@@ -63,6 +80,39 @@ async function ensureHeaderRange(client, startHeight, endHeight, options = {}) {
     [startHeight, endHeight]
   );
   return new Map(resolved.rows.map((row) => [Number(row.height), row]));
+}
+
+function completeHeaderEvents(header) {
+  if (header.system_income_pol_observed !== true
+    || header.system_income_total_e8 == null
+    || header.system_income_pol_reward_e8 == null
+    || !Array.isArray(header.system_income_pol_deployments)
+    || !Array.isArray(header.system_income_pol_pool_fees)) return null;
+  return {
+    rewardE8: header.system_income_pol_reward_e8,
+    systemIncomeE8: header.system_income_total_e8,
+    deployments: header.system_income_pol_deployments,
+    poolFees: header.system_income_pol_pool_fees
+  };
+}
+
+async function persistRepairedBlocks(client, blocks) {
+  // Save complete event headers first. If the ledger write fails, the next run
+  // can rebuild it from these headers without requesting the block results again.
+  await upsertChainHeaders(client, blocks.map((block) => ({
+    height: block.height,
+    blockHash: block.header.block_hash,
+    blockTime: block.blockTime,
+    hasSwapEvents: block.header.has_swap_events,
+    source: block.header.source,
+    incomeBurnE8: block.header.system_income_burn_e8,
+    systemIncomeTotalE8: block.parsed.systemIncomeE8,
+    systemIncomePolObserved: true,
+    systemIncomePolRewardE8: block.parsed.rewardE8,
+    systemIncomePolDeployments: block.parsed.deployments,
+    systemIncomePolPoolFees: block.parsed.poolFees
+  })));
+  await saveSystemIncomePolBlocks(client, blocks);
 }
 
 export async function repairSystemIncomePolBlocks(client, options = {}) {
@@ -110,13 +160,14 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
     ...options,
     fetchRpc
   });
-  const blocks = await mapWithConcurrency(
+  const repaired = await persistConcurrentBatches(
     heights,
     options.concurrency || config.systemIncomePolRepairConcurrency,
     async (height) => {
       const header = headers.get(height);
       if (!header?.block_time) throw new Error(`SIPOL repair is missing block time for ${height}`);
-      const parsed = parseSystemIncomePolRpcBlock(await fetchRpc('/block_results', { height }));
+      const storedEvents = completeHeaderEvents(header);
+      const parsed = storedEvents || parseSystemIncomePolRpcBlock(await fetchRpc('/block_results', { height }));
       return {
         height,
         blockTime: header.block_time,
@@ -124,26 +175,13 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
         systemIncomeE8: parsed.systemIncomeE8,
         deployments: parsed.deployments,
         poolFees: parsed.poolFees,
-        source: 'liquify-rpc-repair',
+        source: storedEvents ? header.source : 'liquify-rpc-repair',
         header,
         parsed
       };
-    }
+    },
+    (blocks) => persistRepairedBlocks(client, blocks)
   );
-  await saveSystemIncomePolBlocks(client, blocks);
-  await upsertChainHeaders(client, blocks.map((block) => ({
-    height: block.height,
-    blockHash: block.header.block_hash,
-    blockTime: block.blockTime,
-    hasSwapEvents: block.header.has_swap_events,
-    source: block.header.source,
-    incomeBurnE8: block.header.system_income_burn_e8,
-    systemIncomeTotalE8: block.parsed.systemIncomeE8,
-    systemIncomePolObserved: true,
-    systemIncomePolRewardE8: block.parsed.rewardE8,
-    systemIncomePolDeployments: block.parsed.deployments,
-    systemIncomePolPoolFees: block.parsed.poolFees
-  })));
   const remaining = await client.query(
     `select exists (
        select 1 from generate_series($1::bigint, $2::bigint) candidate(height)
@@ -158,7 +196,7 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
       activationHeight,
       lastEventHeight: headHeight,
       stats: {
-        repaired_blocks: blocks.length,
+        repaired_blocks: repaired,
         repair_head_height: headHeight,
         repair_complete: true
       }
@@ -169,7 +207,7 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
     headHeight,
     repairStartHeight,
     requested: heights.length,
-    repaired: blocks.length,
+    repaired,
     complete
   };
 }

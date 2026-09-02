@@ -120,6 +120,15 @@ confirmed gateway 429s remain global. Migration
 and resets the `tx_search` backfill cursor because its page number is relative
 to the requested height interval.
 
+Collector head discovery caps each RPC height interval at 10,000 blocks and
+persists the exact interval and next page across failures or page-budget exits.
+It advances contiguous coverage only when that interval is exhausted, including
+empty intervals. Completed archival coverage can seed the head cursor; a highest
+observed matching block cannot. Once caught up, searches retain a 1,200-block
+overlap. Fee coverage remains incomplete until both head cursors cover the
+newest known target. Existing historical backfill ranges retain their own
+pagination contract.
+
 All backend volume producers follow
 [`volume-accounting.md`](./volume-accounting.md): aggregates and fee-rate
 denominators use executed-leg volume, while intentional route-notional display
@@ -223,6 +232,15 @@ Authenticated Liquify Portal URLs belong only in the server-owned
 provider-cooldown scope, so a public gateway 429 cannot disable that endpoint.
 Keep `RPC_WS_URL` on the public WebSocket route unless the Portal explicitly
 supplies and verifies a dedicated WebSocket URL.
+
+Cooldown errors are not themselves new upstream requests. Ordinary HTTP 5xx
+and transport failures normally pause their service lane for 60 seconds;
+rate-limit/breach failures default to one hour. Parsed `Retry-After` seconds
+are a lower bound for either duration. Inspect `last_status`, `last_failed_at`,
+`blocked_until`, and the redacted failure reason before attributing cooldowns
+to quota exhaustion. Heights or hashes containing `429` are not HTTP status
+evidence. See the [September 2 investigation](../knowledge/liquify-cooldowns-2026-09-02.md)
+for observed failures and remaining request budgets.
 
 `POOL_DISLOCATION_THORNODE_URLS` is an independent ordered list for this
 sampler and its historical repair. Add a second provider only after its DNS and
@@ -443,8 +461,9 @@ pool-generated liquidity fees, and per-asset sync state. Migration
 `052_pool_analysis_fee_scope.sql` removes the legacy downstream-earnings
 column, discards rows that contain no swap measures, and normalizes retained
 rows to swap-history provenance.
-`boonetools-pool-analysis.timer` refreshes the trailing 35 days every fifteen
-minutes and publishes the compact `/pool-analysis` table model. Its single
+`boonetools-pool-analysis.timer` refreshes today's swap totals every fifteen
+minutes, reuses the shared fresh pool snapshot for today's partial depth, and
+publishes the compact `/pool-analysis` table model. Its single
 aggregate query materializes completed-UTC 24-hour, 7-day, 30-day, 90-day, and
 1-year volume and liquidity-fee windows, including coverage and annualized
 generated-fee rates. Current price, depth, and balances come from
@@ -465,6 +484,26 @@ both ledgers by UTC day; `depth_usd` in this **series** is two-sided depth,
 at the same closing pool-implied RUNE price. It is pool-accounted liquidity,
 not independently reconciled vault inventory. Missing depth or price is null;
 the in-progress UTC day is explicitly partial.
+
+Migration `060_pool_analysis_completion.sql` adds independent swaps/depth
+completion markers. A closed day is marked complete only after a successful
+same-provider history fetch with valid UTC boundaries and required values,
+preceded by `/health` reporting a healthy aggregation watermark at or beyond
+that day end. Completed days are skipped on subsequent timer runs; a sparse
+gap never causes already completed days between gaps to be re-requested.
+Today remains partial. Fresh core depth uses the pool response's own
+`asset_tor_price`, balances, and field timestamp without another provider call.
+
+Historical catch-up follows live work and is capped at 20 history requests per
+run, plus one shared health request when there is pending work. It prioritizes
+newly closed days and rotates retry candidates so unavailable gaps cannot
+monopolize the allowance. Missing days remain tracked across outages. Legacy
+rows begin without completion markers and are validated once in small batches;
+they are not all fetched during deployment. There is no periodic broad
+reconciliation. The explicit backfill job remains available when an operator
+needs to repair even previously completed data. Monitor completion counts,
+pending work, provider watermark errors, and per-run request statistics while
+the initial validation finishes.
 
 The chart's Depth / Cumulative fees toggle changes only the green USD line,
 axis, and tooltip, preserving daily volume/fee bars, the range, and custom
@@ -490,10 +529,17 @@ Midgard's 100-interval per-pool swap-history limit, writes bounded batches, and
 can be safely started again. Missing provider days remain visible gaps; they
 are never interpolated or treated as zero. Optional settings are
 `POOL_ANALYSIS_START_DATE` (default `2021-04-01`),
-`POOL_ANALYSIS_RECENT_LOOKBACK_DAYS` (default `35`),
+`POOL_ANALYSIS_RECENT_LOOKBACK_DAYS` (default `35`, used only to seed the durable
+missing-day tracking boundary),
 `POOL_ANALYSIS_REQUEST_DELAY_MS` (default `100`),
-`POOL_ANALYSIS_MAX_PAGES` (default `30`), and
-`POOL_ANALYSIS_CONCURRENCY` (default `2`).
+`POOL_ANALYSIS_MAX_PAGES` (default `30` for standalone history fetches),
+`POOL_ANALYSIS_CONCURRENCY` (default `2`),
+`POOL_ANALYSIS_HISTORY_REQUEST_LIMIT` (default `20` per scheduled run), and
+`POOL_ANALYSIS_CORE_MAX_AGE_MS` (default `300000`). Routine history requests
+use one page per contiguous pending range, with at most 100 swap days or 400
+depth days and explicit UTC bounds. The explicit full backfill bypasses the
+routine request budget and may replace completed rows only with another
+validated complete observation.
 
 Migration `042_pool_dislocation_binance_usdt_to_usd.sql` corrects the Pool
 Dislocation Binance unit contract. Binance spot markets provide `XUSDT`, so

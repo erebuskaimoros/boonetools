@@ -209,9 +209,9 @@ test('Pool Analysis pagination crosses sparse and halted history instead of trea
     }
   });
   assert.equal(result.rows.length, 2);
-  assert.equal(calls.length, 3);
-  assert.match(calls[1], /from=1618099200/);
-  assert.match(calls[2], /from=1633132800/);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1], /from=1625875200/);
+  assert.match(calls[1], /to=1633478400/);
 });
 
 test('Pool Analysis ingestion tolerates one failed pool and persists successful history', async () => {
@@ -221,6 +221,10 @@ test('Pool Analysis ingestion tolerates one failed pool and persists successful 
   const result = await ingestPoolAnalysisHistory({ id: 'db' }, {
     now: new Date('2026-01-31T12:00:00Z'),
     assets: ['BTC.BTC', 'ETH.ETH'],
+    coreSnapshot: { payload: { pools: ['BTC.BTC', 'ETH.ETH'].map((asset) => ({
+      asset, balance_rune: '1', balance_asset: '1', asset_tor_price: '100000000'
+    })), field_meta: { pools: { status: 'fresh', fetched_at: '2026-01-31T12:00:00Z' } } } },
+    loadPendingDays: async () => [],
     skipDelay: true,
     fetchSwapHistory: async (asset) => {
       if (asset === 'ETH.ETH') throw new Error('temporary failure');
@@ -282,8 +286,8 @@ test('Pool Analysis depth pagination uses the exact pool and advances across spa
     }
   });
   assert.match(calls[0], /^\/history\/depths\/ETH.LINK-0X123\?/);
-  assert.match(calls[0], /count=400/);
-  assert.match(calls[1], /from=1727395200/);
+  assert.match(calls[0], /to=1727568000/);
+  assert.equal(calls.length, 1);
   assert.equal(result.rows.length, 1);
 });
 
@@ -292,6 +296,9 @@ test('Pool Analysis depth failures do not prevent successful fee history from be
   let state;
   const result = await ingestPoolAnalysisHistory({}, {
     now: new Date('2026-01-31T12:00:00Z'), assets: ['BTC.BTC'],
+    coreSnapshot: null,
+    loadPendingDays: async () => [{ asset: 'BTC.BTC', lane: 'depth', day: '2026-01-30' }],
+    fetchMidgard: async () => ({ database: true, inSync: true, lastAggregated: { height: 1, timestamp: 1769817600 } }),
     fetchSwapHistory: async () => ({ pages: 1, rows: [{ asset: 'BTC.BTC', day: '2026-01-31' }] }),
     fetchDepthHistory: async () => { throw new Error('depth provider unavailable'); },
     upsert: async (_client, rows) => { saved += rows.length; return rows.length; },

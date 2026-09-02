@@ -26,9 +26,29 @@ distribution. The dashboard is visible in navigation.
 
 ## Storage and operations
 
-Migration 059 adds `pool_analysis_depth_daily`. The existing fifteen-minute
-Pool Analysis job refreshes the recent 35-day window for swaps and depth;
-`pool-analysis-backfill` fills history from 2021-04-01. Depth acquisition is
-independent of successful fee writes, with its own error/stat fields. Public
-GETs only join stored data and never fetch providers. See
+Migration 059 adds `pool_analysis_depth_daily`; migration 060 adds durable
+per-day completion. The fifteen-minute job refreshes today's swap totals and
+uses the existing fresh THORNode pool field for today's partial depth. Its
+asset price, RUNE balance, and asset balance come from the same pool response;
+the observation retains the field's actual timestamp and `thornode-core:pools`
+provenance. Stale, future-dated, or prior-UTC-day core observations cannot
+populate today's depth.
+
+Swaps and depth have independent `completed_at` markers. A closed day is
+sealed only after a healthy Midgard aggregation watermark has passed that
+day's UTC boundary, the requested interval and required values are valid, and
+the data and marker are saved together. The health check precedes historical
+requests, which use the same provider base. Rounded bucket end times alone do
+not establish completion.
+
+Normal work requests only missing or incomplete closed days and never crosses
+completed days to combine gaps. Newly closed days take priority over a bounded
+older backlog. Complete days are skipped across restarts. Legacy rows have no
+proven aggregation watermark and receive a bounded one-time validation rather
+than being silently certified by their former `partial=false` flag. There is
+no recurring 35-day rescan. `pool-analysis-backfill` remains an explicit repair
+override for history from 2021-04-01.
+
+Depth acquisition is independent of successful fee writes, with its own
+error/stat fields. Public GETs only join stored data and never fetch providers. See
 [backend deployment](../docs/boonetools-backend-hetzner.md) for backfill commands.

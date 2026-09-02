@@ -199,6 +199,8 @@ export const config = Object.freeze({
   poolAnalysisRequestDelayMs: readInt('POOL_ANALYSIS_REQUEST_DELAY_MS', 100),
   poolAnalysisMaxPages: readInt('POOL_ANALYSIS_MAX_PAGES', 30),
   poolAnalysisConcurrency: readInt('POOL_ANALYSIS_CONCURRENCY', 2),
+  poolAnalysisHistoryRequestLimit: readInt('POOL_ANALYSIS_HISTORY_REQUEST_LIMIT', 20),
+  poolAnalysisCoreMaxAgeMs: readInt('POOL_ANALYSIS_CORE_MAX_AGE_MS', 300000),
   polTrackerStartDate: optional(process.env.POL_TRACKER_START_DATE) || '2025-02-01',
   polTrackerThornodeUrls: readList('POL_TRACKER_THORNODE_URLS', [
     thornodeArchiveUrl,
