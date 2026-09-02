@@ -1,5 +1,6 @@
 <script>
   import { onDestroy, onMount, tick } from 'svelte';
+  import { createVisiblePoll } from './utils/visible-poll.js';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
   import { subscribeChainHeads } from './api/chain-stream.js';
   import { fetchBurnTracker } from './burn-tracker/api.js';
@@ -125,11 +126,11 @@
       onUnavailable: () => { chainStreamConnected = false; },
       onHead: handleChainHead
     });
-    refreshTimer = window.setInterval(() => load(true), REFRESH_MS);
+    refreshTimer = createVisiblePoll(() => load(true), { intervalMs: REFRESH_MS, immediate: false });
   });
 
   onDestroy(() => {
-    window.clearInterval(refreshTimer);
+    refreshTimer?.stop();
     chainSubscription?.close();
     chart?.destroy();
   });

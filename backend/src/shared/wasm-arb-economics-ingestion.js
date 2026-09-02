@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
 import { safeNumber, sleep } from '../lib/utils.js';
-import { fetchMidgard, fetchMidgardActions, fetchMidgardSwapHistory } from './midgard.js';
+import { MIDGARD_BASES, fetchMidgard, fetchMidgardActions, fetchMidgardSwapHistory } from './midgard.js';
+import { acquisitionSourceKey, loadAcquisition, saveAcquisition } from './acquisition-cache.js';
+import { resolveThorchainBlockTime, resolveThorchainHead } from './chain-data.js';
 import { fetchThorchainRpc } from './rpc.js';
 import {
   ensureThorchainMarketSnapshot,
@@ -1336,18 +1338,13 @@ export async function scanCandidateBlocks(client, options = {}) {
       );
       let blockTime = block.block_time;
       if (!Number.isFinite(Date.parse(blockTime || ''))) {
-        const blockPayload = await (options.fetchBlock || fetchRpc)(
-          '/block',
-          { height: block.height },
-          {
+        blockTime = await (options.resolveBlockTime || resolveThorchainBlockTime)(client, block.height, {
+          fetchBlock: (height) => (options.fetchBlock || fetchRpc)('/block', { height }, {
             cooldownClient: client,
             sharedCooldown: true,
             cooldownScope: FEE_BLOCK_COOLDOWN_SCOPE
-          }
-        );
-        blockTime = blockPayload?.result?.block?.header?.time
-          || blockPayload?.block?.header?.time
-          || null;
+          })
+        });
       }
       if (!Number.isFinite(Date.parse(blockTime || ''))) {
         throw new Error(`Missing canonical block time for height ${block.height}`);
@@ -1413,27 +1410,68 @@ export async function scanCandidateBlocks(client, options = {}) {
   };
 }
 
-async function fetchPriceIntervals(poolAsset, from, to, options = {}) {
+export async function fetchPriceIntervals(poolAsset, from, to, options = {}) {
   const prices = new Map();
-  let cursor = floorBucket(from);
-  const target = floorBucket(to) + FIVE_MINUTES;
-  while (cursor < target) {
-    const until = Math.min(target, cursor + NETWORK_INTERVAL_LIMIT * FIVE_MINUTES);
+  const namespace = 'midgard:depth-price:5min';
+  const base = options.priceBase || MIDGARD_BASES[0];
+  const sourceKey = acquisitionSourceKey(base);
+  const identity = (bucket) => `${sourceKey}:${normalizeAsset(poolAsset)}:${bucket}:${bucket + FIVE_MINUTES}`;
+  const requested = options.requiredBuckets
+    ? [...new Set(options.requiredBuckets.map(floorBucket))].sort((a, b) => a - b)
+    : Array.from({ length: Math.max(0, (floorBucket(to) - floorBucket(from)) / FIVE_MINUTES + 1) }, (_, index) => floorBucket(from) + index * FIVE_MINUTES);
+  const missing = [];
+  for (const bucket of requested) {
+    const stored = await (options.loadAcquisition || loadAcquisition)(options.client, namespace, identity(bucket), { requireComplete: true });
+    const price = safeNumber(stored?.payload?.price);
+    if (stored?.completedAt && price > 0) prices.set(bucket, price);
+    else missing.push(bucket);
+  }
+  if (!missing.length) return prices;
+
+  // Rounded history endTime does not prove the bucket has been aggregated.
+  // Capture this provider's watermark before requesting any of its history.
+  const fetch = options.fetchMidgard || fetchMidgard;
+  const fetchOptions = { cooldownClient: options.client, sharedCooldown: true, bases: [base] };
+  const health = await fetch('/health', fetchOptions);
+  const now = typeof options.healthNow === 'function' ? options.healthNow() : options.healthNow ?? Date.now();
+  const nowMs = typeof now === 'number' ? now : Date.parse(now);
+  const watermark = Number(health?.lastAggregated?.timestamp);
+  const validWatermark = health?.database === true && health?.inSync === true
+    && Number(health?.lastAggregated?.height) > 0 && Number.isFinite(watermark)
+    && watermark > 0 && watermark * 1000 <= nowMs;
+  const ranges = [];
+  for (const bucket of missing) {
+    const last = ranges.at(-1);
+    if (last && bucket === last.until && last.count < NETWORK_INTERVAL_LIMIT) {
+      last.until += FIVE_MINUTES;
+      last.count++;
+    } else ranges.push({ from: bucket, until: bucket + FIVE_MINUTES, count: 1 });
+  }
+  for (const range of ranges) {
     const query = new URLSearchParams({
       interval: '5min',
-      from: String(cursor),
-      to: String(until)
+      from: String(range.from),
+      to: String(range.until)
     });
-    const payload = await (options.fetchMidgard || fetchMidgard)(
+    const payload = await fetch(
       `/history/depths/${encodeURIComponent(poolAsset)}?${query}`,
-      { cooldownClient: options.client, sharedCooldown: true }
+      fetchOptions
     );
     for (const interval of payload?.intervals || []) {
+      const bucket = Number(interval?.startTime);
       const price = safeNumber(interval?.assetPriceUSD);
-      if (price > 0) prices.set(floorBucket(interval?.startTime), price);
+      if (!(price > 0) || bucket < range.from || bucket >= range.until || bucket !== floorBucket(bucket)) continue;
+      prices.set(bucket, price);
+      if (validWatermark && Number(interval?.endTime) === bucket + FIVE_MINUTES && watermark >= bucket + FIVE_MINUTES) {
+        const observedAt = new Date(nowMs).toISOString();
+        await (options.saveAcquisition || saveAcquisition)(options.client, {
+          namespace, identity: identity(bucket), payload: { price }, source: 'midgard-depth-5min',
+          observedAt, completedAt: observedAt,
+          metadata: { sourceKey, poolAsset: normalizeAsset(poolAsset), from: bucket, to: bucket + FIVE_MINUTES, watermark }
+        });
+      }
     }
-    cursor = until;
-    if (config.wasmArbEconomicsRequestDelayMs > 0) {
+    if (!options.skipDelay && config.wasmArbEconomicsRequestDelayMs > 0) {
       await sleep(config.wasmArbEconomicsRequestDelayMs);
     }
   }
@@ -1532,11 +1570,15 @@ export async function priceRujiraFeeEvents(client, options = {}) {
       continue;
     }
     try {
+      const requiredBuckets = rows.filter((row) => {
+        const hint = row.raw_event?.finExecutionPrice;
+        return [row.denom, hint?.baseDenom, hint?.quoteDenom].some((value) => String(value || '').toLowerCase() === denom);
+      }).map((row) => floorBucket(unixSeconds(row.block_time)));
       priceMaps.set(denom, await fetchPriceIntervals(
         poolAsset,
         unixSeconds(rows[0].block_time),
         unixSeconds(rows.at(-1).block_time),
-        { ...options, client }
+        { ...options, client, requiredBuckets }
       ));
     } catch (error) {
       if (isUnsupportedPoolPriceError(error)) {
@@ -1745,13 +1787,12 @@ export async function wasmRuntimeOptions(client, options = {}, lane = 'combined'
     timeoutMs: WASM_THORNODE_REQUEST_TIMEOUT_MS,
     ...fetchOptions
   }));
-  const latestHeight = Math.trunc(safeNumber(options.latestHeight)) || Math.trunc(
-    extractThorHeight(await fetchThor('/thorchain/lastblock', {
-      cooldownClient: client,
-      sharedCooldown: true,
-      cooldownScope: `wasm-${lane}-head`
-    }))
-  );
+  const latestHeight = Math.trunc(safeNumber(options.latestHeight)) || (await (options.resolveHead || resolveThorchainHead)(client, {
+    nowMs: options.nowMs,
+    fetchHead: async () => ({ height: extractThorHeight(await fetchThor('/thorchain/lastblock', {
+      cooldownClient: client, sharedCooldown: true, cooldownScope: `wasm-${lane}-head`
+    })), source: 'thornode:lastblock' })
+  })).height;
   return { ...options, fetchThorchain: fetchThor, latestHeight };
 }
 

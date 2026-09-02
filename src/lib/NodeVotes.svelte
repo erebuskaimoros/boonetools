@@ -1,5 +1,6 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
+  import { createVisiblePoll } from './utils/visible-poll.js';
   import {
     fetchNodeVoteDetails,
     fetchNodeVoteNodeDetails,
@@ -74,12 +75,12 @@
 
   onMount(() => {
     loadDashboard();
-    refreshTimer = setInterval(() => loadDashboard({ silent: true }), REFRESH_INTERVAL_MS);
+    refreshTimer = createVisiblePoll(() => loadDashboard({ silent: true }), { intervalMs: REFRESH_INTERVAL_MS, immediate: false });
   });
 
   onDestroy(() => {
     dashboardRequestId += 1;
-    clearInterval(refreshTimer);
+    refreshTimer?.stop();
   });
 
   async function loadDashboard(options = {}) {

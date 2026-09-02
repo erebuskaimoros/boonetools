@@ -2,6 +2,7 @@ import { config } from '../lib/config.js';
 import { fetchMidgard } from '../shared/midgard.js';
 import { fetchThorchain } from '../shared/thornode.js';
 import { isThorNodeCoreSnapshotStale } from '../shared/thornode-core-snapshot.js';
+import { loadAcquisition, saveAcquisition } from '../shared/acquisition-cache.js';
 
 const REQUEST_TIMEOUT_MS = 6_000;
 const EVM_RPC_ENDPOINTS = Object.freeze({
@@ -249,6 +250,16 @@ async function postRpcBatch(chain, calls, options = {}) {
 
 export async function fetchEvmChainHoldings(address, chain, trackedAssets = [], options = {}) {
   const assets = [...new Set(trackedAssets)].filter((asset) => normalizeContract(asset));
+  const nowMs = Number(options.nowMs ?? Date.now());
+  const client = options.cooldownClient;
+  const decimalsByContract = new Map();
+  for (const asset of assets) {
+    const contract = normalizeContract(asset);
+    const cached = await loadAcquisition(client, 'evm-token-decimals:v1', { chain, contract }, { nowMs });
+    if (Number.isInteger(cached?.payload) && cached.payload >= 0 && cached.payload <= 36) {
+      decimalsByContract.set(contract, cached.payload);
+    }
+  }
   const calls = [{ key: 'native', method: 'eth_getBalance', params: [address, 'latest'] }];
   for (const asset of assets) {
     const contract = normalizeContract(asset);
@@ -257,7 +268,7 @@ export async function fetchEvmChainHoldings(address, chain, trackedAssets = [], 
       method: 'eth_call',
       params: [{ to: contract, data: `0x70a08231${addressWord(address)}` }, 'latest']
     });
-    calls.push({
+    if (!decimalsByContract.has(contract)) calls.push({
       key: `${asset}:decimals`,
       method: 'eth_call',
       params: [{ to: contract, data: '0x313ce567' }, 'latest']
@@ -265,14 +276,26 @@ export async function fetchEvmChainHoldings(address, chain, trackedAssets = [], 
   }
 
   const results = await postRpcBatch(chain, calls, options);
+  const byKey = new Map(calls.map((call, index) => [call.key, results[index]]));
   const holdings = [];
   const nativeAmount = formatUnits(decodeRpcQuantity(results[0]), 18);
   const nativeAsset = { ETH: 'ETH.ETH', BSC: 'BSC.BNB', AVAX: 'AVAX.AVAX', BASE: 'BASE.ETH' }[chain];
   if (nativeAsset && nativeAmount > 0) holdings.push({ asset: nativeAsset, chain, amount: nativeAmount });
 
-  for (const [assetIndex, asset] of assets.entries()) {
-    const balance = decodeRpcQuantity(results[1 + assetIndex * 2]);
-    const decimals = Number(decodeRpcQuantity(results[2 + assetIndex * 2], 18n));
+  for (const asset of assets) {
+    const contract = normalizeContract(asset);
+    const balance = decodeRpcQuantity(byKey.get(`${asset}:balance`));
+    if (!decimalsByContract.has(contract)) {
+      const raw = byKey.get(`${asset}:decimals`);
+      if (!/^0x[0-9a-f]+$/i.test(String(raw))) throw new Error(`Invalid ${chain} token decimals`);
+      const decimals = Number(BigInt(raw));
+      if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) throw new Error(`Invalid ${chain} token decimals`);
+      decimalsByContract.set(contract, decimals);
+      await saveAcquisition(client, { namespace: 'evm-token-decimals:v1', identity: { chain, contract },
+        payload: decimals, source: `${chain}:eth_call`, observedAt: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + 86_400_000).toISOString() });
+    }
+    const decimals = decimalsByContract.get(contract);
     const amount = formatUnits(balance, decimals);
     if (!(amount > 0)) continue;
     holdings.push({

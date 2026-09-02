@@ -9,7 +9,8 @@ export async function handleNetworkSnapshot(_request, url) {
     'pools', 'constants', 'node_mimirs', 'churns'
   ]);
   const body = allowedFields.has(requestedField) ? payload[requestedField] : payload;
-  return json(body, 200, {
+  const withMeta = allowedFields.has(requestedField) && url?.searchParams?.get('include_meta') === 'true';
+  return json(withMeta ? { value: body, field_meta: payload.field_meta?.[requestedField] || {}, stale: payload.stale } : body, 200, {
     'Cache-Control': payload.stale
       ? 'public, max-age=5, stale-if-error=60'
       : 'public, max-age=10, stale-while-revalidate=15'

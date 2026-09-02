@@ -4,23 +4,20 @@ import { error, isValidThorAddress, json } from '../lib/http.js';
 import { config } from '../lib/config.js';
 import { requestFromProviders } from '../lib/provider-client.js';
 import {
-  calculateBondHistoryRow,
   hasBondHistoryValue,
   isPoisonedBondHistoryRow,
   isTransientHistoricalFetchError
 } from '../shared/bond-history.js';
 import { enqueueBondHistoryRefresh } from '../shared/bond-history-refresh-queue.js';
-import { fetchMidgardActions } from '../shared/midgard.js';
 import { executeDuneQueryRows, summarizeDuneError } from '../shared/dune.js';
 import { fetchStockPrices } from '../shared/stock-prices.js';
-import { fetchChurns, fetchNodes, fetchThorchain } from '../shared/thornode.js';
+import { fetchChurns, fetchNodes } from '../shared/thornode.js';
+import { processChurn, scanBondActionWindow } from '../shared/bond-history-acquisition.js';
 
 const BOND_HISTORY_SCOPE_CURRENT = 'current';
 const BOND_HISTORY_SCOPE_HISTORICAL = 'historical';
 const BOND_HISTORY_SCOPE_LEGACY = 'legacy';
 const BOND_TX_EVENT_SYNC_TTL_MS = 6 * 60 * 60 * 1000;
-const BOND_TX_EVENT_PAGE_SIZE = 50;
-const BOND_TX_EVENT_MAX_PAGES = 20;
 const COINGECKO_BASE = 'https://api.coingecko.com';
 
 function fetchCoinGecko(path) {
@@ -30,14 +27,6 @@ function fetchCoinGecko(path) {
     timeoutMs: 10_000,
     headers: { Accept: 'application/json' }
   });
-}
-
-async function fetchNodeAtHeight(nodeAddress, height) {
-  return fetchThorchain(`/thorchain/node/${nodeAddress}?height=${height}`, { historical: true });
-}
-
-async function fetchNetworkAtHeight(height) {
-  return fetchThorchain(`/thorchain/network?height=${height}`, { historical: true });
 }
 
 async function getCurrentNodeAddresses(bondAddress) {
@@ -99,8 +88,8 @@ function normalizeDuneBondTxEvent(bondAddress, row) {
   };
 }
 
-async function loadBondTxEvents(bondAddress) {
-  const { rows } = await query(
+async function loadBondTxEvents(bondAddress, client) {
+  const { rows } = await (client ? client.query.bind(client) : query)(
     `select bond_address, tx_id, action_height, node_address, action_type, raw_action
      from bond_tx_events
      where bond_address = $1
@@ -111,9 +100,9 @@ async function loadBondTxEvents(bondAddress) {
   return rows || [];
 }
 
-async function loadBondTxEventSyncState(bondAddress) {
-  const { rows } = await query(
-    `select synced_at, complete, error
+async function loadBondTxEventSyncState(bondAddress, client) {
+  const { rows } = await (client ? client.query.bind(client) : query)(
+    `select synced_at, complete, error, midgard_scanned_through, midgard_source_key, midgard_scan_json, dune_seeded_at
      from bond_tx_event_sync_state
      where bond_address = $1
      limit 1`,
@@ -125,122 +114,81 @@ async function loadBondTxEventSyncState(bondAddress) {
 
 function isFreshBondTxSync(syncState) {
   const syncedAtMs = Date.parse(String(syncState?.synced_at || ''));
-  return Number.isFinite(syncedAtMs) && Date.now() - syncedAtMs < BOND_TX_EVENT_SYNC_TTL_MS;
+  const age = Date.now() - syncedAtMs;
+  const ttl = syncState?.complete ? BOND_TX_EVENT_SYNC_TTL_MS : 30_000;
+  return Number.isFinite(syncedAtMs) && age >= 0 && age < ttl;
 }
 
 async function saveBondTxEventSyncState(client, bondAddress, payload) {
   await client.query(
-    `insert into bond_tx_event_sync_state (bond_address, synced_at, complete, error)
-     values ($1, now(), $2, $3)
-     on conflict (bond_address)
-     do update set
-       synced_at = excluded.synced_at,
-       complete = excluded.complete,
-       error = excluded.error`,
-    [
-      bondAddress,
-      Boolean(payload.complete),
-      payload.error || ''
-    ]
+    `insert into bond_tx_event_sync_state as current (
+       bond_address, synced_at, complete, error, midgard_scanned_through,
+       midgard_source_key, midgard_scan_json, dune_seeded_at
+     ) values ($1, now(), $2, $3, $4, $5, $6::jsonb, $7)
+     on conflict (bond_address) do update set
+       synced_at = excluded.synced_at, complete = excluded.complete, error = excluded.error,
+       midgard_scanned_through = coalesce(excluded.midgard_scanned_through, current.midgard_scanned_through),
+       midgard_source_key = coalesce(excluded.midgard_source_key, current.midgard_source_key),
+       midgard_scan_json = excluded.midgard_scan_json,
+       dune_seeded_at = coalesce(excluded.dune_seeded_at, current.dune_seeded_at)`,
+    [bondAddress, Boolean(payload.complete), payload.error || '',
+      payload.coveredThrough ? new Date(payload.coveredThrough * 1000).toISOString() : null,
+      payload.coveredThrough ? payload.sourceKey : null, JSON.stringify(payload.progress || {}),
+      payload.duneSeededAt || null]
   );
 }
 
 async function scanAndCacheBondTxEvents(bondAddress) {
-  let duneErrorSummary = null;
-
-  if (config.duneApiKey && config.bondTxEventsDuneQueryId) {
-    try {
-      const result = await executeDuneQueryRows(config.bondTxEventsDuneQueryId, {
-        bond_address: bondAddress,
-        start_time: config.bondTxEventsDuneStartTime,
-        limit: config.bondTxEventsDuneLimit
-      }, {
-        limit: config.bondTxEventsDuneLimit
-      });
-      const rows = result.rows
-        .map((row) => normalizeDuneBondTxEvent(bondAddress, row))
-        .filter(Boolean);
-      const dbClient = await getClient();
-      try {
-        await upsertRows(dbClient, 'bond_tx_events', rows, {
-          conflictColumns: ['bond_address', 'tx_id', 'action_height'],
-          jsonColumns: ['raw_action']
-        });
-        await saveBondTxEventSyncState(dbClient, bondAddress, {
-          complete: true,
-          error: ''
-        });
-      } finally {
-        dbClient.release();
-      }
-
-      return {
-        events: await loadBondTxEvents(bondAddress),
-        complete: true,
-        error: ''
-      };
-    } catch (duneError) {
-      duneErrorSummary = summarizeDuneError(duneError);
-      console.warn(`[bond-history] Dune bond action scan failed for ${bondAddress}; falling back to Midgard: ${duneErrorSummary.message}`);
-    }
-  }
-
-  const rowsByKey = new Map();
-  let offset = 0;
-  let complete = false;
-  let errorMessage = '';
-
-  for (let page = 0; page < BOND_TX_EVENT_MAX_PAGES; page += 1) {
-    const data = await fetchMidgardActions({
-      address: bondAddress,
-      type: 'bond',
-      limit: BOND_TX_EVENT_PAGE_SIZE,
-      offset
-    });
-    const actions = data.actions || [];
-
-    for (const action of actions) {
-      const row = normalizeBondTxEvent(bondAddress, action);
-      if (!row) {
-        continue;
-      }
-      rowsByKey.set(`${row.tx_id}:${row.action_height}`, row);
-    }
-
-    if (actions.length < BOND_TX_EVENT_PAGE_SIZE) {
-      complete = true;
-      break;
-    }
-
-    offset += actions.length;
-  }
-
-  if (!complete) {
-    errorMessage = `Bond action scan reached ${BOND_TX_EVENT_MAX_PAGES} pages`;
-  } else if (duneErrorSummary) {
-    errorMessage = `Dune bond action scan failed; served Midgard fallback (${duneErrorSummary.message})`;
-  }
-
-  const rows = [...rowsByKey.values()];
-  const dbClient = await getClient();
+  const client = await getClient();
+  const lockKey = `bond-actions:${bondAddress}`;
   try {
-    await upsertRows(dbClient, 'bond_tx_events', rows, {
-      conflictColumns: ['bond_address', 'tx_id', 'action_height'],
-      jsonColumns: ['raw_action']
-    });
-    await saveBondTxEventSyncState(dbClient, bondAddress, {
-      complete,
-      error: errorMessage
-    });
+    await client.query('select pg_advisory_lock(hashtextextended($1, 0))', [lockKey]);
+    const previous = await loadBondTxEventSyncState(bondAddress, client);
+    // Both scope queues can reach this lane together; recheck after the lock.
+    if (isFreshBondTxSync(previous)) return {
+      events: await loadBondTxEvents(bondAddress, client), complete: Boolean(previous.complete), error: previous.error || ''
+    };
+    const rows = [];
+    let duneSeededAt = null;
+    let duneError = '';
+    // Dune seeds old events once. Only Midgard's own verified window can establish
+    // its durable incremental boundary; a last matching event is not coverage.
+    if (!previous && config.duneApiKey && config.bondTxEventsDuneQueryId) {
+      try {
+        const result = await executeDuneQueryRows(config.bondTxEventsDuneQueryId, {
+          bond_address: bondAddress, start_time: config.bondTxEventsDuneStartTime, limit: config.bondTxEventsDuneLimit
+        }, { limit: config.bondTxEventsDuneLimit });
+        rows.push(...result.rows.map((row) => normalizeDuneBondTxEvent(bondAddress, row)).filter(Boolean));
+        duneSeededAt = new Date().toISOString();
+      } catch (error) { duneError = summarizeDuneError(error).message; }
+    }
+    let scan;
+    try {
+      scan = await scanBondActionWindow(bondAddress, {
+        client, coveredThrough: Date.parse(previous?.midgard_scanned_through || '') / 1000,
+        coveredSourceKey: previous?.midgard_source_key, progress: previous?.midgard_scan_json,
+        validateAction: (action) => Boolean(normalizeBondTxEvent(bondAddress, action))
+      });
+    } catch (error) {
+      scan = { actions: [], complete: false, coveredThrough: null,
+        progress: previous?.midgard_scan_json, error: error?.message || String(error) };
+    }
+    rows.push(...scan.actions.map((action) => normalizeBondTxEvent(bondAddress, action)).filter(Boolean));
+    const rowsByKey = new Map(rows.map((row) => [`${row.tx_id}:${row.action_height}`, row]));
+    const error = scan.error || (duneError ? `Dune seed failed; served Midgard (${duneError})` : '');
+    await client.query('begin');
+    try {
+      await upsertRows(client, 'bond_tx_events', [...rowsByKey.values()], {
+        conflictColumns: ['bond_address', 'tx_id', 'action_height'], jsonColumns: ['raw_action']
+      });
+      await saveBondTxEventSyncState(client, bondAddress, { ...scan, error, duneSeededAt });
+      await client.query('commit');
+    } catch (error) { await client.query('rollback'); throw error; }
+    return { events: await loadBondTxEvents(bondAddress, client), complete: scan.complete, error };
   } finally {
-    dbClient.release();
+    try { await client.query('select pg_advisory_unlock(hashtextextended($1, 0))', [lockKey]); }
+    finally { client.release(); }
   }
-
-  return {
-    events: await loadBondTxEvents(bondAddress),
-    complete,
-    error: errorMessage
-  };
 }
 
 async function getBondTxEvents(bondAddress) {
@@ -480,52 +428,6 @@ function cachedHistoryResponse({
   });
 }
 
-async function processChurn(bondAddress, nodeAddresses, churnHeight, churnTimestamp, ratesJson) {
-  const nodePromises = nodeAddresses.map(async (address) => {
-    try {
-      return {
-        ok: true,
-        data: await fetchNodeAtHeight(address, churnHeight - 1)
-      };
-    } catch (fetchError) {
-      return {
-        ok: false,
-        data: null,
-        error: fetchError
-      };
-    }
-  });
-  const networkPromise = fetchNetworkAtHeight(churnHeight)
-    .then((data) => ({ ok: true, data }))
-    .catch((fetchError) => ({
-      ok: false,
-      data: null,
-      error: fetchError
-    }));
-
-  const [nodeResults, networkData] = await Promise.all([
-    Promise.all(nodePromises),
-    networkPromise
-  ]);
-
-  const hasTransientNodeFailure = nodeResults.some((result) => (
-    !result.ok && isTransientHistoricalFetchError(result.error)
-  ));
-  const hasTransientNetworkFailure = !networkData.ok && isTransientHistoricalFetchError(networkData.error);
-  if (hasTransientNodeFailure || hasTransientNetworkFailure || !networkData.data) {
-    return null;
-  }
-
-  return calculateBondHistoryRow({
-    bondAddress,
-    nodePayloads: nodeResults.map((result) => result?.data).filter(Boolean),
-    networkData: networkData.data,
-    churnHeight,
-    churnTimestamp,
-    ratesJson
-  });
-}
-
 export async function handleBondHistory(request, url) {
   const bondAddress = (url.searchParams.get('bond_address') || '').trim().toLowerCase();
   const includeHistorical = url.searchParams.get('include_historical') === 'true';
@@ -757,14 +659,16 @@ export async function handleBondHistory(request, url) {
       hasHistorical: effectiveHasHistorical,
       minHeight: 0,
       bondTxEvents,
-      includeBondTxs
+      includeBondTxs,
+      stale: !discoveryComplete,
+      warning: discoveryComplete ? '' : `Bond action discovery remains incomplete: ${discoveryError}`
     });
   }
 
   uncached.sort((left, right) => right.height - left.height);
   const zeroThreshold = includeHistorical ? 5 : 2;
   const newRows = [];
-  let refreshPartial = false;
+  let refreshPartial = !discoveryComplete;
   let consecutiveZero = 0;
   const ratesJson = await fetchRatesJson();
 
@@ -850,7 +754,8 @@ export async function handleBondHistory(request, url) {
   if (refreshPartial) {
     payload.stale = true;
     payload.partial = true;
-    payload.warning = 'Historical refresh stopped after a transient upstream failure';
+    payload.warning = discoveryComplete ? 'Historical refresh stopped after an upstream failure'
+      : `Bond action discovery remains incomplete: ${discoveryError}`;
   }
 
   if (includeBondTxs) {

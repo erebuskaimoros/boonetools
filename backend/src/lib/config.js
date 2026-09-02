@@ -222,6 +222,8 @@ export const config = Object.freeze({
   burnTrackerStartDate: optional(process.env.BURN_TRACKER_START_DATE) || '2024-09-26',
   burnTrackerRecentLookbackDays: readInt('BURN_TRACKER_RECENT_LOOKBACK_DAYS', 7),
   burnTrackerRequestDelayMs: readInt('BURN_TRACKER_REQUEST_DELAY_MS', 250),
+  burnTrackerHistoryRequestLimit: readInt('BURN_TRACKER_HISTORY_REQUEST_LIMIT', 1),
+  burnTrackerReconcileIntervalMs: readInt('BURN_TRACKER_RECONCILE_INTERVAL_MS', 86_400_000),
   systemIncomePolActivationHeight: readInt('SYSTEM_INCOME_POL_ACTIVATION_HEIGHT', 27636623),
   systemIncomePolRepairBlocksPerRun: readInt('SYSTEM_INCOME_POL_REPAIR_BLOCKS_PER_RUN', 30_000),
   systemIncomePolRepairMaxBatches: readInt('SYSTEM_INCOME_POL_REPAIR_MAX_BATCHES', 24),

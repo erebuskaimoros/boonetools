@@ -14,6 +14,8 @@ import { sleep } from '../lib/utils.js';
 import { executeDuneQueryRows, formatDuneDateTime } from './dune.js';
 import { fetchThorchainRpc } from './rpc.js';
 import { fetchThorchain } from './thornode.js';
+import { resolveThorchainBlockTime } from './chain-data.js';
+import { loadVoteQueryProgress, saveVoteQueryProgress, loadVoteScan, saveVoteScan, voteScanWindow } from './node-vote-acquisition.js';
 
 const THORNODE_TIMEOUT_MS = 8000;
 const TX_SEARCH_MAX_PAGE_SIZE = 100;
@@ -309,6 +311,10 @@ async function fetchNodeVoteDuneRows(startTime, endTime) {
     start_time: formatDuneDateTime(startTime),
     end_time: formatDuneDateTime(endTime)
   });
+  const total = Number(result.metadata?.total_row_count ?? result.metadata?.row_count ?? result.rows.length);
+  if (total > result.rows.length || result.raw?.next_uri || result.raw?.next_offset) {
+    throw new Error('Truncated Dune node-vote result');
+  }
 
   return {
     executionId: result.executionId,
@@ -512,6 +518,9 @@ export async function fetchNodeVotesRpcStatus(options = {}) {
 }
 
 export async function fetchNodeVotesBlockTime(height, options = {}) {
+  if (options.client) return resolveThorchainBlockTime(options.client, height, {
+    rpcOptions: { ...options, cooldownClient: options.client, rpcUrls: options.rpcUrls || config.nodeVotesRpcUrls }
+  });
   const payload = await fetchNodeVotesRpc('/block', {
     height: Math.trunc(Number(height))
   }, options);
@@ -610,6 +619,10 @@ async function fetchNodeVoteTxPage({
   if (payload?.error) {
     throw new Error(payload.error?.data || payload.error?.message || 'tx_search failed');
   }
+  if (!payload?.result || !/^\d+$/.test(String(payload.result.total_count))
+    || (payload.result.txs != null && !Array.isArray(payload.result.txs))) {
+    throw new Error('Incomplete transaction search response');
+  }
 
   return {
     total: Number(payload?.result?.total_count || 0),
@@ -628,8 +641,10 @@ export async function fetchNodeVoteTxs({ startHeight, endHeight }, options = {})
 
   for (const eventQuery of eventQueries) {
     let queryRows = 0;
+    let expectedTotal = null;
+    const seen = new Set();
     for (let page = 1; ; page += 1) {
-      const result = await fetchNodeVoteTxPage({
+      const result = await (options.fetchPage || fetchNodeVoteTxPage)({
         startHeight,
         endHeight,
         page,
@@ -637,15 +652,24 @@ export async function fetchNodeVoteTxs({ startHeight, endHeight }, options = {})
         eventQuery,
         transportOptions: options.transportOptions
       });
+      if (!Number.isSafeInteger(result.total) || result.total < 0 || !Array.isArray(result.txs)
+        || (expectedTotal !== null && result.total !== expectedTotal)) {
+        throw new Error('Incomplete transaction search: invalid or changing total');
+      }
+      expectedTotal = result.total;
 
       total += page === 1 ? result.total : 0;
       queryRows += result.txs.length;
       for (const tx of result.txs) {
         const identity = String(tx?.hash || `${tx?.height || 0}:${tx?.index || 0}`).toUpperCase();
+        if (seen.has(identity)) throw new Error('Incomplete transaction search: duplicate page result');
+        seen.add(identity);
         byHash.set(identity, tx);
       }
 
-      if (queryRows >= result.total || result.txs.length === 0) {
+      if (result.txs.length === 0 && queryRows < result.total) throw new Error('Truncated transaction search');
+      if (queryRows > result.total) throw new Error('Incomplete transaction search: inconsistent row count');
+      if (queryRows === result.total) {
         break;
       }
 
@@ -680,19 +704,31 @@ export async function fetchNodeVoteCosmosTxs({ startHeight, endHeight }, options
   ));
   const responses = [];
   let total = 0;
+  let expectedTotal = null;
+  const seen = new Set();
 
   for (let page = 1; ; page += 1) {
     const payload = await fetchPage(page);
+    if (!/^\d+$/.test(String(payload?.total))
+      || (payload?.tx_responses != null && !Array.isArray(payload.tx_responses))) {
+      throw new Error('Incomplete Cosmos transaction search response');
+    }
     const pageResponses = Array.isArray(payload?.tx_responses) ? payload.tx_responses : [];
     total = Math.max(0, Number(payload?.total || 0));
+    if (!Number.isSafeInteger(total) || (expectedTotal !== null && total !== expectedTotal)) {
+      throw new Error('Incomplete Cosmos transaction search: changing total');
+    }
+    expectedTotal = total;
+    for (const tx of pageResponses) {
+      const identity = String(tx?.txhash || '').toUpperCase();
+      if (!identity || seen.has(identity)) throw new Error('Incomplete Cosmos transaction search: missing or duplicate identity');
+      seen.add(identity);
+    }
     responses.push(...pageResponses);
 
-    if (pageResponses.length === 0 || (total > 0 && responses.length >= total)) {
-      break;
-    }
-    if (total === 0 && pageResponses.length < limit) {
-      break;
-    }
+    if (pageResponses.length === 0 && responses.length < total) throw new Error('Truncated Cosmos transaction search');
+    if (responses.length > total) throw new Error('Incomplete Cosmos transaction search: inconsistent row count');
+    if (responses.length === total) break;
 
     if (config.nodeVotesRequestDelayMs > 0) {
       await sleep(config.nodeVotesRequestDelayMs);
@@ -706,58 +742,99 @@ export async function fetchNodeVoteCosmosTxs({ startHeight, endHeight }, options
   };
 }
 
-export async function resolveNodeVoteHeightRange(startTime, endTime) {
-  // Block-level archive routing errors are path-specific. Do not let one bad
-  // historical height cool down the healthy gateway before the adjacent-block
-  // recovery or Cosmos transaction query can run.
-  const transportOptions = { sharedCooldown: false };
-  const status = await fetchNodeVotesRpcStatus(transportOptions);
-  const bounds = statusHeights(status);
-  const startHeight = await findNodeVotesStartHeight(startTime, status, { transportOptions });
+export async function resolveNodeVoteHeightRange(startTime, endTime, options = {}) {
+  const startMs = Date.parse(startTime || '');
   const endMs = Date.parse(endTime || '');
-  let endHeight = bounds.latestHeight;
-
-  if (Number.isFinite(endMs) && bounds.latestTime && Date.parse(bounds.latestTime) > endMs) {
-    endHeight = await findNodeVotesStartHeight(endTime, status, { transportOptions });
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > endMs) throw new Error('Invalid vote scan time bounds');
+  const bases = [...new Set(options.rpcUrls || config.nodeVotesRpcUrls)];
+  let lastError;
+  const retained = [];
+  const finish = async (base, status, bounds, partial) => {
+    const transportOptions = { sharedCooldown: false, client: options.client, cooldownClient: options.client, rpcUrls: [base] };
+    const startHeight = partial ? bounds.earliestHeight : Math.trunc(Number(options.startHeight || 0))
+      || await findNodeVotesStartHeight(startTime, status, { transportOptions });
+    let endHeight = bounds.latestHeight;
+    let scannedEndTime = bounds.latestTime;
+    if (Date.parse(bounds.latestTime) > endMs) {
+      endHeight = await findNodeVotesStartHeight(endTime, status, { transportOptions });
+      scannedEndTime = await fetchNodeVotesBlockTime(endHeight, transportOptions);
+    }
+    if (startHeight > endHeight || !scannedEndTime) throw new Error('Vote cursor is ahead of the provider head');
+    const coverageStartTime = partial ? bounds.earliestTime : new Date(startMs).toISOString();
+    return { startHeight, endHeight, endTime: scannedEndTime, rpcUrls: [base],
+      coverageStartHeight: startHeight, coverageStartTime, requestedStartTime: new Date(startMs).toISOString(),
+      historyComplete: !partial };
+  };
+  // The indexed transaction provider must advertise these retained blocks. A
+  // newer local listener head cannot establish an archive provider's coverage.
+  for (const base of bases) {
+    const transportOptions = { sharedCooldown: false, client: options.client, cooldownClient: options.client, rpcUrls: [base] };
+    try {
+      const status = await (options.fetchStatus || fetchNodeVotesRpcStatus)(transportOptions);
+      const bounds = statusHeights(status);
+      const sync = status?.result?.sync_info;
+      if (!Number.isSafeInteger(bounds.earliestHeight) || bounds.earliestHeight <= 0
+        || !Number.isSafeInteger(bounds.latestHeight) || bounds.latestHeight < bounds.earliestHeight
+        || !bounds.earliestTime || !bounds.latestTime || sync?.catching_up !== false
+        || status?.result?.node_info?.other?.tx_index === 'off') {
+        throw new Error('RPC provider cannot establish indexed vote coverage');
+      }
+      const nowMs = Number(options.nowMs ?? Date.now());
+      if (Date.parse(bounds.latestTime) > nowMs) throw new Error('RPC provider returned a future head');
+      const requestedHeight = Math.trunc(Number(options.startHeight || 0));
+      if (requestedHeight > 0 ? requestedHeight < bounds.earliestHeight : startMs < Date.parse(bounds.earliestTime)) {
+        if (Date.parse(bounds.earliestTime) <= endMs) retained.push({ base, status, bounds });
+        throw new Error('RPC provider has pruned blocks needed for vote coverage');
+      }
+      return await finish(base, status, bounds, false);
+    } catch (error) { lastError = error; }
   }
-
-  return { startHeight, endHeight };
+  if (options.allowPartialHistory !== false) {
+    for (const candidate of retained.sort((a, b) => a.bounds.earliestHeight - b.bounds.earliestHeight || b.bounds.latestHeight - a.bounds.latestHeight)) {
+      try { return await finish(candidate.base, candidate.status, candidate.bounds, true); }
+      catch (error) { lastError = error; }
+    }
+  }
+  throw lastError || new Error('No RPC provider available for vote coverage');
 }
 
-async function fetchNodeVoteRowsFromCosmos(startTime, endTime) {
-  const { startHeight, endHeight } = await resolveNodeVoteHeightRange(startTime, endTime);
+async function fetchNodeVoteRowsFromCosmos(startTime, endTime, options = {}) {
+  const range = await (options.resolveRange || resolveNodeVoteHeightRange)(startTime, endTime, options);
+  const { startHeight, endHeight } = range;
   const result = await fetchNodeVoteCosmosTxs({ startHeight, endHeight });
-  return { ...result, startHeight, endHeight };
+  return { ...result, ...range };
 }
 
-async function fetchNodeVoteRowsFromRpc(startTime, endTime) {
-  const { startHeight, endHeight } = await resolveNodeVoteHeightRange(startTime, endTime);
+async function fetchNodeVoteRowsFromRpc(startTime, endTime, options = {}) {
+  const range = await (options.resolveRange || resolveNodeVoteHeightRange)(startTime, endTime, options);
+  const { startHeight, endHeight } = range;
 
-  const txResult = await fetchNodeVoteTxs({ startHeight, endHeight });
+  const txResult = await fetchNodeVoteTxs({ startHeight, endHeight }, { transportOptions: { cooldownClient: options.client, rpcUrls: range.rpcUrls } });
   const heights = [...new Set(
     txResult.txs
       .map((tx) => Number(tx?.height || 0))
       .filter((height) => height > 0)
   )];
-  const blockTimes = await fetchBlockTimesForHeights(heights);
+  const blockTimes = await fetchBlockTimesForHeights(heights, options);
   const rows = txResult.txs.flatMap((tx) => (
     parseNodeVoteTxSearchTx(tx, blockTimes.get(Number(tx?.height || 0)) || null)
   ));
 
   return {
-    startHeight,
-    endHeight,
+    ...range,
     total: txResult.total,
     txs: txResult.txs,
     rows
   };
 }
 
-async function fetchNodeUpgradeRowsFromRpc(startTime, endTime) {
-  const { startHeight, endHeight } = await resolveNodeVoteHeightRange(startTime, endTime);
+async function fetchNodeUpgradeRowsFromRpc(startTime, endTime, options = {}) {
+  const range = await (options.resolveRange || resolveNodeVoteHeightRange)(startTime, endTime, options);
+  const { startHeight, endHeight } = range;
   const txResult = await fetchNodeVoteTxs(
     { startHeight, endHeight },
     {
+      transportOptions: { cooldownClient: options.client, rpcUrls: range.rpcUrls },
       // CometBFT's event query grammar does not provide a portable OR form.
       // Search proposal, approval, and rejection attributes independently,
       // then de-dupe transaction hashes before parsing complete event sets.
@@ -773,28 +850,26 @@ async function fetchNodeUpgradeRowsFromRpc(startTime, endTime) {
       .map((tx) => Number(tx?.height || 0))
       .filter((height) => height > 0)
   )];
-  const blockTimes = await fetchBlockTimesForHeights(heights);
+  const blockTimes = await fetchBlockTimesForHeights(heights, options);
   const rows = txResult.txs.flatMap((tx) => (
     parseNodeVoteTxSearchTx(tx, blockTimes.get(Number(tx?.height || 0)) || null)
   )).filter((row) => row.mimir_key.startsWith('UPGRADE-'));
 
-  return { startHeight, endHeight, total: txResult.total, txs: txResult.txs, rows };
+  return { ...range, total: txResult.total, txs: txResult.txs, rows };
 }
 
-async function fetchBlockTimesForHeights(heights) {
+async function fetchBlockTimesForHeights(heights, options = {}) {
   const times = new Map();
 
   await runConcurrent(
     heights,
     Math.max(1, config.nodeVotesBlockTimeConcurrency),
     async (height) => {
-      try {
-        const blockTime = await fetchNodeVotesBlockTime(height);
+      {
+        const blockTime = await fetchNodeVotesBlockTime(height, { client: options.client, cooldownClient: options.client });
         if (blockTime) {
           times.set(height, blockTime);
         }
-      } catch {
-        times.set(height, null);
       }
 
       if (config.nodeVotesRequestDelayMs > 0) {
@@ -815,7 +890,7 @@ async function saveNodeVoteSyncState(client, payload) {
       end_height: payload.endHeight,
       start_time: payload.startTime,
       end_time: payload.endTime,
-      complete: true,
+      complete: Boolean(payload.complete),
       updated_at: new Date().toISOString(),
       stats_json: payload.stats || {}
     }
@@ -836,24 +911,43 @@ async function loadNodeVoteSyncState(client) {
   return rows[0] || null;
 }
 
-async function loadLatestStoredNodeVoteTime(client) {
-  const { rows } = await client.query(
-    `select max(block_time) as latest_time
-     from node_votes`
-  );
-  return toIsoOrNull(rows[0]?.latest_time);
-}
-
 export async function runNodeVoteBackfill(client, options = {}) {
   const previousSyncState = await loadNodeVoteSyncState(client);
-  const latestStoredTime = options.startTime ? '' : await loadLatestStoredNodeVoteTime(client);
-  const window = resolveNodeVoteBackfillWindow({
-    endTime: options.endTime,
-    startTime: options.startTime,
-    latestStoredTime
-  });
-  const latestTime = window.endTime;
+  const latestTime = toIsoOrNull(options.endTime) || new Date().toISOString();
+  const fullStartTime = sixMonthsAgo(new Date(latestTime)).toISOString();
+  let savedPrimary = await loadVoteScan(client, 'mimir');
+  let savedUpgrade = await loadVoteScan(client, 'upgrades');
+  let queryProgress = await loadVoteQueryProgress(client);
+  const legacyQueryThrough = toIsoOrNull(previousSyncState?.end_time);
+  if (!queryProgress && previousSyncState?.stats_json?.source === 'dune'
+    && !previousSyncState.stats_json.dune_error && legacyQueryThrough
+    && Date.parse(legacyQueryThrough) <= Date.parse(latestTime)) {
+    queryProgress = await saveVoteQueryProgress(client, {
+      queriedFrom: toIsoOrNull(previousSyncState.stats_json.start_time || previousSyncState.start_time),
+      queriedThrough: legacyQueryThrough, executionId: previousSyncState.stats_json.dune_execution_id || '',
+      seededFrom: 'node_vote_sync_state'
+    });
+  }
+  const window = voteScanWindow({ previous: savedPrimary,
+    endTime: latestTime, startTime: options.startTime, fullStartTime });
+  const upgradeWindow = voteScanWindow({ previous: savedUpgrade,
+    endTime: latestTime, startTime: options.startTime, fullStartTime });
+  const ranges = new Map();
+  const statuses = new Map();
+  const fetchStatus = (transport) => {
+    const key = JSON.stringify(transport.rpcUrls);
+    if (!statuses.has(key)) statuses.set(key, (options.fetchStatus || fetchNodeVotesRpcStatus)(transport));
+    return statuses.get(key);
+  };
+  const resolveRange = (start, end, scanOptions = {}) => {
+    const key = `${start}:${end}:${scanOptions.startHeight || 0}`;
+    if (!ranges.has(key)) ranges.set(key, resolveNodeVoteHeightRange(start, end, { ...scanOptions, fetchStatus }));
+    return ranges.get(key);
+  };
   const startTime = window.startTime;
+  const scanOptions = { client, startHeight: window.startHeight, resolveRange };
+  let primaryRange = null;
+  let upgradeRange = null;
 
   let rows = [];
   let startHeight = 0;
@@ -868,38 +962,46 @@ export async function runNodeVoteBackfill(client, options = {}) {
   let upgradeTxCount = 0;
   let upgradeError = '';
 
-  if (config.duneApiKey && config.nodeVotesDuneQueryId) {
+  let primaryError = '';
+  let duneAvailable = false;
+  let pendingQueryProgress = null;
+  const previousQueryTime = Date.parse(queryProgress?.queriedThrough || '');
+  const duneStartTime = options.startTime || new Date(Number.isFinite(previousQueryTime)
+    ? Math.max(Date.parse(fullStartTime), previousQueryTime - Math.max(1, config.nodeVotesBackfillLookbackDays) * 86_400_000)
+    : Date.parse(fullStartTime)).toISOString();
+  // Query progress only records a successful Dune request. Its index has no
+  // completeness watermark, so it is separate from verified RPC coverage.
+  if (options.fetchDuneRows || (config.duneApiKey && config.nodeVotesDuneQueryId)) {
     try {
-      const duneResult = await fetchNodeVoteDuneRows(startTime, latestTime);
-      rows = duneResult.rows;
-      duneExecutionId = duneResult.executionId;
+      const result = await (options.fetchDuneRows || fetchNodeVoteDuneRows)(duneStartTime, latestTime);
+      rows = result.rows;
+      duneExecutionId = result.executionId;
       txSearchTotal = rows.length;
       txCount = rows.length;
-    } catch (error) {
-      duneError = error?.message || String(error);
-    }
-  } else {
-    duneError = !config.duneApiKey ? 'missing_dune_api_key' : 'missing_dune_node_votes_query_id';
+      source = 'dune';
+      duneAvailable = true;
+      pendingQueryProgress = { queriedFrom: duneStartTime, queriedThrough: latestTime, executionId: result.executionId };
+    } catch (error) { duneError = error?.message || String(error); }
   }
-
-  if (rows.length === 0 && duneError) {
+  if (!duneAvailable) {
     try {
-      const cosmosResult = await fetchNodeVoteRowsFromCosmos(startTime, latestTime);
-      rows = cosmosResult.rows;
-      startHeight = cosmosResult.startHeight;
-      endHeight = cosmosResult.endHeight;
-      txSearchTotal = cosmosResult.total;
-      txCount = cosmosResult.txs.length;
-      source = 'cosmos-rest';
-    } catch (error) {
-      cosmosRestError = error?.message || String(error);
-      const rpcResult = await fetchNodeVoteRowsFromRpc(startTime, latestTime);
-      rows = rpcResult.rows;
-      startHeight = rpcResult.startHeight;
-      endHeight = rpcResult.endHeight;
-      txSearchTotal = rpcResult.total;
-      txCount = rpcResult.txs.length;
+      const result = await (options.fetchRpcRows || fetchNodeVoteRowsFromRpc)(startTime, latestTime, scanOptions);
+      primaryRange = { startTime, ...result };
+      rows = result.rows;
+      startHeight = result.startHeight;
+      endHeight = result.endHeight;
+      txSearchTotal = result.total;
+      txCount = result.txs.length;
       source = 'rpc';
+    } catch (error) {
+      primaryError = error?.message || String(error);
+      try {
+        const result = await (options.fetchCosmosRows || fetchNodeVoteRowsFromCosmos)(startTime, latestTime, scanOptions);
+        rows = result.rows;
+        txSearchTotal = result.total;
+        txCount = result.txs.length;
+        source = 'cosmos-rest';
+      } catch (error) { cosmosRestError = error?.message || String(error); }
     }
   }
 
@@ -909,7 +1011,9 @@ export async function runNodeVoteBackfill(client, options = {}) {
   // avoid relying on a non-portable OR expression in CometBFT's query grammar.
   let upgradeRows = [];
   try {
-    const upgradeResult = await fetchNodeUpgradeRowsFromRpc(startTime, latestTime);
+    const upgradeResult = await (options.fetchUpgradeRows || fetchNodeUpgradeRowsFromRpc)(upgradeWindow.startTime, latestTime,
+      { client, startHeight: upgradeWindow.startHeight, resolveRange });
+    upgradeRange = { startTime: upgradeWindow.startTime, endTime: latestTime, ...upgradeResult };
     upgradeRows = upgradeResult.rows;
     upgradeTxSearchTotal = upgradeResult.total;
     upgradeTxCount = upgradeResult.txs.length;
@@ -930,29 +1034,19 @@ export async function runNodeVoteBackfill(client, options = {}) {
   }
   rows = [...mergedRows.values()];
 
-  // Cosmos/RPC vote and upgrade ingestion already resolved this time window
-  // against one RPC status snapshot. Reuse that confirmed range for direct
-  // Mimir discovery so a second, changing status response cannot invalidate
-  // an otherwise successful backfill.
-  const confirmedStartHeight = Math.trunc(Number(startHeight || 0));
-  const confirmedEndHeight = Math.trunc(Number(endHeight || 0));
+  rows = await (options.enrichRows || enrichRowsWithNodeMetadata)(rows);
 
-  rows = await enrichRowsWithNodeMetadata(rows);
-
-  const inserted = await upsertNodeVotes(client, rows);
-  const heights = rows.map((row) => Number(row.height || 0)).filter((height) => height > 0);
-  startHeight = heights.length ? Math.min(...heights) : startHeight;
-  endHeight = heights.length ? Math.max(...heights) : endHeight;
+  const inserted = await (options.upsertVotes || upsertNodeVotes)(client, rows);
+  if (pendingQueryProgress) queryProgress = await saveVoteQueryProgress(client, pendingQueryProgress);
+  if (primaryRange) savedPrimary = await saveVoteScan(client, 'mimir', { ...primaryRange, source: 'rpc' });
+  if (upgradeRange) savedUpgrade = await saveVoteScan(client, 'upgrades', { ...upgradeRange, source: 'rpc' });
   let protocolMimir = null;
   let protocolMimirError = '';
   try {
     const { runProtocolMimirBackfill } = await import('./protocol-mimir-changes.js');
-    protocolMimir = await runProtocolMimirBackfill(client, buildProtocolMimirBackfillOptions({
-      startTime,
-      endTime: latestTime,
-      startHeight: confirmedStartHeight,
-      endHeight: confirmedEndHeight
-    }));
+    protocolMimir = await (options.runProtocolBackfill || runProtocolMimirBackfill)(client, {
+      startTime: options.startTime, endTime: latestTime, resolveHeightRange: resolveRange
+    });
   } catch (error) {
     // Protocol changes are additive history. Preserve the existing validator
     // vote backfill and last-good summary when archive RPC is temporarily down.
@@ -966,8 +1060,12 @@ export async function runNodeVoteBackfill(client, options = {}) {
     dune_execution_id: duneExecutionId,
     dune_error: duneError,
     cosmos_rest_error: cosmosRestError,
-    latest_stored_time: window.latestStoredTime,
-    lookback_days: window.lookbackDays,
+    mimir_error: primaryError,
+    mimir_history_status: primaryError ? 'degraded' : duneAvailable ? 'query-complete' : savedPrimary?.historyComplete === false ? 'partial' : 'complete',
+    mimir_coverage_verified: Boolean(primaryRange),
+    mimir_coverage: savedPrimary,
+    mimir_query_progress: queryProgress,
+    lookback_days: window.mode === 'incremental' ? 1 / 24 : 0,
     start_height: startHeight,
     end_height: endHeight,
     start_time: startTime,
@@ -977,35 +1075,28 @@ export async function runNodeVoteBackfill(client, options = {}) {
     upgrade_tx_search_total: upgradeTxSearchTotal,
     upgrade_tx_count: upgradeTxCount,
     upgrade_error: upgradeError,
-    upgrade_history_status: upgradeError ? 'degraded' : 'complete',
+    upgrade_history_status: upgradeError ? 'degraded' : savedUpgrade?.historyComplete === false ? 'partial' : 'complete',
+    upgrade_coverage: savedUpgrade,
     upgrade_event_count: rows.filter((row) => row.mimir_key.startsWith('UPGRADE-')).length,
     protocol_mimir: protocolMimir,
     protocol_mimir_error: protocolMimirError,
-    protocol_mimir_history_status: protocolMimirError ? 'degraded' : 'complete',
+    protocol_mimir_history_status: protocolMimirError ? 'degraded' : protocolMimir?.history_complete === false ? 'partial' : 'complete',
     event_count: rows.length,
     upserted: inserted,
     unique_vote_keys: new Set(rows.map((row) => row.mimir_key)).size,
     unique_nodes: new Set(rows.map((row) => row.node_address)).size,
     unique_operators: new Set(rows.map((row) => row.node_operator_address || row.node_address)).size
   };
-  const displayStartTime = window.mode === 'rolling'
-    ? sixMonthsAgo(new Date(latestTime)).toISOString()
-    : startTime;
-  let syncStartHeight = startHeight;
-  if (window.mode === 'rolling') {
-    const previousStartHeight = Number(previousSyncState?.start_height || 0);
-    try {
-      syncStartHeight = await findNodeVotesStartHeight(displayStartTime);
-    } catch {
-      syncStartHeight = previousStartHeight;
-    }
-  }
+  const displayStartTime = options.startTime || fullStartTime;
+  const syncStartHeight = options.startTime ? startHeight : Number(previousSyncState?.start_height || startHeight);
 
   await saveNodeVoteSyncState(client, {
     startHeight: syncStartHeight,
     endHeight,
     startTime: displayStartTime,
     endTime: latestTime,
+    complete: !duneAvailable && !primaryError && !upgradeError && !protocolMimirError
+      && savedPrimary?.historyComplete !== false && savedUpgrade?.historyComplete !== false && protocolMimir?.history_complete !== false,
     stats
   });
 

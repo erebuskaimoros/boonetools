@@ -99,10 +99,98 @@ function timestampMs(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function routeDue(previous, type, collectorKey, nowMs) {
-  if (!['config', 'history'].includes(type)) return true;
+function collectorCoverageHealthy(state, nowMs) {
+  const blockTime = timestampMs(state?.last_block_time);
+  return Number(state?.contiguous_blocks) >= 2 && Number(state?.last_height) > 0
+    && blockTime > 0 && blockTime <= nowMs && nowMs - blockTime <= 45000;
+}
+
+function eventVersion(state, key) {
+  return `${Number(state?.generation) || 0}:${Number(state?.dirty_heights?.[key]) || 0}`;
+}
+
+function previousEventVersion(previous, type, key) {
+  return previous?.route_event_versions?.[type]?.[key]
+    || (previous?.collector_invalidation
+      ? `${Number(previous.collector_invalidation.generation) || 0}:${Number(previous.route_invalidation?.[key]?.[type]) || 0}` : '');
+}
+
+function routeDue(previous, type, collectorKey, nowMs, invalidation) {
+  if (type === 'balance') return true;
+  const healthy = collectorCoverageHealthy(invalidation, nowMs);
+  if (type === 'actions' && !healthy) return true;
+  if (['actions', 'history'].includes(type) && healthy
+    && previousEventVersion(previous, type, collectorKey) !== eventVersion(invalidation, collectorKey)) return true;
+  const ttlMs = type === 'history' && healthy ? 24 * 60 * 60 * 1000 : config.appLayerStaticStateTtlMs;
   const fetchedAt = timestampMs(previous?.route_fetched_at?.[type]?.[collectorKey]);
-  return fetchedAt <= 0 || nowMs - fetchedAt >= config.appLayerStaticStateTtlMs;
+  return fetchedAt <= 0 || fetchedAt > nowMs || nowMs - fetchedAt >= ttlMs;
+}
+
+export function collectorBlockInvalidation(data = {}) {
+  const finalize = data.result_finalize_block || data.result_end_block;
+  const txResults = finalize?.tx_results ?? finalize?.txs_results;
+  const blockTxs = data.block?.data?.txs;
+  const events = [...(Array.isArray(finalize?.events) ? finalize.events : [])];
+  const txEventsComplete = Array.isArray(txResults)
+    && txResults.every((tx) => Number(tx?.code || 0) !== 0 || Array.isArray(tx?.events));
+  const complete = Array.isArray(finalize?.events) && txEventsComplete
+    && (!Array.isArray(blockTxs) || blockTxs.length === txResults.length);
+  for (const tx of Array.isArray(txResults) ? txResults : []) {
+    if (Number(tx?.code || 0) === 0 && Array.isArray(tx.events)) events.push(...tx.events);
+  }
+  const byAddress = new Map(collectors.map((collector) => [collector.address, collector.key]));
+  const dirty = new Set();
+  const decode = (value) => {
+    const text = String(value || '');
+    if (text.startsWith('thor1') || text.includes('contract')) return text;
+    try { return Buffer.from(text, 'base64').toString('utf8'); } catch { return text; }
+  };
+  for (const event of events) {
+    // wasmd emits generic sudo/migrate events even when a privileged mutation
+    // returns no custom attributes. Execute/custom wasm events conservatively
+    // invalidate other deployed collector versions as well.
+    if (!/^(sudo|migrate|instantiate|execute|wasm(?:-|$)|update_contract_)/.test(String(event?.type || ''))) continue;
+    for (const attribute of event.attributes || []) {
+      if (!['_contract_address', 'contract_address', 'contract'].includes(decode(attribute.key))) continue;
+      const key = byAddress.get(decode(attribute.value));
+      if (key) dirty.add(key);
+    }
+  }
+  return { height: Number(data.block?.header?.height) || 0,
+    blockTime: data.block?.header?.time || null, complete, dirty: [...dirty] };
+}
+
+export async function recordCollectorEventBlock(client, data) {
+  const block = collectorBlockInvalidation(data);
+  if (block.height <= 0 || !timestampMs(block.blockTime)) return;
+  const dirty = Object.fromEntries(block.dirty.map((key) => [key, block.height]));
+  await client.query(
+    `insert into app_layer_collector_event_state as current
+       (stream_key, last_height, last_block_time, generation, contiguous_blocks, dirty_heights)
+     values ('thorchain-mainnet', $1, $2, 1, case when $3 then 1 else 0 end, $4::jsonb)
+     on conflict (stream_key) do update set
+       last_height = excluded.last_height,
+       last_block_time = excluded.last_block_time,
+       generation = current.generation + case when $3 and excluded.last_height = current.last_height + 1 then 0 else 1 end,
+       contiguous_blocks = case when $3 and excluded.last_height = current.last_height + 1
+         then least(2, current.contiguous_blocks + 1) when $3 then 1 else 0 end,
+       dirty_heights = current.dirty_heights || excluded.dirty_heights,
+       updated_at = now()
+     where excluded.last_height > current.last_height`,
+    [block.height, block.blockTime, block.complete, JSON.stringify(dirty)]
+  );
+}
+
+export async function resetCollectorEventCoverage(client) {
+  await client.query(`update app_layer_collector_event_state
+    set contiguous_blocks = 0, generation = generation + 1, updated_at = now()
+    where stream_key = 'thorchain-mainnet'`);
+}
+
+async function loadCollectorInvalidation(client) {
+  const { rows } = await client.query(`select last_height, last_block_time, generation, contiguous_blocks, dirty_heights
+    from app_layer_collector_event_state where stream_key = 'thorchain-mainnet'`);
+  return rows[0] || null;
 }
 
 function routeWarning(failures) {
@@ -168,6 +256,7 @@ export async function fetchAppLayerLiveStatePayload(options = {}) {
   const startedAt = now.toISOString();
   const nowMs = now.getTime();
   const previous = options.previousSnapshot || null;
+  const invalidation = options.collectorInvalidation || null;
   const core = options.coreSnapshot?.payload || options.coreSnapshot || null;
   const coreStale = isThorNodeCoreSnapshotStale(options.coreSnapshot, ['network', 'pools']);
   const fetchThor = options.fetchThorchain || ((path) => fetchThorchain(path, {
@@ -196,7 +285,7 @@ export async function fetchAppLayerLiveStatePayload(options = {}) {
   };
   const tasks = collectors.flatMap((collector) => (
     Object.keys(routeLoaders)
-      .filter((type) => routeDue(previous, type, collector.key, nowMs))
+      .filter((type) => routeDue(previous, type, collector.key, nowMs, invalidation))
       .map((type) => ({ type, collector }))
   ));
   const loaded = await mapWithConcurrency(
@@ -259,6 +348,14 @@ export async function fetchAppLayerLiveStatePayload(options = {}) {
     actions: buildObject(actionRows),
     histories: buildObject(historyRows),
     route_fetched_at: routeFetchedAt,
+    collector_invalidation: invalidation,
+    route_event_versions: Object.fromEntries(['actions', 'history'].map((type) => [type,
+      Object.fromEntries(collectors.map((collector) => [collector.key,
+        loadedByRoute.get(`${type}:${collector.key}`)?.ok
+          ? eventVersion(invalidation, collector.key)
+          : previousEventVersion(previous, type, collector.key)
+      ]))
+    ])),
     route_query_failures: failures.map((failure) => ({
       key: failure.key,
       type: failure.type,
@@ -285,7 +382,8 @@ export async function refreshAppLayerLiveState() {
     const payload = await fetchAppLayerLiveStatePayload({
       previousSnapshot: previous,
       coreSnapshot: coreModel,
-      cooldownClient: client
+      cooldownClient: client,
+      collectorInvalidation: await loadCollectorInvalidation(client)
     });
     const snapshot = await writeCachedSnapshot(client, payload);
     await publishReadModel(ANALYTICS_READ_MODEL_KEYS.appLayerLiveState, snapshot, {

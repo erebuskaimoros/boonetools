@@ -148,21 +148,26 @@ test('Burn Tracker ingestion replaces the interval bucket with the live partial 
   let syncState;
   const result = await ingestBurnTrackerHistory({ id: 'db' }, {
     now: new Date('2024-09-27T12:00:00Z'),
+    getSyncState: async () => null,
+    loadPendingDays: async () => ['2024-09-26'],
+    loadTotals: async () => ({ complete: true, completed_burn_e8: '10', current_burn_e8: '7' }),
+    fetchMidgard: async () => ({ database: true, inSync: true, lastAggregated: { height: 1, timestamp: 1727438400 } }),
     loadCoverage: async () => ({ first_day: null }),
     fetchDaily: async () => ({
       pages: 1,
       rows: [
-        { day: '2024-09-26', burn_e8: '10', partial: false },
+        { day: '2024-09-26', burn_e8: '10', rune_price_usd: '4', partial: false,
+          interval_start: '2024-09-26T00:00:00Z', interval_end: '2024-09-27T00:00:00Z', source_json: { pools: [] } },
         { day: '2024-09-27', burn_e8: '0', partial: false }
       ]
     }),
     fetchCurrent: async () => ({ day: '2024-09-27', burn_e8: '7', partial: true }),
     fetchAllTime: async () => ({ burn_e8: '17' }),
-    upsert: async (_client, rows) => { persisted = rows; return rows.length; },
+    upsert: async (_client, rows) => { persisted.push(...rows); return rows.length; },
     updateSyncState: async (_client, state) => { syncState = state; }
   });
   assert.equal(result.all_time_burn_e8, '17');
-  assert.deepEqual(persisted.map((row) => [row.day, row.burn_e8, row.partial]), [
+  assert.deepEqual(persisted.sort((a, b) => a.day.localeCompare(b.day)).map((row) => [row.day, row.burn_e8, row.partial]), [
     ['2024-09-26', '10', false],
     ['2024-09-27', '7', true]
   ]);

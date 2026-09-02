@@ -227,6 +227,8 @@ test('protocol Mimir backfill rolls from its own bounded watermark', async () =>
       if (sql.includes('from node_vote_sync_state')) {
         return { rows: [{
           start_height: 25_000_000,
+          last_scanned_height: 27_500_000,
+          complete: true,
           start_time: '2026-02-28T00:00:00.000Z',
           end_time: '2026-08-20T00:00:00.000Z'
         }] };
@@ -248,8 +250,8 @@ test('protocol Mimir backfill rolls from its own bounded watermark', async () =>
     }
   });
 
-  assert.equal(stats.mode, 'rolling');
-  assert.equal(resolvedWindow.startTime, '2026-08-06T00:00:00.000Z');
+  assert.equal(stats.mode, 'incremental');
+  assert.equal(resolvedWindow.startTime, '2026-08-19T23:00:00.000Z');
   assert.deepEqual(eventQueries, ['set_mimir.key EXISTS']);
   assert.ok(calls.some(({ sql }) => sql.includes('insert into "node_vote_sync_state"')));
 });
@@ -285,7 +287,8 @@ test('protocol Mimir backfill reuses a confirmed height range without another RP
   });
   assert.deepEqual(fetchOptions.transportOptions, {
     sharedCooldown: true,
-    cooldownScope: 'protocol-mimir-history'
+    cooldownScope: 'protocol-mimir-history',
+    client, cooldownClient: client
   });
 });
 
@@ -310,4 +313,34 @@ test('node-vote parent forwards its confirmed scan range to protocol Mimir backf
     startTime: '2026-08-14T00:00:00.000Z',
     endTime: '2026-08-28T00:00:00.000Z'
   });
+});
+
+test('protocol Mimir advances recent coverage while preserving an unavailable older history gap', async () => {
+  const { runProtocolMimirBackfill } = await import('../src/shared/protocol-mimir-changes.js');
+  let stored;
+  const windows = [];
+  const client = { query: async (sql, values = []) => {
+    if (sql.includes('from node_vote_sync_state')) return { rows: stored ? [stored] : [] };
+    if (sql.startsWith('insert into "node_vote_sync_state"')) stored = {
+      start_height: values[1], last_scanned_height: values[2], end_height: values[3],
+      start_time: values[4], end_time: values[5], complete: values[6], stats_json: JSON.parse(values[8])
+    };
+    return { rows: [] };
+  } };
+  const options = { endTime: '2026-09-02T12:00:00Z',
+    resolveHeightRange: async (start, end, options) => {
+      windows.push({ start, startHeight: options.startHeight });
+      return { startHeight: windows.length === 1 ? 800 : 900, endHeight: windows.length === 1 ? 1000 : 1100,
+        coverageStartTime: windows.length === 1 ? '2026-08-26T07:02:24Z' : start,
+        requestedStartTime: start, endTime: end };
+    }, fetchTxs: async () => ({ txs: [], total: 0 })
+  };
+  await runProtocolMimirBackfill(client, options);
+  const result = await runProtocolMimirBackfill(client, { ...options, endTime: '2026-09-02T13:00:00Z' });
+  assert.equal(windows[1].start, '2026-09-02T11:00:00.000Z');
+  assert.equal(result.history_complete, false);
+  assert.equal(result.scan_coverage.coverageStartHeight, 800);
+  assert.equal(result.scan_coverage.endHeight, 1100);
+  assert.equal(result.scan_coverage.historyGaps[0].endTime, '2026-08-26T07:02:24.000Z');
+  assert.equal(stored.complete, false);
 });

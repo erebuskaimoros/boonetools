@@ -371,6 +371,7 @@ prime_read_models() {
     boonetools-node-votes-summary.service
     boonetools-rapid-swaps-market-history.service
     boonetools-treasury-snapshot.service
+    boonetools-visitor-data.service
     boonetools-pool-dislocation-repair.service
     boonetools-pool-dislocation.service
     boonetools-pool-analysis.service

@@ -21,6 +21,7 @@ import { runStatusLiveScheduler } from './jobs/status-live-scheduler.js';
 import { runSystemIncomePolScheduler } from './jobs/system-income-pol.js';
 import { runTcFeeDashBackfill } from './jobs/tc-fee-dash-backfill.js';
 import { runTreasurySnapshot } from './jobs/treasury-snapshot.js';
+import { runVisitorDataScheduler } from './jobs/visitor-data.js';
 import { runWasmArbEconomicsFees } from './jobs/wasm-arb-economics-fees.js';
 import { runWasmArbEconomicsOracle } from './jobs/wasm-arb-economics-oracle.js';
 import { runWasmArbEconomicsScheduler } from './jobs/wasm-arb-economics-scheduler.js';
@@ -55,6 +56,7 @@ const runners = {
   'tc-fee-dash-backfill': runTcFeeDashBackfill,
   'thornode-core-snapshot': runThorNodeCoreSnapshot,
   'treasury-snapshot': runTreasurySnapshot,
+  'visitor-data': runVisitorDataScheduler,
   'wasm-arb-economics-fees': runWasmArbEconomicsFees,
   'wasm-arb-economics-oracle': runWasmArbEconomicsOracle,
   'wasm-arb-economics-scheduler': runWasmArbEconomicsScheduler

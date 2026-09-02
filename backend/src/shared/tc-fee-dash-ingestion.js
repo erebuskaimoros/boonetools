@@ -421,24 +421,25 @@ export function mergeTcFeeRowsForDays(days, primaryRows = [], fallbackRows = [])
   };
 }
 
-async function fetchDuneTcFeeRows(startDate, count) {
+export async function fetchDuneTcFeeRows(startDate, count, options = {}) {
   const endDate = addDays(startDate, count - 1);
-  const result = await executeDuneQueryRows(config.tcFeeDashDuneQueryId, {
+  const result = await (options.executeDune || executeDuneQueryRows)(config.tcFeeDashDuneQueryId, {
     start_date: startDate,
     end_date: endDate
   }, {
     limit: Math.max(count + 10, 100)
   });
-  if (config.tcFeeDashRequestDelayMs > 0) {
+  if (config.tcFeeDashRequestDelayMs > 0 && !options.skipDelay) {
     await sleep(config.tcFeeDashRequestDelayMs);
   }
   const [cmcVolumesByDate, thorchainVolumesByDate] = await Promise.all([
-    fetchCmcGlobalVolumeDays(startDate, count),
-    fetchMidgardSwapVolumeDays(startDate, count)
+    (options.fetchCmc || fetchCmcGlobalVolumeDays)(startDate, count),
+    (options.fetchSwapVolumes || fetchMidgardSwapVolumeDays)(startDate, count)
   ]);
 
   return {
     executionId: result.executionId,
+    acquisition: { startDate, count, cmcVolumesByDate, thorchainVolumesByDate },
     duneRows: result.rows.length,
     cmcRows: cmcVolumesByDate.size,
     thorchainVolumeRows: thorchainVolumesByDate.size,
@@ -450,7 +451,9 @@ async function fetchDuneTcFeeRows(startDate, count) {
   };
 }
 
-async function fetchMidgardTcFeeRows(startDate, count) {
+export async function fetchMidgardTcFeeRows(startDate, count, options = {}) {
+  const acquired = options.acquisition?.startDate === startDate && options.acquisition?.count === count
+    ? options.acquisition : null;
   const params = new URLSearchParams({
     interval: 'day',
     from: String(unixStart(startDate)),
@@ -458,15 +461,18 @@ async function fetchMidgardTcFeeRows(startDate, count) {
   });
 
   const [earnings, runeHistory, swaps, cmcVolumesByDate, dexVolumeResult] = await Promise.all([
-    fetchMidgard(`/history/earnings?${params.toString()}`, {
+    (options.fetchMidgard || fetchMidgard)(`/history/earnings?${params.toString()}`, {
       validateResponse: (_path, data) => !Array.isArray(data?.intervals)
     }),
-    fetchMidgard(`/history/rune?${params.toString()}`, {
+    (options.fetchMidgard || fetchMidgard)(`/history/rune?${params.toString()}`, {
       validateResponse: (_path, data) => !Array.isArray(data?.intervals)
     }),
-    fetchMidgardSwapHistory(Object.fromEntries(params)),
-    fetchCmcGlobalVolumeDays(startDate, count),
-    fetchDefiLlamaDexVolumeDays(startDate, count)
+    acquired?.thorchainVolumesByDate instanceof Map
+      ? { intervals: [...acquired.thorchainVolumesByDate.values()].map((row) => row.raw) }
+      : (options.fetchSwapHistory || fetchMidgardSwapHistory)(Object.fromEntries(params)),
+    acquired?.cmcVolumesByDate instanceof Map ? acquired.cmcVolumesByDate
+      : (options.fetchCmc || fetchCmcGlobalVolumeDays)(startDate, count),
+    (options.fetchDex || fetchDefiLlamaDexVolumeDays)(startDate, count)
       .then((rows) => ({ rows, error: null }))
       .catch((error) => ({ rows: new Map(), error }))
   ]);
@@ -481,7 +487,7 @@ async function fetchMidgardTcFeeRows(startDate, count) {
     rows: buildTcFeeDailyRowsFromMidgard(earnings.intervals, runeHistory.intervals, {
       cmcVolumesByDate,
       dexVolumesByDate: dexVolumeResult.rows,
-      thorchainVolumesByDate: parseMidgardSwapVolumeDays(swaps.intervals)
+      thorchainVolumesByDate: acquired?.thorchainVolumesByDate || parseMidgardSwapVolumeDays(swaps.intervals)
     })
   };
 }
@@ -783,7 +789,7 @@ export async function runTcFeeDashDailyBackfill(client) {
     let merged = mergeTcFeeRowsForDays(days, result.rows, []);
 
     if (merged.missingDays.length > 0) {
-      fallback = await fetchMidgardTcFeeRows(startDate, dayCount);
+      fallback = await fetchMidgardTcFeeRows(startDate, dayCount, { acquisition: result.acquisition });
       merged = mergeTcFeeRowsForDays(days, result.rows, fallback.rows);
     }
 

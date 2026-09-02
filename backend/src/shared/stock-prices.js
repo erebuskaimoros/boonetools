@@ -1,4 +1,5 @@
 import { requestFromProviders } from '../lib/provider-client.js';
+import { acquireCached } from './acquisition-cache.js';
 
 const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart';
 export const ALLOWED_SYMBOLS = ['SPY', 'VT', 'GC=F'];
@@ -61,9 +62,18 @@ export async function fetchStockPrices(symbols, options = {}) {
   const from = options.from ? Number(options.from) : undefined;
   const to = options.to ? Number(options.to) : undefined;
   const isHistorical = from && to && Number.isFinite(from) && Number.isFinite(to);
+  const cacheSeconds = isHistorical ? 3600 : 300;
+  const fetchQuote = options.fetchQuote || fetchYahooQuote;
 
   const results = await Promise.allSettled(
-    uniqueSymbols.map((symbol) => fetchYahooQuote(symbol, isHistorical ? from : undefined, isHistorical ? to : undefined))
+    uniqueSymbols.map(async (symbol) => (await acquireCached(options.client, {
+      namespace: 'yahoo-chart:v1', identity: { symbol, from: isHistorical ? from : null, to: isHistorical ? to : null },
+      source: 'yahoo', ttlMs: cacheSeconds * 1000, nowMs: options.nowMs,
+      load: () => fetchQuote(symbol, isHistorical ? from : undefined, isHistorical ? to : undefined),
+      validate: (payload) => isHistorical
+        ? Array.isArray(payload) && payload.every((point) => Array.isArray(point) && point.length === 2 && point.every(Number.isFinite))
+        : Number.isFinite(payload) && payload > 0
+    })).payload)
   );
 
   const prices = {};
@@ -74,6 +84,6 @@ export async function fetchStockPrices(symbols, options = {}) {
 
   return {
     prices,
-    cacheSeconds: isHistorical ? 3600 : 300
+    cacheSeconds
   };
 }

@@ -46,6 +46,7 @@ function inferAsOf(body, now) {
     body?.updated_at,
     body?.fetchedAt,
     body?.fetched_at,
+    body?.observed_at,
     body?.read_model?.generated_at,
     body?.read_model?.source_updated_at
   ];

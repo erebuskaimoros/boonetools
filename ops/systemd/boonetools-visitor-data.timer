@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh queued BooneTools visitor data every minute
+
+[Timer]
+OnActiveSec=20s
+OnUnitActiveSec=1min
+AccuracySec=5s
+Persistent=true
+Unit=boonetools-visitor-data.service
+
+[Install]
+WantedBy=timers.target

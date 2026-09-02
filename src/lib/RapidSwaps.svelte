@@ -1,5 +1,6 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte';
+  import { createVisiblePoll } from './utils/visible-poll.js';
   import { formatNumber, formatUSD, formatUSDCompact } from '$lib/utils/formatting';
   import { fromBaseUnit } from '$lib/utils/blockchain';
   import {
@@ -38,6 +39,7 @@
   let dashboard = null;
   let dashboardError = '';
   let refreshInterval;
+  let historyRefreshInterval;
   let tableReloadTimer = null;
   let dashboardRequestId = 0;
   let midgardHistoryRequestId = 0;
@@ -438,9 +440,11 @@
 
   onMount(() => {
     loadData(true);
-    refreshInterval = setInterval(() => loadData(false), REFRESH_INTERVAL_MS);
+    refreshInterval = createVisiblePoll(() => loadData(false, { reloadHistory: false }), { intervalMs: REFRESH_INTERVAL_MS, immediate: false });
+    historyRefreshInterval = createVisiblePoll(loadMidgardSwapHistory, { intervalMs: 30 * 60_000, immediate: false });
     return () => {
-      clearInterval(refreshInterval);
+      refreshInterval?.stop();
+      historyRefreshInterval?.stop();
       clearTimeout(tableReloadTimer);
       chartRenderer.destroyAll();
     };

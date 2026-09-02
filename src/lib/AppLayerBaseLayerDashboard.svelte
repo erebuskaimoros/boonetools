@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { createVisiblePoll } from './utils/visible-poll.js';
   import {
     fetchAppLayerBaseFees,
     fetchAppLayerBaseLayerEarnings,
@@ -592,12 +593,12 @@
         await loadArtifacts();
         if (mounted) await refreshDashboard();
       }
-      if (mounted) refreshTimer = window.setInterval(refreshDashboard, 120_000);
+      if (mounted) refreshTimer = createVisiblePoll(refreshDashboard, { intervalMs: 120_000, immediate: false });
     });
 
     return () => {
       mounted = false;
-      if (refreshTimer) window.clearInterval(refreshTimer);
+      refreshTimer?.stop();
       accruedValueChart?.destroy();
       collectedChart?.destroy();
       paymentChart?.destroy();

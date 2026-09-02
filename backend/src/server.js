@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { performance } from 'node:perf_hooks';
 import { config } from './lib/config.js';
+import { acquisitionMetrics } from './lib/acquisition-metrics.js';
 import { applyApiContract } from './lib/api-contract.js';
 import {
   CORS_HEADERS,
@@ -22,6 +23,7 @@ import { handleBurnTracker } from './handlers/burn-tracker.js';
 import { handleCurrencyRates } from './handlers/currency-rates.js';
 import { handleDynamicFeeAffiliateVolume } from './handlers/dynamic-fee-affiliate-volume.js';
 import { handleDynamicFeeTransactions } from './handlers/dynamic-fee-transactions.js';
+import { handleDynamicFeeSnapshot, handleDynamicFeeHistory, handleVaultExplorerSnapshot } from './handlers/visitor-snapshots.js';
 import { handleHealth } from './handlers/health.js';
 import { handleNodeopLeaderboard } from './handlers/nodeop-leaderboard.js';
 import { handleNodeopMeta } from './handlers/nodeop-meta.js';
@@ -83,7 +85,10 @@ const routes = new Map([
   ['/bond-history', route(handleBondHistory, 4, 3)],
   ['/block-production', route(handleBlockProduction, 1, 64)],
   ['/chain-events', streamRoute(1, 100)],
-  ['/dynamic-fee-affiliate-volume', route(handleDynamicFeeAffiliateVolume, 5, 2)],
+  ['/dynamic-fee-affiliate-volume', route(handleDynamicFeeAffiliateVolume, 2, 16)],
+  ['/dynamic-fee-snapshot', route(handleDynamicFeeSnapshot, 1, 64)],
+  ['/dynamic-fee-history', route(handleDynamicFeeHistory, 1, 32)],
+  ['/vault-explorer-snapshot', route(handleVaultExplorerSnapshot, 1, 64)],
   ['/dynamic-fee-transactions', route(handleDynamicFeeTransactions, 5, 2)],
   ['/app-layer-base-layer-earnings', route(handleAppLayerBaseLayerEarnings, 1, 64)],
   ['/app-layer-base-fees', route(handleAppLayerBaseFees, 1, 64)],
@@ -213,12 +218,18 @@ const server = http.createServer(async (request, response) => {
 
 await query('select 1');
 await chainEventBroker.start();
+const acquisitionLogTimer = setInterval(() => {
+  const acquisition = acquisitionMetrics({ reset: true });
+  if (acquisition) console.log(JSON.stringify({ type: 'acquisition_metrics', window_seconds: 300, acquisition }));
+}, 300_000);
+acquisitionLogTimer.unref();
 
 server.listen(config.port, '127.0.0.1', () => {
   console.log(`BooneTools backend listening on 127.0.0.1:${config.port}`);
 });
 
 async function shutdown(signal) {
+  clearInterval(acquisitionLogTimer);
   console.log(`Received ${signal}, shutting down backend...`);
   await chainEventBroker.stop().catch(() => {});
   server.close(async () => {

@@ -122,6 +122,17 @@ test('SIPOL repair retains successful blocks across a provider failure so retrie
   assert.equal(result.complete, true);
 });
 
+test('SIPOL repair reuses the durable fresh head before requesting RPC status', async () => {
+  let requests = 0;
+  const result = await repairSystemIncomePolBlocks({ query: async () => ({ rows: [] }) }, {
+    activationHeight: 100,
+    resolveHead: async () => ({ height: 99, source: 'chain-block-headers' }),
+    fetchRpc: async () => { requests++; return { result: { sync_info: { latest_block_height: '99' } } }; }
+  });
+  assert.equal(result.headHeight, 99);
+  assert.equal(requests, 0);
+});
+
 test('SIPOL repair drains in-flight workers and stops new requests before rejecting after a provider failure', async () => {
   const store = repairStore(100, 105);
   const slowStarted = deferred();

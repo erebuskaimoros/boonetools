@@ -650,10 +650,12 @@ test('fee pricing negative-caches deterministic missing Midgard pools', async ()
     status: 400
   });
   const result = await priceRujiraFeeEvents(client, {
+    async loadAcquisition() { return null; },
     async isMissingPoolPriceCached() {
       return false;
     },
-    async fetchMidgard() {
+    async fetchMidgard(path) {
+      if (path === '/health') return { database: true, inSync: true, lastAggregated: { height: 1, timestamp: 1 } };
       throw error;
     },
     async cacheMissingPoolPrice(poolAsset, receivedError) {

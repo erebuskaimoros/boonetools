@@ -75,6 +75,15 @@ function providers(overrides = {}) {
   };
 }
 
+test('fresh module balances are reused without a duplicate bank request', async () => {
+  const calls = [];
+  const snapshot = await buildTreasurySnapshot({ now: () => NOW, providers: providers({
+    fetchThorBalance: async (address) => { calls.push(address); return [{ denom: 'rune', amount: '100000000' }]; }
+  }) });
+  assert.equal(calls.some((address) => address.startsWith('thor1module')), false);
+  assert.equal(snapshot.sections[0].entries[0].balances[0].amount, 3);
+});
+
 test('fetchTreasuryCore fetches shared network, pools, nodes, and module data exactly once', async () => {
   const calls = [];
   const result = await fetchTreasuryCore({
@@ -274,4 +283,30 @@ test('Treasury module repeats broad LP discovery when Midgard has no module memb
     refreshed.sections[0].entries[0].lpPositions.map((position) => position.fullPool),
     ['ETH.ETH']
   );
+});
+
+test('malformed module coin amounts and denoms retain the bank balance fallback', async () => {
+  for (const coin of [{ denom: 'rune', amount: 'invalid' }, { denom: 'rune', amount: '-1' }, { denom: '', amount: '100000000' }, null]) {
+    const calls = [];
+    const snapshot = await buildTreasurySnapshot({ now: () => NOW, providers: providers({
+      fetchTreasuryCore: async () => corePayload({ module: { ok: true, value: {
+        address: 'thor1module000000000000000000000000000000000', coins: [coin]
+      } } }),
+      fetchThorBalance: async (address) => { calls.push(address); return [{ denom: 'rune', amount: '100000000' }]; }
+    }) });
+    assert.equal(calls.some((address) => address.startsWith('thor1module')), true);
+    assert.equal(snapshot.sections[0].entries[0].balances[0].amount, 1);
+  }
+});
+
+test('a validated empty module coin list does not trigger a bank fallback', async () => {
+  const calls = [];
+  const snapshot = await buildTreasurySnapshot({ now: () => NOW, providers: providers({
+    fetchTreasuryCore: async () => corePayload({ module: { ok: true, value: {
+      address: 'thor1module000000000000000000000000000000000', coins: []
+    } } }),
+    fetchThorBalance: async (address) => { calls.push(address); return []; }
+  }) });
+  assert.equal(calls.some((address) => address.startsWith('thor1module')), false);
+  assert.deepEqual(snapshot.sections[0].entries[0].balances, []);
 });

@@ -3,7 +3,8 @@
   import Chart from 'chart.js/auto';
   import zoomPlugin from 'chartjs-plugin-zoom';
   import { INTERACTIVE_CHART_LEGEND } from '$lib/charts/terminal.js';
-  import { fetchJSONWithFallback, MIDGARD_ENDPOINTS } from '$lib/utils/api';
+  import { fetchSharedVisitorData } from '$lib/api/visitor-data.js';
+  import { createVisiblePoll } from '$lib/utils/visible-poll.js';
   import { booneToolsApi } from '$lib/api/boonetools.js';
   import { subscribeChainHeads } from '$lib/api/chain-stream.js';
   import {
@@ -95,9 +96,14 @@
   let affiliateTransactionsCache = {};
   let affiliateTransactionsLoading = false;
   let affiliateTransactionsError = null;
+  let affiliateTransactionsWarning = '';
   let activeAffiliateTransactionRequestKey = '';
-  let runePriceHistoryPromise = null;
-  let detailCache = {};
+  let requestController = new AbortController();
+  let warmingPoll;
+  let dynamicSnapshotStale = false;
+  let dynamicSnapshotWarning = '';
+  let affiliateVolumePartial = false;
+  let affiliateHistoryWarning = '';
   let chainHeadSubscription = null;
   let rpcConnected = false;
   let rpcStatus = 'idle';
@@ -190,6 +196,12 @@
   onMount(() => {
     loadData();
     connectChainHeadStream();
+    warmingPoll = createVisiblePoll(async () => {
+      if (!loading && !refreshing && (!model || dynamicSnapshotStale)) await loadData();
+      if (!affiliateHistoryLoading && affiliateVolumePartial && selectedAffiliate) {
+        await loadAffiliateHistory(selectedAffiliate, affiliateHistoryKey);
+      }
+    }, { intervalMs: 15_000, immediate: false });
   });
 
   onDestroy(() => {
@@ -197,6 +209,8 @@
     affiliateChartInstance?.destroy();
     disconnectChainHeadStream();
     clearTimeout(epochRefreshTimer);
+    warmingPoll?.stop();
+    requestController.abort();
   });
 
   async function loadData() {
@@ -206,40 +220,12 @@
     error = null;
 
     try {
-      const [mimir, recordsResponse, currentResponse, lastblock] = await Promise.all([
-        fetchJSONWithFallback('/thorchain/mimir'),
-        fetchJSONWithFallback('/thorchain/dynamic_l1_fees'),
-        fetchJSONWithFallback('/thorchain/dynamic_l1_fees_current'),
-        fetchJSONWithFallback('/thorchain/lastblock')
-      ]);
-
-      const thornames = Array.from(
-        new Set((recordsResponse?.entries || []).map((entry) => entry.thorname).filter(Boolean))
-      );
-      const detailsByThorname = {};
-
-      await Promise.all(
-        thornames.map(async (thorname) => {
-          try {
-            const detail = await getThornameDetail(thorname);
-            if (detail) {
-              detailsByThorname[thorname] = detail;
-              detailsByThorname[String(thorname).toLowerCase()] = detail;
-              detailsByThorname[String(thorname).toUpperCase()] = detail;
-            }
-          } catch (detailError) {
-            console.warn(`dynamic fee detail fetch failed for ${thorname}`, detailError);
-          }
-        })
-      );
-
-      model = buildDynamicFeeModel({
-        mimir,
-        recordsResponse,
-        currentResponse,
-        detailsByThorname,
-        lastblock
-      });
+      const snapshot = await fetchSharedVisitorData('/dynamic-fee-snapshot', { signal: requestController.signal });
+      dynamicSnapshotStale = snapshot.stale;
+      dynamicSnapshotWarning = snapshot.pending_details > 0
+        ? `Loading shared history for ${snapshot.pending_details} remaining affiliates.`
+        : snapshot.stale ? 'Refreshing shared chain state; showing the last observation.' : '';
+      model = buildDynamicFeeModel(snapshot);
 
       const loadedHeight = model.config.blockHeight;
       if (rpcLastBlock > loadedHeight) {
@@ -256,7 +242,7 @@
         selectedAffiliateId = model.affiliates[0]?.id || '';
       }
 
-      lastRefresh = new Date();
+      lastRefresh = new Date(snapshot.field_meta?.current?.fetched_at || snapshot.observed_at);
     } catch (err) {
       console.error('dynamic fee dashboard load failed', err);
       error = err?.message || 'failed to load dynamic fee state';
@@ -266,65 +252,36 @@
     }
   }
 
-  async function getThornameDetail(thorname) {
-    const key = String(thorname).toLowerCase();
-    if (detailCache[key]) return detailCache[key];
-    const detail = await fetchJSONWithFallback(`/thorchain/dynamic_l1_fees/${encodeURIComponent(thorname)}`);
-    detailCache = { ...detailCache, [key]: detail };
-    return detail;
-  }
-
-  function getRunePriceHistory() {
-    if (runePriceHistoryPromise) return runePriceHistoryPromise;
-
-    const params = new URLSearchParams({
-      interval: 'day',
-      count: String(AFFILIATE_HISTORY_COUNT)
-    });
-    runePriceHistoryPromise = fetchJSONWithFallback(
-      `/v2/history/rune?${params.toString()}`,
-      {},
-      MIDGARD_ENDPOINTS
-    )
-      .then((payload) => Array.isArray(payload?.intervals) ? payload.intervals : [])
-      .catch((err) => {
-        runePriceHistoryPromise = null;
-        throw err;
-      });
-    return runePriceHistoryPromise;
-  }
-
   async function loadAffiliateHistory(affiliate, requestKey) {
     if (!affiliate?.thorname) return;
 
-    affiliateHistoryLoading = true;
+    affiliateHistoryLoading = !affiliateHistoryCache[requestKey];
     affiliateHistoryError = null;
     activeAffiliateHistoryKey = requestKey;
 
-    const params = new URLSearchParams({
-      thorname: affiliate.thorname,
-      interval: 'day',
-      count: String(AFFILIATE_HISTORY_COUNT)
-    });
-
     try {
-      const [volumePayload, earningsRows, runePriceRows] = await Promise.all([
+      const [volumePayload, historyPayload] = await Promise.all([
         booneToolsApi.get('/dynamic-fee-affiliate-volume', {
+          signal: requestController.signal,
           query: {
             affiliate: affiliate.thorname,
             days: AFFILIATE_HISTORY_COUNT
           },
           errorMessage: 'Failed to load canonical affiliate volume'
         }),
-        fetchJSONWithFallback(`/v2/history/affiliate/earnings?${params.toString()}`, {}, MIDGARD_ENDPOINTS),
-        getRunePriceHistory()
+        fetchSharedVisitorData('/dynamic-fee-history', { query: { affiliate: affiliate.thorname }, signal: requestController.signal })
       ]);
-
+      if (activeAffiliateHistoryKey !== requestKey) return;
+      affiliateVolumePartial = Boolean(volumePayload.partial || volumePayload.stale || historyPayload.stale);
+      affiliateHistoryWarning = volumePayload.partial
+        ? `History is updating (${volumePayload.coverage?.days_available || 0}/${AFFILIATE_HISTORY_COUNT} days available). Missing days are omitted.`
+        : historyPayload.stale ? 'Refreshing shared fee history; showing the last observation.' : '';
+      const available = new Set((volumePayload.points || []).map((row) => String(row.startTime)));
       const series = buildAffiliateMidgardSeries(
         volumePayload?.points,
-        earningsRows,
+        volumePayload.partial ? historyPayload.earningsRows.filter((row) => available.has(String(row.startTime))) : historyPayload.earningsRows,
         affiliate.thorname,
-        runePriceRows
+        historyPayload.runePriceRows
       );
       affiliateHistoryCache = {
         ...affiliateHistoryCache,
@@ -409,7 +366,8 @@
   function scheduleEpochRefresh() {
     clearTimeout(epochRefreshTimer);
     epochRefreshTimer = setTimeout(() => {
-      if (!loading && !refreshing) loadData();
+      if (!loading && !refreshing && document.visibilityState !== 'hidden') loadData();
+      else dynamicSnapshotStale = true;
     }, EPOCH_REFRESH_DEBOUNCE_MS);
   }
 
@@ -902,6 +860,7 @@
   }
 
   async function loadAffiliateTransactions(affiliate, point) {
+    affiliateTransactionsWarning = '';
     const startTime = Math.max(0, Math.trunc(Number(point?.startTime) || 0));
     const endTime = Math.max(startTime, Math.trunc(Number(point?.endTime) || 0));
     if (!affiliate?.thorname || !startTime || endTime <= startTime) return;
@@ -934,6 +893,7 @@
 
     try {
       const payload = await booneToolsApi.get('/dynamic-fee-affiliate-volume', {
+        signal: requestController.signal,
         query: {
           affiliate: affiliate.thorname,
           days,
@@ -949,10 +909,8 @@
       if (activeAffiliateTransactionRequestKey !== requestKey) return;
 
       affiliateTransactions = view.rows;
-      affiliateTransactionsCache = {
-        ...affiliateTransactionsCache,
-        [requestKey]: view.rows
-      };
+      if (!payload.partial) affiliateTransactionsCache = { ...affiliateTransactionsCache, [requestKey]: view.rows };
+      if (payload.transactions_truncated) affiliateTransactionsWarning = 'Showing the largest 1,000 transactions in this bucket.';
     } catch (err) {
       if (activeAffiliateTransactionRequestKey === requestKey) {
         affiliateTransactionsError = err?.message || 'failed to load affiliate bucket transactions';
@@ -1127,6 +1085,10 @@
     <div class="alerts">
       <div class="alert warn"><span class="alert-tag">ARM</span><span>{statusMessage()}</span></div>
     </div>
+  {/if}
+
+  {#if dynamicSnapshotWarning}
+    <div class="alerts"><div class="alert warn"><span class="alert-tag">WRN</span><span>{dynamicSnapshotWarning}</span></div></div>
   {/if}
 
   <section class="block">
@@ -1611,6 +1573,7 @@
         >[reset zoom]</button>
       </div>
 
+      {#if affiliateHistoryWarning}<div class="block-meta">{affiliateHistoryWarning}</div>{/if}
       <div class="chart-frame affiliate-chart-frame">
         {#if affiliateHistoryLoading}
           <div class="loading-block"><span class="loading-marker">////</span><span>loading affiliate history</span></div>
@@ -1631,6 +1594,7 @@
 
     {#if selectedAffiliateBucket}
       <section class="block affiliate-transactions-block">
+        {#if affiliateTransactionsWarning}<div class="block-meta">{affiliateTransactionsWarning}</div>{/if}
         <div class="block-head">
           <div class="block-title"><span class="title-marker">|</span><h2>Affiliate Bucket Transactions</h2></div>
           <div class="block-head-actions">

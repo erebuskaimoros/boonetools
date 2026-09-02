@@ -1,14 +1,12 @@
 import {
-  getAsgardVaults,
   sortVaultsByStatus,
   formatVaultName,
   calculateVaultBond,
   calculateVaultAssetValue,
   VAULT_STATUS
 } from '$lib/utils/network';
-import { fetchJSONWithFallback } from '$lib/utils/api';
+import { fetchSharedVisitorData } from '$lib/api/visitor-data.js';
 import { fromBaseUnit, getAssetType, normalizeAsset } from '$lib/utils/blockchain';
-import { getNodes } from '$lib/utils/nodes';
 import { getAssetDisplayName } from '$lib/constants';
 import {
   buildCustodiedAssetRows,
@@ -23,16 +21,10 @@ import { hydrateUtxoOnChainBalances } from './utxo-balances.js';
  * Fetch and process all vault explorer data.
  * Returns a structured model for the visualization.
  */
-export async function fetchVaultExplorerData() {
-  const [rawVaults, poolsData, networkData, nodesData, tradeUnits, securedAssets, inboundAddresses] = await Promise.all([
-    getAsgardVaults(),
-    fetchJSONWithFallback('/thorchain/pools'),
-    fetchJSONWithFallback('/thorchain/network'),
-    getNodes(),
-    fetchJSONWithFallback('/thorchain/trade/units').catch(() => []),
-    fetchJSONWithFallback('/thorchain/securedassets').catch(() => []),
-    fetchJSONWithFallback('/thorchain/inbound_addresses').catch(() => [])
-  ]);
+export async function fetchVaultExplorerData(options = {}) {
+  const snapshot = await fetchSharedVisitorData('/vault-explorer-snapshot', options);
+  const { vaults: rawVaults, pools: poolsData, network: networkData, nodes: nodesData,
+    tradeUnits, securedAssets, inboundAddresses } = snapshot;
 
   let vaults = sortVaultsByStatus(rawVaults);
   try {
@@ -272,6 +264,9 @@ export async function fetchVaultExplorerData() {
   }));
 
   return {
+    observedAt: snapshot.field_meta?.vaults?.fetched_at || snapshot.observed_at,
+    stale: snapshot.stale,
+    fieldMeta: snapshot.field_meta,
     vaults: vaultModels,
     pools,
     assets,

@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import { createVisiblePoll } from './utils/visible-poll.js';
   import { slide } from 'svelte/transition';
   import { formatNumber, formatUSD, formatUSDCompact, formatThorAmount, copyToClipboard as copyToClipboardUtil, shortenAddress as shortenAddressUtil, getAddressSuffix } from '$lib/utils/formatting';
   import { fromBaseUnit } from '$lib/utils/blockchain';
@@ -21,6 +22,8 @@
   let error = null;
   let data = null;
   let lastUpdated = null;
+  let requestController;
+  let warmingPoll;
   let activeTab = 'overview';
 
   // Crosshair hover state
@@ -42,7 +45,7 @@
     'THOR': 'https://thorchain.net/address/'
   };
 
-  async function loadVaultData(initial = false) {
+  async function loadVaultData(initial = false, options = {}) {
     if (refreshing) return;
     if (initial) {
       loading = true;
@@ -52,8 +55,8 @@
     }
 
     try {
-      data = await fetchVaultExplorerData();
-      lastUpdated = new Date();
+      data = await fetchVaultExplorerData({ ...options, signal: requestController?.signal });
+      lastUpdated = new Date(data.observedAt || Date.now());
       error = null;
     } catch (e) {
       const message = e?.message || 'Unable to load vault data';
@@ -79,7 +82,12 @@
   }
 
   onMount(() => {
+    requestController = new AbortController();
     loadVaultData(true);
+    warmingPoll = createVisiblePoll(() => {
+      if (data?.stale && !refreshing && !loading) return loadVaultData(false, { requireFresh: true });
+    }, { intervalMs: 15_000, immediate: false });
+    return () => { warmingPoll?.stop(); requestController?.abort(); };
   });
 
   function handleCellEnter(e, poolIdx, rowIdx, colIdx) {
@@ -251,7 +259,7 @@
       <button class="tab-btn" role="tab" aria-selected={activeTab === 'details'} class:tab-active={activeTab === 'details'} on:click={() => activeTab = 'details'}>Vault Details</button>
       <div class="tab-spacer"></div>
       {#if lastUpdated}
-        <span class="last-updated">Updated {formatLastUpdated(lastUpdated)}</span>
+        <span class="last-updated">Updated {formatLastUpdated(lastUpdated)}{data?.stale ? ' · refreshing shared data' : ''}</span>
       {/if}
       <button class="refresh-btn" on:click={() => loadVaultData(false)} disabled={refreshing}>
         {refreshing ? 'Refreshing...' : 'Refresh'}

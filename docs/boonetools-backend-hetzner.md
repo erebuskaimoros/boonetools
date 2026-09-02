@@ -98,8 +98,22 @@ Selected day, week, and month chart buckets can opt into the same bounded
 action scan with `include_transactions=true`; those responses add
 volume-sorted route details and whole-route liquidity fees without bloating the
 default 400-day chart response. Transaction detail is capped at 31 days.
-Responses use persistent and single-flight caches because this is a bounded
-historical drill-down rather than a dashboard summary read model.
+This GET now reads canonical stored actions and queues bounded acquisition in
+`boonetools-visitor-data.timer` (every minute). The worker persists each page
+with its fixed source/range/offset and marks daily aggregates complete only
+after exhaustive acquisition against that source's watermark. Failed/capped
+work resumes the same range; it does not restart the 400-day scan. Transaction
+details are derived from those same stored actions.
+
+`/dynamic-fee-snapshot`, `/dynamic-fee-history`, and
+`/vault-explorer-snapshot` also read shared observations and enqueue refreshes.
+Cold responses return 503 with Retry-After; browsers retry while visible and
+keep previously displayed values during refresh. The visitor worker primes
+the two global snapshots during deploy, then refreshes on demand. Individual
+field observation times remain available; republishing does not renew their
+source age. Affiliate earnings USD remains refreshable because Midgard values
+it using current RUNE price, while daily RUNE-price buckets reuse the shared
+completed history cache.
 
 The public `/functions/v1/wasm-arb-economics` endpoint serves the corrected v3
 post-Mimir-zero monitoring series without request-time provider calls. Recent
@@ -321,10 +335,33 @@ journal. Job return payloads can contain whole provider snapshots and must not
 be printed: the journal is duplicated into host syslog, so pretty-printing a
 15-second job result can exhaust the server filesystem.
 
+Completion/failure records include bounded acquisition counters from the
+common backend transport and shared observation cache. Outbound attempts,
+HTTP success/failure, cooldown skips, cache hits, and coalesced requests are
+separate; endpoint families omit credentials and request identities. The API
+emits the same aggregate every five minutes when there is activity. These
+counters do not measure unrelated direct external/browser transports.
+
+Migrations 061–064 add the raw observation store, verified Burn/Bond progress,
+independent App Layer event coverage, and queued visitor/affiliate state.
+Historical completion is source-specific and never inferred from TTL expiry.
+For repeatable SQL and concurrency checks, apply the migrations to a disposable
+database named `acquisition_test*` or `boonetools_acquisition_test*`, then run
+`ACQUISITION_TEST_DATABASE_URL=... node backend/scripts/check-acquisition-integration.mjs`.
+The script rejects production database names and blocks provider fetches.
+
 Migration `026_event_provenance.sql` gives Rapid Swaps, node votes, and Rujira
 Reserve payments a unique canonical identity plus per-provider observation
 history. Canonical upserts enforce source precedence and monotonic first/last
 seen timestamps atomically in Postgres.
+
+Node Votes retains Dune as the normal Mimir history source. Its successful
+query-progress record uses a bounded late-index overlap and does not claim
+verified chain coverage. Upgrade/protocol discovery tracks its own actual RPC
+scan range, including empty scans, and preserves any older retention gap.
+RPC status and transaction pages stay on the same provider; a newer local
+head cannot prove an archive's coverage. Exact timestamps are shared, and
+display-window dates no longer trigger repeated six-month height bisections.
 
 Migration `027_api_read_models.sql` adds the shared `api_read_models` snapshot
 store and bounded publisher-run history. Migration
@@ -437,8 +474,12 @@ public performance gate; subsequent repair is resumable and idempotent.
 
 Migration `049_system_income_burn_tracker.sql` adds route-specific daily RUNE
 burn history and resumable sync state. `boonetools-burn-tracker.timer` refreshes
-the current UTC partial day, all-time reconciliation total, and public read
-model every five minutes. Migration `050_system_income_burn_blocks.sql` adds
+the current UTC partial day and public read model every five minutes.
+Migration `062_historical_acquisition.sql` records independently verified
+completed days and bounds gap repair to one historical request per run.
+All-time reconciliation remains live during bootstrap; after the closed-day
+baseline is complete, the independent all-time audit runs daily. Migration
+`050_system_income_burn_blocks.sql` adds
 the exact `rewards.income_burn` amount to live block headers. `/burn-tracker`
 overlays those committed post-snapshot blocks and the browser applies every
 `/chain-events` height once, while the five-minute job remains the durable
@@ -452,7 +493,9 @@ journalctl -fu boonetools-burn-tracker-backfill.service
 
 Optional configuration is `BURN_TRACKER_START_DATE` (default `2024-09-26`),
 `BURN_TRACKER_RECENT_LOOKBACK_DAYS` (default `7`), and
-`BURN_TRACKER_REQUEST_DELAY_MS` (default `250`). Both jobs use the configured
+`BURN_TRACKER_REQUEST_DELAY_MS` (default `250`),
+`BURN_TRACKER_HISTORY_REQUEST_LIMIT` (default `1`), and
+`BURN_TRACKER_RECONCILE_INTERVAL_MS` (default `86400000`). Both jobs use the configured
 Liquify `MIDGARD_URLS`; no public request contacts Midgard or THORNode. The
 per-block path reuses the existing consolidated Liquify websocket connection.
 

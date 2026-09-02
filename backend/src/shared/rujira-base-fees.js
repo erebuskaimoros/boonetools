@@ -5,6 +5,7 @@ import { config } from '../lib/config.js';
 import { chunkArray, safeNumber, sleep, toIsoString } from '../lib/utils.js';
 import { executeDuneQueryRows, summarizeDuneError } from './dune.js';
 import { fetchMidgard, isMidgardRateLimitError } from './midgard.js';
+import { loadRujiraRunePrices } from './rujira-rune-prices.js';
 
 const ACTION_SYNC_KEY = 'rujira-thorchain-swap-actions:v1';
 const ACTION_PAGE_LIMIT = 50;
@@ -182,15 +183,6 @@ function parseDateNs(ns) {
 function dateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
   return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : '';
-}
-
-function startOfUtcWeek(value) {
-  const source = value instanceof Date ? value : new Date(value);
-  const date = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth(), source.getUTCDate()));
-  const day = date.getUTCDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  date.setUTCDate(date.getUTCDate() + mondayOffset);
-  return date;
 }
 
 function addDays(value, days) {
@@ -1900,66 +1892,39 @@ export async function processRujiraBaseFeeBlocks(client, options = {}) {
   return stats;
 }
 
-async function fetchRunePriceWeeks(fromTs, count) {
-  const params = new URLSearchParams({
-    interval: 'week',
-    from: String(fromTs),
-    count: String(Math.max(1, Math.min(400, count)))
-  });
-  const payload = await fetchMidgard(`/history/rune?${params.toString()}`, {
-    bases: config.rujiraBaseFeesMidgardUrls,
-    validateResponse: (_path, data) => !Array.isArray(data?.intervals)
-  });
-
-  return payload.intervals.map((row) => ({
-    week_start: dateKey(new Date(Number(row.startTime) * 1000)),
-    week_end: dateKey(new Date(Number(row.endTime) * 1000)),
-    rune_price_usd: Number(row.runePriceUSD) || 0,
-    source_json: row
-  }));
-}
-
-export async function refreshRujiraBaseFeePrices(client) {
+export async function refreshRujiraBaseFeePrices(client, options = {}) {
   const { rows } = await client.query(
-    `select min(block_time) as min_time, max(block_time) as max_time
+    `select distinct to_char(date_trunc('week', block_time at time zone 'UTC'), 'YYYY-MM-DD') as bucket_start
      from rujira_base_fee_events
-     where block_time is not null
-       and included = true
-       and rune_price_usd = 0`
+     where block_time is not null and included = true and source <> 'dune'
+     order by bucket_start`
   );
-  const minTime = rows[0]?.min_time;
-  const maxTime = rows[0]?.max_time;
-  if (!minTime || !maxTime) {
-    return {
-      weeks: 0,
-      priced_events: 0
-    };
-  }
-
-  const firstWeek = startOfUtcWeek(minTime);
-  const lastWeek = startOfUtcWeek(maxTime);
-  const weekCount = Math.ceil((lastWeek.getTime() - firstWeek.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 2;
-  const priceRows = await fetchRunePriceWeeks(Math.floor(firstWeek.getTime() / 1000), weekCount);
-  await upsertRows(client, 'rujira_base_fee_rune_price_weeks', priceRows, {
-    conflictColumns: ['week_start'],
-    jsonColumns: ['source_json']
+  if (!rows.length) return { weeks: 0, priced_events: 0 };
+  const loaded = await (options.loadPrices || loadRujiraRunePrices)(client, rows.map((row) => row.bucket_start), {
+    ...options, interval: 'week', bases: config.rujiraBaseFeesMidgardUrls
   });
-
+  const prices = Array.isArray(loaded) ? loaded : loaded.rows;
+  if (prices.length) await client.query(
+    `insert into rujira_base_fee_rune_price_weeks as current (week_start, week_end, rune_price_usd, source_json, fetched_at)
+     select start::date, "end"::date, price, source_json, coalesce("observedAt", now())
+     from jsonb_to_recordset($1::jsonb) as price(start text, "end" text, price double precision, source_json jsonb, "observedAt" timestamptz)
+     on conflict (week_start) do update set week_end = excluded.week_end,
+       rune_price_usd = excluded.rune_price_usd, source_json = excluded.source_json, fetched_at = excluded.fetched_at
+     where (current.week_end, current.rune_price_usd, current.source_json, current.fetched_at)
+       is distinct from (excluded.week_end, excluded.rune_price_usd, excluded.source_json, excluded.fetched_at)`,
+    [JSON.stringify(prices)]
+  );
   const updateResult = await client.query(
     `update rujira_base_fee_events event
-     set rune_price_usd = price.rune_price_usd,
-         liquidity_fee_usd = event.liquidity_fee_rune * price.rune_price_usd,
-         updated_at = now()
+     set rune_price_usd = price.rune_price_usd, liquidity_fee_usd = event.liquidity_fee_rune * price.rune_price_usd, updated_at = now()
      from rujira_base_fee_rune_price_weeks price
-     where event.block_time is not null
-       and event.rune_price_usd = 0
-       and date_trunc('week', event.block_time at time zone 'UTC')::date = price.week_start`
+     where event.block_time is not null and event.source <> 'dune' and price.rune_price_usd > 0
+       and date_trunc('week', event.block_time at time zone 'UTC')::date = price.week_start
+       and (event.rune_price_usd, event.liquidity_fee_usd) is distinct from (price.rune_price_usd, event.liquidity_fee_rune * price.rune_price_usd)`
   );
-
-  return {
-    weeks: priceRows.length,
-    priced_events: Number(updateResult.rowCount) || 0
-  };
+  return { weeks: prices.length, priced_events: Number(updateResult.rowCount) || 0,
+    requests: loaded.requests || 0, pending_buckets: loaded.pending_buckets || 0,
+    ...(loaded.errors?.length ? { error: loaded.errors.join('; ') } : {}) };
 }
 
 function normalizeWeeklyRows(rows) {

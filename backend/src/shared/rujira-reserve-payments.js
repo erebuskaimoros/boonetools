@@ -13,11 +13,13 @@ import {
 } from '../lib/provenance.js';
 import { safeNumber, sleep, toIsoString } from '../lib/utils.js';
 import { executeDuneQueryRows, formatDuneDateTime, summarizeDuneError } from './dune.js';
-import { fetchMidgard, fetchMidgardActions, isMidgardRateLimitError } from './midgard.js';
+import { fetchMidgardActions, isMidgardRateLimitError } from './midgard.js';
 import { fetchThorchain } from './thornode.js';
+import { loadRujiraRunePrices } from './rujira-rune-prices.js';
 
 const ACTION_SYNC_KEY = 'rujira-reserve-payment-actions:v1';
 const SCHEDULE_SYNC_KEY = 'rujira-reserve-payment-schedule:v1';
+const DUNE_SYNC_KEY = 'rujira-reserve-payment-dune:v1';
 const ACTION_PAGE_LIMIT = 50;
 const RPC_REQUEST_TIMEOUT_MS = 10000;
 const CANONICAL_RESERVE_PAYMENT_EVENTS_CTE = `
@@ -819,12 +821,6 @@ async function fetchRpcBlock(height) {
   });
 }
 
-function getBlockTimeFromBlockPayload(payload) {
-  const value = payload?.result?.block?.header?.time || '';
-  const date = value ? new Date(value) : null;
-  return date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
-}
-
 async function fetchRpcStatus() {
   const payload = await fetchJsonFromBases(config.rujiraReservePaymentsRpcUrls, '/status');
   return Number(payload?.result?.sync_info?.latest_block_height || 0);
@@ -969,7 +965,10 @@ export function buildRujiraReservePaymentScheduleRangeCandidates({
 export async function ingestRujiraReservePaymentScheduledCandidates(client, options = {}) {
   const syncState = await loadSyncState(client, SCHEDULE_SYNC_KEY);
   const maxHeights = Math.max(0, Number(options.maxHeights ?? config.rujiraReservePaymentsCandidateMaxHeights) || 0);
-  const latestHeight = await (options.fetchLatestHeight || fetchRpcStatus)();
+  const resolveHead = options.resolveHead || (await import('./chain-data.js')).resolveThorchainHead;
+  const head = await resolveHead(client, { nowMs: options.nowMs,
+    fetchHead: async () => ({ height: await (options.fetchLatestHeight || fetchRpcStatus)(), source: 'rpc-status' }) });
+  const latestHeight = Number(head?.height) || 0;
   const stopHeight = Math.max(0, latestHeight - config.rujiraReservePaymentsHeadLagBlocks);
   const configuredCadence = Math.max(1, Number(config.rujiraReservePaymentsScheduleBlocks) || 101);
   let scheduleError = '';
@@ -1199,8 +1198,8 @@ export async function processRujiraReservePaymentBlocks(client, options = {}) {
     try {
       let blockTime = row.block_time ? new Date(row.block_time).toISOString() : null;
       if (!blockTime) {
-        const blockPayload = await fetchRpcBlock(row.height);
-        blockTime = getBlockTimeFromBlockPayload(blockPayload);
+        const resolveBlockTime = options.resolveBlockTime || (await import('./chain-data.js')).resolveThorchainBlockTime;
+        blockTime = await resolveBlockTime(client, Number(row.height), { fetchBlock: fetchRpcBlock });
       }
       const payload = await fetchRpcBlockResults(row.height);
       const parsed = await saveParsedRujiraReservePaymentBlock(client, Number(row.height), payload, {
@@ -1227,72 +1226,39 @@ export async function processRujiraReservePaymentBlocks(client, options = {}) {
   return stats;
 }
 
-async function fetchRunePriceDays(fromTs, count) {
-  const params = new URLSearchParams({
-    interval: 'day',
-    from: String(fromTs),
-    count: String(Math.max(1, Math.min(400, count)))
-  });
-  const payload = await fetchMidgard(`/history/rune?${params.toString()}`, {
-    bases: config.rujiraReservePaymentsMidgardUrls,
-    validateResponse: (_path, data) => !Array.isArray(data?.intervals)
-  });
-
-  return payload.intervals.map((row) => ({
-    day_start: dateKey(new Date(Number(row.startTime) * 1000)),
-    day_end: dateKey(new Date(Number(row.endTime) * 1000)),
-    rune_price_usd: Number(row.runePriceUSD) || 0,
-    source_json: row
-  }));
-}
-
-export async function refreshRujiraReservePaymentPrices(client) {
+export async function refreshRujiraReservePaymentPrices(client, options = {}) {
   const { rows } = await client.query(
-    `select min(block_time) as min_time, max(block_time) as max_time
+    `select distinct to_char(date_trunc('day', block_time at time zone 'UTC'), 'YYYY-MM-DD') as bucket_start
      from rujira_reserve_payment_events
-     where block_time is not null`
+     where block_time is not null and source <> 'dune'
+     order by bucket_start`
   );
-  const minTime = rows[0]?.min_time;
-  const maxTime = rows[0]?.max_time;
-  if (!minTime || !maxTime) {
-    return {
-      days: 0,
-      priced_events: 0
-    };
-  }
-
-  const firstDay = new Date(Date.UTC(
-    new Date(minTime).getUTCFullYear(),
-    new Date(minTime).getUTCMonth(),
-    new Date(minTime).getUTCDate()
-  ));
-  const lastDay = new Date(Date.UTC(
-    new Date(maxTime).getUTCFullYear(),
-    new Date(maxTime).getUTCMonth(),
-    new Date(maxTime).getUTCDate()
-  ));
-  const dayCount = Math.ceil((lastDay.getTime() - firstDay.getTime()) / (24 * 60 * 60 * 1000)) + 2;
-  const priceRows = await fetchRunePriceDays(Math.floor(firstDay.getTime() / 1000), dayCount);
-  await upsertRows(client, 'rujira_reserve_payment_rune_price_days', priceRows, {
-    conflictColumns: ['day_start'],
-    jsonColumns: ['source_json']
+  if (!rows.length) return { days: 0, priced_events: 0 };
+  const loaded = await (options.loadPrices || loadRujiraRunePrices)(client, rows.map((row) => row.bucket_start), {
+    ...options, interval: 'day', bases: config.rujiraReservePaymentsMidgardUrls
   });
-
+  const prices = Array.isArray(loaded) ? loaded : loaded.rows;
+  if (prices.length) await client.query(
+    `insert into rujira_reserve_payment_rune_price_days as current (day_start, day_end, rune_price_usd, source_json, updated_at)
+     select start::date, "end"::date, price, source_json, coalesce("observedAt", now())
+     from jsonb_to_recordset($1::jsonb) as price(start text, "end" text, price numeric, source_json jsonb, "observedAt" timestamptz)
+     on conflict (day_start) do update set day_end = excluded.day_end,
+       rune_price_usd = excluded.rune_price_usd, source_json = excluded.source_json, updated_at = excluded.updated_at
+     where (current.day_end, current.rune_price_usd, current.source_json, current.updated_at)
+       is distinct from (excluded.day_end, excluded.rune_price_usd, excluded.source_json, excluded.updated_at)`,
+    [JSON.stringify(prices)]
+  );
   const updateResult = await client.query(
     `update rujira_reserve_payment_events event
-     set rune_price_usd = price.rune_price_usd,
-         amount_usd = event.amount_rune * price.rune_price_usd,
-         updated_at = now()
+     set rune_price_usd = price.rune_price_usd, amount_usd = event.amount_rune * price.rune_price_usd, updated_at = now()
      from rujira_reserve_payment_rune_price_days price
-     where event.block_time is not null
-       and event.source <> 'dune'
-       and date_trunc('day', event.block_time at time zone 'UTC')::date = price.day_start`
+     where event.block_time is not null and event.source <> 'dune' and price.rune_price_usd > 0
+       and date_trunc('day', event.block_time at time zone 'UTC')::date = price.day_start
+       and (event.rune_price_usd, event.amount_usd) is distinct from (price.rune_price_usd, event.amount_rune * price.rune_price_usd)`
   );
-
-  return {
-    days: priceRows.length,
-    priced_events: Number(updateResult.rowCount) || 0
-  };
+  return { days: prices.length, priced_events: Number(updateResult.rowCount) || 0,
+    requests: loaded.requests || 0, pending_buckets: loaded.pending_buckets || 0,
+    ...(loaded.errors?.length ? { error: loaded.errors.join('; ') } : {}) };
 }
 
 function normalizeWeeklyRows(rows) {
@@ -1792,7 +1758,7 @@ export function buildRujiraReservePaymentRowsFromDune(rows) {
     .filter((row) => row && row.height > 0 && row.amount_rune > 0);
 }
 
-async function runRujiraReservePaymentsDuneIngestion(client) {
+export async function runRujiraReservePaymentsDuneIngestion(client, options = {}) {
   if (!config.duneApiKey || !config.rujiraReservePaymentsDuneQueryId) {
     return {
       skipped: true,
@@ -1803,38 +1769,47 @@ async function runRujiraReservePaymentsDuneIngestion(client) {
     };
   }
 
-  const startTime = toIsoOrNull(config.rujiraReservePaymentsDuneStartTime) || '2026-04-30T00:00:00.000Z';
-  const endTime = new Date(Date.now() - Math.max(0, config.rujiraReservePaymentsDuneHeadLagHours) * 60 * 60 * 1000).toISOString();
-  const result = await executeDuneQueryRows(config.rujiraReservePaymentsDuneQueryId, {
-    start_time: formatDuneDateTime(startTime),
-    end_time: formatDuneDateTime(endTime)
-  });
+  const configuredStart = toIsoOrNull(config.rujiraReservePaymentsDuneStartTime) || '2026-04-30T00:00:00.000Z';
+  const progress = await (options.loadDuneProgress || loadSyncState)(client, DUNE_SYNC_KEY);
+  const coveredThrough = toIsoOrNull(progress?.stats_json?.covered_through);
+  const now = options.now ? new Date(typeof options.now === 'function' ? options.now() : options.now) : new Date();
+  const headEndMs = now.getTime() - Math.max(0, config.rujiraReservePaymentsDuneHeadLagHours) * 3600000;
+  if (coveredThrough && Date.parse(coveredThrough) >= headEndMs) {
+    return { skipped: true, source: 'dune', reason: 'caught_up_to_dune_head_lag', covered_through: coveredThrough };
+  }
+  // Revisit only a bounded late-arrival overlap, with a separate durable cursor
+  // that cannot be overwritten by Midgard's candidate/head scan.
+  const startMs = Math.max(Date.parse(configuredStart), coveredThrough ? Date.parse(coveredThrough) - 86400000 : 0);
+  const endMs = Math.min(headEndMs, (coveredThrough ? Date.parse(coveredThrough) : startMs) + 3 * 86400000);
+  const startTime = new Date(startMs).toISOString();
+  const endTime = new Date(endMs).toISOString();
+  const resultLimit = 32000;
+  const result = await (options.executeDune || executeDuneQueryRows)(config.rujiraReservePaymentsDuneQueryId, {
+    start_time: formatDuneDateTime(startTime), end_time: formatDuneDateTime(endTime)
+  }, { limit: resultLimit });
+  const totalRows = Number(result.metadata?.total_row_count);
+  if (!Array.isArray(result.rows) || !Number.isSafeInteger(totalRows) || totalRows < 0
+    || result.rows.length >= resultLimit || totalRows !== result.rows.length
+    || result.raw?.next_uri || result.raw?.next_offset != null) {
+    throw new Error('Reserve Dune window was incomplete or truncated; coverage was not advanced');
+  }
   const rows = buildRujiraReservePaymentRowsFromDune(result.rows);
+  if (rows.length !== result.rows.length) {
+    throw new Error('Reserve Dune window contained invalid settlement rows; coverage was not advanced');
+  }
 
-  await persistRujiraReservePaymentEvents(client, rows);
+  await (options.persistDuneRows || persistRujiraReservePaymentEvents)(client, rows);
   const duplicateRowsDeleted = await pruneDuplicateRujiraReservePaymentEvents(client);
 
   const heights = rows.map((row) => row.height).filter((height) => height > 0);
-  await upsertRows(client, 'rujira_reserve_payment_sync_state', [{
-    sync_key: ACTION_SYNC_KEY,
-    next_page_token: '',
-    next_scheduled_height: heights.length ? Math.max(...heights) : 0,
-    complete: true,
-    rate_limited_until: null,
-    updated_at: new Date().toISOString(),
+  await (options.saveDuneProgress || saveSyncState)(client, DUNE_SYNC_KEY, {
+    complete: endMs >= headEndMs,
     stats_json: {
-      source: 'dune',
-      dune_query_id: config.rujiraReservePaymentsDuneQueryId,
-      dune_execution_id: result.executionId,
-      start_time: startTime,
-      end_time: endTime,
-      rows: result.rows.length,
-      accepted_rows: rows.length,
-      duplicate_rows_deleted: duplicateRowsDeleted
+      source: 'dune', dune_query_id: config.rujiraReservePaymentsDuneQueryId,
+      dune_execution_id: result.executionId, start_time: startTime, end_time: endTime,
+      covered_through: endTime, overlap_hours: 24,
+      rows: result.rows.length, accepted_rows: rows.length, duplicate_rows_deleted: duplicateRowsDeleted
     }
-  }], {
-    conflictColumns: ['sync_key'],
-    jsonColumns: ['stats_json']
   });
 
   return {
@@ -1996,7 +1971,7 @@ export async function runRujiraReservePaymentsIngestion(client, options = {}) {
   if (config.rujiraReservePaymentsDuneQueryId) {
     let duneSource;
     try {
-      duneSource = await runDune(client);
+      duneSource = await runDune(client, options);
     } catch (error) {
       const duneError = summarizeDuneError(error);
       return runLegacy(client, {

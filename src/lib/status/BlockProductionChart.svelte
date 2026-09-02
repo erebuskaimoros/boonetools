@@ -1,5 +1,6 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
+  import { createVisiblePoll } from '../utils/visible-poll.js';
   import { subscribeChainHeads } from '../api/chain-stream.js';
   import { fetchBlockIntervals } from './api.js';
   import {
@@ -29,6 +30,7 @@
   const TOOLTIP_WIDTH = 290;
   const TOOLTIP_HEIGHT = 72;
   const RECONCILE_INTERVAL_MS = 15_000;
+  const HEALTHY_REPAIR_INTERVAL_MS = 5 * 60_000;
 
   /** @type {number | null} */
   let activePointIndex = null;
@@ -50,6 +52,7 @@
   let chainSubscription = null;
   let reconcileTimer = null;
   let requestController = null;
+  let lastReconciledAt = 0;
 
   $: displayHistory = rawPoints.length > 1
     ? {
@@ -119,26 +122,35 @@
     requestController = new AbortController();
     loadRawIntervals({ full: true });
     chainSubscription = subscribeChainHeads({
-      onOpen: () => { chainStreamConnected = true; },
+      onOpen: () => { chainStreamConnected = true; loadRawIntervals({ full: rawHasGaps }); },
       onError: () => { chainStreamConnected = false; },
       onHead: (head) => {
         chainStreamConnected = true;
         const point = chainHeadToBlockIntervalPoint(head);
         if (!point) return;
+        const previousHeight = Number(rawPoints.at(-1)?.height || 0);
+        if (previousHeight > 0 && Number(point.height) > previousHeight + 1) {
+          rawHasGaps = true;
+          loadRawIntervals({ full: true });
+        }
         rawPoints = mergeBlockIntervalPoints(rawPoints, [point]);
       }
     });
-    reconcileTimer = setInterval(() => loadRawIntervals({ full: rawHasGaps }), RECONCILE_INTERVAL_MS);
+    reconcileTimer = createVisiblePoll(() => {
+      if (!chainStreamConnected || rawHasGaps || Date.now() - lastReconciledAt >= HEALTHY_REPAIR_INTERVAL_MS) {
+        return loadRawIntervals({ full: rawHasGaps });
+      }
+    }, { intervalMs: RECONCILE_INTERVAL_MS, immediate: false });
   });
 
   onDestroy(() => {
     requestController?.abort();
     chainSubscription?.close();
-    clearInterval(reconcileTimer);
+    reconcileTimer?.stop();
   });
 
   async function loadRawIntervals({ full = false } = {}) {
-    if (rawRequestActive) return;
+    if (rawRequestActive || document.visibilityState === 'hidden') return;
     rawRequestActive = true;
     const afterHeight = full ? 0 : Number(rawPoints.at(-1)?.height || 0);
     try {
@@ -148,6 +160,7 @@
         signal: requestController?.signal
       });
       const incoming = decodeBlockIntervalPayload(payload);
+      lastReconciledAt = Date.now();
       // Preserve a head received over SSE while a full replay request is in flight.
       rawPoints = mergeBlockIntervalPoints(rawPoints, incoming);
       rawHasGaps = Array.isArray(payload?.gaps) && payload.gaps.length > 0;

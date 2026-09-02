@@ -1,5 +1,6 @@
 import { config } from '../lib/config.js';
 import { fetchThorchainRpc } from './rpc.js';
+import { resolveThorchainHead } from './chain-data.js';
 import { parseChainHeaderRange, upsertChainHeaders } from './chain-headers.js';
 import { parseSystemIncomePolRpcBlock } from './system-income-pol-blocks.js';
 import {
@@ -38,12 +39,6 @@ async function persistConcurrentBatches(items, limit, worker, persist) {
     if (failure) throw failure;
   }
   return persisted;
-}
-
-function rpcHead(payload = {}) {
-  const height = Math.trunc(Number(payload?.result?.sync_info?.latest_block_height)) || 0;
-  if (height <= 0) throw new Error('SIPOL repair could not resolve the RPC head');
-  return height;
 }
 
 async function ensureHeaderRange(client, startHeight, endHeight, options = {}) {
@@ -125,7 +120,10 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
     1,
     Math.trunc(Number(options.activationHeight)) || config.systemIncomePolActivationHeight
   );
-  const headHeight = Math.trunc(Number(options.headHeight)) || rpcHead(await fetchRpc('/status'));
+  const headHeight = Math.trunc(Number(options.headHeight)) || (await (options.resolveHead || resolveThorchainHead)(client, {
+    nowMs: options.nowMs,
+    fetchHead: () => fetchRpc('/status')
+  })).height;
   if (headHeight < activationHeight) {
     return { activationHeight, headHeight, requested: 0, repaired: 0, complete: true };
   }

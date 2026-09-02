@@ -1,0 +1,17 @@
+[Unit]
+Description=Refresh shared BooneTools visitor data and affiliate history
+After=network-online.target docker.service boonetools-api.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/opt/boonetools-backend/current/backend
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--dns-result-order=ipv4first
+EnvironmentFile=/opt/boonetools-backend/config/backend.env
+ExecStart=/usr/bin/node src/run-job.js visitor-data
+TimeoutStartSec=5min
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=boonetools-visitor-data

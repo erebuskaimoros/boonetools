@@ -10,7 +10,6 @@ import {
   countUnpricedBalances,
   finalizeTreasuryEntry,
   fromBaseUnit,
-  mergeDenomBalances,
   normalizeHoldings,
   safeNumber,
   summarizeSection,
@@ -356,9 +355,13 @@ export async function buildTreasurySnapshot(options = {}) {
     const oldEntry = previousEntries.get(key);
     try {
       if (entry.chain === 'THOR') {
-        const bankBalances = await providers.fetchThorBalance(entry.address, providerOptions);
+        const freshModule = entry.address === module.address && segmentStates.module.status === 'fresh'
+          && module.coins.every((coin) => typeof coin?.denom === 'string' && coin.denom.trim().length > 0
+            && /^\d+$/.test(String(coin?.amount ?? '')));
+        const bankBalances = freshModule ? module.coins
+          : await providers.fetchThorBalance(entry.address, providerOptions);
         rawBalances.set(key, buildThorHoldings(
-          mergeDenomBalances(entry.moduleBalances, bankBalances),
+          bankBalances,
           poolState.assetPrices
         ));
       } else {

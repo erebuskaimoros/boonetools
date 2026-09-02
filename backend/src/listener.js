@@ -34,6 +34,7 @@ import {
   upsertChainHeader
 } from './shared/chain-headers.js';
 import { parseConsolidatedChainBlock } from './shared/chain-stream.js';
+import { recordCollectorEventBlock, resetCollectorEventCoverage } from './shared/app-layer-live-state.js';
 import {
   saveParsedRujiraBaseFeeBlock,
   writeRujiraBaseFeeListenerHeartbeat
@@ -439,6 +440,7 @@ async function processConsolidatedBlock(data) {
       systemIncomePolPoolFees: parsed.systemIncomePol.poolFees
     });
     if (!storedHeader) throw new Error(`Unable to persist block header ${parsed.header.height}`);
+    await recordCollectorEventBlock(client, data);
     if (storedHeader.height >= config.systemIncomePolActivationHeight) {
       await saveSystemIncomePolBlock(client, {
         height: storedHeader.height,
@@ -687,6 +689,10 @@ function connect() {
     opened = true;
     connectedAt = Date.now();
     reconnectAttempt = 0;
+    chainProcessQueue = chainProcessQueue.catch(() => {}).then(async () => {
+      const client = await getClient();
+      try { await resetCollectorEventCoverage(client); } finally { client.release(); }
+    });
 
     ws.send(JSON.stringify({
       jsonrpc: '2.0',

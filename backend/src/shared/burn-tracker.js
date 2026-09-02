@@ -83,13 +83,19 @@ export async function buildBurnTrackerReadModel(client, options = {}) {
   const rate = resolveSystemIncomeBurnRate(mimir, constants);
   const supply = bankRuneSupplyBase(supplyPayload);
   const missingDays = daily.filter((row) => row.burn_e8 === null).map((row) => row.day);
-  const reconciliationDelta = BigInt(allTimeTotal) - BigInt(fallbackTotal);
+  // The independent audit runs less often than live updates. Compare its paired
+  // observations, never today's live sum against yesterday's audit total.
+  const signedDelta = String(sync?.stats_json?.reconciliation_delta_e8 ?? '');
+  const reconciliationDelta = /^-?\d+$/.test(signedDelta) ? BigInt(signedDelta)
+    : Object.hasOwn(sync?.stats_json || {}, 'reconciled_at') ? 0n
+      : BigInt(allTimeTotal) - BigInt(fallbackTotal);
   const absoluteReconciliationDelta = reconciliationDelta < 0n
     ? -reconciliationDelta
     : reconciliationDelta;
-  const displayTotal = missingDays.length ? allTimeTotal : fallbackTotal;
+  const displayTotal = missingDays.length || sync?.stats_json?.baseline_complete === false ? allTimeTotal : fallbackTotal;
   const warnings = [];
   if (missingDays.length) warnings.push(`${missingDays.length} UTC burn day(s) are missing`);
+  if (sync?.stats_json?.baseline_complete === false) warnings.push('Burn history completeness is still being verified');
   if (absoluteReconciliationDelta > 100_000_000n) {
     warnings.push('Stored daily burn sum does not yet reconcile to the Midgard all-time total');
   }

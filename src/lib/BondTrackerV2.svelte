@@ -7,6 +7,7 @@
   import { fromBaseUnit } from '$lib/utils/blockchain';
   import { getChurnState, getNodes, getLeaveStatus, LEAVE_STATUS } from '$lib/utils/nodes';
   import { estimateCurrentChurnYields } from '$lib/bond-tracker/apy.js';
+  import { selectReusableBondNode } from '$lib/bond-tracker/shared-nodes.js';
   import { calculateAPR, calculateAPY } from '$lib/utils/calculations';
   import { LoadingBar, StatusIndicator, ActionButton, Toast, RefreshIcon, BookmarkIcon, CopyIcon, CurrencySelector } from '$lib/components';
   import { get } from 'svelte/store';
@@ -27,6 +28,7 @@
   const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
 
   let my_bond_address = "";
+  let nodesObservation = {};
   let node_address = ""; // Keep for backwards compatibility
   let showData = false;
   let my_bond = 0;
@@ -222,7 +224,15 @@
 
       // Discover current bond nodes from THORNode instead of Midgard /bonds,
       // which has been intermittently returning 500s in browser traffic.
-      const allNodesData = await getNodes({ cache: false });
+      let allNodesData;
+      try {
+        const snapshot = await booneToolsApi.get('/network-snapshot', { query: { field: 'nodes', include_meta: 'true' } });
+        allNodesData = snapshot.value;
+        nodesObservation = snapshot.stale ? {} : snapshot.field_meta;
+      } catch {
+        allNodesData = await getNodes({ cache: false });
+        nodesObservation = {};
+      }
       allNodes = allNodesData;
       const nodesWithBond = getBondNodesFromThorNodes(allNodesData, my_bond_address);
 
@@ -284,7 +294,8 @@
 
       // Fetch detailed data for each node
       const nodeDataPromises = nodes.map(async (node) => {
-        const nodeData = await thornode.fetch(`/thorchain/node/${node.address}`);
+        const nodeData = selectReusableBondNode(allNodesData, node.address, nodesObservation)
+          || await thornode.fetch(`/thorchain/node/${node.address}`);
         const bondProviders = nodeData.bond_providers.providers;
 
         let userBond = 0;
@@ -360,7 +371,8 @@
     try {
       // Parallelize independent API calls
       const [nodeData, churnState, runePriceData, allNodesData] = await Promise.all([
-        thornode.fetch(`/thorchain/node/${node_address}`),
+        selectReusableBondNode(preloadedAllNodes, node_address, nodesObservation)
+          || thornode.fetch(`/thorchain/node/${node_address}`),
         getChurnState().catch(() => null),
         thornode.getNetwork(),
         preloadedAllNodes || getNodes()

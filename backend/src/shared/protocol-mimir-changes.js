@@ -1,6 +1,7 @@
 import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
 import { sleep } from '../lib/utils.js';
+import { mergeVoteScanCoverage, voteScanWindow } from './node-vote-acquisition.js';
 import {
   fetchNodeVoteTxs,
   fetchNodeVotesBlockTime,
@@ -153,7 +154,7 @@ async function saveSyncState(client, payload) {
     end_height: payload.endHeight,
     start_time: payload.startTime,
     end_time: payload.endTime,
-    complete: true,
+    complete: Boolean(payload.historyComplete),
     updated_at: new Date().toISOString(),
     stats_json: payload.stats
   }], {
@@ -166,7 +167,8 @@ async function blockTimesFor(heights, options = {}) {
   const times = new Map();
   const fetchTime = options.fetchBlockTime || fetchNodeVotesBlockTime;
   for (const height of heights) {
-    const value = await fetchTime(height, options.transportOptions).catch(() => null);
+    const value = await fetchTime(height, options.transportOptions);
+    if (!value) throw new Error(`Missing protocol Mimir block time at ${height}`);
     times.set(height, value);
     if (config.nodeVotesRequestDelayMs > 0) await sleep(config.nodeVotesRequestDelayMs);
   }
@@ -175,10 +177,16 @@ async function blockTimesFor(heights, options = {}) {
 
 export async function runProtocolMimirBackfill(client, options = {}) {
   const previous = await loadSyncState(client);
-  const window = resolveNodeVoteBackfillWindow({
+  const fullWindow = resolveNodeVoteBackfillWindow({ endTime: options.endTime });
+  const previousCoverage = previous?.stats_json?.scan_coverage || (previous?.complete ? {
+    startTime: previous.start_time, startHeight: Number(previous.start_height),
+    endTime: previous.end_time, endHeight: Number(previous.last_scanned_height || previous.end_height)
+  } : null);
+  const window = voteScanWindow({
     startTime: options.startTime,
-    endTime: options.endTime,
-    latestStoredTime: options.startTime ? '' : previous?.end_time
+    endTime: fullWindow.endTime,
+    fullStartTime: fullWindow.startTime,
+    previous: previousCoverage
   });
   const resolveRange = options.resolveHeightRange || resolveNodeVoteHeightRange;
   const fetchTxs = options.fetchTxs || fetchNodeVoteTxs;
@@ -186,11 +194,13 @@ export async function runProtocolMimirBackfill(client, options = {}) {
   const explicitEndHeight = Math.trunc(Number(options.endHeight || 0));
   const confirmedRange = explicitStartHeight > 0 && explicitEndHeight >= explicitStartHeight
     ? { startHeight: explicitStartHeight, endHeight: explicitEndHeight }
-    : await resolveRange(window.startTime, window.endTime);
+    : await resolveRange(window.startTime, window.endTime, { client, startHeight: window.startHeight });
   const { startHeight, endHeight } = confirmedRange;
   const transportOptions = {
     sharedCooldown: true,
-    cooldownScope: 'protocol-mimir-history'
+    cooldownScope: 'protocol-mimir-history',
+    client, cooldownClient: client,
+    ...(confirmedRange.rpcUrls ? { rpcUrls: confirmedRange.rpcUrls } : {})
   };
   const result = await fetchTxs(
     { startHeight, endHeight },
@@ -207,7 +217,11 @@ export async function runProtocolMimirBackfill(client, options = {}) {
     parseProtocolMimirTxSearchTx(tx, times.get(Number(tx?.height || 0)) || null)
   ));
   const upserted = await upsertProtocolMimirChanges(client, rows);
+  const coverage = mergeVoteScanCoverage(previousCoverage, {
+    startTime: window.startTime, endTime: window.endTime, ...confirmedRange
+  });
   const stats = {
+    scan_complete: true, history_complete: coverage.historyComplete, scan_coverage: coverage,
     mode: window.mode,
     start_height: startHeight,
     end_height: endHeight,
@@ -220,14 +234,15 @@ export async function runProtocolMimirBackfill(client, options = {}) {
     unique_mimir_keys: new Set(rows.map((row) => row.mimir_key)).size
   };
   await saveSyncState(client, {
-    startHeight: window.mode === 'rolling'
+    startHeight: window.mode === 'incremental'
       ? (Number(previous?.start_height || 0) || startHeight)
       : startHeight,
     endHeight,
-    startTime: window.mode === 'rolling'
+    startTime: window.mode === 'incremental'
       ? (previous?.start_time || window.startTime)
       : window.startTime,
-    endTime: window.endTime,
+    endTime: coverage.endTime,
+    historyComplete: coverage.historyComplete,
     stats
   });
   return stats;

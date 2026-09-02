@@ -1,6 +1,7 @@
 import { config } from '../lib/config.js';
 import { fetchThorchainRpc } from './rpc.js';
 import { fetchThorchain } from './thornode.js';
+import { resolveThorchainBlockTime } from './chain-data.js';
 
 function positiveHeight(value) {
   const height = Math.trunc(Number(value));
@@ -90,11 +91,11 @@ export async function ensureThorchainMarketSnapshot(client, height, options = {}
       rpcUrls: thorchainMarketSnapshotRpcUrls(options)
     }
   ));
-  // The three provider calls run concurrently. Cooldown bookkeeping therefore
+  // The price requests and exact timestamp resolution run concurrently. Cooldown bookkeeping therefore
   // uses the shared pool by default instead of issuing overlapping queries on
   // the advisory-lock client.
   const cooldownClient = options.cooldownClient;
-  const [poolsPayload, oraclePayload, blockPayload] = await Promise.all([
+  const [poolsPayload, oraclePayload, resolvedBlockTime] = await Promise.all([
     fetchThor(`/thorchain/pools?height=${targetHeight}`, {
       historical: true,
       timeoutMs: options.timeoutMs || 30_000,
@@ -109,17 +110,17 @@ export async function ensureThorchainMarketSnapshot(client, height, options = {}
       cooldownScope: 'market-snapshots',
       sharedCooldown: true
     }),
-    fetchBlock(
-      '/block',
-      { height: targetHeight },
-      { cooldownClient, sharedCooldown: true }
-    )
+    resolveThorchainBlockTime(client, targetHeight, {
+      nowMs: options.nowMs,
+      fetchBlock: (requestedHeight) => fetchBlock('/block', { height: requestedHeight },
+        { cooldownClient: client, sharedCooldown: true })
+    })
   ]);
   const pools = Array.isArray(poolsPayload) ? poolsPayload : poolsPayload?.pools || [];
   const oraclePrices = oraclePayload?.prices || oraclePayload || [];
   const snapshot = await persistThorchainMarketSnapshot(client, {
     height: targetHeight,
-    blockTime: blockTime(blockPayload),
+    blockTime: resolvedBlockTime,
     pools,
     oraclePrices,
     source: options.source || 'thornode-historical'
