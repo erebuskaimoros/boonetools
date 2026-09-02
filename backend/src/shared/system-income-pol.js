@@ -8,7 +8,7 @@ import {
 } from './system-income-pol-store.js';
 
 export const SYSTEM_INCOME_POL_MODEL_KEY = 'system-income-pol:v1';
-export const SYSTEM_INCOME_POL_SCHEMA_VERSION = 4;
+export const SYSTEM_INCOME_POL_SCHEMA_VERSION = 5;
 export const SYSTEM_INCOME_POL_TTL_MS = 5 * 60 * 1000;
 
 const FEE_APR_WINDOWS = Object.freeze([
@@ -43,6 +43,15 @@ function optionalNonnegativeNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function positiveDecimalString(value) {
+  const normalized = typeof value === 'string'
+    ? value.trim()
+    : typeof value === 'number' ? String(value) : '';
+  if (!/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(normalized)) return null;
+  const number = Number(normalized);
+  return Number.isFinite(number) && number > 0 ? normalized : null;
 }
 
 function day(value) {
@@ -286,6 +295,9 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
   let feesComplete = true;
   const daily = dailyRows.map((row) => {
     const key = day(row.day);
+    // Reuse the matching UTC day's stored Midgard interval-end price. Never
+    // substitute the current position price or another day's reference.
+    const dailyRunePriceUsd = positiveDecimalString(row.rune_price_usd);
     cumulativeFunded += BigInt(integer(row.funded_e8));
     if (row.system_income_e8 == null) systemIncomeComplete = false;
     else if (systemIncomeComplete) cumulativeSystemIncome += BigInt(integer(row.system_income_e8));
@@ -301,6 +313,11 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
       funded_e8: integer(row.funded_e8),
       system_income_e8: row.system_income_e8 == null ? null : integer(row.system_income_e8),
       deployed_e8: integer(row.deployed_e8),
+      rune_price_usd: dailyRunePriceUsd,
+      price_source: dailyRunePriceUsd === null ? null : String(row.price_source || '') || null,
+      price_provisional: Boolean(row.price_provisional) || key >= now.toISOString().slice(0, 10),
+      price_as_of: dailyRunePriceUsd === null ? null : iso(row.price_as_of),
+      price_updated_at: dailyRunePriceUsd === null ? null : iso(row.price_updated_at),
       minted_units_e8: row.minted_units_e8 == null ? null : integer(row.minted_units_e8),
       estimated_fees_e8: estimatedFees,
       cumulative_funded_e8: cumulativeFunded.toString(),
@@ -412,6 +429,7 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
       sources: [
         { lane: 'events', source: 'thorchain-block-results:rewards,pol_reserve_deploy,add_liquidity,swap' },
         { lane: 'positions', source: 'thornode-core:pools+network-price+mimir+thornode:pol_reserve-module-lp' },
+        { lane: 'daily_prices', source: 'system_income_burn_daily:liquify-midgard-earnings:interval-end-runePriceUSD' },
         { lane: 'fees', source: 'system-income-pol-block-fees:hourly×sampled-ownership' }
       ],
       warnings
@@ -492,6 +510,11 @@ export function applySystemIncomePolLiveOverlay(payload = {}, overlay = {}) {
       funded_e8: reward,
       system_income_e8: systemIncome,
       deployed_e8: deployed,
+      rune_price_usd: null,
+      price_source: null,
+      price_provisional: true,
+      price_as_of: null,
+      price_updated_at: null,
       minted_units_e8: null,
       estimated_fees_e8: null,
       cumulative_funded_e8: summary.total_funded_e8,

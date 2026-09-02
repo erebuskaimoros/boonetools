@@ -439,11 +439,19 @@ export async function updateSystemIncomePolState(client, input = {}) {
 
 export async function loadSystemIncomePolDaily(client) {
   const { rows } = await client.query(
-    `select day::text as day, funded_e8::text, system_income_e8::text,
-            deployed_e8::text, minted_units_e8::text,
-            first_height::text, last_height::text, observed_blocks, expected_blocks,
-            partial, source_updated_at
-     from system_income_pol_daily order by day`
+    `select daily.day::text as day, daily.funded_e8::text, daily.system_income_e8::text,
+            daily.deployed_e8::text, daily.minted_units_e8::text,
+            daily.first_height::text, daily.last_height::text,
+            daily.observed_blocks, daily.expected_blocks,
+            daily.partial, daily.source_updated_at,
+            prices.rune_price_usd::text as rune_price_usd,
+            prices.source as price_source,
+            coalesce(prices.partial, false) as price_provisional,
+            prices.interval_end as price_as_of,
+            prices.updated_at as price_updated_at
+     from system_income_pol_daily daily
+     left join system_income_burn_daily prices on prices.day = daily.day
+     order by daily.day`
   );
   return rows;
 }

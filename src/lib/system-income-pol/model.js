@@ -176,6 +176,9 @@ function normalizeDaily(row = {}) {
   const cumulativeSystemIncomeE8 = optionalBase(row.cumulative_system_income_e8);
   const cumulativeDeployedE8 = optionalBase(row.cumulative_deployed_e8);
   const cumulativeEstimatedFeesE8 = optionalBase(row.cumulative_estimated_fees_e8);
+  const price = finite(row.rune_price_usd);
+  const runePriceUsd = price > 0 ? price : null;
+  const deployedRune = e8ToNumber(deployedE8);
   return {
     day: utcDay(row.day),
     fundedE8,
@@ -190,7 +193,12 @@ function normalizeDaily(row = {}) {
     cumulativeDeployedRune: e8ToNumber(cumulativeDeployedE8),
     cumulativeEstimatedFeesRune: e8ToNumber(cumulativeEstimatedFeesE8),
     fundedRune: e8ToNumber(fundedE8),
-    deployedRune: e8ToNumber(deployedE8),
+    deployedRune,
+    runePriceUsd,
+    priceSource: String(row.price_source || ''),
+    priceProvisional: Boolean(row.price_provisional),
+    deployedUsd: deployedRune === 0 ? 0
+      : deployedRune !== null && runePriceUsd !== null ? deployedRune * runePriceUsd : null,
     estimatedFeesRune: e8ToNumber(estimatedFeesE8),
     partial: Boolean(row.partial),
     coverage: row.coverage && typeof row.coverage === 'object' ? row.coverage : {}
@@ -206,6 +214,15 @@ export function normalizeSystemIncomePolPayload(payload = {}) {
     .map(normalizeDaily)
     .filter((row) => row.day)
     .sort((left, right) => left.day.localeCompare(right.day));
+  // Accumulate dollars across the full history, before range filtering/zoom.
+  // A missing price makes the all-time dollar total unknown, not understated.
+  let cumulativeDeployedUsd = 0;
+  let dollarHistoryComplete = true;
+  for (const row of daily) {
+    if (row.deployedUsd === null) dollarHistoryComplete = false;
+    else cumulativeDeployedUsd += row.deployedUsd;
+    row.cumulativeDeployedUsd = dollarHistoryComplete ? cumulativeDeployedUsd : null;
+  }
   const liveHeight = Math.max(0, Math.trunc(finite(payload.live?.through_height, 0)));
   return {
     schemaVersion: finite(payload.schema_version, 1),
@@ -350,10 +367,7 @@ export function buildSystemIncomePolChart(rows = [], options = {}) {
   const width = options.width || 1000;
   const height = options.height || 260;
   const unit = options.unit === 'usd' ? 'usd' : 'rune';
-  const runePriceUsd = e8ToNumber(options.runePriceUsdE8);
-  const unitAvailable = unit === 'rune' || (Number.isFinite(runePriceUsd) && runePriceUsd > 0);
-  const unitMultiplier = unit === 'usd' && unitAvailable ? runePriceUsd : 1;
-  const denominate = (runeValue) => unitAvailable ? runeValue * unitMultiplier : null;
+  const unitAvailable = unit === 'rune' || rows.some(row => Number.isFinite(row.deployedUsd));
   const plot = { left: 72, right: width - 72, top: 18, bottom: height - 34 };
   const slotWidth = (plot.right - plot.left) / Math.max(1, rows.length);
   const barWidth = Math.max(1, Math.min(28, slotWidth * 0.72));
@@ -368,8 +382,8 @@ export function buildSystemIncomePolChart(rows = [], options = {}) {
       ...row,
       depositedPlotRune,
       cumulativeDepositedRune,
-      depositedPlotValue: denominate(depositedPlotRune),
-      cumulativeDepositedValue: denominate(cumulativeDepositedRune),
+      depositedPlotValue: unit === 'usd' ? finite(row.deployedUsd) : depositedPlotRune,
+      cumulativeDepositedValue: unit === 'usd' ? finite(row.cumulativeDeployedUsd) : cumulativeDepositedRune,
       x: plot.left + slotWidth * (index + 0.5)
     };
   });
@@ -377,8 +391,8 @@ export function buildSystemIncomePolChart(rows = [], options = {}) {
   const y = (value) => plot.bottom - (Math.max(0, value) / yMax) * (plot.bottom - plot.top);
   const cumulativeYMax = niceCeiling(Math.max(1, ...points.map((point) => point.cumulativeDepositedValue || 0)));
   const cumulativeY = (value) => plot.bottom - (Math.max(0, value) / cumulativeYMax) * (plot.bottom - plot.top);
-  const depositBars = points.map((point) => {
-    const top = y(point.depositedPlotValue || 0);
+  const depositBars = points.filter(point => Number.isFinite(point.depositedPlotValue)).map((point) => {
+    const top = y(point.depositedPlotValue);
     return {
       day: point.day,
       value: point.depositedPlotValue,
@@ -396,7 +410,7 @@ export function buildSystemIncomePolChart(rows = [], options = {}) {
     height,
     unit,
     unitAvailable,
-    runePriceUsd,
+    missingPriceDays: unit === 'usd' ? points.filter(point => point.depositedPlotValue === null).length : 0,
     plot,
     points,
     depositBars,

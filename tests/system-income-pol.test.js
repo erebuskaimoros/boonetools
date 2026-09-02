@@ -52,8 +52,9 @@ test('System Income POL owns /pol-tracker and appears in navigation', async () =
   assert.match(dashboardSource, /aria-label="Chart denomination"/);
   assert.match(dashboardSource, />\[RUNE\]<\/button>/);
   assert.match(dashboardSource, />\[\$\]<\/button>/);
-  assert.match(dashboardSource, /runePriceUsdE8: dashboard\.summary\.runePriceUsdE8/);
-  assert.match(dashboardSource, /USD values use the current RUNE price/);
+  assert.match(dashboardSource, /daily\.some\(row => Number\.isFinite\(row\.deployedUsd\)\)/);
+  assert.doesNotMatch(dashboardSource, /USD values use the current RUNE price/);
+  assert.match(dashboardSource, /USD deposits use each UTC day's closing RUNE price/);
   assert.match(dashboardSource, /<rect class="bar deposited"/);
   assert.match(dashboardSource, /<path class="series cumulative"/);
   assert.match(dashboardSource, /class="chart-tooltip"/);
@@ -353,29 +354,74 @@ test('System Income POL history charts each day\'s POL deposit as a bar', () => 
   assert.equal(chart.cumulativeYTicks.length, 5);
 });
 
-test('System Income POL history can denominate daily and cumulative deposits in current-price USD', () => {
-  const rows = [{
+test('System Income POL USD deposits use daily prices and sum historic dollars before range selection', () => {
+  const { daily: rows } = normalizeSystemIncomePolPayload({ daily: [{
     day: '2026-08-31',
-    deployedRune: 690,
-    cumulativeDeployedRune: 690
+    deployed_e8: '69000000000',
+    cumulative_deployed_e8: '69000000000',
+    rune_price_usd: '2'
   }, {
     day: '2026-09-01',
-    deployedRune: 55,
-    cumulativeDeployedRune: 745
-  }];
+    deployed_e8: '5500000000',
+    cumulative_deployed_e8: '74500000000',
+    rune_price_usd: '3'
+  }] });
   const chart = buildSystemIncomePolChart(rows, {
     unit: 'usd',
-    runePriceUsdE8: '200000000'
+    runePriceUsdE8: '900000000'
   });
 
   assert.equal(chart.unit, 'usd');
   assert.equal(chart.unitAvailable, true);
-  assert.equal(chart.runePriceUsd, 2);
-  assert.deepEqual(chart.points.map((point) => point.depositedPlotValue), [1380, 110]);
-  assert.deepEqual(chart.points.map((point) => point.cumulativeDepositedValue), [1380, 1490]);
-  assert.deepEqual(chart.depositBars.map((bar) => bar.value), [1380, 110]);
+  assert.deepEqual(chart.points.map((point) => point.depositedPlotValue), [1380, 165]);
+  assert.deepEqual(chart.points.map((point) => point.cumulativeDepositedValue), [1380, 1545]);
+  assert.deepEqual(chart.depositBars.map((bar) => bar.value), [1380, 165]);
   assert.deepEqual(chart.points.map((point) => point.depositedPlotRune), [690, 55]);
   assert.match(chart.cumulativeDepositedPath, /^M/);
+  const zoomed = buildSystemIncomePolChart(rows.slice(1), { unit: 'usd' });
+  assert.equal(zoomed.points[0].cumulativeDepositedValue, 1545);
+});
+
+test('System Income POL USD history leaves missing daily prices unknown', () => {
+  const { daily } = normalizeSystemIncomePolPayload({ daily: [
+    { day: '2026-08-31', deployed_e8: '100000000', rune_price_usd: '2' },
+    { day: '2026-09-01', deployed_e8: '100000000', rune_price_usd: null },
+    { day: '2026-09-02', deployed_e8: '100000000', rune_price_usd: '3', price_provisional: true }
+  ] });
+  const chart = buildSystemIncomePolChart(daily, { unit: 'usd', runePriceUsdE8: '900000000' });
+  assert.deepEqual(chart.points.map(point => point.depositedPlotValue), [2, null, 3]);
+  assert.deepEqual(chart.points.map(point => point.cumulativeDepositedValue), [2, null, null]);
+  assert.equal(chart.depositBars.length, 2);
+});
+
+test('live POL deposits retain their day price and midnight never borrows yesterday’s price', () => {
+  const payload = {
+    summary: { rune_price_usd_e8: '900000000' },
+    live: { through_height: 10 },
+    daily: [{ day: '2026-09-01', deployed_e8: '100000000', rune_price_usd: '2', price_provisional: true }]
+  };
+  const head = {
+    height: 11, time: '2026-09-01T23:59:59Z',
+    pol_reserve_deployments: [{ asset: 'TRON.USDT', rune_e8: '100000000' }]
+  };
+  const sameDay = normalizeSystemIncomePolPayload(applySystemIncomePolHead(payload, head));
+  assert.equal(sameDay.daily[0].deployedUsd, 4);
+  assert.equal(sameDay.daily[0].priceProvisional, true);
+  const nextDay = normalizeSystemIncomePolPayload(applySystemIncomePolHead(payload, {
+    ...head, time: '2026-09-02T00:00:01Z'
+  }));
+  assert.equal(nextDay.daily[0].deployedUsd, 2);
+  assert.equal(nextDay.daily[1].deployedUsd, null);
+  assert.equal(nextDay.daily[1].cumulativeDeployedUsd, null);
+});
+
+test('zero POL deposits do not require a price or invalidate the cumulative dollars', () => {
+  const { daily } = normalizeSystemIncomePolPayload({ daily: [
+    { day: '2026-08-31', deployed_e8: '100000000', rune_price_usd: '2' },
+    { day: '2026-09-01', deployed_e8: '0', rune_price_usd: null },
+    { day: '2026-09-02', deployed_e8: '100000000', rune_price_usd: '3' }
+  ] });
+  assert.deepEqual(daily.map(row => row.cumulativeDeployedUsd), [2, 2, 5]);
 });
 
 test('System Income POL chart selection projects drag zoom in either direction', () => {

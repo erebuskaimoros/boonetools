@@ -46,14 +46,10 @@
   $: isChartZoomed = Boolean(zoomStartDay && zoomEndDay && rows.length > 1) && (
     rows[0]?.day !== rangeRows[0]?.day || rows.at(-1)?.day !== rangeRows.at(-1)?.day
   );
-  $: usdChartAvailable = dashboard.summary.runePriceUsdE8 !== null
-    && Number(dashboard.summary.runePriceUsdE8) > 0;
+  $: usdChartAvailable = dashboard.daily.some(row => Number.isFinite(row.deployedUsd));
   $: if (chartUnit === 'usd' && !usdChartAvailable) chartUnit = 'rune';
   $: chartUnitLabel = chartUnit === 'usd' ? 'USD' : 'RUNE';
-  $: chart = buildSystemIncomePolChart(rows, {
-    unit: chartUnit,
-    runePriceUsdE8: dashboard.summary.runePriceUsdE8
-  });
+  $: chart = buildSystemIncomePolChart(rows, { unit: chartUnit });
   $: hoveredChartPoint = hoverIndex >= 0 ? chart.points[hoverIndex] || null : null;
   $: coverage = dashboard.coverage;
   $: feeApr24h = dashboard.summary.feeAprWindows['24h'];
@@ -488,13 +484,13 @@
         <h2 id="history-title">DAILY + CUMULATIVE POL DEPOSITS</h2>
         <p>
           Daily gross POL deployments shown as bars with the all-time total overlaid. Hover for values; drag to zoom.
-          {#if chartUnit === 'usd'}USD values use the current RUNE price ({formatE8Usd(dashboard.summary.runePriceUsdE8)}).{/if}
+          {#if chartUnit === 'usd'}USD deposits use each UTC day's closing RUNE price; the cumulative line sums those daily dollar values. Today's estimate is provisional.{/if}
         </p>
       </div>
       <div class="chart-controls">
         <div class="unit-group" aria-label="Chart denomination">
           <button class:active={chartUnit === 'rune'} aria-pressed={chartUnit === 'rune'} on:click={() => setChartUnit('rune')}>[RUNE]</button>
-          <button class:active={chartUnit === 'usd'} aria-pressed={chartUnit === 'usd'} disabled={!usdChartAvailable} title={usdChartAvailable ? 'Show values at the current RUNE/USD price' : 'Current RUNE/USD price unavailable'} on:click={() => setChartUnit('usd')}>[$]</button>
+          <button class:active={chartUnit === 'usd'} aria-pressed={chartUnit === 'usd'} disabled={!usdChartAvailable} title={usdChartAvailable ? 'Show deposits at each UTC day’s closing RUNE/USD price' : 'Historical daily RUNE/USD prices unavailable'} on:click={() => setChartUnit('usd')}>[$]</button>
         </div>
         <div class="range-group" aria-label="History range">
           {#each SYSTEM_INCOME_POL_RANGES as range}
@@ -530,7 +526,7 @@
           {/each}
           {#if chart.cumulativeDepositedPath}
             <path class="series cumulative" d={chart.cumulativeDepositedPath}></path>
-            {#each chart.points as point}
+            {#each chart.points.filter(point => Number.isFinite(point.cumulativeDepositedValue)) as point}
               <circle class="cumulative-point" cx={point.x} cy={chart.cumulativeYTicks.length ? chart.plot.bottom - (point.cumulativeDepositedValue / chart.cumulativeYMax) * (chart.plot.bottom - chart.plot.top) : chart.plot.bottom} r="3">
                 <title>{displayDay(point.day)} · {displayChartValue(point.cumulativeDepositedValue)} {chartUnitLabel} cumulative deposited</title>
               </circle>
@@ -583,14 +579,20 @@
             <span class="tooltip-row cumulative">
               <i></i><span>CUMULATIVE</span><b>{displayChartValue(hoveredChartPoint.cumulativeDepositedValue)} {chartUnitLabel}</b>
             </span>
+            {#if chartUnit === 'usd'}
+              <span>{hoveredChartPoint.priceProvisional ? 'LATEST PRICE' : 'DAY-END PRICE'}: {hoveredChartPoint.runePriceUsd === null ? 'UNAVAILABLE' : `$${hoveredChartPoint.runePriceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} / RUNE`}{hoveredChartPoint.priceProvisional ? ' · PROVISIONAL' : ''}</span>
+            {/if}
           </div>
         {/if}
       </div>
       <div class="legend">
         <span><i class="deposited"></i> DAILY POL DEPOSITED · {chartUnitLabel}</span>
         <span><i class="cumulative"></i> CUMULATIVE POL DEPOSITED · {chartUnitLabel}</span>
-        <small>{displayDay(rows[0]?.day)} → {displayDay(rows.at(-1)?.day)} · {chartUnitLabel}{chartUnit === 'usd' ? ' · CURRENT RUNE PRICE' : ''}</small>
+        <small>{displayDay(rows[0]?.day)} → {displayDay(rows.at(-1)?.day)} · {chartUnitLabel}{chartUnit === 'usd' ? ' · HISTORICAL DAILY PRICE' : ''}</small>
       </div>
+      {#if chartUnit === 'usd' && chart.points.some(point => point.cumulativeDepositedValue === null)}
+        <p class="chart-price-note">Missing daily prices are shown as unavailable. The cumulative USD line stops where historical pricing is incomplete.</p>
+      {/if}
     {:else}
       <div class="empty-chart">NO DAILY HISTORY AVAILABLE</div>
     {/if}
@@ -851,6 +853,7 @@
   .legend i.deposited { background: var(--term-accent); }
   .legend i.cumulative { height: 2px; background: var(--term-amber); }
   .legend small { margin-left: auto; color: var(--term-text-3); }
+  .chart-price-note { margin: 0; padding: 12px 18px; color: var(--term-text-2); font-size: 13px; }
   .empty-chart { padding: 60px 20px; color: var(--term-text-3); text-align: center; font-size: 12px; }
   .coverage-grid { display: grid; grid-template-columns: minmax(300px, .8fr) minmax(420px, 1.2fr); gap: 14px; max-width: 1440px; margin: 0 auto; }
   .coverage-grid .panel { width: 100%; margin: 0; }

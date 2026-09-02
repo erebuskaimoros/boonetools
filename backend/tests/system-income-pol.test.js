@@ -19,6 +19,7 @@ const {
 } = await import('../src/shared/system-income-pol.js');
 const {
   compactSystemIncomePolEvents,
+  loadSystemIncomePolDaily,
   refreshSystemIncomePolFeeEstimates
 } = await import('../src/shared/system-income-pol-store.js');
 const { runSystemIncomePolScheduler } = await import('../src/jobs/system-income-pol.js');
@@ -30,6 +31,102 @@ function event(type, attributes) {
     attributes: Object.entries(attributes).map(([key, value]) => ({ key, value: String(value) }))
   };
 }
+
+test('SIPOL deposit history exposes each UTC day price without substituting the current price', async () => {
+  const { payload } = await buildSystemIncomePolReadModel({}, {
+    now: new Date('2026-09-02T12:00:00Z'),
+    loadDaily: async () => [
+      {
+        day: '2026-08-31', deployed_e8: '10000000000', rune_price_usd: '2',
+        price_source: 'liquify-midgard-earnings', price_provisional: false,
+        price_as_of: '2026-09-01T00:00:00Z', price_updated_at: '2026-09-01T00:10:00Z'
+      },
+      { day: '2026-09-01', deployed_e8: '10000000000', rune_price_usd: null },
+      { day: '2026-09-02', deployed_e8: '10000000000', rune_price_usd: '3', price_source: 'liquify-midgard-earnings-live', price_provisional: true }
+    ],
+    loadPoolDaily: async () => [],
+    loadPoolHourly: async () => [],
+    loadPositions: async () => [],
+    loadState: async () => ({ rune_price_usd_e8: '900000000' })
+  });
+  assert.deepEqual(payload.daily.map(row => row.rune_price_usd), ['2', null, '3']);
+  assert.equal(payload.daily[0].price_source, 'liquify-midgard-earnings');
+  assert.equal(payload.daily[0].price_provisional, false);
+  assert.equal(payload.daily[0].price_as_of, '2026-09-01T00:00:00.000Z');
+  assert.equal(payload.daily[0].price_updated_at, '2026-09-01T00:10:00.000Z');
+  assert.equal(payload.daily[1].price_source, null);
+  assert.equal(payload.daily[1].price_provisional, false);
+  assert.equal(payload.daily[2].price_provisional, true);
+  assert.equal(payload.summary.rune_price_usd_e8, '900000000');
+  assert.equal(payload.schema_version, 5);
+});
+
+test('SIPOL daily history loader joins only matching stored UTC-day prices and retains unpriced days', async () => {
+  const rows = [{ day: '2026-08-31', deployed_e8: '10', rune_price_usd: '2' }];
+  const queries = [];
+  const result = await loadSystemIncomePolDaily({
+    query: async (sql, params) => {
+      queries.push({ sql, params });
+      return { rows };
+    }
+  });
+
+  assert.equal(result, rows);
+  assert.equal(queries.length, 1);
+  assert.match(queries[0].sql, /left join system_income_burn_daily prices on prices\.day = daily\.day/);
+  assert.match(queries[0].sql, /prices\.rune_price_usd::text as rune_price_usd/);
+  assert.match(queries[0].sql, /prices\.source as price_source/);
+  assert.match(queries[0].sql, /coalesce\(prices\.partial, false\) as price_provisional/);
+  assert.match(queries[0].sql, /prices\.interval_end as price_as_of/);
+  assert.match(queries[0].sql, /prices\.updated_at as price_updated_at/);
+  assert.match(queries[0].sql, /order by daily\.day/);
+  assert.doesNotMatch(queries[0].sql, /rune_price_usd_e8|system_income_pol_state|cross join|lateral/);
+});
+
+test('SIPOL daily prices reject missing, nonpositive, and nonfinite values without substituting current USD', async () => {
+  const invalidPrices = [null, undefined, '', ' ', '0', 0, '-2', '-Infinity', 'Infinity', 'NaN', '1e999', true, '0x10'];
+  const { payload } = await buildSystemIncomePolReadModel({}, {
+    now: new Date('2026-09-02T12:00:00Z'),
+    loadDaily: async () => invalidPrices.map((value, index) => ({
+      day: `2026-08-${String(index + 1).padStart(2, '0')}`,
+      deployed_e8: '10000000000',
+      rune_price_usd: value,
+      price_source: 'liquify-midgard-earnings',
+      price_as_of: '2026-09-01T00:00:00Z',
+      price_updated_at: '2026-09-01T00:10:00Z'
+    })),
+    loadPoolDaily: async () => [],
+    loadPoolHourly: async () => [],
+    loadPositions: async () => [],
+    loadState: async () => ({ rune_price_usd_e8: '900000000' })
+  });
+
+  for (const row of payload.daily) {
+    assert.equal(row.rune_price_usd, null);
+    assert.equal(row.price_source, null);
+    assert.equal(row.price_as_of, null);
+    assert.equal(row.price_updated_at, null);
+    assert.equal(row.price_provisional, false);
+  }
+});
+
+test('SIPOL prices distinguish partial source days and current UTC day from completed references', async () => {
+  const { payload } = await buildSystemIncomePolReadModel({}, {
+    now: new Date('2026-09-02T12:00:00Z'),
+    loadDaily: async () => [
+      { day: '2026-08-31', rune_price_usd: ' 2.125000 ', price_provisional: false },
+      { day: '2026-09-01', rune_price_usd: '2.2', price_provisional: true },
+      { day: '2026-09-02', rune_price_usd: '3.1', price_provisional: false }
+    ],
+    loadPoolDaily: async () => [],
+    loadPoolHourly: async () => [],
+    loadPositions: async () => [],
+    loadState: async () => ({})
+  });
+
+  assert.deepEqual(payload.daily.map(row => row.rune_price_usd), ['2.125000', '2.2', '3.1']);
+  assert.deepEqual(payload.daily.map(row => row.price_provisional), [false, true, true]);
+});
 
 test('SIPOL parser extracts exact rewards and pairs deployments with internal LP unit events', () => {
   const parsed = parseSystemIncomePolEvents([
@@ -478,7 +575,10 @@ test('SIPOL live overlay advances funded/deployed totals and preserves precise p
     },
     pools: [{ asset: 'BTC.BTC', units_e8: '10', rune_deposited_e8: '60' }],
     daily: [{ day: '2026-08-31', funded_e8: '100', deployed_e8: '60',
-      cumulative_funded_e8: '100', cumulative_deployed_e8: '60' }]
+      cumulative_funded_e8: '100', cumulative_deployed_e8: '60',
+      rune_price_usd: '2.1', price_source: 'liquify-midgard-earnings-live',
+      price_provisional: true, price_as_of: '2026-08-31T11:58:00.000Z',
+      price_updated_at: '2026-08-31T11:58:03.000Z' }]
   }, {
     reward_e8: '9',
     system_income_e8: '90',
@@ -494,17 +594,26 @@ test('SIPOL live overlay advances funded/deployed totals and preserves precise p
   assert.equal(payload.pools[0].units_e8, '10');
   assert.equal(payload.live.through_height, 22);
   assert.equal(payload.freshness.events_as_of, '2026-08-31T12:00:06.000Z');
+  assert.equal(payload.daily[0].rune_price_usd, '2.1');
+  assert.equal(payload.daily[0].price_source, 'liquify-midgard-earnings-live');
+  assert.equal(payload.daily[0].price_provisional, true);
+  assert.equal(payload.daily[0].price_as_of, '2026-08-31T11:58:00.000Z');
+  assert.equal(payload.daily[0].price_updated_at, '2026-08-31T11:58:03.000Z');
 });
 
 test('SIPOL live overlay starts a new UTC day without waiting for reconciliation', () => {
   const payload = applySystemIncomePolLiveOverlay({
     summary: {
-      total_funded_e8: '100', total_system_income_e8: '1000', total_deployed_e8: '60', undeployed_rune_e8: '40'
+      total_funded_e8: '100', total_system_income_e8: '1000', total_deployed_e8: '60', undeployed_rune_e8: '40',
+      rune_price_usd_e8: '900000000'
     },
     pools: [],
     daily: [{
       day: '2026-08-31', funded_e8: '100', deployed_e8: '60',
-      cumulative_funded_e8: '100', cumulative_deployed_e8: '60'
+      cumulative_funded_e8: '100', cumulative_deployed_e8: '60',
+      rune_price_usd: '2.1', price_source: 'liquify-midgard-earnings',
+      price_provisional: false, price_as_of: '2026-09-01T00:00:00.000Z',
+      price_updated_at: '2026-09-01T00:00:02.000Z'
     }]
   }, {
     reward_e8: '9', system_income_e8: '90', deployments: [], through_height: 22,
@@ -516,6 +625,11 @@ test('SIPOL live overlay starts a new UTC day without waiting for reconciliation
     funded_e8: '9',
     system_income_e8: '90',
     deployed_e8: '0',
+    rune_price_usd: null,
+    price_source: null,
+    price_provisional: true,
+    price_as_of: null,
+    price_updated_at: null,
     minted_units_e8: null,
     estimated_fees_e8: null,
     cumulative_funded_e8: '109',
@@ -526,6 +640,9 @@ test('SIPOL live overlay starts a new UTC day without waiting for reconciliation
     partial: true,
     fee_coverage: null
   });
+  assert.equal(payload.daily[0].rune_price_usd, '2.1');
+  assert.equal(payload.daily[0].price_provisional, false);
+  assert.equal(payload.summary.rune_price_usd_e8, '900000000');
 });
 
 test('SIPOL hourly fee refresh seeds from durable block fees and preserves source freshness', async () => {

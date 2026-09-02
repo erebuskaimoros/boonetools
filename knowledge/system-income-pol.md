@@ -60,3 +60,22 @@ asset inventory lists the reconciled RUNE and external asset legs separately.
 The public handler is provider-free: it reads `system-income-pol:v1` and
 overlays committed blocks newer than the model watermark. The frontend applies
 each SSE height once and shows independent event, position, and fee freshness.
+
+## Historical deposit dollars
+
+The deposit chart's USD mode multiplies each UTC day's deployed RUNE by that
+day's historical `runePriceUSD` already stored in `system_income_burn_daily`.
+Midgard earnings defines this as the deepest USD pool's **end-of-interval**
+price, not a daily average. Completed days use their day-end reference; the
+open day's latest interval price is provisional. The read model joins prices
+by UTC date and exposes source, interval end, update time, and provisional
+status without new provider requests.
+
+The cumulative USD line sums those historically priced daily deposits across
+the full history before range selection or zoom. Missing nonzero-day prices
+stay unavailable and interrupt the cumulative USD total; they never fall back
+to today's price. Live deposits retain the current day's supplied reference,
+while a new UTC day waits for its own price. Headline LP TVL and current
+holdings continue to use the latest RUNE price.
+
+Source contract: [Midgard earnings schema](https://gitlab.com/thorchain/midgard/-/blob/develop/openapi/openapi.yaml).

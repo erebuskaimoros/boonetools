@@ -403,6 +403,14 @@ form the capital-hours denominator for the non-compounding 24-hour, 7-day, and
 age out. `/pol-tracker` remains provider-free and adds committed block events
 newer than its model watermark.
 
+The deposit chart's historical USD series reuses the same-day price in
+`system_income_burn_daily` through a database-only left join. Midgard's price
+is an end-of-interval reference (day-end for completed days), not an average.
+Schema v5 exposes `rune_price_usd`, price source/timestamps, and provisional
+status on each day. The browser sums each historically priced day's deposits
+for the cumulative USD line before range selection; missing prices remain
+unavailable, and current headline valuations retain the live core price.
+
 Optional controls are `SYSTEM_INCOME_POL_ACTIVATION_HEIGHT`,
 `SYSTEM_INCOME_POL_REPAIR_BLOCKS_PER_RUN`,
 `SYSTEM_INCOME_POL_REPAIR_CONCURRENCY`, `SYSTEM_INCOME_POL_LP_CONCURRENCY`, and
