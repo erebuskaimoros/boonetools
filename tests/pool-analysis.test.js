@@ -11,6 +11,7 @@ import {
   normalizePoolAnalysisSummary,
   poolAnalysisColumns,
   poolAnalysisFeeVolumeBps,
+  poolAnalysisLineMetric,
   selectPoolAnalysisPeriod,
   sortPoolAnalysisRows
 } from '../src/lib/pool-analysis/model.js';
@@ -138,7 +139,8 @@ test('Pool Analysis series preserves gaps, partial state, exact RUNE, and cumula
       {
         day: '2026-08-23', volume_rune_e8: '200000000', volume_usd: 10,
         fees_rune_e8: '100000000', fees_usd: 2,
-        cumulative_fees_rune_e8: '9007199254740993', cumulative_fees_usd: 100
+        cumulative_fees_rune_e8: '9007199254740993', cumulative_fees_usd: 100,
+        depth_usd: 500, depth_partial: true
       },
       {
         day: '2026-08-24', volume_rune_e8: null, fees_rune_e8: null,
@@ -152,6 +154,9 @@ test('Pool Analysis series preserves gaps, partial state, exact RUNE, and cumula
     coverage: { first_indexed_day: '2021-04-11', missing_days: ['2026-08-24'] }
   });
   assert.equal(series.points[0].volumeRune, 2);
+  assert.equal(series.points[0].depthUsd, 500);
+  assert.equal(series.points[0].depthPartial, true);
+  assert.equal(series.points[1].depthUsd, null);
   assert.equal(series.points[0].cumulativeFeesRuneBase, '9007199254740993');
   assert.equal(series.points[1].feesRune, null);
   assert.equal(series.points[2].partial, true);
@@ -207,12 +212,58 @@ test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the exclude
   assert.match(component, /\.detail-panel \{[^}]*width: 100cqw;[^}]*max-width: 100cqw;/);
   assert.match(chart, /label: 'DAILY VOLUME'/);
   assert.match(chart, /label: 'DAILY FEES'/);
-  assert.match(chart, /label: 'CUMULATIVE FEES'/);
+  assert.match(chart, /label: lineMetric.label/);
+  assert.match(component, /aria-label="Pool chart line metric"/);
+  assert.match(component, /aria-pressed=\{lineMetricId === metric.id\}/);
   assert.match(chart, /FEES \/ VOLUME:/);
   assert.match(chart, /poolAnalysisFeeVolumeBps\(row\.feesRuneBase, row\.volumeRuneBase\)/);
   assert.match(chart, /wheel: \{ enabled: false \}/);
   assert.match(chart, /pinch: \{ enabled: true \}/);
-  assert.match(chart, /cumulativeFeesUsd/);
+  assert.match(chart, /poolAnalysisLineMetric/);
+});
+
+test('Pool chart line toggle preserves bars and zoom, updates the axis and tooltip, and keeps null depth gaps', async () => {
+  const source = await readFile(new URL('../src/lib/pool-analysis/charts.js', import.meta.url), 'utf8');
+  class ChartStub {
+    static register() {}
+    constructor(_context, config) {
+      Object.assign(this, config);
+      this.scales = { x: { min: 0, max: 9 } };
+    }
+    update() {}
+  }
+  const render = new Function('Chart', 'zoomPlugin', 'TERMINAL_CHART_PALETTE', 'terminalChartFont',
+    'poolAnalysisFeeVolumeBps', 'poolAnalysisLineMetric',
+    source.replace(/^import .*;\n/gm, '').replace('export function', 'function')
+      + '\nreturn renderPoolAnalysisCharts;'
+  )(ChartStub, {}, {}, () => ({}), poolAnalysisFeeVolumeBps, poolAnalysisLineMetric);
+  const rows = Array.from({ length: 10 }, (_, index) => ({
+    day: `2026-01-${String(index + 1).padStart(2, '0')}`,
+    volumeUsd: 100, feesUsd: 1, cumulativeFeesUsd: index + 1,
+    volumeRuneBase: '100000000', feesRuneBase: '1000000',
+    depthUsd: index === 1 ? null : 500 + index
+  }));
+  const controller = render({ getContext: () => ({}) }, null, rows);
+  assert.equal(controller.chart.data.datasets[2].label, 'CUMULATIVE FEES');
+  controller.zoomBy(0.4);
+  const xOptions = { ...controller.chart.options.scales.x };
+  const bars = controller.chart.data.datasets.slice(0, 2);
+  controller.setLineMetric('depth');
+  assert.deepEqual(controller.chart.options.scales.x, xOptions);
+  assert.deepEqual(controller.chart.data.datasets.slice(0, 2), bars);
+  assert.equal(controller.chart.data.datasets[2].label, 'DEPTH');
+  assert.deepEqual(controller.chart.data.datasets[2].data, rows.map((row) => row.depthUsd));
+  assert.equal(controller.chart.data.datasets[2].spanGaps, false);
+  assert.equal(controller.chart.options.scales.yLine.title.text, 'DEPTH · USD');
+  const tooltip = controller.chart.options.plugins.tooltip.callbacks.afterBody;
+  assert.ok(tooltip([{ dataIndex: 0 }]).includes('DEPTH: $500.00'));
+  assert.ok(tooltip([{ dataIndex: 1 }]).includes('DEPTH: unavailable'));
+  assert.ok(tooltip([{ dataIndex: 0 }]).includes('FEES / VOLUME: 100 BPS'));
+  controller.setLineMetric('cumulativeFees');
+  assert.deepEqual(controller.chart.data.datasets[2].data, rows.map((row) => row.cumulativeFeesUsd));
+  assert.ok(tooltip([{ dataIndex: 0 }]).includes('CUMULATIVE FEES: $1.00'));
+  const initialDepth = render({ getContext: () => ({}) }, null, rows, { lineMetric: 'depth' });
+  assert.equal(initialDepth.chart.data.datasets[2].label, 'DEPTH');
 });
 
 test('Pool Analysis bars can expand with the visible zoom range', async () => {

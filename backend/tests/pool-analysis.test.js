@@ -7,11 +7,13 @@ import {
   buildPoolAnalysisReadModel,
   buildPoolAnalysisRows,
   buildPoolAnalysisSeries,
+  parsePoolAnalysisDepthInterval,
   parsePoolAnalysisSwapInterval
 } from '../src/shared/pool-analysis.js';
-import { loadPoolAnalysisAggregates } from '../src/shared/pool-analysis-store.js';
+import { loadPoolAnalysisAggregates, loadPoolAnalysisSeries, upsertPoolAnalysisDepthDays } from '../src/shared/pool-analysis-store.js';
 import {
   fetchPoolAnalysisSwapHistory,
+  fetchPoolAnalysisDepthHistory,
   ingestPoolAnalysisHistory
 } from '../src/shared/pool-analysis-ingestion.js';
 import { runPoolAnalysisBackfill, runPoolAnalysisScheduler } from '../src/jobs/pool-analysis.js';
@@ -214,6 +216,7 @@ test('Pool Analysis pagination crosses sparse and halted history instead of trea
 
 test('Pool Analysis ingestion tolerates one failed pool and persists successful history', async () => {
   let persisted = [];
+  const depths = [];
   const states = [];
   const result = await ingestPoolAnalysisHistory({ id: 'db' }, {
     now: new Date('2026-01-31T12:00:00Z'),
@@ -227,13 +230,88 @@ test('Pool Analysis ingestion tolerates one failed pool and persists successful 
       }] };
     },
     upsert: async (_client, rows) => { persisted.push(...rows); return rows.length; },
+    fetchDepthHistory: async (asset) => ({ pages: 1, rows: [{ asset, day: '2026-01-31', asset_depth_e8: '100' }] }),
+    upsertDepths: async (_client, rows) => { depths.push(...rows); return rows.length; },
     updateSyncState: async (_client, state) => { states.push(state); }
   });
   assert.equal(result.successful_pools, 1);
   assert.equal(result.failed_pools, 1);
   assert.equal(persisted.length, 1);
+  assert.equal(depths.length, 2);
+  assert.equal(result.failed_depth_pools, 0);
   assert.equal(Object.hasOwn(result, 'earnings_pages'), false);
   assert.match(states.find((state) => state.asset === 'ETH.ETH').lastError, /temporary/);
+});
+
+test('Pool Analysis depth uses closing two-sided USD value and preserves independent gaps', () => {
+  const depth = parsePoolAnalysisDepthInterval({
+    startTime: '1727308800', endTime: '1727395200',
+    assetDepth: '200000000', runeDepth: '10000000000', assetPriceUSD: '25'
+  }, { asset: 'btc.btc', partial: true });
+  assert.equal(depth.asset, 'BTC.BTC');
+  assert.equal(depth.day, '2024-09-26');
+  assert.equal(depth.rune_depth_e8, '10000000000');
+  assert.equal(depth.partial, true);
+  const series = buildPoolAnalysisSeries([
+    { ...depth, depth_partial: depth.partial, depth_source: depth.source, source: 'missing' },
+    { day: '2024-09-28', fees_rune_e8: '100000000', rune_price_usd: '5' },
+    { day: '2024-09-29', asset_depth_e8: '0', rune_depth_e8: '0' },
+    { day: '2024-09-30', asset_depth_e8: '100000000', asset_price_usd: '0' }
+  ], { range: 'all', asOf: '2024-09-30' });
+  assert.equal(series.points[0].depth_usd, 100);
+  assert.equal(series.points[0].depth_partial, true);
+  assert.equal(series.points[0].cumulative_fees_usd, null);
+  assert.equal(series.points[1].depth_usd, null);
+  assert.equal(series.points[2].depth_usd, null);
+  assert.equal(series.points[2].cumulative_fees_usd, 5);
+  assert.equal(series.points[3].depth_usd, 0);
+  assert.equal(series.points[4].depth_usd, null);
+  assert.deepEqual(series.coverage.depth_missing_days, ['2024-09-27', '2024-09-28', '2024-09-30']);
+});
+
+test('Pool Analysis depth pagination uses the exact pool and advances across sparse history', async () => {
+  const calls = [];
+  const result = await fetchPoolAnalysisDepthHistory('ETH.LINK-0x123', {
+    startDate: '2024-09-26', endDate: '2024-09-28', skipDelay: true,
+    fetchMidgard: async (path) => {
+      calls.push(path);
+      return { intervals: calls.length === 1 ? [{
+        startTime: '1727308800', endTime: '1727395200',
+        assetDepth: '100000000', runeDepth: '100000000', assetPriceUSD: '2'
+      }] : [] };
+    }
+  });
+  assert.match(calls[0], /^\/history\/depths\/ETH.LINK-0X123\?/);
+  assert.match(calls[0], /count=400/);
+  assert.match(calls[1], /from=1727395200/);
+  assert.equal(result.rows.length, 1);
+});
+
+test('Pool Analysis depth failures do not prevent successful fee history from being saved', async () => {
+  let saved = 0;
+  let state;
+  const result = await ingestPoolAnalysisHistory({}, {
+    now: new Date('2026-01-31T12:00:00Z'), assets: ['BTC.BTC'],
+    fetchSwapHistory: async () => ({ pages: 1, rows: [{ asset: 'BTC.BTC', day: '2026-01-31' }] }),
+    fetchDepthHistory: async () => { throw new Error('depth provider unavailable'); },
+    upsert: async (_client, rows) => { saved += rows.length; return rows.length; },
+    upsertDepths: async () => { assert.fail('Must not write a failed depth observation'); },
+    updateSyncState: async (_client, next) => { state = next; }
+  });
+  assert.equal(saved, 1);
+  assert.equal(result.failed_depth_pools, 1);
+  assert.match(state.lastError, /Depth: depth provider unavailable/);
+});
+
+test('Pool Analysis stores depth independently and joins it without dropping depth-only days', async () => {
+  const calls = [];
+  const client = { query: async (sql, params) => { calls.push({ sql, params }); return { rows: [], rowCount: 1 }; } };
+  await upsertPoolAnalysisDepthDays(client, [{ asset: 'BTC.BTC', day: '2026-01-31' }]);
+  await loadPoolAnalysisSeries(client, 'BTC.BTC');
+  assert.match(calls[0].sql, /insert into pool_analysis_depth_daily/);
+  assert.doesNotMatch(calls[0].sql, /fees_rune_e8|volume_rune_e8/);
+  assert.match(calls[1].sql, /full outer join/);
+  assert.deepEqual(calls[1].params, ['BTC.BTC']);
 });
 
 test('scheduled and backfill jobs share the Pool Analysis lock and publication contract', async () => {

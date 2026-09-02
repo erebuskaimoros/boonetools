@@ -1,7 +1,7 @@
 import Chart from 'chart.js/auto';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import { TERMINAL_CHART_PALETTE, terminalChartFont } from '../charts/terminal.js';
-import { poolAnalysisFeeVolumeBps } from './model.js';
+import { poolAnalysisFeeVolumeBps, poolAnalysisLineMetric } from './model.js';
 
 Chart.register(zoomPlugin);
 
@@ -43,6 +43,7 @@ export function renderPoolAnalysisCharts(canvas, previous, rows = [], options = 
   previous?.destroy?.();
   if (!canvas || !rows.length) return null;
   const labels = rows.map((row) => row.day);
+  let lineMetric = poolAnalysisLineMetric(options.lineMetric);
 
   function visibleRange(chart) {
     const scale = chart?.scales?.x;
@@ -72,8 +73,10 @@ export function renderPoolAnalysisCharts(canvas, previous, rows = [], options = 
           `DAILY FEES: ${row.feesUsd == null ? 'unavailable' : usd.format(row.feesUsd)}`,
           `FEES / VOLUME: ${formatBps(feeVolumeBps)}`,
           `FEES IN RUNE: ${row.feesRune == null ? 'unavailable' : `${rune.format(row.feesRune)} ᚱ`}`,
-          `CUMULATIVE FEES: ${row.cumulativeFeesUsd == null ? 'unavailable' : usd.format(row.cumulativeFeesUsd)}`,
-          ...(row.partial ? ['LIVE PARTIAL UTC DAY'] : []),
+          `${lineMetric.label}: ${row[lineMetric.field] == null ? 'unavailable' : usd.format(row[lineMetric.field])}`,
+          ...(row.partial || lineMetric.id === 'depth' && row.depthPartial ? ['LIVE PARTIAL UTC DAY'] : []),
+          ...(lineMetric.id === 'depth' && row.depthPartial && row.depthUpdatedAt
+            ? [`DEPTH OBSERVED: ${row.depthUpdatedAt}`] : []),
           ...(row.source === 'missing' ? ['MISSING SOURCE DAY'] : [])
         ];
       }
@@ -107,9 +110,9 @@ export function renderPoolAnalysisCharts(canvas, previous, rows = [], options = 
         },
         {
           type: 'line',
-          label: 'CUMULATIVE FEES',
-          data: rows.map((row) => row.cumulativeFeesUsd),
-          yAxisID: 'yCumulative',
+          label: lineMetric.label,
+          data: rows.map((row) => row[lineMetric.field]),
+          yAxisID: 'yLine',
           backgroundColor: 'rgba(0, 204, 102, 0.05)',
           borderColor: TERMINAL_CHART_PALETTE.accent,
           borderWidth: 2,
@@ -133,8 +136,8 @@ export function renderPoolAnalysisCharts(canvas, previous, rows = [], options = 
           borderWidth: 1,
           titleColor: TERMINAL_CHART_PALETTE.accent,
           bodyColor: TERMINAL_CHART_PALETTE.text,
-          titleFont: terminalChartFont(11),
-          bodyFont: terminalChartFont(11),
+          titleFont: terminalChartFont(12),
+          bodyFont: terminalChartFont(12),
           padding: 10,
           callbacks: tooltipCallbacks()
         },
@@ -189,14 +192,14 @@ export function renderPoolAnalysisCharts(canvas, previous, rows = [], options = 
           title: { display: true, text: 'DAILY FEES · USD', color: TERMINAL_CHART_PALETTE.amber, font: terminalChartFont(11) },
           ticks: { color: TERMINAL_CHART_PALETTE.amber, font: terminalChartFont(11), callback: compact }
         },
-        yCumulative: {
+        yLine: {
           type: 'linear',
           position: 'right',
           beginAtZero: false,
           grace: '3%',
           grid: { drawOnChartArea: false },
           border: { color: TERMINAL_CHART_PALETTE.accent },
-          title: { display: true, text: 'CUMULATIVE FEES · USD', color: TERMINAL_CHART_PALETTE.accent, font: terminalChartFont(11) },
+          title: { display: true, text: `${lineMetric.label} · USD`, color: TERMINAL_CHART_PALETTE.accent, font: terminalChartFont(11) },
           ticks: { color: TERMINAL_CHART_PALETTE.accent, font: terminalChartFont(11), callback: compact }
         }
       }
@@ -205,6 +208,13 @@ export function renderPoolAnalysisCharts(canvas, previous, rows = [], options = 
 
   return {
     chart,
+    setLineMetric(id) {
+      lineMetric = poolAnalysisLineMetric(id);
+      chart.data.datasets[2].label = lineMetric.label;
+      chart.data.datasets[2].data = rows.map((row) => row[lineMetric.field]);
+      chart.options.scales.yLine.title.text = `${lineMetric.label} · USD`;
+      chart.update('none');
+    },
     resetZoom() {
       chart.resetZoom?.('none');
       options.onZoom?.(null);

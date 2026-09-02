@@ -80,14 +80,17 @@ export async function handlePoolAnalysisSeries(_request, url, options = {}) {
     asOf: model.payload?.as_of || model.generatedAt
   });
   const payload = {
-    schema_version: 1,
+    schema_version: 2,
     as_of: model.payload?.as_of || model.generatedAt,
     asset,
     symbol: pool.symbol,
     range,
     ...series,
     stale: Boolean(model.stale),
-    sources: { history: 'liquify-midgard:history/swaps' },
+    sources: {
+      history: 'liquify-midgard:history/swaps',
+      depth: 'liquify-midgard:history/depths (two-sided, UTC closing balances and price)'
+    },
     warnings: [
       ...(series.coverage.missing_days.length
         ? [`${series.coverage.missing_days.length} UTC day(s) are missing in this window`]

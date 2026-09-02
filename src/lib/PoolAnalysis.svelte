@@ -6,6 +6,7 @@
   import { renderPoolAnalysisCharts } from './pool-analysis/charts.js';
   import {
     POOL_ANALYSIS_RANGES,
+    POOL_ANALYSIS_LINE_METRICS,
     POOL_ANALYSIS_TABLE_PERIODS,
     baseToNumber,
     filterPoolAnalysisRows,
@@ -15,6 +16,7 @@
     normalizePoolAnalysisSeries,
     normalizePoolAnalysisSummary,
     poolAnalysisColumns,
+    poolAnalysisLineMetric,
     selectPoolAnalysisPeriod,
     sortPoolAnalysisRows
   } from './pool-analysis/model.js';
@@ -25,6 +27,7 @@
   let selectedAsset = '';
   let selectedSeries = null;
   let rangeId = '30d';
+  let lineMetricId = 'cumulativeFees';
   let tablePeriodId = '30d';
   let search = '';
   let statusFilter = 'available';
@@ -52,6 +55,7 @@
     sort
   );
   $: displayedPoints = selectedSeries?.asset === selectedAsset ? selectedSeries.points : [];
+  $: lineMetric = poolAnalysisLineMetric(lineMetricId);
 
   onMount(() => {
     loadSummary();
@@ -152,8 +156,14 @@
     chartController = null;
     if (!displayedPoints.length || !chartCanvas) return;
     chartController = renderPoolAnalysisCharts(chartCanvas, null, displayedPoints, {
+      lineMetric: lineMetricId,
       onZoom(window) { zoomWindow = window; }
     });
+  }
+
+  function selectLineMetric(id) {
+    lineMetricId = id;
+    chartController?.setLineMetric?.(id);
   }
 
   function resetZoom() {
@@ -377,6 +387,15 @@
                             >[{range.label}]</button>
                           {/each}
                         </div>
+                        <div class="range-buttons" role="group" aria-label="Pool chart line metric">
+                          {#each POOL_ANALYSIS_LINE_METRICS as metric}
+                            <button
+                              class:active={lineMetricId === metric.id}
+                              aria-pressed={lineMetricId === metric.id}
+                              on:click={() => selectLineMetric(metric.id)}
+                            >[{metric.label}]</button>
+                          {/each}
+                        </div>
                         <div class="zoom-buttons" role="group" aria-label="Keyboard zoom controls">
                           <button aria-label="Zoom in" disabled={!displayedPoints.length} on:click={() => chartController?.zoomBy?.(0.6)}>[+]</button>
                           <button aria-label="Zoom out" disabled={!displayedPoints.length} on:click={() => chartController?.zoomBy?.(1.6)}>[-]</button>
@@ -397,7 +416,7 @@
                         <div class="chart-frame" role="group" aria-label={`${pool.asset} combined daily chart`} on:dblclick={resetZoom}>
                           <canvas
                             bind:this={chartCanvas}
-                            aria-label={`${pool.asset} daily volume, daily pool-generated liquidity fees, and cumulative pool-generated liquidity fees in US dollars`}
+                            aria-label={`${pool.asset} daily volume, daily pool-generated liquidity fees, and ${lineMetricId === 'depth' ? 'two-sided pool depth' : 'cumulative pool-generated liquidity fees'} in US dollars`}
                           ></canvas>
                         </div>
                       {:else}
@@ -405,16 +424,20 @@
                       {/if}
 
                       {#if selectedSeries?.asset === pool.asset}
+                        {#if lineMetricId === 'depth' && selectedSeries.coverage.depthMissingDays.length}
+                          <div class="coverage-warning-line">WRN · {selectedSeries.coverage.depthMissingDays.length} UTC day(s) have no depth observation. Gaps are not interpolated.</div>
+                        {/if}
                         {#each selectedSeries.warnings as warning}
                           <div class="coverage-warning-line">WRN · {warning}</div>
                         {/each}
                         <footer class="detail-foot">
                           <span>BLUE · DAILY VOLUME</span>
                           <span>AMBER · DAILY FEES</span>
-                          <span>GREEN · CUMULATIVE FEES</span>
+                          <span>GREEN · {lineMetric.label}</span>
                           <span>FIRST INDEXED · {selectedSeries.coverage.firstIndexedDay || '—'}</span>
                           <span>GAPS · {selectedSeries.coverage.missingDays.length}</span>
                           <span>USD FEES USE HISTORICAL DAILY RUNE PRICE</span>
+                          {#if lineMetricId === 'depth'}<span>DEPTH = TWO-SIDED UTC CLOSING POOL VALUE</span>{/if}
                         </footer>
                       {/if}
                     </section>

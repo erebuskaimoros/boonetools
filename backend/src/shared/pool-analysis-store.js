@@ -100,15 +100,47 @@ export async function loadPoolAnalysisAggregates(client, completedDay, periods =
 
 export async function loadPoolAnalysisSeries(client, asset) {
   const { rows } = await client.query(
-    `select day, volume_rune_e8::text, volume_usd_e2::text,
-            fees_rune_e8::text, rune_price_usd::text, partial, source
-     from pool_analysis_daily
-     where asset = $1
+    `select coalesce(swaps.day, depth.day) as day,
+            swaps.volume_rune_e8::text, swaps.volume_usd_e2::text,
+            swaps.fees_rune_e8::text, swaps.rune_price_usd::text,
+            swaps.partial, coalesce(swaps.source, 'missing') as source,
+            depth.rune_depth_e8::text, depth.asset_depth_e8::text,
+            depth.asset_price_usd::text, depth.partial as depth_partial,
+            depth.source as depth_source, depth.updated_at as depth_updated_at
+     from (select * from pool_analysis_daily where asset = $1) swaps
+     full outer join (select * from pool_analysis_depth_daily where asset = $1) depth
+       on swaps.day = depth.day
      order by day
      limit 5000`,
     [asset]
   );
   return rows;
+}
+
+export async function upsertPoolAnalysisDepthDays(client, rows = []) {
+  if (!rows.length) return 0;
+  const { rowCount } = await client.query(
+    `insert into pool_analysis_depth_daily (
+       asset, day, rune_depth_e8, asset_depth_e8, asset_price_usd,
+       interval_end, partial, source
+     )
+     select asset, day, rune_depth_e8, asset_depth_e8, asset_price_usd,
+            interval_end, partial, source
+     from jsonb_to_recordset($1::jsonb) as incoming (
+       asset text, day date, rune_depth_e8 numeric, asset_depth_e8 numeric,
+       asset_price_usd numeric, interval_end timestamptz, partial boolean, source text
+     )
+     on conflict (asset, day) do update set
+       rune_depth_e8 = excluded.rune_depth_e8,
+       asset_depth_e8 = excluded.asset_depth_e8,
+       asset_price_usd = excluded.asset_price_usd,
+       interval_end = excluded.interval_end,
+       partial = excluded.partial,
+       source = excluded.source,
+       updated_at = now()`,
+    [JSON.stringify(rows)]
+  );
+  return rowCount || rows.length;
 }
 
 export async function loadPoolAnalysisSyncStates(client) {

@@ -94,6 +94,31 @@ export function parsePoolAnalysisSwapInterval(interval = {}, options = {}) {
   };
 }
 
+export function parsePoolAnalysisDepthInterval(interval = {}, options = {}) {
+  const asset = assetIdentity(options.asset).asset;
+  const day = dayFromUnix(interval.startTime);
+  if (!asset || !day) throw new Error('Pool depth interval requires an asset and UTC day');
+  return {
+    asset,
+    day,
+    rune_depth_e8: nonNegativeBaseString(interval.runeDepth),
+    asset_depth_e8: nonNegativeBaseString(interval.assetDepth),
+    asset_price_usd: decimal(interval.assetPriceUSD),
+    interval_end: isoFromUnix(interval.endTime),
+    partial: Boolean(options.partial),
+    source: 'liquify-midgard-depths'
+  };
+}
+
+function historicalDepthUsd(row) {
+  const assetDepth = nonNegativeBaseString(row.asset_depth_e8);
+  const runeDepth = nonNegativeBaseString(row.rune_depth_e8);
+  if (assetDepth === '0' && runeDepth === '0') return 0;
+  const price = positive(row.asset_price_usd);
+  return assetDepth === null || assetDepth === '0' || price === null
+    ? null : 2 * (Number(assetDepth) / 1e8) * price;
+}
+
 function divideBase(numerator, denominator, multiplier = 1) {
   const top = positive(numerator);
   const bottom = positive(denominator);
@@ -324,8 +349,12 @@ export function buildPoolAnalysisSeries(rows = [], options = {}) {
         volume_usd: volumeUsdCents === null ? null : Number(volumeUsdCents) / 100,
         fees_rune_e8: feesBase,
         fees_usd: feeUsd,
-        cumulative_fees_rune_e8: cumulativeFees.toString(),
-        cumulative_fees_usd: usdComplete ? cumulativeFeesUsd : null,
+        cumulative_fees_rune_e8: feesBase === null ? null : cumulativeFees.toString(),
+        cumulative_fees_usd: feesBase !== null && usdComplete ? cumulativeFeesUsd : null,
+        depth_usd: historicalDepthUsd(row),
+        depth_partial: Boolean(row.depth_partial),
+        depth_source: row.depth_source || null,
+        depth_updated_at: row.depth_updated_at || null,
         rune_price_usd: runePrice,
         partial: Boolean(row.partial),
         source: String(row.source || '')
@@ -352,6 +381,10 @@ export function buildPoolAnalysisSeries(rows = [], options = {}) {
           fees_usd: null,
           cumulative_fees_rune_e8: null,
           cumulative_fees_usd: null,
+          depth_usd: null,
+          depth_partial: false,
+          depth_source: null,
+          depth_updated_at: null,
           rune_price_usd: null,
           partial: false,
           source: 'missing'
@@ -369,7 +402,9 @@ export function buildPoolAnalysisSeries(rows = [], options = {}) {
       first_displayed_day: selected[0]?.day || '',
       last_day: selected.at(-1)?.day || '',
       observed_days: selectedObserved.length,
-      missing_days: missingDays
+      missing_days: [...new Set([...missingDays, ...selectedObserved
+        .filter((row) => row.source === 'missing').map((row) => row.day)])].sort(),
+      depth_missing_days: selected.filter((row) => row.depth_usd === null).map((row) => row.day)
     }
   };
 }

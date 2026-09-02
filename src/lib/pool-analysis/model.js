@@ -3,6 +3,16 @@ export const POOL_ANALYSIS_RANGES = Object.freeze([
   { id: 'all', label: 'ALL TIME' }
 ]);
 
+export const POOL_ANALYSIS_LINE_METRICS = Object.freeze([
+  { id: 'depth', label: 'DEPTH', field: 'depthUsd' },
+  { id: 'cumulativeFees', label: 'CUMULATIVE FEES', field: 'cumulativeFeesUsd' }
+]);
+
+export function poolAnalysisLineMetric(id) {
+  return POOL_ANALYSIS_LINE_METRICS.find((metric) => metric.id === id)
+    || POOL_ANALYSIS_LINE_METRICS[1];
+}
+
 export const POOL_ANALYSIS_TABLE_PERIODS = Object.freeze([
   { id: '24h', label: '24H', days: 1 },
   { id: '7d', label: '7D', days: 7 },
@@ -207,6 +217,9 @@ export function normalizePoolAnalysisSeries(payload = {}) {
       cumulativeFeesRuneBase: baseString(row.cumulative_fees_rune_e8),
       cumulativeFeesRune: baseToNumber(row.cumulative_fees_rune_e8),
       cumulativeFeesUsd: finite(row.cumulative_fees_usd),
+      depthUsd: finite(row.depth_usd),
+      depthPartial: Boolean(row.depth_partial),
+      depthUpdatedAt: row.depth_updated_at || null,
       runePriceUsd: finite(row.rune_price_usd),
       partial: Boolean(row.partial),
       source: String(row.source || '')
@@ -216,7 +229,8 @@ export function normalizePoolAnalysisSeries(payload = {}) {
       firstDisplayedDay: date(payload.coverage?.first_displayed_day),
       lastDay: date(payload.coverage?.last_day),
       observedDays: Math.max(0, Number(payload.coverage?.observed_days) || 0),
-      missingDays: Array.isArray(payload.coverage?.missing_days) ? payload.coverage.missing_days : []
+      missingDays: Array.isArray(payload.coverage?.missing_days) ? payload.coverage.missing_days : [],
+      depthMissingDays: Array.isArray(payload.coverage?.depth_missing_days) ? payload.coverage.depth_missing_days : []
     },
     warnings: Array.isArray(payload.warnings) ? payload.warnings : []
   };

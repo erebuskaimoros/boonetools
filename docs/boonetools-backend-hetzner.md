@@ -436,6 +436,23 @@ stored daily rows and never contacts a provider during a public request. Pool
 Analysis stops at liquidity-fee generation; subsequent system-income
 distribution is outside its data contract.
 
+Migration `059_pool_analysis_depth.sql` adds an independent
+`pool_analysis_depth_daily` ledger of Midgard daily closing asset/RUNE balances
+and pool asset USD prices. The same scheduler and backfill collect
+`/history/depths/{pool}` in up to 400-day pages. Depth failures preserve the
+volume/fee writer and report a separate sync error. The public series joins
+both ledgers by UTC day; `depth_usd` in this **series** is two-sided depth,
+`2 × assetDepth / 1e8 × assetPriceUSD`, equivalent to twice RUNE depth valued
+at the same closing pool-implied RUNE price. It is pool-accounted liquidity,
+not independently reconciled vault inventory. Missing depth or price is null;
+the in-progress UTC day is explicitly partial.
+
+The chart's Depth / Cumulative fees toggle changes only the green USD line,
+axis, and tooltip, preserving daily volume/fee bars, the range, and custom
+zoom. Cumulative fees remains the default. Deploy the additive backend change,
+run the existing backfill to seed historical depth, then deploy the frontend.
+The route remains provider-free and reports `coverage.depth_missing_days`.
+
 The table displays total two-sided liquidity from `total_depth_usd` and uses
 that same total as the Volume/Depth and Fees/Depth denominator. Fees/Depth is
 the selected period's generated liquidity fees divided by current total depth;

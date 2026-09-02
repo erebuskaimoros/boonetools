@@ -5,10 +5,12 @@ import { coreSnapshotValue, getThorNodeCoreSnapshot } from './thornode-core-snap
 import {
   POOL_ANALYSIS_START_DATE,
   assetIdentity,
+  parsePoolAnalysisDepthInterval,
   parsePoolAnalysisSwapInterval
 } from './pool-analysis.js';
 import {
   updatePoolAnalysisSyncState,
+  upsertPoolAnalysisDepthDays,
   upsertPoolAnalysisDays
 } from './pool-analysis-store.js';
 
@@ -43,7 +45,7 @@ async function historyRequest(path, options = {}) {
 }
 
 async function dailyHistory({ path, startDate, endDate, query = {}, parse, options = {} }) {
-  const count = Math.min(100, Math.max(1, Math.trunc(Number(options.count)) || 100));
+  const count = Math.min(options.maxCount || 100, Math.max(1, Math.trunc(Number(options.count)) || 100));
   const maxPages = Math.max(1, Math.trunc(Number(
     options.maxPages ?? config.poolAnalysisMaxPages
   )) || 10);
@@ -101,6 +103,21 @@ export async function fetchPoolAnalysisSwapHistory(asset, options = {}) {
       asset: normalizedAsset,
       partial: dateKey(new Date(Number(interval.startTime ?? interval.start_time) * 1000)) === endDate
     }))
+  });
+}
+
+export async function fetchPoolAnalysisDepthHistory(asset, options = {}) {
+  const normalizedAsset = assetIdentity(asset).asset;
+  const endDate = dateKey(options.endDate || resolvedNow(options.now));
+  return dailyHistory({
+    path: `/history/depths/${encodeURIComponent(normalizedAsset)}`,
+    startDate: dateKey(options.startDate || POOL_ANALYSIS_START_DATE),
+    endDate,
+    options: { ...options, count: options.count ?? 400, maxCount: 400 },
+    parse: (intervals) => intervals.map((interval) => parsePoolAnalysisDepthInterval(interval, {
+      asset: normalizedAsset,
+      partial: dateKey(new Date(Number(interval.startTime) * 1000)) === endDate
+    })).filter((row) => row.day <= endDate)
   });
 }
 
@@ -170,10 +187,23 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
   const merged = successfulSwaps.flatMap((result) => result.rows);
   const upsert = options.upsert || upsertPoolAnalysisDays;
   const upserted = await upsertBatches(client, merged, upsert, options.batchSize);
+  // Depth is independent: a depth provider failure must not discard fee history.
+  const depthResults = await mapWithConcurrency(assets, concurrency, async (asset) => {
+    try {
+      const result = await (options.fetchDepthHistory || fetchPoolAnalysisDepthHistory)(asset, {
+        ...options, client, startDate, endDate: today, now
+      });
+      await upsertBatches(client, result.rows, options.upsertDepths || upsertPoolAnalysisDepthDays, options.batchSize);
+      return { asset, ...result, error: '' };
+    } catch (error) {
+      return { asset, rows: [], pages: 0, error: error?.message || String(error) };
+    }
+  });
   const rowsByAsset = new Map(assets.map((asset) => [asset, []]));
   for (const row of merged) rowsByAsset.get(row.asset)?.push(row);
   const lastCompletedDay = shiftDay(today, -1);
   for (const result of swapResults) {
+    const depthResult = depthResults.find((depth) => depth.asset === result.asset);
     const rows = rowsByAsset.get(result.asset) || [];
     const days = rows.map((row) => row.day).sort();
     await (options.updateSyncState || updatePoolAnalysisSyncState)(client, {
@@ -181,13 +211,15 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
       firstDay: days[0] || null,
       lastDay: days.at(-1) || null,
       lastCompletedDay: result.error ? null : lastCompletedDay,
-      lastError: result.error,
+      lastError: [result.error, depthResult?.error && `Depth: ${depthResult.error}`].filter(Boolean).join('; '),
       stats: {
         full: Boolean(options.full),
         start_date: startDate,
         end_date: today,
         rows: rows.length,
-        swap_pages: result.pages
+        swap_pages: result.pages,
+        depth_pages: depthResult?.pages || 0,
+        depth_rows: depthResult?.rows.length || 0
       }
     });
   }
@@ -200,6 +232,9 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
     failed_pools: swapResults.length - successfulSwaps.length,
     rows: merged.length,
     upserted,
-    swap_pages: swapResults.reduce((total, result) => total + result.pages, 0)
+    swap_pages: swapResults.reduce((total, result) => total + result.pages, 0),
+    depth_pages: depthResults.reduce((total, result) => total + result.pages, 0),
+    depth_rows: depthResults.reduce((total, result) => total + result.rows.length, 0),
+    failed_depth_pools: depthResults.filter((result) => result.error).length
   };
 }
