@@ -243,7 +243,7 @@
         <strong>{formatPolTrackerUsd(latest?.reservePolUsd, true)}</strong>
         <small>{formatPolTrackerRune(latest?.reservePolRune)} legacy-module gross</small>
       </article>
-      <article class="metric metric--system-income-pol">
+      <article class="metric">
         <span class="metric-label">SYSTEM INCOME POL{currentSystemIncomePol ? ' · LIVE' : ''}</span>
         <strong>{formatPolTrackerUsd(systemIncomePolUsd, true)}</strong>
         <small>{formatPolTrackerRune(systemIncomePolRune)} · FULL TWO-SIDED POSITION</small>
@@ -491,7 +491,6 @@
   }
   .metric--total .metric-label, .metric--total strong { color: #00cc66; }
   .metric--total small { color: #7fc49f; }
-  .metric--system-income-pol strong { color: #ff8a3d; }
 
   .range-bar { flex-wrap: wrap; gap: 6px; padding: 10px 0; color: #777; font-size: 10px; }
   .range-bar button { min-width: 48px; padding: 6px 9px; font-size: 10px; }

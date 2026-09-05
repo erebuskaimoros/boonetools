@@ -405,9 +405,25 @@ journalctl -fu boonetools-pool-dislocation-backfill.service
 The resumable service reads pool and oracle state at the same historical
 THORChain block. Its Binance leg uses the matching five-minute kline close,
 because the public Spot archive has no historical best-bid/best-ask stream.
-It writes in bounded transactions, preserves any live row at a conflicting
-timestamp, verifies every planned bucket, and refreshes the public read model.
-It has no timer and does not run automatically during future deploys.
+It writes in bounded transactions, preserves complete live rows at conflicting
+timestamps, verifies every planned bucket, and refreshes the public read model.
+Historical reconstruction can replace a scheduled row lacking a block height
+or its persisted market snapshot only when the incoming reconstruction has a
+positive height and a matching stored snapshot. All prices and source metadata
+are replaced together; this lets the repair planner stop selecting the completed
+bucket. Existing missing-price and core-fallback repair rules also apply.
+The one-time backfill has no timer and does not run automatically during future
+deploys; `boonetools-pool-dislocation-repair.timer` separately repairs recent gaps
+every fifteen minutes.
+
+Block lookup shares exact-height timestamps with other acquisition jobs and
+persists each completed timestamp-to-height proof in `source_observations`.
+A proof requires adjacent heights with `block_time <= target < next_block_time`.
+Completed proofs survive later archive pruning/outages and need no new RPC
+status or block calls. Successful candidates and proofs survive a later lookup
+failure. Cold searches use interpolation, switching to bisection after two
+probes fail to halve the range, so uneven block times cannot cause a long
+one-height-at-a-time scan. Existing provider cooldowns remain enforced.
 
 Migrations `046_pol_tracker.sql`, `047_pol_tracker_pool_breakdown.sql`, and
 `056_pol_tvl_system_income_pol.sql` add daily and per-pool POL Tracker history,

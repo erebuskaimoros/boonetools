@@ -182,7 +182,9 @@ export function buildPolTrackerChart(rows = [], groupId, options = {}) {
     }
     const lower = cumulative[index];
     cumulative[index] += value;
-    return { x: x(index), lower, upper: cumulative[index] };
+    // A zero-width layer has no visible holding. Keep it in the stack math,
+    // but break its paths so its outline cannot trace the layer below it.
+    return value === 0 ? null : { x: x(index), lower, upper: cumulative[index] };
   }));
   const yMax = niceCeiling(Math.max(1, ...cumulative));
   const spanY = plot.bottom - plot.top;

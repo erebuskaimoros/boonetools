@@ -90,6 +90,20 @@ export async function upsertPoolDislocationRows(client, rows = []) {
             current.pool_price_method = 'thornode-core-snapshot'
             or (current.oracle_symbol is not null and current.oracle_price_usd is null)
             or (current.binance_symbol is not null and current.binance_price_usd is null)
+            or (
+              (
+                current.thorchain_height is null
+                or not exists (
+                  select 1 from thorchain_market_snapshots snapshot
+                  where snapshot.height = current.thorchain_height
+                )
+              )
+              and excluded.thorchain_height > 0
+              and exists (
+                select 1 from thorchain_market_snapshots snapshot
+                where snapshot.height = excluded.thorchain_height
+              )
+            )
           )
         )`,
     [JSON.stringify(payload)]

@@ -1,3 +1,5 @@
+import { loadAcquisition, saveAcquisition } from './acquisition-cache.js';
+import { resolveThorchainBlockTime } from './chain-data.js';
 import { config } from '../lib/config.js';
 import { requestFromProviders } from '../lib/provider-client.js';
 import {
@@ -15,6 +17,8 @@ import {
   persistThorchainMarketSnapshot
 } from './thorchain-market-snapshots.js';
 import { fetchThorchain } from './thornode.js';
+
+const ANCHOR_NAMESPACE = 'thorchain-mainnet:pool-dislocation-block-anchor:v1';
 
 const FIVE_MINUTES_MS = POOL_DISLOCATION_SAMPLE_MINUTES * 60 * 1000;
 const WINDOW_MS = POOL_DISLOCATION_WINDOW_DAYS * 24 * 60 * 60 * 1000;
@@ -175,8 +179,39 @@ async function defaultFetchRpcBlock(height, options = {}) {
   });
 }
 
+function validBlockAnchor(proof, observedAt) {
+  return proof?.observedAt === observedAt
+    && Number.isSafeInteger(proof.height) && proof.height > 0
+    && Number.isSafeInteger(proof.nextHeight) && proof.nextHeight === proof.height + 1
+    && typeof proof.blockTime === 'string' && typeof proof.nextBlockTime === 'string'
+    && Date.parse(proof.blockTime) <= Date.parse(observedAt)
+    && Date.parse(observedAt) < Date.parse(proof.nextBlockTime);
+}
+
+function anchorFromProof(proof) {
+  return { observedAt: proof.observedAt, height: proof.height, blockTime: proof.blockTime };
+}
+
+async function loadBlockAnchor(client, observedAt) {
+  if (!client?.query) return null;
+  const cached = await loadAcquisition(client, ANCHOR_NAMESPACE, observedAt, { requireComplete: true });
+  return validBlockAnchor(cached?.payload, observedAt) ? cached.payload : null;
+}
+
 export async function resolvePoolDislocationBlockAnchors(bucketTimes = [], options = {}) {
   if (!bucketTimes.length) return [];
+  const requested = bucketTimes.map(timestamp).sort();
+  const anchors = [];
+  const pending = [];
+  for (const observedAt of requested) {
+    const proof = await loadBlockAnchor(options.client, observedAt);
+    if (proof) {
+      const anchor = anchorFromProof(proof);
+      anchors.push(anchor);
+      await options.onAnchor?.(anchor);
+    } else pending.push(observedAt);
+  }
+  if (!pending.length) return anchors;
   const delayMs = Math.max(0, finiteInteger(
     options.requestDelayMs ?? config.poolDislocationBackfillRequestDelayMs
   ));
@@ -186,10 +221,21 @@ export async function resolvePoolDislocationBlockAnchors(bucketTimes = [], optio
   const cache = new Map();
   const loadBlock = async (height) => {
     if (cache.has(height)) return cache.get(height);
-    const block = parsePoolDislocationRpcBlock(await fetchBlock(height, options));
-    if (block.height !== height) throw new Error(`RPC returned height ${block.height} for requested height ${height}`);
+    const fetchValidated = async () => {
+      const block = parsePoolDislocationRpcBlock(await fetchBlock(height, options));
+      if (block.height !== height) throw new Error(`RPC returned height ${block.height} for requested height ${height}`);
+      await sleep(delayMs);
+      return block;
+    };
+    const block = options.client?.query
+      ? { height, blockTime: await resolveThorchainBlockTime(options.client, height, {
+        fetchBlock: async () => {
+          const result = await fetchValidated();
+          return { header: { height: result.height, time: result.blockTime } };
+        }
+      }) }
+      : await fetchValidated();
     cache.set(height, block);
-    await sleep(delayMs);
     return block;
   };
 
@@ -200,9 +246,8 @@ export async function resolvePoolDislocationBlockAnchors(bucketTimes = [], optio
   cache.set(earliest.height, earliest);
   cache.set(latest.height, latest);
 
-  const anchors = [];
   let previous = earliest;
-  for (const observedAt of bucketTimes.map(timestamp).sort()) {
+  for (const observedAt of pending) {
     const targetMs = Date.parse(observedAt);
     if (options.skipPointsBeforeEarliest && targetMs < Date.parse(earliest.blockTime)) continue;
     if (options.skipPointsAtOrAfterLatest && targetMs >= Date.parse(latest.blockTime)) continue;
@@ -215,21 +260,42 @@ export async function resolvePoolDislocationBlockAnchors(bucketTimes = [], optio
 
     let low = previous;
     let high = latest;
+    let slowProbes = 0;
+    let bisect = false;
     while (high.height - low.height > 1) {
+      const width = high.height - low.height;
       const lowMs = Date.parse(low.blockTime);
       const highMs = Date.parse(high.blockTime);
       const ratio = highMs > lowMs ? (targetMs - lowMs) / (highMs - lowMs) : 0.5;
-      let guess = Math.floor(low.height + ((high.height - low.height) * Math.min(0.999999, Math.max(0.000001, ratio))));
+      let guess = bisect ? low.height + Math.floor(width / 2)
+        : Math.floor(low.height + (width * Math.min(0.999999, Math.max(0.000001, ratio))));
       guess = Math.max(low.height + 1, Math.min(high.height - 1, guess));
       const candidate = await loadBlock(guess);
       if (Date.parse(candidate.blockTime) <= targetMs) low = candidate;
       else high = candidate;
+      // Uniform block times usually need only two interpolation probes. A halt
+      // can instead move one bound a single height per request. Once two probes
+      // fail to halve the range, bisection bounds all remaining search work.
+      slowProbes = high.height - low.height > width / 2 ? slowProbes + 1 : 0;
+      if (slowProbes >= 2) bisect = true;
     }
 
-    anchors.push({ observedAt, height: low.height, blockTime: low.blockTime });
+    const proof = { observedAt, height: low.height, blockTime: low.blockTime,
+      nextHeight: high.height, nextBlockTime: high.blockTime };
+    if (!validBlockAnchor(proof, observedAt)) throw new Error(`Invalid RPC block bracket for ${observedAt}`);
+    // Save only after search completes. Holding an acquisition lock around this
+    // search would deadlock the shared block-time acquisition on the same client.
+    if (options.client?.query) {
+      await saveAcquisition(options.client, { namespace: ANCHOR_NAMESPACE, identity: observedAt,
+        payload: proof, source: 'thorchain-rpc:block-bracket', completedAt: new Date().toISOString()
+      }, { force: true });
+    }
+    const anchor = anchorFromProof(proof);
+    anchors.push(anchor);
+    await options.onAnchor?.(anchor);
     previous = low;
   }
-  return anchors;
+  return anchors.sort((left, right) => left.observedAt.localeCompare(right.observedAt));
 }
 
 export async function resolvePoolDislocationBlockAnchorsAcrossRpcRanges(
@@ -238,26 +304,33 @@ export async function resolvePoolDislocationBlockAnchorsAcrossRpcRanges(
 ) {
   const requested = bucketTimes.map(timestamp);
   if (!requested.length) return [];
-  const rpcUrls = [...new Set(poolDislocationHistoricalRpcUrls(options).filter(Boolean))];
-  if (!rpcUrls.length) throw new Error('No RPC providers configured for historical anchor resolution');
-
   const unresolved = new Set(requested);
   const anchors = [];
+  const acceptAnchor = async (anchor) => {
+    const observedAt = timestamp(anchor.observedAt);
+    if (!unresolved.delete(observedAt)) return;
+    anchors.push({ ...anchor, observedAt });
+    await options.onAnchor?.(anchor);
+  };
+  // Completed historical proofs are independent of today's provider availability
+  // and retention bounds, including when no historical provider remains configured.
+  for (const observedAt of unresolved) {
+    const proof = await loadBlockAnchor(options.client, observedAt);
+    if (proof) await acceptAnchor(anchorFromProof(proof));
+  }
+  const rpcUrls = [...new Set(poolDislocationHistoricalRpcUrls(options).filter(Boolean))];
+  if (unresolved.size && !rpcUrls.length) throw new Error('No RPC providers configured for historical anchor resolution');
   const providerErrors = [];
   for (const rpcUrl of rpcUrls) {
     if (!unresolved.size) break;
     try {
-      const providerAnchors = await resolvePoolDislocationBlockAnchors([...unresolved], {
+      await resolvePoolDislocationBlockAnchors([...unresolved], {
         ...options,
         rpcUrls: [rpcUrl],
         skipPointsBeforeEarliest: true,
-        skipPointsAtOrAfterLatest: true
+        skipPointsAtOrAfterLatest: true,
+        onAnchor: acceptAnchor
       });
-      for (const anchor of providerAnchors) {
-        const observedAt = timestamp(anchor.observedAt);
-        if (!unresolved.delete(observedAt)) continue;
-        anchors.push({ ...anchor, observedAt });
-      }
     } catch (error) {
       providerErrors.push(error);
     }

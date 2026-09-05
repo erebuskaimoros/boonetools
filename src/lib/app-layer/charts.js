@@ -1,4 +1,5 @@
 import Chart from 'chart.js/auto';
+import { appLayerChartRange } from './chart-range.js';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import { INTERACTIVE_CHART_LEGEND, TERMINAL_CHART_PALETTE } from '../charts/terminal.js';
 import { denomLabel, fillBucketGaps, formatWeekLabel } from './model.js';
@@ -194,6 +195,7 @@ export function renderAppLayerSeriesChart(canvas, previousChart, config) {
       },
       scales: {
         x: {
+          ...appLayerChartRange(rows, config.rangeDays === undefined ? 30 : config.rangeDays, grain),
           stacked: stackedBars,
           grid: { color: '#111', drawBorder: false },
           border: { color: '#1a1a1a' },

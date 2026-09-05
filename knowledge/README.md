@@ -6,6 +6,7 @@ This directory contains website/backend-specific protocol notes and session hist
 - Primary local API references are [the Thornode API guide](../docs/thornode-api-reference.md), [the consumer OpenAPI snapshot](../docs/thornode-openapi.yaml), and [the Midgard Swagger snapshot](../docs/midgard-swagger.json).
 - Start with [sessions/_index.md](./sessions/_index.md) for the local execution trail.
 - [liquify-cooldowns-2026-09-02.md](./liquify-cooldowns-2026-09-02.md) — production cooldown evidence, regression fixes, resumable acquisition, and remaining provider-call budgets.
+- [api-limit-audit-2026-09-05.md](./api-limit-audit-2026-09-05.md) — measured provider traffic, current scanner throttling, and Pool Dislocation repair/lookup efficiency fixes awaiting deployment.
 - [sitewide-call-redundancy-2026-09-02.md](./sitewide-call-redundancy-2026-09-02.md) — follow-up audit of duplicate acquisition, completed history, visitor-driven provider calls, and internal polling.
 - [fee-collector-accounting.md](./fee-collector-accounting.md) — balance-delta method for auditing on-chain fee collectors when senders aren't enumerable or the collector converts assets internally.
 - [app-layer-post-unfreeze-2026-09-02.md](./app-layer-post-unfreeze-2026-09-02.md) — stale earnings midnight lookup and missing on-chain collector schedules after the Wasm unfreeze.

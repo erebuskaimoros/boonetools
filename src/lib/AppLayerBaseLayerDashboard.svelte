@@ -247,13 +247,19 @@
 
   // Two independent per-chart toggles: bucket size (daily default, weekly
   // option) and view (per-bucket bars vs cumulative line). The visible time
-  // range is set directly on the chart by dragging or scrolling to zoom.
+  // range defaults to 30 days, with all history available before dragging to zoom.
   let granularity = { accrued: 'daily', collected: 'daily', paid: 'daily', pol: 'daily', generated: 'daily' };
   let view = { accrued: 'bars', collected: 'bars', paid: 'bars', pol: 'bars', generated: 'bars' };
+  let chartRange = { accrued: '30d', collected: '30d', paid: '30d', pol: '30d', generated: '30d' };
   let zoomed = { accrued: false, collected: false, paid: false, pol: false, generated: false };
 
   function setGranularity(key, value) {
     granularity = { ...granularity, [key]: value };
+    zoomed = { ...zoomed, [key]: false };
+  }
+
+  function setChartRange(key, value) {
+    chartRange = { ...chartRange, [key]: value };
     zoomed = { ...zoomed, [key]: false };
   }
 
@@ -457,9 +463,10 @@
     .slice(0, 8);
   $: baseRuneRatePerSecond = targetRatePerSecond(configs.base, 'rune');
 
-  function renderAccruedValueChart(pick, chartView) {
+  function renderAccruedValueChart(pick, chartView, range) {
     accruedValueChart = renderSeriesChart(accruedValueCanvas, accruedValueChart, {
       zoomKey: 'accrued',
+      rangeDays: range === 'all' ? null : 30,
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
@@ -484,9 +491,10 @@
     });
   }
 
-  function renderCollectedChart(pick, chartView) {
+  function renderCollectedChart(pick, chartView, range) {
     collectedChart = renderSeriesChart(collectedCanvas, collectedChart, {
       zoomKey: 'collected',
+      rangeDays: range === 'all' ? null : 30,
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
@@ -499,9 +507,10 @@
     });
   }
 
-  function renderPaymentChart(pick, chartView) {
+  function renderPaymentChart(pick, chartView, range) {
     paymentChart = renderSeriesChart(paymentCanvas, paymentChart, {
       zoomKey: 'paid',
+      rangeDays: range === 'all' ? null : 30,
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
@@ -519,9 +528,10 @@
     });
   }
 
-  function renderPolAccrualChart(pick, chartView) {
+  function renderPolAccrualChart(pick, chartView, range) {
     polPaymentChart = renderSeriesChart(polPaymentCanvas, polPaymentChart, {
       zoomKey: 'pol',
+      rangeDays: range === 'all' ? null : 30,
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
@@ -534,9 +544,10 @@
     });
   }
 
-  function renderGeneratedFeesChart(pick, chartView) {
+  function renderGeneratedFeesChart(pick, chartView, range) {
     generatedFeesChart = renderSeriesChart(generatedFeesCanvas, generatedFeesChart, {
       zoomKey: 'generated',
+      rangeDays: range === 'all' ? null : 30,
       rows: pick.rows,
       grain: pick.grain,
       view: chartView,
@@ -560,12 +571,12 @@
   $: generatedPick = pickAggRows(generatedFees, granularity.generated);
 
   $: if (accruedValueCanvas && accruedValuePick.rows.length)
-    renderAccruedValueChart(accruedValuePick, view.accrued);
-  $: if (collectedCanvas && collectedPick.rows.length) renderCollectedChart(collectedPick, view.collected);
-  $: if (paymentCanvas && paidPick.rows.length) renderPaymentChart(paidPick, view.paid);
-  $: if (polPaymentCanvas && polPick.rows.length) renderPolAccrualChart(polPick, view.pol);
+    renderAccruedValueChart(accruedValuePick, view.accrued, chartRange.accrued);
+  $: if (collectedCanvas && collectedPick.rows.length) renderCollectedChart(collectedPick, view.collected, chartRange.collected);
+  $: if (paymentCanvas && paidPick.rows.length) renderPaymentChart(paidPick, view.paid, chartRange.paid);
+  $: if (polPaymentCanvas && polPick.rows.length) renderPolAccrualChart(polPick, view.pol, chartRange.pol);
   $: if (generatedFeesCanvas && generatedPick.rows.length)
-    renderGeneratedFeesChart(generatedPick, view.generated);
+    renderGeneratedFeesChart(generatedPick, view.generated, chartRange.generated);
 
   async function refreshDashboard() {
     if (dashboardRefreshRunning) return;
@@ -1096,6 +1107,11 @@
           <button class:active={view.accrued === 'cumulative'} on:click={() => setView('accrued', 'cumulative')}>[cumul]</button>
         </div>
         <span class="ctrl-div">·</span>
+        <div class="mode-toggle">
+          <button class:active={chartRange.accrued === '30d'} on:click={() => setChartRange('accrued', '30d')}>[30d]</button>
+          <button class:active={chartRange.accrued === 'all'} on:click={() => setChartRange('accrued', 'all')}>[all]</button>
+        </div>
+        <span class="ctrl-div">·</span>
         <span class="zoom-hint">drag to zoom</span>
         <button class="zoom-reset" on:click={() => resetZoom('accrued')} disabled={!zoomed.accrued}>[reset]</button>
       </div>
@@ -1141,6 +1157,11 @@
         <div class="mode-toggle">
           <button class:active={view.collected === 'bars'} on:click={() => setView('collected', 'bars')}>[bars]</button>
           <button class:active={view.collected === 'cumulative'} on:click={() => setView('collected', 'cumulative')}>[cumul]</button>
+        </div>
+        <span class="ctrl-div">·</span>
+        <div class="mode-toggle">
+          <button class:active={chartRange.collected === '30d'} on:click={() => setChartRange('collected', '30d')}>[30d]</button>
+          <button class:active={chartRange.collected === 'all'} on:click={() => setChartRange('collected', 'all')}>[all]</button>
         </div>
         <span class="ctrl-div">·</span>
         <span class="zoom-hint">drag to zoom</span>
@@ -1227,6 +1248,11 @@
         <div class="mode-toggle">
           <button class:active={view.paid === 'bars'} on:click={() => setView('paid', 'bars')}>[bars]</button>
           <button class:active={view.paid === 'cumulative'} on:click={() => setView('paid', 'cumulative')}>[cumul]</button>
+        </div>
+        <span class="ctrl-div">·</span>
+        <div class="mode-toggle">
+          <button class:active={chartRange.paid === '30d'} on:click={() => setChartRange('paid', '30d')}>[30d]</button>
+          <button class:active={chartRange.paid === 'all'} on:click={() => setChartRange('paid', 'all')}>[all]</button>
         </div>
         <span class="ctrl-div">·</span>
         <span class="zoom-hint">drag to zoom</span>
@@ -1319,6 +1345,11 @@
           <button class:active={view.pol === 'cumulative'} on:click={() => setView('pol', 'cumulative')}>[cumul]</button>
         </div>
         <span class="ctrl-div">·</span>
+        <div class="mode-toggle">
+          <button class:active={chartRange.pol === '30d'} on:click={() => setChartRange('pol', '30d')}>[30d]</button>
+          <button class:active={chartRange.pol === 'all'} on:click={() => setChartRange('pol', 'all')}>[all]</button>
+        </div>
+        <span class="ctrl-div">·</span>
         <span class="zoom-hint">drag to zoom</span>
         <button class="zoom-reset" on:click={() => resetZoom('pol')} disabled={!zoomed.pol}>[reset]</button>
       </div>
@@ -1402,6 +1433,11 @@
         <div class="mode-toggle">
           <button class:active={view.generated === 'bars'} on:click={() => setView('generated', 'bars')}>[bars]</button>
           <button class:active={view.generated === 'cumulative'} on:click={() => setView('generated', 'cumulative')}>[cumul]</button>
+        </div>
+        <span class="ctrl-div">·</span>
+        <div class="mode-toggle">
+          <button class:active={chartRange.generated === '30d'} on:click={() => setChartRange('generated', '30d')}>[30d]</button>
+          <button class:active={chartRange.generated === 'all'} on:click={() => setChartRange('generated', 'all')}>[all]</button>
         </div>
         <span class="ctrl-div">·</span>
         <span class="zoom-hint">drag to zoom</span>
@@ -2426,6 +2462,7 @@
 
   .block-head {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: baseline;
     gap: 14px;
@@ -2492,6 +2529,7 @@
 
   .chart-controls {
     display: flex;
+    max-width: 100%;
     align-items: center;
     gap: 8px;
     flex-shrink: 0;

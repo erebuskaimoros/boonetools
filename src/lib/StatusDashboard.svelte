@@ -3,7 +3,7 @@
 
   import { fetchStatusDashboard, fetchStatusLive } from './status/api.js';
   import BlockProductionChart from './status/BlockProductionChart.svelte';
-  import { formatChurnCountdown } from './status/churn-countdown.js';
+  import { formatChurnCountdown, getChurnDisplayState } from './status/churn-countdown.js';
   import { groupStuckTransactionsByChain } from './status/stuck-transactions.js';
 
   const DASHBOARD_REFRESH_INTERVAL_MS = 60_000;
@@ -69,6 +69,7 @@
     estimated: true
   };
   $: churnCountdown = formatChurnCountdown(churnStatus, countdownNowMs, { consensusStalled });
+  $: churnDisplayState = getChurnDisplayState(churnStatus, { consensusStalled });
   $: governanceVotes = currentDashboard?.votes?.governance || [];
   $: statusUpdates = currentDashboard?.votes?.status_updates || [];
   $: stuckDashboard = currentDashboard?.stuck_transactions || null;
@@ -413,7 +414,7 @@
             <span class="churn-dot"></span>
             <div>
               <small>VALIDATOR CHURN</small>
-              <strong>{consensusStalled ? 'BLOCKED' : churnStatus.isInProgress ? 'CHURNING' : churnStatus.isPaused ? 'PAUSED' : 'ACTIVE'}</strong>
+              <strong>{churnDisplayState}</strong>
               <span class="churn-mimir">[HALTCHURNING={churnStatus.mimirValue}]</span>
             </div>
           </div>
@@ -428,7 +429,7 @@
                 target unavailable
               {/if}
             </small>
-            {#if churnStatus.isInProgress}
+            {#if churnDisplayState === 'CHURNING'}
               <a class="churn-link" href="https://churn.thorchain.org/" target="_blank" rel="noopener noreferrer">
                 Track churn <span>↗</span>
               </a>

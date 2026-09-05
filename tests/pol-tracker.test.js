@@ -192,3 +192,40 @@ test('POL Tracker drag selection projects either direction into a bounded chart 
     endX: 2_000
   }), { startIndex: 0, endIndex: 10 });
 });
+
+test('zero System Income POL does not draw an orange outline over other holdings', () => {
+  const rows = [0, 0, 0].map((value, index) => ({ day: `2026-08-0${index + 1}`,
+    synthBackingUsd: 100, treasuryTotalUsd: 20, reservePolUsd: 10, systemIncomePolUsd: value }));
+  const chart = buildPolTrackerChart(rows, 'overview');
+  const pol = chart.paths.find((series) => series.id === 'system_income_pol');
+  assert.equal(pol.path, '');
+  assert.equal(pol.areaPath, '');
+});
+
+test('System Income POL paths begin at positive holdings and break across zero or missing days', () => {
+  const rows = [0, 0, 5, 10, 0, 8, 9, null, 3, 4, 0].map((value, index) => ({
+    day: `2026-08-${String(index + 1).padStart(2, '0')}`,
+    synthBackingUsd: 100, treasuryTotalUsd: 20, reservePolUsd: 10, systemIncomePolUsd: value
+  }));
+  const chart = buildPolTrackerChart(rows, 'overview');
+  const pol = chart.paths.find((series) => series.id === 'system_income_pol');
+  const segments = pol.path.match(/M[^M]+/g);
+  assert.equal(segments.length, 3);
+  assert.equal((pol.areaPath.match(/Z/g) || []).length, 3);
+  for (const [segment, indexes] of segments.map((value, index) => [value, [[2, 3], [5, 6], [8, 9]][index]])) {
+    assert.ok(segment.startsWith(`M${chart.x(indexes[0]).toFixed(2)},`));
+    assert.ok(segment.includes(`L${chart.x(indexes[1]).toFixed(2)},`));
+    assert.equal((segment.match(/L/g) || []).length, 1);
+  }
+  assert.equal(totalPolTrackerValue(rows[0]), 130);
+  assert.equal(totalPolTrackerValue(rows[2]), 135);
+  assert.equal(totalPolTrackerValue(rows[7]), null);
+});
+
+test('a zero lower holding leaves positive upper stack layers available', () => {
+  const chart = buildPolTrackerChart([1, 2].map((day) => ({ day: `2026-08-0${day}`,
+    synthBackingUsd: 0, treasuryTotalUsd: 20, reservePolUsd: 10, systemIncomePolUsd: 5
+  })), 'overview');
+  assert.equal(chart.paths[0].path, '');
+  assert.ok(chart.paths.slice(1).every((series) => series.path.includes('L') && series.areaPath.includes('Z')));
+});

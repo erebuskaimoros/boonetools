@@ -57,8 +57,9 @@ test('stuck transactions render as expandable chain bundles', () => {
 });
 
 test('an active churn exposes the dedicated churn tracker', () => {
-  assert.match(source, /churnStatus\.isInProgress\s*\?\s*'CHURNING'/);
-  assert.match(source, /\{#if churnStatus\.isInProgress\}[\s\S]*href="https:\/\/churn\.thorchain\.org\/"/);
+  assert.match(source, /churnDisplayState = getChurnDisplayState\(churnStatus, \{ consensusStalled \}\)/);
+  assert.match(source, /churnDisplayState === 'CHURNING'/);
+  assert.match(source, /\{#if churnDisplayState === 'CHURNING'\}[\s\S]*href="https:\/\/churn\.thorchain\.org\/"/);
   assert.match(source, /Track churn <span>↗<\/span>/);
 });
 

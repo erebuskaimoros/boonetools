@@ -2,10 +2,17 @@ function pad(value) {
   return String(value).padStart(2, '0');
 }
 
-export function formatChurnCountdown(churnStatus = {}, nowMs = Date.now(), options = {}) {
+export function getChurnDisplayState(churnStatus = {}, options = {}) {
   if (options.consensusStalled) return 'BLOCKED';
-  if (churnStatus.isInProgress) return 'IN PROGRESS';
   if (churnStatus.isPaused) return 'PAUSED';
+  if (churnStatus.isInProgress) return 'CHURNING';
+  return 'ACTIVE';
+}
+
+export function formatChurnCountdown(churnStatus = {}, nowMs = Date.now(), options = {}) {
+  const state = getChurnDisplayState(churnStatus, options);
+  if (state === 'CHURNING') return 'IN PROGRESS';
+  if (state !== 'ACTIVE') return state;
 
   const targetMs = Number(churnStatus.nextChurnTimestampMs);
   if (!Number.isFinite(targetMs) || targetMs <= 0) return '-';
