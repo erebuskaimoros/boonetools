@@ -14,8 +14,8 @@
 
 | Date | Focus | Summary | Link |
 |------|-------|---------|------|
-| 2026-09-02 #1 | Bond Tracker No-Bond Recovery | Deployed no-bond form results and saved-query cleanup; resolved 16 release-workflow papercuts | `sessions/2026-09-02/session-1.md` |
-| 2026-09-01 #1 | Live System Income POL Analytics | Launched live SIPOL accounting, integrated full value into POL TVL, and deployed hourly fee estimation plus the refined dashboard | `sessions/2026-09-01/session-1.md` |
-| 2026-08-26 #1 | Pool Analysis Fee Scope | Limited Pool Analysis to pool-generated liquidity fees and excluded downstream system-income distribution | `sessions/2026-08-26/session-1.md` |
-| 2026-08-25 #1 | Burn Chart Unit Toggle | Added historical USD and RUNE chart modes with full-ledger cumulative accounting and honest price gaps | `sessions/2026-08-25/session-1.md` |
-| 2026-08-23 #1 | Live System Income Burn Tracker | Added and deployed historical plus per-block RUNE burn accounting, charting, price overlays, and navigation | `sessions/2026-08-23/session-1.md` |
+| 2026-09-05 #1 | API Efficiency and Dashboard Fixes | Deployed repair reuse and four UI fixes; upstream historical repair remains blocked | [Session](2026-09-05/session-1.md) |
+| 2026-09-02 #1 | Bond Tracker No-Bond Recovery | Deployed no-bond form results and saved-query cleanup; resolved 16 release-workflow papercuts | `2026-09-02/session-1.md` |
+| 2026-09-01 #1 | Live System Income POL Analytics | Launched live SIPOL accounting, integrated full value into POL TVL, and deployed hourly fee estimation plus the refined dashboard | `2026-09-01/session-1.md` |
+| 2026-08-26 #1 | Pool Analysis Fee Scope | Limited Pool Analysis to pool-generated liquidity fees and excluded downstream system-income distribution | `2026-08-26/session-1.md` |
+| 2026-08-25 #1 | Burn Chart Unit Toggle | Added historical USD and RUNE chart modes with full-ledger cumulative accounting and honest price gaps | `2026-08-25/session-1.md` |

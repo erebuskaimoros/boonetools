@@ -100,3 +100,9 @@ scheduled-row protection, atomic provenance replacement, invalid incoming-height
 protection, and proof reuse across connections. Backend import boundaries and
 `git diff --check` pass. Production remains on the previously inspected release;
 no commit, push, migration, timer change, or deployment was performed.
+
+## Deployment follow-up
+
+Backend and frontend deployed on September 5 as `39937587909bacd32d5f95d2c6e2d3fb27bd76e6`. The isolated release excluded unrelated unpublished work. GitHub CI run 33956709810 passed; the clean release passed 309 frontend tests, 526 backend tests, and eight PostgreSQL integration checks. Type checking reported zero errors and 56 existing warnings. All 16 production API performance gates passed, and production browser checks verified the paused churn label, white System Income POL metric, nonzero-only orange history, and five default 30-day chart ranges.
+
+The optional historical repair prime still encountered Liquify HTTP 500 responses (Too many hops). Cached dashboard data remains healthy and the normal repair timer can retry; deployment does not establish that the historical backlog has been repaired.

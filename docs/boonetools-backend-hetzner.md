@@ -680,3 +680,12 @@ verify every public route after activation and must never install the app-only
 - GitHub workflow cron is no longer the source of truth for DB-backed jobs.
 - Hetzner cron wrappers should remain disabled once the systemd timers are active.
 - The listener and schedulers rely on Postgres advisory locks and durable tables.
+
+## Large journal audits
+
+For multi-day provider audits, limit `journalctl` to the relevant units and time
+window, and select only needed JSON fields with `--output-fields` before
+transferring results. For verbose JSON streams, pipe remote `journalctl` output through `gzip -c`
+and decompress locally with `gzip -dc`, retaining the existing `boone-vps` SSH
+control socket. Parse locally when `jq` is not installed remotely. Avoid printing raw provider URLs, which may contain
+credentials; redact them before sharing diagnostics.
