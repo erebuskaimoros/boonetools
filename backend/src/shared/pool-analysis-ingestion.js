@@ -1,9 +1,11 @@
+import { fetchPoolAnalysisSnapshot, combinePoolAnalysisSnapshots } from './pool-analysis-rolling.js';
 import { config } from '../lib/config.js';
 import { sleep } from '../lib/utils.js';
 import { fetchMidgard, MIDGARD_BASES } from './midgard.js';
 import { coreSnapshotValue, getThorNodeCoreSnapshot } from './thornode-core-snapshot.js';
 import {
   POOL_ANALYSIS_START_DATE,
+  POOL_ANALYSIS_TABLE_PERIODS,
   assetIdentity,
   nonNegativeBaseString,
   parsePoolAnalysisDepthInterval,
@@ -11,6 +13,12 @@ import {
 } from './pool-analysis.js';
 import {
   loadPoolAnalysisPendingDays,
+  loadPoolAnalysisCompletedDays,
+  loadPoolAnalysisRollingEdges,
+  savePoolAnalysisIntradaySnapshot,
+  loadPoolAnalysisBoundarySnapshots,
+  savePoolAnalysisRollingSnapshot,
+  markPoolAnalysisRollingFailure,
   updatePoolAnalysisSyncState,
   upsertPoolAnalysisDepthDays,
   upsertPoolAnalysisDays
@@ -248,9 +256,40 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
     } catch (error) { state.errors.push(error?.message || String(error)); }
   }
 
+  let watermark = 0;
+  let watermarkError = '';
+  const bases = [options.historyBase || MIDGARD_BASES[0]];
+  const rollingEdges = new Map();
+  if (options.rolling) {
+    try { watermark = await historyWatermark(client, options, bases); }
+    catch (error) { watermarkError = error?.message || String(error); }
+    await mapWithConcurrency(assets, concurrency, async (asset) => {
+      const state = byAsset.get(asset).swaps;
+      try {
+        if (!watermark) throw new Error(watermarkError);
+        const cutoff = Math.floor(watermark / 900000) * 900;
+        const cached = await (options.loadRollingEdges || loadPoolAnalysisRollingEdges)(client, asset, cutoff);
+        const onHead = async (head) => {
+          await (options.saveIntradaySnapshot || savePoolAnalysisIntradaySnapshot)(client, head);
+          const row = { ...head, partial: true, completed_at: null };
+          await persist('swaps', [row]);
+          state.rows.push(row);
+        };
+        const result = cached || await fetchPoolAnalysisSnapshot(asset, cutoff, {
+          ...options, client, bases, onHead, onRequest: () => { state.pages++; }
+        });
+        if (cached) await onHead(cached.head);
+        rollingEdges.set(asset, result);
+      } catch (error) {
+        state.errors.push(error?.message || String(error));
+        await (options.markRollingFailure || markPoolAnalysisRollingFailure)(client, asset, error?.message || String(error));
+      }
+    });
+  }
+
   // Live work always precedes recovery, so a historical backlog cannot consume
   // its request allowance or prevent its data from reaching the read model.
-  await mapWithConcurrency(assets, concurrency, (asset) => request({ asset, lane: 'swaps', startDate: today, endDate: today, days: 1 }));
+  if (!options.rolling) await mapWithConcurrency(assets, concurrency, (asset) => request({ asset, lane: 'swaps', startDate: today, endDate: today, days: 1 }));
   const currentDepth = currentDepthRows(core, assets, now, Math.max(1, Number(
     options.coreMaxAgeMs ?? config.poolAnalysisCoreMaxAgeMs
   ) || 300000));
@@ -273,10 +312,7 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
   const limit = options.full ? ranges.length : Math.max(0, Math.trunc(Number(
     options.historyRequestLimit ?? config.poolAnalysisHistoryRequestLimit
   )) || 0);
-  let watermark = 0;
-  let watermarkError = '';
-  const bases = [options.historyBase || MIDGARD_BASES[0]];
-  if (ranges.length && limit > 0) {
+  if (!options.rolling && ranges.length && limit > 0) {
     try { watermark = await historyWatermark(client, options, bases); }
     catch (error) { watermarkError = error?.message || String(error); }
   }
@@ -295,6 +331,17 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
   };
   const selected = [...rotate(newlyClosed, limit), ...rotate(backlog, available)].slice(0, limit);
   await mapWithConcurrency(selected, concurrency, (task) => request(task, watermark, bases));
+  for (const [asset, edges] of rollingEdges) {
+    try {
+      const daily = await (options.loadCompletedDays || loadPoolAnalysisCompletedDays)(client, asset, edges.cutoff);
+      const prefixes = await (options.loadBoundarySnapshots || loadPoolAnalysisBoundarySnapshots)(client, asset, edges.cutoff, POOL_ANALYSIS_TABLE_PERIODS);
+      const periods = combinePoolAnalysisSnapshots(edges, daily, prefixes);
+      await (options.saveRollingSnapshot || savePoolAnalysisRollingSnapshot)(client, asset, periods, new Date(edges.cutoff * 1000).toISOString());
+    } catch (error) {
+      byAsset.get(asset).swaps.errors.push(error?.message || String(error));
+      await (options.markRollingFailure || markPoolAnalysisRollingFailure)(client, asset, error?.message || String(error));
+    }
+  }
   const allStates = [...byAsset.values()];
   for (const [asset, state] of byAsset) {
     const days = state.swaps.rows.map((row) => row.day).sort();

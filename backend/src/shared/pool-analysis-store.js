@@ -227,3 +227,95 @@ export async function updatePoolAnalysisSyncState(client, state = {}) {
     ]
   );
 }
+
+export const POOL_ANALYSIS_ROLLING_NAMESPACE = 'thorchain-mainnet:pool-analysis-rolling:v1';
+
+export async function loadPoolAnalysisCompletedDays(client, asset, cutoff) {
+  const { rows } = await client.query(
+    `select day, volume_rune_e8::text, volume_usd_e2::text, fees_rune_e8::text,
+            rune_price_usd::text, partial, completed_at
+     from pool_analysis_daily
+     where asset = $1 and day >= ($2::timestamptz at time zone 'UTC')::date - 365
+       and day < ($2::timestamptz at time zone 'UTC')::date
+     order by day`, [asset, new Date(cutoff * 1000).toISOString()]);
+  return rows;
+}
+
+export async function savePoolAnalysisRollingSnapshot(client, asset, periods, observedAt) {
+  await client.query(
+    `insert into source_observations as current
+       (namespace, identity, payload_json, source, observed_at, metadata_json)
+     values ($1, $2, $3::jsonb, 'liquify-midgard:exact-swaps+completed-days', $4, '{}'::jsonb)
+     on conflict (namespace, identity) do update set
+       payload_json = excluded.payload_json, observed_at = excluded.observed_at,
+       metadata_json = excluded.metadata_json
+     where current.observed_at <= excluded.observed_at`,
+    [POOL_ANALYSIS_ROLLING_NAMESPACE, asset, JSON.stringify({ periods }), observedAt]);
+}
+
+export async function markPoolAnalysisRollingFailure(client, asset, message) {
+  // Preserve the successful observation and its timestamp; a failed attempt is never fresh data.
+  await client.query(
+    `update source_observations set metadata_json = jsonb_build_object('last_error', $3::text)
+     where namespace = $1 and identity = $2`, [POOL_ANALYSIS_ROLLING_NAMESPACE, asset, message]);
+}
+
+export async function loadPoolAnalysisRollingAggregates(client, asOf, periods = []) {
+  const { rows } = await client.query(
+    `select payload_json, observed_at, metadata_json from source_observations where namespace = $1`,
+    [POOL_ANALYSIS_ROLLING_NAMESPACE]);
+  const now = new Date(asOf).getTime();
+  const snapshots = rows.flatMap((row) => (Array.isArray(row.payload_json) ? row.payload_json : row.payload_json?.periods || []).map((period) => ({
+    ...period,
+    stale: period.window_mode === 'rolling' && (Boolean(row.metadata_json?.last_error)
+      || now - new Date(row.observed_at).getTime() > 20 * 60 * 1000 || new Date(row.observed_at).getTime() > now),
+    refresh_error: row.metadata_json?.last_error || ''
+  })));
+  if (!periods.length) return snapshots;
+  const midnight = Math.floor(now / 86400000) * 86400000;
+  const completedDay = new Date(midnight - 86400000).toISOString().slice(0, 10);
+  // Preserve existing table totals while the prefix ledger warms, including
+  // valid legacy !partial rows which predate explicit completed_at proofs.
+  const legacy = await loadPoolAnalysisAggregates(client, completedDay, periods);
+  const merged = new Map(legacy.map((row) => {
+    const days = Number(row.period_days);
+    return [`${row.asset}:${row.period_id}`, { ...row,
+      window_mode: 'completed-days', snapshot_ready: false, snapshot_resolution_seconds: 900,
+      window_start: new Date(midnight - days * 86400000).toISOString(),
+      window_end: new Date(midnight).toISOString(), stale: false,
+      incomplete: Number(row.observed_days) < days, usd_fee_estimate: true }];
+  }));
+  for (const row of snapshots) {
+    const key = `${row.asset}:${row.period_id}`;
+    if (row.window_mode === 'rolling' || !merged.has(key)) merged.set(key, row);
+    else merged.set(key, { ...merged.get(key), snapshot_cutoff: row.snapshot_cutoff, refresh_error: row.refresh_error });
+  }
+  return [...merged.values()];
+}
+
+export async function loadPoolAnalysisRollingEdges(client, asset, cutoff) {
+  const { rows } = await client.query(
+    `select asset, bucket_end, volume_rune_e8::text, volume_usd_e2::text, fees_rune_e8::text, rune_price_usd::text
+     from pool_analysis_intraday_snapshots where asset = $1 and bucket_end = $2`,
+    [asset, new Date(cutoff * 1000).toISOString()]);
+  const row = rows[0];
+  return row ? { asset, cutoff, head: { ...row, day: new Date(cutoff * 1000).toISOString().slice(0, 10),
+    interval_start: new Date(Math.floor(cutoff / 86400) * 86400000).toISOString(),
+    interval_end: new Date(cutoff * 1000).toISOString(), partial: true } } : null;
+}
+
+export async function savePoolAnalysisIntradaySnapshot(client, head) {
+  await client.query(
+    `insert into pool_analysis_intraday_snapshots
+       (asset, bucket_end, volume_rune_e8, volume_usd_e2, fees_rune_e8, rune_price_usd)
+     values ($1, $2, $3, $4, $5, $6) on conflict (asset, bucket_end) do nothing`,
+    [head.asset, head.interval_end, head.volume_rune_e8, head.volume_usd_e2, head.fees_rune_e8, head.rune_price_usd]);
+}
+
+export async function loadPoolAnalysisBoundarySnapshots(client, asset, cutoff, periods) {
+  const ends = periods.map((period) => new Date((cutoff - period.days * 86400) * 1000).toISOString());
+  const { rows } = await client.query(
+    `select bucket_end, volume_rune_e8::text, volume_usd_e2::text, fees_rune_e8::text, rune_price_usd::text
+     from pool_analysis_intraday_snapshots where asset = $1 and bucket_end = any($2::timestamptz[])`, [asset, ends]);
+  return rows;
+}

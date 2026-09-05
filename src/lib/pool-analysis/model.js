@@ -21,6 +21,27 @@ export const POOL_ANALYSIS_TABLE_PERIODS = Object.freeze([
   { id: '1y', label: '1Y', days: 365 }
 ]);
 
+export function poolAnalysisPeriodDescription(metadata = {}, periodId = '30d') {
+  const period = POOL_ANALYSIS_TABLE_PERIODS.find((candidate) => candidate.id === periodId)
+    || POOL_ANALYSIS_TABLE_PERIODS[2];
+  const rolling = period.id === '24h' ? 'the preceding 24 hours' : `the preceding ${period.days} days`;
+  const daily = period.id === '24h' ? 'the latest completed UTC day' : `${period.days} completed UTC days`;
+  if (metadata.mode === 'rolling') return rolling;
+  if (metadata.mode === 'bucketed') {
+    return `${rolling} as 15-minute history becomes available; until then, ${daily}`;
+  }
+  return daily;
+}
+
+export function poolAnalysisWindowLabel(pool = {}, metadata = {}) {
+  if (metadata.mode === 'bucketed') {
+    return pool.windowMode === 'rolling' && pool.snapshotReady
+      ? `ROLLING · ${Math.round((pool.snapshotResolutionSeconds || 900) / 60)}M`
+      : 'DAILY · BUILDING HISTORY';
+  }
+  return metadata.mode === 'rolling' ? 'ROLLING' : 'DAILY';
+}
+
 export const POOL_ANALYSIS_COLUMNS = Object.freeze([
   { id: 'asset', label: 'POOL', defaultDirection: 'asc' },
   { id: 'priceUsd', label: 'USD PRICE', defaultDirection: 'desc' },
@@ -83,6 +104,14 @@ function normalizePeriodMetric(value = {}, period, volumeDepthScale = 1, balance
   return {
     id: period.id,
     days: period.days,
+    windowMode: value.window_mode || null,
+    snapshotReady: Boolean(value.snapshot_ready),
+    snapshotResolutionSeconds: finite(value.snapshot_resolution_seconds),
+    windowStart: value.window_start || null,
+    windowEnd: value.window_end || null,
+    periodStale: Boolean(value.stale),
+    periodIncomplete: Boolean(value.incomplete),
+    usdFeeEstimate: Boolean(value.usd_fee_estimate),
     periodVolumeBase: baseString(value.volume_rune_e8),
     periodVolumeUsd: finite(value.volume_usd),
     periodFeesBase,

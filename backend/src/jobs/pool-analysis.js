@@ -11,7 +11,7 @@ import {
 const LOCK_KEY = 'boonetools:pool-analysis';
 
 async function ingestAndPublish(client, options = {}) {
-  const ingestion = await (options.ingest || ingestPoolAnalysisHistory)(client, options);
+  const ingestion = await (options.ingest || ingestPoolAnalysisHistory)(client, { ...options, rolling: true });
   const published = await (options.publish || buildAndPublishReadModel)({
     modelKey: POOL_ANALYSIS_MODEL_KEY,
     schemaVersion: POOL_ANALYSIS_SCHEMA_VERSION,

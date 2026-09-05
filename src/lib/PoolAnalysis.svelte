@@ -17,6 +17,8 @@
     normalizePoolAnalysisSummary,
     poolAnalysisColumns,
     poolAnalysisLineMetric,
+    poolAnalysisPeriodDescription,
+    poolAnalysisWindowLabel,
     selectPoolAnalysisPeriod,
     sortPoolAnalysisRows
   } from './pool-analysis/model.js';
@@ -48,6 +50,9 @@
   $: dashboard = normalizePoolAnalysisSummary(payload || {});
   $: tablePeriod = POOL_ANALYSIS_TABLE_PERIODS.find((period) => period.id === tablePeriodId)
     || POOL_ANALYSIS_TABLE_PERIODS[2];
+  $: rollingPeriods = dashboard.period.mode === 'rolling';
+  $: bucketedPeriods = dashboard.period.mode === 'bucketed';
+  $: timedPeriods = rollingPeriods || bucketedPeriods;
   $: tableColumns = poolAnalysisColumns(tablePeriodId);
   $: tablePools = dashboard.pools.map((pool) => selectPoolAnalysisPeriod(pool, tablePeriodId));
   $: filteredPools = sortPoolAnalysisRows(
@@ -200,6 +205,18 @@
       : '—';
   }
 
+  function periodBounds(pool) {
+    if (!timedPeriods) return '';
+    const state = pool.periodIncomplete ? 'UNAVAILABLE · ' : pool.periodStale ? 'STALE · ' : '';
+    return `${poolAnalysisWindowLabel(pool, dashboard.period)} · ${state}${displayTimestamp(pool.windowStart)} → ${displayTimestamp(pool.windowEnd)}`;
+  }
+
+  function shortCutoff(value) {
+    const parsed = new Date(value || '');
+    if (!Number.isFinite(parsed.getTime())) return '—';
+    return `${parsed.toISOString().slice(5, 10)} ${parsed.toISOString().slice(11, 16)} UTC`;
+  }
+
   function displayDay(value) {
     const parsed = new Date(`${value}T00:00:00Z`);
     return Number.isFinite(parsed.getTime())
@@ -258,7 +275,7 @@
       <div>
         <span class="section-index">[01]</span>
         <h2 id="pool-table-title">POOL PERFORMANCE MATRIX</h2>
-        <p>Activity covers {tablePeriod.label === '24H' ? 'the latest completed UTC day' : `${tablePeriod.days} completed UTC days`}. Pricing and two-sided depth are current.</p>
+        <p>Activity covers {poolAnalysisPeriodDescription(dashboard.period, tablePeriodId)}{rollingPeriods ? ' through each pool’s reported cutoff' : ''}. Pricing and two-sided depth are current.</p>
       </div>
       <div class="table-controls">
         <div class="period-picker">
@@ -299,7 +316,7 @@
               <th colspan="1">POOL</th>
               <th colspan="2">PRICING</th>
               <th colspan="2">LIQUIDITY</th>
-              <th colspan="5">ACTIVITY · {tablePeriod.label}</th>
+              <th colspan="5">ACTIVITY · {rollingPeriods ? 'ROLLING ' : ''}{tablePeriod.label}</th>
               <th colspan="1">ANNUALIZED</th>
             </tr>
             <tr class="column-row">
@@ -352,10 +369,13 @@
                   <span>{balanceLabel(pool.balanceAssetBase, pool.symbol)}</span>
                   <small>{balanceLabel(pool.balanceRuneBase, 'RUNE')}</small>
                 </td>
-                <td class="number" data-label="VOLUME">{formatPoolAnalysisUsd(pool.periodVolumeUsd, { compact: true })}</td>
-                <td class="number" data-label="FEES" class:coverage-warning={pool.coverage.missingDays > 0}>
+                <td class="number" data-label="VOLUME" title={periodBounds(pool)}>{formatPoolAnalysisUsd(pool.periodVolumeUsd, { compact: true })}</td>
+                <td class="number" data-label="FEES" title={`${periodBounds(pool)}${pool.usdFeeEstimate ? ' · USD fees use each source interval’s mean RUNE price' : ''}`} class:coverage-warning={pool.periodStale || pool.periodIncomplete || pool.coverage.missingDays > 0}>
                   {formatPoolAnalysisUsd(pool.periodFeesUsd, { compact: true })}
-                  {#if pool.coverage.missingDays > 0}<small>{pool.coverage.observedDays}/{pool.coverage.expectedDays}D</small>{/if}
+                  {#if timedPeriods}
+                    {#if bucketedPeriods}<small class="period-mode">{poolAnalysisWindowLabel(pool, dashboard.period)}</small>{/if}
+                    <small class="period-cutoff">{pool.periodIncomplete ? 'UNAVAILABLE' : pool.periodStale ? 'STALE' : 'THROUGH'}<br />{shortCutoff(pool.windowEnd)}</small>
+                  {:else if pool.coverage.missingDays > 0}<small>{pool.coverage.observedDays}/{pool.coverage.expectedDays}D</small>{/if}
                 </td>
                 <td class="number" data-label="VOLUME / DEPTH">{formatPoolAnalysisPercent(pool.volumeDepthPercent)}</td>
                 <td class="number" data-label="FEES / DEPTH">{formatPoolAnalysisPercent(pool.feeDepthPercent)}</td>
@@ -369,6 +389,7 @@
                       <div class="detail-heading">
                         <div>
                           <span class="detail-kicker">{pool.asset} · DAILY HISTORY</span>
+                          {#if timedPeriods}<p class="period-bounds">TABLE · {tablePeriod.label} · {periodBounds(pool)}</p>{/if}
                           <h3>VOLUME + POOL-GENERATED LIQUIDITY FEES</h3>
                         </div>
                         <div class="range-copy">
@@ -453,7 +474,7 @@
       <footer class="table-foot">
         <span>{filteredPools.length} / {dashboard.pools.length} POOLS</span>
         <span>RUNE / USD · {formatPoolAnalysisUsd(dashboard.runePriceUsd)}</span>
-        <span>{tablePeriod.label} THROUGH · {dashboard.period?.through_day || '—'}</span>
+        <span>{bucketedPeriods ? 'SNAPSHOTS THROUGH' : `${tablePeriod.label} ${timedPeriods ? 'OLDEST CUTOFF' : 'THROUGH'}`} · {timedPeriods ? displayTimestamp(dashboard.period.through_time) : dashboard.period?.through_day || '—'}</span>
       </footer>
     {/if}
   </section>
@@ -537,6 +558,10 @@
   .oracle-cell small, .balance-cell small, .coverage-warning small { margin-top: 3px; color: var(--term-text-6, #333); font-size: 10px; }
   .oracle-cell small.positive { color: var(--term-accent, #00cc66); }
   .oracle-cell small.negative { color: var(--term-error, #dc3545); }
+  .number .period-mode { display: block; margin-top: 3px; color: var(--term-text-muted, #c8c8c8); font-size: 11px; white-space: normal; }
+  .number .period-cutoff { display: block; margin-top: 3px; color: var(--term-text-muted, #c8c8c8); font-size: 11px; white-space: normal; }
+  .coverage-warning .period-cutoff { color: var(--term-amber, #d4a017); }
+  .period-bounds { font-size: 11px; overflow-wrap: anywhere; }
   .coverage-warning { color: var(--term-amber, #d4a017); }
   .empty-row { height: 100px; color: var(--term-text-5, #444); text-align: center; letter-spacing: .08em; }
 

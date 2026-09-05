@@ -6,7 +6,7 @@ import {
 } from './thornode-core-snapshot.js';
 import { normalizeOraclePrices, referenceMappingForAsset } from './pool-dislocation.js';
 import {
-  loadPoolAnalysisAggregates,
+  loadPoolAnalysisRollingAggregates,
   loadPoolAnalysisSyncStates
 } from './pool-analysis-store.js';
 
@@ -186,6 +186,14 @@ export function buildPoolAnalysisRows({
         return [period.id, {
           id: period.id,
           days: period.days,
+          window_start: aggregate.window_start || null,
+          window_end: aggregate.window_end || null,
+          window_mode: aggregate.window_mode || 'completed-days',
+          snapshot_ready: Boolean(aggregate.snapshot_ready),
+          snapshot_resolution_seconds: 900,
+          stale: aggregate.stale ?? false,
+          incomplete: aggregate.incomplete ?? coveredDays < period.days,
+          usd_fee_estimate: true,
           volume_rune_e8: volumeRune,
           volume_usd: finite(aggregate.volume_usd),
           fees_rune_e8: feesRune,
@@ -250,14 +258,12 @@ export function buildPoolAnalysisRows({
 export async function buildPoolAnalysisReadModel(client, options = {}) {
   const nowValue = typeof options.now === 'function' ? options.now() : options.now;
   const now = nowValue instanceof Date ? nowValue : new Date(nowValue || Date.now());
-  const completedDay = new Date(Date.UTC(
-    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1
-  )).toISOString().slice(0, 10);
+  const currentDay = now.toISOString().slice(0, 10);
   const [core, aggregates, syncStates] = await Promise.all([
     (options.getCoreSnapshot || getThorNodeCoreSnapshot)({ client, allowStale: true }),
-    (options.loadAggregates || loadPoolAnalysisAggregates)(
+    (options.loadAggregates || loadPoolAnalysisRollingAggregates)(
       client,
-      completedDay,
+      now.toISOString(),
       POOL_ANALYSIS_TABLE_PERIODS
     ),
     (options.loadSyncStates || loadPoolAnalysisSyncStates)(client)
@@ -289,6 +295,11 @@ export async function buildPoolAnalysisReadModel(client, options = {}) {
     row.period_metrics['30d'].coverage.observed_days < POOL_ANALYSIS_PERIOD_DAYS
   )).length;
   if (incomplete) warnings.push(`${incomplete} pool(s) have incomplete 30-day history coverage`);
+  const currentAssets = new Set(rows.map((row) => row.asset));
+  const ends = aggregates.filter((row) => currentAssets.has(row.asset)).map((row) => Date.parse(row.snapshot_cutoff)).filter(Number.isFinite);
+  const throughTime = ends.length ? new Date(Math.min(...ends)).toISOString() : null;
+  const stalePeriods = rows.filter((row) => Object.values(row.period_metrics).some((period) => period.stale)).length;
+  if (stalePeriods) warnings.push(`${stalePeriods} pool(s) have stale or unavailable rolling periods`);
   const generatedAt = now.toISOString();
   const sourceUpdatedAt = sourceTime(
     core?.sourceUpdatedAt,
@@ -303,7 +314,10 @@ export async function buildPoolAnalysisReadModel(client, options = {}) {
       period: {
         id: '30d',
         days: POOL_ANALYSIS_PERIOD_DAYS,
-        through_day: completedDay,
+        mode: 'bucketed',
+        snapshot_resolution_seconds: 900,
+        through_time: throughTime,
+        through_day: throughTime?.slice(0, 10) || currentDay,
         available: POOL_ANALYSIS_TABLE_PERIODS
       },
       rune_price_usd: runePriceUsd,
@@ -312,7 +326,7 @@ export async function buildPoolAnalysisReadModel(client, options = {}) {
         current: runePriceSource
           ? `thornode-core:pools+${runePriceSource}`
           : 'thornode-core:pools',
-        history: 'liquify-midgard:history/swaps'
+        history: 'liquify-midgard:quarter-hour-prefixes+completed-days'
       },
       warnings
     },

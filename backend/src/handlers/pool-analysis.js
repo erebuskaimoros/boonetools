@@ -1,6 +1,7 @@
 import { error, json } from '../lib/http.js';
 import { createReadModelEtag } from '../shared/read-models.js';
 import {
+  POOL_ANALYSIS_TTL_MS,
   buildPoolAnalysisSeries,
   getPoolAnalysisReadModel
 } from '../shared/pool-analysis.js';
@@ -34,12 +35,26 @@ export async function handlePoolAnalysis(_request, _url, options = {}) {
       'Retry-After': '300'
     });
   }
+  const nowValue = typeof options.now === 'function' ? options.now() : options.now;
+  const now = new Date(nowValue || Date.now()).getTime();
+  const rolling = ['rolling', 'bucketed'].includes(model.payload?.period?.mode);
+  const pools = (model.payload?.pools || []).map((pool) => rolling ? {
+    ...pool,
+    period_metrics: Object.fromEntries(Object.entries(pool.period_metrics || {}).map(([id, metric]) => {
+      const end = Date.parse(metric.window_end);
+      return [id, { ...metric, stale: metric.window_mode === 'completed-days' ? false : Boolean(metric.stale) || !Number.isFinite(end)
+        || end > now || now - end > POOL_ANALYSIS_TTL_MS }];
+    }))
+  } : pool);
+  const sourceStale = rolling && pools.some((pool) => Object.values(pool.period_metrics).some((metric) => metric.stale));
   const payload = {
     ...model.payload,
-    stale: Boolean(model.stale),
+    pools,
+    stale: Boolean(model.stale) || sourceStale,
     warnings: [...new Set([
       ...(Array.isArray(model.payload?.warnings) ? model.payload.warnings : []),
-      ...(model.stale ? ['Serving the last successful Pool Analysis snapshot'] : [])
+      ...(model.stale ? ['Serving the last successful Pool Analysis snapshot'] : []),
+      ...(sourceStale ? ['Some rolling periods are stale or unavailable'] : [])
     ])],
     read_model: {
       key: model.key,
@@ -51,7 +66,13 @@ export async function handlePoolAnalysis(_request, _url, options = {}) {
     }
   };
   const etag = createReadModelEtag(payload);
-  return json(payload, 200, modelHeaders(model, etag));
+  const headers = modelHeaders({ ...model, stale: Boolean(model.stale) || sourceStale }, etag);
+  if (rolling) {
+    const ends = pools.flatMap((pool) => Object.values(pool.period_metrics).filter((metric) => metric.window_mode !== 'completed-days').map((metric) => Date.parse(metric.window_end))).filter(Number.isFinite);
+    const remaining = ends.length ? Math.floor((Math.min(...ends) + POOL_ANALYSIS_TTL_MS - now) / 1000) : 60;
+    headers['Cache-Control'] = `public, max-age=${Math.max(0, Math.min(60, remaining))}, must-revalidate`;
+  }
+  return json(payload, 200, headers);
 }
 
 export async function handlePoolAnalysisSeries(_request, url, options = {}) {

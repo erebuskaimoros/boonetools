@@ -529,16 +529,40 @@ column, discards rows that contain no swap measures, and normalizes retained
 rows to swap-history provenance.
 `boonetools-pool-analysis.timer` refreshes today's swap totals every fifteen
 minutes, reuses the shared fresh pool snapshot for today's partial depth, and
-publishes the compact `/pool-analysis` table model. Its single
-aggregate query materializes completed-UTC 24-hour, 7-day, 30-day, 90-day, and
-1-year volume and liquidity-fee windows, including coverage and annualized
-generated-fee rates. Current price, depth, and balances come from
+publishes the compact `/pool-analysis` table model with rolling 24-hour, 7-day,
+30-day, 90-day, and 365-day volume and liquidity-fee windows, including coverage
+and annualized generated-fee rates. Current price, depth, and balances come from
 `thornode-core:v1`; the core snapshot also retains
 `/thorchain/oracle/prices` on the pool cadence. The lazy
 `/pool-analysis-series?asset=...&range=30d|all` route reads at most 5,000
 stored daily rows and never contacts a provider during a public request. Pool
 Analysis stops at liquidity-fee generation; subsequent system-income
 distribution is outside its data contract.
+
+Migration `066_pool_analysis_intraday_snapshots.sql` preserves cumulative pool
+activity at 15-minute UTC boundaries. The collector floors the same-provider
+Midgard aggregation watermark to the latest quarter-hour and requests only the
+current day's prefix using `from`/`to` without `interval` or `count`. This replaces
+the existing current-day swap request; it does not add per-period boundary
+queries. A repeated cutoff reuses its durable snapshot. The shared health
+request and bounded historical repair remain centralized, independent of
+visitor count.
+
+The intraday ledger stores cumulative RUNE volume, USD volume in cents, and
+pool-generated RUNE fees, keyed by pool and bucket end. It is a boundary snapshot,
+not an invented interval delta. Completed daily totals supply the middle of a
+rolling period; the saved prefix at its start is subtracted locally, and the
+current prefix supplies its end. Missing polls are not interpolated. UTC midnight
+uses a zero prefix and the independently validated completed prior day.
+
+Snapshots accumulate prospectively. A period retains its completed-UTC-day
+metrics until the required starting snapshot and daily history exist, and the UI
+identifies whether that pool's selected period is daily or rolling. Rolling
+windows end on a quarter-hour and expose their actual timestamps. Failed
+refreshes preserve prior observations and mark them stale. No historical
+snapshot backfill runs automatically. USD fees remain an estimate using each
+source piece's mean RUNE price; RUNE amounts and USD-volume cents are stored as
+exact integers. Charts retain daily UTC buckets.
 
 Migration `059_pool_analysis_depth.sql` adds an independent
 `pool_analysis_depth_daily` ledger of Midgard daily closing asset/RUNE balances
@@ -561,7 +585,7 @@ Today remains partial. Fresh core depth uses the pool response's own
 `asset_tor_price`, balances, and field timestamp without another provider call.
 
 Historical catch-up follows live work and is capped at 20 history requests per
-run, plus one shared health request when there is pending work. It prioritizes
+run, plus the same shared health request used to establish the rolling cutoff. It prioritizes
 newly closed days and rotates retry candidates so unavailable gaps cannot
 monopolize the allowance. Missing days remain tracked across outages. Legacy
 rows begin without completion markers and are validated once in small batches;
