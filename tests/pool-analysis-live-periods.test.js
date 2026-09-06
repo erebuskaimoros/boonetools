@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { normalizePoolAnalysisSummary, selectPoolAnalysisPeriod, poolAnalysisPeriodDescription, poolAnalysisWindowLabel } from '../src/lib/pool-analysis/model.js';
 
 test('selected Pool Analysis periods retain exact bounds and stale/incomplete state', () => {
@@ -39,4 +40,13 @@ test('quarter-hour periods distinguish retained daily history from ready rolling
   assert.equal(poolAnalysisWindowLabel(dashboard.pools[0], dashboard.period), 'DAILY · BUILDING HISTORY');
   assert.match(poolAnalysisPeriodDescription(dashboard.period, '30d'), /15-minute history/);
   assert.match(poolAnalysisPeriodDescription(dashboard.period, '30d'), /30 completed UTC days/);
+});
+
+test('Pool Analysis keeps snapshot status notes out of table cells', async () => {
+  const source = await readFile(
+    new URL('../src/lib/PoolAnalysis.svelte', import.meta.url),
+    'utf8'
+  );
+  assert.doesNotMatch(source, /<small class="period-mode">/);
+  assert.doesNotMatch(source, /<small class="period-cutoff">/);
 });

@@ -211,12 +211,6 @@
     return `${poolAnalysisWindowLabel(pool, dashboard.period)} · ${state}${displayTimestamp(pool.windowStart)} → ${displayTimestamp(pool.windowEnd)}`;
   }
 
-  function shortCutoff(value) {
-    const parsed = new Date(value || '');
-    if (!Number.isFinite(parsed.getTime())) return '—';
-    return `${parsed.toISOString().slice(5, 10)} ${parsed.toISOString().slice(11, 16)} UTC`;
-  }
-
   function displayDay(value) {
     const parsed = new Date(`${value}T00:00:00Z`);
     return Number.isFinite(parsed.getTime())
@@ -372,10 +366,7 @@
                 <td class="number" data-label="VOLUME" title={periodBounds(pool)}>{formatPoolAnalysisUsd(pool.periodVolumeUsd, { compact: true })}</td>
                 <td class="number" data-label="FEES" title={`${periodBounds(pool)}${pool.usdFeeEstimate ? ' · USD fees use each source interval’s mean RUNE price' : ''}`} class:coverage-warning={pool.periodStale || pool.periodIncomplete || pool.coverage.missingDays > 0}>
                   {formatPoolAnalysisUsd(pool.periodFeesUsd, { compact: true })}
-                  {#if timedPeriods}
-                    {#if bucketedPeriods}<small class="period-mode">{poolAnalysisWindowLabel(pool, dashboard.period)}</small>{/if}
-                    <small class="period-cutoff">{pool.periodIncomplete ? 'UNAVAILABLE' : pool.periodStale ? 'STALE' : 'THROUGH'}<br />{shortCutoff(pool.windowEnd)}</small>
-                  {:else if pool.coverage.missingDays > 0}<small>{pool.coverage.observedDays}/{pool.coverage.expectedDays}D</small>{/if}
+                  {#if !timedPeriods && pool.coverage.missingDays > 0}<small>{pool.coverage.observedDays}/{pool.coverage.expectedDays}D</small>{/if}
                 </td>
                 <td class="number" data-label="VOLUME / DEPTH">{formatPoolAnalysisPercent(pool.volumeDepthPercent)}</td>
                 <td class="number" data-label="FEES / DEPTH">{formatPoolAnalysisPercent(pool.feeDepthPercent)}</td>
@@ -558,9 +549,6 @@
   .oracle-cell small, .balance-cell small, .coverage-warning small { margin-top: 3px; color: var(--term-text-6, #333); font-size: 10px; }
   .oracle-cell small.positive { color: var(--term-accent, #00cc66); }
   .oracle-cell small.negative { color: var(--term-error, #dc3545); }
-  .number .period-mode { display: block; margin-top: 3px; color: var(--term-text-muted, #c8c8c8); font-size: 11px; white-space: normal; }
-  .number .period-cutoff { display: block; margin-top: 3px; color: var(--term-text-muted, #c8c8c8); font-size: 11px; white-space: normal; }
-  .coverage-warning .period-cutoff { color: var(--term-amber, #d4a017); }
   .period-bounds { font-size: 11px; overflow-wrap: anywhere; }
   .coverage-warning { color: var(--term-amber, #d4a017); }
   .empty-row { height: 100px; color: var(--term-text-5, #444); text-align: center; letter-spacing: .08em; }
