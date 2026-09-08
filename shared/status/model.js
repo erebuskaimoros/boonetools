@@ -476,6 +476,13 @@ function compactStuckTransaction(row) {
   };
 }
 
+function compactHaltedStuckTransaction(row) {
+  return {
+    ...compactStuckTransaction(row),
+    exclusion_reason: String(row?.exclusion_reason || '')
+  };
+}
+
 function compactBlockProduction(input = {}) {
   const normalized = (Array.isArray(input.points) ? input.points : [])
     .map((row) => ({
@@ -525,13 +532,18 @@ export function buildStatusDashboardReadModel(input = {}) {
   const transactions = (Array.isArray(stuckDashboard.transactions) ? stuckDashboard.transactions : [])
     .slice(0, MAX_STATUS_STUCK_TRANSACTIONS)
     .map(compactStuckTransaction);
+  const haltedTransactions = (
+    Array.isArray(stuckDashboard.halted_transactions) ? stuckDashboard.halted_transactions : []
+  )
+    .slice(0, MAX_STATUS_STUCK_TRANSACTIONS)
+    .map(compactHaltedStuckTransaction);
   const sourceTimestamps = {
     votes: timestamp(voteDashboard.as_of),
     stuck: timestamp(stuckDashboard.scanned_at)
   };
 
   return {
-    schema_version: 3,
+    schema_version: 4,
     as_of: generatedAt,
     network: liveNetwork.network,
     chains: liveNetwork.chains,
@@ -551,6 +563,9 @@ export function buildStatusDashboardReadModel(input = {}) {
       count: numberValue(stuckDashboard.count),
       transactions,
       truncated: numberValue(stuckDashboard.count) > transactions.length,
+      halted_count: numberValue(stuckDashboard.halted_count),
+      halted_transactions: haltedTransactions,
+      halted_truncated: numberValue(stuckDashboard.halted_count) > haltedTransactions.length,
       partial: Boolean(stuckDashboard.partial),
       failed_lookups: numberValue(stuckDashboard.failed_lookups),
       scanned_height: numberValue(stuckDashboard.height)

@@ -56,6 +56,14 @@ test('stuck transactions render as expandable chain bundles', () => {
   assert.match(source, /Open \{number\.format\(bundle\.count\)\} transaction/);
 });
 
+test('halt-explained overdue outbounds remain visible outside the actionable stuck count', () => {
+  assert.match(source, /haltedTransactions\s*=\s*stuckDashboard\?\.halted_transactions/);
+  assert.match(source, /haltedTransactionGroups\s*=\s*groupStuckTransactionsByChain\(haltedTransactions\)/);
+  assert.match(source, /Past due[^<]*explained by active halt/i);
+  assert.match(source, /These payments remain queued, but signing is currently paused/i);
+  assert.match(source, /\{#each haltedTransactionGroups as bundle \(bundle\.chain\)\}/);
+});
+
 test('an active churn exposes the dedicated churn tracker', () => {
   assert.match(source, /churnDisplayState = getChurnDisplayState\(churnStatus, \{ consensusStalled \}\)/);
   assert.match(source, /churnDisplayState === 'CHURNING'/);

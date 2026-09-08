@@ -134,6 +134,22 @@ function sources() {
         completed_outbounds: 0,
         raw_provider_field_that_must_not_leak: 'large'
       }],
+      halted_count: 1,
+      halted_transactions: [{
+        tx_id: 'TX-HALTED',
+        stage: 'outbound_signing',
+        stage_label: 'Outbound signing',
+        chain: 'GAIA',
+        asset: 'GAIA.ATOM',
+        asset_ticker: 'ATOM',
+        amount: '200000000',
+        destination: 'cosmos1destination',
+        scheduled_height: 400,
+        overdue_blocks: 600,
+        completed_outbounds: 0,
+        exclusion_reason: 'active_signing_halt',
+        raw_provider_field_that_must_not_leak: 'large'
+      }],
       partial: false,
       failed_lookups: 0
     },
@@ -179,6 +195,10 @@ test('status dashboard read model compacts network, governance, updates, and stu
   assert.equal(payload.votes.status_updates[1].description, 'BTC trading resumed');
   assert.equal(payload.stuck_transactions.count, 1);
   assert.equal(payload.stuck_transactions.transactions[0].raw_provider_field_that_must_not_leak, undefined);
+  assert.equal(payload.stuck_transactions.halted_count, 1);
+  assert.equal(payload.stuck_transactions.halted_transactions.length, 1);
+  assert.equal(payload.stuck_transactions.halted_transactions[0].exclusion_reason, 'active_signing_halt');
+  assert.equal(payload.stuck_transactions.halted_transactions[0].raw_provider_field_that_must_not_leak, undefined);
   assert.ok(Buffer.byteLength(JSON.stringify(payload)) < 25_000);
 });
 

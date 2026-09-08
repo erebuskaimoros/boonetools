@@ -140,7 +140,6 @@ function buildOutstandingOutboundRows({
     if (!txId || !chain || !status || !signedStage) continue;
     if (status?.stages?.inbound_finalised?.completed !== true) continue;
     if (signedStage.completed || hasRealOutboundHash(item.out_hash)) continue;
-    if (isSigningHalted(chain, mimirByKey, currentHeight)) continue;
 
     const scheduledHeight = numberValue(signedStage.scheduled_outbound_height);
     const overdueBlocks = scheduledHeight > 0 && currentHeight > 0
@@ -166,7 +165,10 @@ function buildOutstandingOutboundRows({
       overdue_blocks: overdueBlocks,
       retry_height: numberValue(item.height),
       completed_outbounds: (status.out_txs || []).length,
-      refund: Boolean(planned?.refund)
+      refund: Boolean(planned?.refund),
+      ...(isSigningHalted(chain, mimirByKey, currentHeight)
+        ? { exclusion_reason: 'active_signing_halt' }
+        : {})
     });
   }
 
@@ -346,12 +348,15 @@ export function classifyStuckTransactions({
     if (!previous || row.overdue_blocks > previous.overdue_blocks) unique.set(key, row);
   }
 
+  const sortedRows = [...unique.values()].sort((left, right) => (
+    right.overdue_blocks - left.overdue_blocks || left.tx_id.localeCompare(right.tx_id)
+  ));
+
   return {
     currentHeight,
     signingGraceBlocks,
-    transactions: [...unique.values()].sort((left, right) => (
-      right.overdue_blocks - left.overdue_blocks || left.tx_id.localeCompare(right.tx_id)
-    ))
+    transactions: sortedRows.filter((row) => !row.exclusion_reason),
+    haltedTransactions: sortedRows.filter((row) => row.exclusion_reason === 'active_signing_halt')
   };
 }
 
@@ -580,6 +585,8 @@ export async function buildStuckTransactionSnapshot(fetcher = fetchThorchain, op
     height: classified.currentHeight,
     transactions: classified.transactions,
     count: new Set(classified.transactions.map((row) => row.tx_id)).size,
+    halted_transactions: classified.haltedTransactions,
+    halted_count: new Set(classified.haltedTransactions.map((row) => row.tx_id)).size,
     criteria: {
       signing_grace_blocks: classified.signingGraceBlocks,
       market_swap_grace_blocks: MARKET_SWAP_GRACE_BLOCKS,

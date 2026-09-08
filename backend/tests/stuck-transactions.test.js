@@ -83,7 +83,7 @@ test('keeps an unpaid obligation when sibling outbounds completed', () => {
   assert.equal(result.transactions[0].amount, MAIN_COIN.amount);
 });
 
-test('does not classify paid, within-window, or signing-halted outbounds', () => {
+test('does not classify paid or within-window outbounds', () => {
   const paidInput = baseInput();
   paidInput.statuses.get(TX_ID).out_txs = [{
     chain: 'TRON',
@@ -96,8 +96,45 @@ test('does not classify paid, within-window, or signing-halted outbounds', () =>
   recentInput.statuses.get(TX_ID).stages.outbound_signed.scheduled_outbound_height = 9681;
   assert.equal(classifyStuckTransactions(recentInput).transactions.length, 0);
 
-  const haltedInput = baseInput({ mimir: { HALTSIGNINGTRON: 1 } });
-  assert.equal(classifyStuckTransactions(haltedInput).transactions.length, 0);
+});
+
+test('returns overdue signing-halted outbounds separately from actionable stuck transactions', () => {
+  const result = classifyStuckTransactions(baseInput({
+    mimir: { HALTSIGNINGTRON: 1 }
+  }));
+
+  assert.equal(result.transactions.length, 0);
+  assert.equal(result.haltedTransactions.length, 1);
+  assert.equal(result.haltedTransactions[0].tx_id, TX_ID);
+  assert.equal(result.haltedTransactions[0].overdue_blocks, 1000);
+  assert.equal(result.haltedTransactions[0].exclusion_reason, 'active_signing_halt');
+});
+
+test('snapshot keeps halted backlog outside its actionable transaction count', async () => {
+  const input = baseInput({ mimir: { HALTSIGNINGTRON: 1 } });
+  const fetcher = async (endpoint) => {
+    if (endpoint === '/thorchain/queue/outbound') return input.outboundQueue;
+    if (endpoint === '/thorchain/queue/scheduled') return [];
+    if (endpoint.startsWith('/thorchain/queue/swap/paginated')) return { swap_queue: [] };
+    if (endpoint === '/thorchain/swaps/streaming') return [];
+    if (endpoint.startsWith('/thorchain/tx/status/')) return input.statuses.get(TX_ID);
+    throw new Error(`Unexpected endpoint ${endpoint}`);
+  };
+
+  const snapshot = await buildStuckTransactionSnapshot(fetcher, {
+    coreSnapshot: {
+      lastblock: input.lastBlocks,
+      mimir: input.mimir,
+      constants: input.constants,
+      inbound_addresses: input.inboundAddresses,
+      stale: false
+    }
+  });
+
+  assert.equal(snapshot.count, 0);
+  assert.deepEqual(snapshot.transactions, []);
+  assert.equal(snapshot.halted_count, 1);
+  assert.equal(snapshot.halted_transactions[0].tx_id, TX_ID);
 });
 
 test('classifies only streaming swaps that stopped beyond their progress window', () => {

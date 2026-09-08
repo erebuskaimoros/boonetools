@@ -75,6 +75,8 @@
   $: stuckDashboard = currentDashboard?.stuck_transactions || null;
   $: stuckTransactions = stuckDashboard?.transactions || [];
   $: stuckTransactionGroups = groupStuckTransactionsByChain(stuckTransactions);
+  $: haltedTransactions = stuckDashboard?.halted_transactions || [];
+  $: haltedTransactionGroups = groupStuckTransactionsByChain(haltedTransactions);
   $: hasStuckTransactions = stuckTransactions.length > 0 || Number(stuckDashboard?.count || 0) > 0;
   $: haltedChains = chainStatuses.filter((chain) => chain.trading === 'paused').map((chain) => chain.chain);
   $: statusError = [coreError, liveError].filter(Boolean).join('; ');
@@ -609,6 +611,91 @@
       {/if}
     </section>
 
+    {#if haltedTransactionGroups.length > 0}
+      <section class="block halted-backlog-block" aria-labelledby="halted-backlog-title">
+        <div class="block-title">
+          <h2 id="halted-backlog-title"><span>▌</span> Past due—explained by active halt</h2>
+          <span class="halted-count">
+            {number.format(Number(stuckDashboard?.halted_count || haltedTransactions.length))} QUEUED
+          </span>
+        </div>
+        <p class="halted-explanation">
+          These payments remain queued, but signing is currently paused. They stay outside the actionable stuck count.
+        </p>
+        <div class="stuck-bundles halted-bundles">
+          {#each haltedTransactionGroups as bundle (bundle.chain)}
+            <details class="stuck-bundle halted-bundle">
+              <summary>
+                <span class="stuck-bundle-chain">
+                  <i>{bundle.chain.slice(0, 2)}</i>
+                  <span><strong>{bundle.chain}</strong><small>chain</small></span>
+                </span>
+                <span class="stuck-bundle-metric">
+                  <strong>{number.format(bundle.count)} QUEUED</strong>
+                  <small>payment{bundle.count === 1 ? '' : 's'}</small>
+                </span>
+                <span class="stuck-bundle-metric stuck-bundle-stages" title={bundle.stageLabels.join(', ')}>
+                  <strong>{formatBundleStages(bundle)}</strong>
+                  <small>affected stages</small>
+                </span>
+                <span class="stuck-bundle-metric">
+                  <strong>{formatBlockDuration(bundle.maxOverdueBlocks)}</strong>
+                  <small>{number.format(bundle.maxOverdueBlocks)} blocks past due</small>
+                </span>
+                <span class="stuck-bundle-action">
+                  <span class="when-closed">Open {number.format(bundle.count)} payment{bundle.count === 1 ? '' : 's'}</span>
+                  <span class="when-open">Hide payment{bundle.count === 1 ? '' : 's'}</span>
+                  <i aria-hidden="true"></i>
+                </span>
+              </summary>
+              <div class="table-wrap stuck-bundle-details">
+                <table class="stuck-table halted-table">
+                  <thead>
+                    <tr>
+                      <th>Transaction</th>
+                      <th>State</th>
+                      <th>Outstanding</th>
+                      <th>Destination</th>
+                      <th>Past Due</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {#each bundle.transactions as transaction (transaction.renderKey)}
+                      <tr class="stuck-row halted-row">
+                        <td>
+                          <a class="tx-id" href={txUrl(transaction.tx_id)} target="_blank" rel="noopener noreferrer" title={transaction.tx_id}>
+                            {shortValue(transaction.tx_id)} <span>↗</span>
+                          </a>
+                          {#if transaction.completed_outbounds > 0}
+                            <small>{transaction.completed_outbounds} sibling outbound{transaction.completed_outbounds === 1 ? '' : 's'} completed</small>
+                          {/if}
+                        </td>
+                        <td>
+                          <span class="halted-state"><i></i>PAUSED</span>
+                          <small>{transaction.stage_label}</small>
+                        </td>
+                        <td>
+                          <strong class="outstanding-amount">{formatOutstanding(transaction)}</strong>
+                          <small>{transaction.chain}</small>
+                        </td>
+                        <td>
+                          <span class="destination" title={transaction.destination}>{shortValue(transaction.destination, 7, 6)}</span>
+                        </td>
+                        <td>
+                          <strong class="overdue-time">{formatBlockDuration(transaction.overdue_blocks)}</strong>
+                          <small>{number.format(transaction.overdue_blocks)} blocks</small>
+                        </td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          {/each}
+        </div>
+      </section>
+    {/if}
+
     <div class="lower-grid">
       <section class="block updates-block">
         <div class="block-title">
@@ -1019,6 +1106,56 @@
   .overdue-time { color: #e0b4b9; font: 700 11px/1.4 'JetBrains Mono', monospace; white-space: nowrap; }
   .destination { color: var(--term-text-3); font: 11px/1.4 'JetBrains Mono', monospace; }
   .clean-state span { margin-right: 8px; color: #00cc66; }
+
+  .halted-backlog-block {
+    margin-bottom: 16px;
+    border-color: rgba(212, 160, 23, .32);
+    background: rgba(212, 160, 23, .018);
+  }
+  .halted-backlog-block .block-title { border-bottom-color: rgba(212, 160, 23, .18); }
+  .halted-backlog-block .block-title h2 span { color: #d4a017; }
+  .halted-count {
+    padding: 3px 7px;
+    border: 1px solid rgba(212, 160, 23, .34);
+    color: #d4a017;
+    font: 700 11px/1.3 'JetBrains Mono', monospace;
+    letter-spacing: .1em;
+  }
+  .halted-explanation {
+    margin: 0;
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(212, 160, 23, .16);
+    color: var(--term-text-3);
+    font: 13px/1.55 'JetBrains Mono', monospace;
+  }
+  .halted-bundles { background: #080808; }
+  .halted-bundle { border-top-color: rgba(212, 160, 23, .16); background: rgba(212, 160, 23, .018); }
+  .halted-bundle[open] { background: rgba(212, 160, 23, .03); }
+  .halted-bundle summary:hover { background: rgba(212, 160, 23, .045); }
+  .halted-bundle summary:focus-visible { outline-color: #d4a017; }
+  .halted-bundle .stuck-bundle-chain > i {
+    border-color: rgba(212, 160, 23, .28);
+    color: #dfc577;
+  }
+  .halted-bundle .stuck-bundle-metric:nth-child(2) strong,
+  .halted-bundle .stuck-bundle-metric:nth-child(4) strong { color: #dfc577; }
+  .halted-bundle .stuck-bundle-action i::before,
+  .halted-table .tx-id span { color: #d4a017; }
+  .halted-bundle .stuck-bundle-details { border-top-color: rgba(212, 160, 23, .18); }
+  .halted-row { background: rgba(212, 160, 23, .018); }
+  .halted-row:hover { background: rgba(212, 160, 23, .045); }
+  .halted-row td { border-top-color: rgba(212, 160, 23, .14); }
+  .halted-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #d4a017;
+    font: 800 11px/1.3 'JetBrains Mono', monospace;
+    letter-spacing: .08em;
+  }
+  .halted-state i { width: 5px; height: 5px; border-radius: 50%; background: #d4a017; }
+  .halted-table .outstanding-amount,
+  .halted-table .overdue-time { color: #dfc577; }
 
   .lower-grid {
     display: grid;
