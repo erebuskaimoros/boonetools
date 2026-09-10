@@ -16,6 +16,7 @@ This directory contains website/backend-specific protocol notes and session hist
 - [system-income-pol.md](./system-income-pol.md) — `/pol-tracker` block-live funding, deployments, reconciled positions, and estimated fee share.
 - [burn-tracker.md](./burn-tracker.md) — route-specific system-income RUNE burn metrics, daily ingestion, cumulative accounting, and source semantics.
 - [pool-analysis.md](./pool-analysis.md) — pool-generated liquidity fees, two-sided historical depth, and the chart line toggle.
+- [financials.md](./financials.md) — protocol volume, system income, live/daily bonding APR, and the production collector/read-model contract.
 - [tc-fee-dash.md](./tc-fee-dash.md) — `/tc-fee-dash` historical fee-capture metrics plus its live Mimir/default system-income allocation and Sankey flow contract.
 - [slow-block-consensus-wasm-report-2026-08-06.md](./slow-block-consensus-wasm-report-2026-08-06.md) — three-window analysis of >10-second block intervals, scheduled proposer failures, final commit behavior, and Wasm/FIN activity.
 - [architecture-consolidation.md](./architecture-consolidation.md) — runtime ownership, unified API/backend contract, canonical provenance, queued reads, archive policy, and CI ratchets.

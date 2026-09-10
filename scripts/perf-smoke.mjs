@@ -38,7 +38,8 @@ const ENDPOINTS = [
   { name: 'pol-tvl', path: '/pol-tvl', maxMs: 1_000, maxBytes: 500_000 },
   { name: 'burn-tracker', path: '/burn-tracker', maxMs: 1_000, maxBytes: 500_000 },
   { name: 'pool-dislocation', path: '/pool-dislocation', maxMs: 1_000, maxBytes: 750_000 },
-  { name: 'pool-analysis', path: '/pool-analysis', maxMs: 1_000, maxBytes: 250_000 }
+  { name: 'pool-analysis', path: '/pool-analysis', maxMs: 1_000, maxBytes: 250_000 },
+  { name: 'financials', path: '/financials?range=30d', maxMs: 1_000, maxBytes: 50_000 }
 ];
 
 function parseArgs(argv) {

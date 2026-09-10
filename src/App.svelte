@@ -70,6 +70,14 @@
     description: "Compare THORChain pool depth, volume, pool-generated liquidity fees, and all-time fee history"
   };
 
+  const financialsApp = {
+    name: "Financials",
+    component: () => import("./lib/Financials.svelte"),
+    icon: "▥",
+    path: "financials",
+    description: "Track THORChain protocol volume, system income, and daily bonding APR"
+  };
+
   const polTvlApp = {
     name: "POL TVL",
     component: () => import("./lib/POLTracker.svelte"),
@@ -172,6 +180,7 @@
     tcFeeDashApp,
     poolDislocationApp,
     poolAnalysisApp,
+    financialsApp,
     polTvlApp,
     systemIncomePolApp,
     burnTrackerApp,

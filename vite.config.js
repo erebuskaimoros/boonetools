@@ -4,6 +4,7 @@ import { nodePolyfills } from 'vite-plugin-node-polyfills'
 import path from 'path'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { createFinancialsDevPlugin } from './scripts/dev-financials.mjs'
 
 const THORNODE_PRIMARY = 'https://gateway.liquify.com/chain/thorchain_api'
 export const THORNODE_ARCHIVE = 'https://thornode-archive.ninerealms.com'
@@ -321,6 +322,7 @@ export default defineConfig({
     svelte(),
     nodePolyfills({ include: ['buffer', 'crypto', 'stream', 'process'] }),
     createTreasuryLpProxy(),
+    createFinancialsDevPlugin(),
     createRujiraBaseLayerDataProxy()
   ],
   // The production SPA is served from the domain root. Root-relative entry

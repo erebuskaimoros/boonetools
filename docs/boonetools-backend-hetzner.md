@@ -31,6 +31,21 @@ BooneTools now has a dedicated Hetzner-hosted backend stack for all current DB-b
 
 ## Public API Base
 
+### Financials
+
+`GET /functions/v1/financials?range=30d` serves protocol-wide daily volume,
+system income, and bonding APR. Ranges are `30d`, `90d`, `1y`, and `all`.
+The independent `boonetools-financials.service` refreshes historical observations
+every five minutes and today's completed five-minute buckets every 30 seconds.
+It publishes four Postgres read models; public reads never call providers.
+Its reconstructible completed-history cache lives in systemd-owned
+`/var/lib/boonetools-financials/`, outside immutable releases. Retain this folder
+in server backups; never overwrite its cache while the collector is running.
+No extra secrets or schema migration are required. Deploy backend first and
+verify `/financials?range=30d` before publishing the frontend. Source gaps remain
+explicit, and today's annualized APR is a partial-day estimate. See
+[Financials accounting and operation](../knowledge/financials.md).
+
 Frontend/runtime env should point to:
 
 ```bash
