@@ -1,5 +1,23 @@
 # Liquify cooldown investigation — 2026-09-02
 
+## September 10 follow-up: actions timeouts blocking Pool Analysis
+
+At 00:40:13 UTC, Rujira Base Fees timed out on Midgard `/actions`, opening the
+shared Midgard service breaker until 00:41:13. Pool Analysis started at 00:40:42
+and skipped `/health`, so all 43 pools retained their previous snapshot. Its
+24-hour transport totals were 3,983 successful requests, zero failed outbound
+requests, and six cooldown skips; cooldown skips were not new HTTP 429s.
+The 00:55 refresh subsequently advanced the data cutoff to 00:45 without a
+deployment. Newly closed daily history was separately completing in bounded
+batches.
+
+The targeted fix scopes ordinary `/actions` failures to that endpoint across
+all collectors and query parameters. Gateway-wide HTTP 429 and `Retry-After`
+protection remains shared. `backend/tests/midgard-actions-cooldown.test.js`
+reproduces the blocked health/history reads after actions timeouts and HTTP 500,
+and verifies that actions remain paused while health/history can proceed and
+that gateway-wide cooldowns still prevent outbound requests.
+
 ## Production evidence
 
 Read-only inspection of the BooneTools backend at approximately 08:47–09:00

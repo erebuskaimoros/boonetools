@@ -69,7 +69,9 @@ export async function fetchMidgard(path, options = {}) {
     },
     ...providerLifecycleHooks({
       client: options.cooldownClient,
-      enabled: options.sharedCooldown
+      enabled: options.sharedCooldown,
+      // Slow actions queries should not block health/history; gateway limits stay shared.
+      scope: /^\/actions\/?(?:[?#]|$)/.test(path) ? 'actions' : undefined
     }),
     validateResponse: (payload) => (
       typeof validateResponse === 'function' && validateResponse(path, payload)

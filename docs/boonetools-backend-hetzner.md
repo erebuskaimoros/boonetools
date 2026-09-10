@@ -256,6 +256,14 @@ to quota exhaustion. Heights or hashes containing `429` are not HTTP status
 evidence. See the [September 2 investigation](../knowledge/liquify-cooldowns-2026-09-02.md)
 for observed failures and remaining request budgets.
 
+Midgard `/actions` uses an `actions` cooldown scope shared by every collector
+and query on that endpoint. An actions timeout or ordinary HTTP 5xx pauses
+actions requests without blocking `/health`, pool history, or current network
+reads. HTTP 429 and `Retry-After` responses still use the shared gateway
+cooldown. This prevents an unrelated action collector timeout from skipping
+Pool Analysis's entire fifteen-minute refresh; it does not bypass failures
+from Pool Analysis's own endpoints or change its historical catch-up budget.
+
 `POOL_DISLOCATION_THORNODE_URLS` is an independent ordered list for this
 sampler and its historical repair. Add a second provider only after its DNS and
 `/thorchain/pools` response have been verified from the production host. The
