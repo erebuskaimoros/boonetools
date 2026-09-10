@@ -14,6 +14,7 @@
     selectBurnTrackerRange
   } from './burn-tracker/model.js';
   import {
+    BURN_BAR_COLOR,
     renderBurnTrackerChart,
     setBurnTrackerPriceVisible
   } from './burn-tracker/charts.js';
@@ -171,10 +172,10 @@
   {/each}
 
   <section class="metric-grid" aria-label="Current RUNE burn metrics">
-    <article class="metric-cell metric-cell--accent">
+    <article class="metric-cell">
       <span class="metric-index">01</span>
       <span class="metric-label">SYSTEM INCOME BURNED</span>
-      <strong>{formatBurnTrackerRuneBase(dashboard.totalBurnedBase)}</strong>
+      <strong style:color={BURN_BAR_COLOR}>{formatBurnTrackerRuneBase(dashboard.totalBurnedBase)}</strong>
       <small>RUNE · ALL TIME</small>
     </article>
     <article class="metric-cell">
@@ -264,7 +265,7 @@
     {/if}
 
     <div class="chart-foot">
-      <span>DAILY {chartUnit === 'usd' ? '$' : 'ᚱ'} <b class="green">■</b></span>
+      <span>DAILY {chartUnit === 'usd' ? '$' : 'ᚱ'} <b style:color={BURN_BAR_COLOR}>■</b></span>
       <span>CUMULATIVE {chartUnit === 'usd' ? '$' : 'ᚱ'} <b class="amber">━</b></span>
       <span class:muted={!showPrice}>RUNE / USD <b class="blue">┄</b></span>
       <span class="source">SOURCE · LIQUIFY MIDGARD + PER-BLOCK REWARDS</span>
@@ -453,7 +454,6 @@
     text-overflow: ellipsis;
   }
 
-  .metric-cell--accent strong { color: var(--term-accent); }
   .metric-cell--rate strong { color: var(--term-amber); }
   .metric-cell small {
     display: block;
@@ -565,7 +565,6 @@
     letter-spacing: 0.06em;
   }
   .chart-foot .source { margin-left: auto; }
-  .green { color: var(--term-accent); }
   .amber { color: var(--term-amber); }
   .blue { color: var(--term-info); }
   .muted { opacity: 0.4; }

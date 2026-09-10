@@ -7,8 +7,8 @@ Chart.register(zoomPlugin);
 
 export const FINANCIALS_SERIES = Object.freeze([
   { id: 'volume', label: 'DAILY VOLUME', color: palette.info },
-  { id: 'income', label: 'SYSTEM INCOME', color: palette.amber },
-  { id: 'bondingApr', label: 'BONDING APR', color: palette.accent }
+  { id: 'income', label: 'SYSTEM INCOME', color: palette.accent },
+  { id: 'bondingApr', label: 'BONDING APR', color: palette.amber }
 ]);
 
 export function renderFinancialsChart(canvas, rows, { currency = 'usd', hidden = [], onZoom = (_window) => {} } = {}) {
@@ -30,20 +30,20 @@ export function renderFinancialsChart(canvas, rows, { currency = 'usd', hidden =
       datasets: [
         {
           label: 'DAILY VOLUME', data: rows.map((row) => row[`volume${suffix}`]),
-          yAxisID: 'volume', hidden: hidden.includes('volume'), order: 2,
+          yAxisID: 'volume', hidden: hidden.includes('volume'), order: 1,
           backgroundColor: 'rgba(85, 136, 204, 0.30)', borderColor: palette.info,
           borderWidth: 1, borderRadius: 0, maxBarThickness: 20
         },
         {
           label: 'SYSTEM INCOME', data: rows.map((row) => row[`income${suffix}`]),
-          yAxisID: 'income', hidden: hidden.includes('income'), order: 1,
-          backgroundColor: 'rgba(212, 160, 23, 0.35)', borderColor: palette.amber,
+          yAxisID: 'income', hidden: hidden.includes('income'), order: 2,
+          backgroundColor: 'rgba(0, 204, 102, 0.35)', borderColor: palette.accent,
           borderWidth: 1, borderRadius: 0, maxBarThickness: 20
         },
         {
           type: 'line', label: 'BONDING APR', data: rows.map((row) => row.bondingApr),
           yAxisID: 'bondingApr', hidden: hidden.includes('bondingApr'), order: 0,
-          borderColor: palette.accent, backgroundColor: palette.accent,
+          borderColor: palette.amber, backgroundColor: palette.amber,
           borderWidth: 2, pointRadius: rows.map((row) => row.partial ? 4 : 0), pointHoverRadius: 4,
           segment: { borderDash: (context) => rows[context.p1DataIndex]?.partial ? [4, 4] : [] },
           tension: 0.1, spanGaps: false
@@ -119,8 +119,8 @@ export function renderFinancialsChart(canvas, rows, { currency = 'usd', hidden =
           }
         },
         volume: axis('volume', 'left', palette.info, `VOLUME · ${unit}`, money),
-        income: axis('income', 'right', palette.amber, `INCOME · ${unit}`, money),
-        bondingApr: axis('bondingApr', 'right', palette.accent, 'BONDING APR · %', formatFinancialPercent)
+        income: axis('income', 'right', palette.accent, `INCOME · ${unit}`, money),
+        bondingApr: axis('bondingApr', 'right', palette.amber, 'BONDING APR · %', formatFinancialPercent)
       }
     }
   });

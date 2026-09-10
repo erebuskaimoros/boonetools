@@ -290,8 +290,8 @@
   .metric strong { display: block; color: var(--term-text); font-size: 26px; font-weight: 800; }
   .metric small { display: block; margin-top: 10px; color: var(--term-text-4); font-size: 11px; }
   .volume-value { color: var(--term-info) !important; }
-  .income-value { color: var(--term-amber) !important; }
-  .apr-value { color: var(--term-accent) !important; }
+  .income-value { color: var(--term-accent) !important; }
+  .apr-value { color: var(--term-amber) !important; }
   .chart-panel { border: 1px solid var(--term-border); background: var(--term-surface); padding: 20px; }
   .panel-heading { justify-content: space-between; flex-wrap: wrap; }
   .panel-heading h2 { margin: 0; font-size: 13px; letter-spacing: .08em; }

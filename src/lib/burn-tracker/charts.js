@@ -8,6 +8,8 @@ import {
 
 Chart.register(zoomPlugin);
 
+export const BURN_BAR_COLOR = '#f28c28';
+
 const rune = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const usdBurn = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -70,8 +72,8 @@ export function renderBurnTrackerChart(canvas, previous, rows = [], options = {}
           type: 'bar',
           label: 'DAILY BURN',
           data: rows.map((row) => showUsd ? row.burnedUsd : row.burnedRune),
-          backgroundColor: rows.map((row) => row.partial ? 'rgba(0, 204, 102, 0.16)' : 'rgba(0, 204, 102, 0.34)'),
-          borderColor: TERMINAL_CHART_PALETTE.accent,
+          backgroundColor: rows.map((row) => row.partial ? 'rgba(242, 140, 40, 0.16)' : 'rgba(242, 140, 40, 0.34)'),
+          borderColor: BURN_BAR_COLOR,
           borderWidth: 1,
           borderRadius: 0,
           maxBarThickness: 22,
@@ -186,8 +188,8 @@ export function renderBurnTrackerChart(canvas, previous, rows = [], options = {}
           position: 'left',
           grid: { color: TERMINAL_CHART_PALETTE.grid },
           border: { color: TERMINAL_CHART_PALETTE.border },
-          title: { display: true, text: showUsd ? 'DAILY $' : 'DAILY ᚱ', color: TERMINAL_CHART_PALETTE.accent, font: terminalChartFont(11) },
-          ticks: { color: TERMINAL_CHART_PALETTE.accent, font: terminalChartFont(11), callback: (value) => compact(value, showUsd ? '$' : '') }
+          title: { display: true, text: showUsd ? 'DAILY $' : 'DAILY ᚱ', color: BURN_BAR_COLOR, font: terminalChartFont(11) },
+          ticks: { color: BURN_BAR_COLOR, font: terminalChartFont(11), callback: (value) => compact(value, showUsd ? '$' : '') }
         },
         cumulative: {
           beginAtZero: false,
