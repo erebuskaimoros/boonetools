@@ -438,7 +438,7 @@
           <tr>
             <th>POOL</th>
             <th>POSITION VALUE</th>
-            <th>POL SHARE</th>
+            <th title="Pool depth added by POL, relative to the remaining non-POL depth.">% DEEPER</th>
             <th>RUNE HELD</th>
             <th>ASSET HELD</th>
             <th>GROSS DEPLOYED</th>
@@ -463,7 +463,7 @@
                 <small>{pool.status || 'UNKNOWN'}</small>
               </td>
               <td class="accent">{formatE8Usd(pool.positionValueUsdE8)} <small>USD · CURRENT</small></td>
-              <td>{formatPercent(pool.sharePercent)} <small>{pool.shareBps === null ? '—' : `${pool.shareBps.toLocaleString('en-US')} BPS`}</small></td>
+              <td title="POL liquidity ÷ non-POL liquidity × 100, using current proportional holdings.">{formatPercent(pool.depthIncreasePercent, 1)} <small>VS. WITHOUT POL</small></td>
               <td>{formatE8Rune(pool.runeHeldE8)} <small class="token-name"><img src={getAssetLogo('THOR.RUNE')} alt="" aria-hidden="true" />RUNE</small></td>
               <td>{formatE8Asset(pool.assetHeldE8)} <small class="token-name"><img src={getAssetLogo(pool.asset) || '/assets/coins/fallback-logo.svg'} alt="" aria-hidden="true" />{assetTicker(pool.asset)}</small></td>
               <td>{formatE8Rune(pool.runeDepositedE8)} <small class="token-name"><img src={getAssetLogo('THOR.RUNE')} alt="" aria-hidden="true" />RUNE</small></td>

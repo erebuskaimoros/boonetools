@@ -220,6 +220,20 @@ test('System Income POL normalization preserves exact base-unit accounting', () 
   }]);
 });
 
+test('POL depth increase compares liquidity with the non-POL baseline', () => {
+  const depthIncrease = (shareBps) => normalizeSystemIncomePolPayload({
+    pools: [{ asset: 'TRON.USDT', share_bps: shareBps }]
+  }).pools[0].depthIncreasePercent;
+
+  assert.equal(depthIncrease(2000), 25); // 20 POL + 80 other = 25% deeper than 80.
+  assert.equal(depthIncrease(5000), 100);
+  assert.equal(depthIncrease(0), 0);
+  assert.equal(formatPercent(depthIncrease(2174.12), 1), '27.8%');
+  for (const unavailable of [null, undefined, '', -1, 10000, 10001, Infinity, 'invalid']) {
+    assert.equal(depthIncrease(unavailable), null);
+  }
+});
+
 test('streamed SIPOL events apply once and advance exact cash-flow state', () => {
   const initial = {
     as_of: '2026-08-31T12:00:00Z',

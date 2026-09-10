@@ -147,6 +147,11 @@ function normalizePool(pool = {}) {
     totalPoolUnitsE8: optionalBase(pool.total_pool_units_e8 ?? pool.pool_units),
     shareBps,
     sharePercent: shareBps === null ? null : shareBps / 100,
+    // Compare current depth with the remaining depth after removing POL's
+    // proportional position. Full ownership leaves no finite comparison.
+    depthIncreasePercent: shareBps !== null && shareBps >= 0 && shareBps < 10_000
+      ? (shareBps / (10_000 - shareBps)) * 100
+      : null,
     runeDepositedE8: base(pool.rune_deposited_e8 ?? pool.deposited_rune_e8),
     runeHeldE8: optionalBase(pool.rune_held_e8 ?? pool.rune_redeem_e8),
     assetHeldE8: optionalBase(pool.asset_held_e8 ?? pool.asset_redeem_e8),

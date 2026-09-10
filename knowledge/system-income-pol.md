@@ -43,6 +43,13 @@ by total `pool_units`, including synth dilution. Current holdings use the LP
 endpoint's RUNE and asset redeem values; position value is separate from the
 estimated swap-fee share.
 
+The positions table displays `% DEEPER`: `POL share / (1 - POL share) × 100`.
+It compares current pool depth with the remaining depth excluding POL's
+proportional holdings, including synth dilution in total pool units. This is
+a current-position comparison, not a simulation of historical prices or
+trading without POL. Missing/invalid ownership and 100% ownership display as
+unavailable because there is no valid finite non-POL baseline.
+
 Position samples time-weight ownership and now retain the reconciled SIPOL
 position value in RUNE. Durable block swap fees are compacted into UTC hours and
 multiplied by each hour's sampled ownership share; the open hour remains
