@@ -383,6 +383,10 @@ start_persistent_services() {
     boonetools-api.service
     boonetools-chain-stream-listener.service
   )
+  # Conditional for compatibility when rolling back to a pre-Financials release.
+  if [[ -f "$CURRENT_LINK/ops/systemd/boonetools-financials.service" ]]; then
+    persistent+=(boonetools-financials.service)
+  fi
   systemctl enable "${persistent[@]}" >/dev/null
   systemctl restart "${persistent[@]}"
 }
