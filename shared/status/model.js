@@ -147,7 +147,7 @@ export function buildChainStatuses(
         tipHeight: scannerStats?.tipHeight ?? 0,
         avgBlocksBehindTip: scannerStats?.avgBlocksBehindTip ?? null,
         reportingValidators: scannerStats?.reportingValidators ?? 0,
-        degraded: tradingPaused || lpActions !== 'enabled' || signingPaused
+        degraded: tradingPaused || signingPaused
       };
     })
     .filter((row) => row.chain)

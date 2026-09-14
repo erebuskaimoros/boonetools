@@ -147,13 +147,53 @@ test('chain status keeps trading and LP actions distinct', () => {
     tipHeight: 0,
     avgBlocksBehindTip: null,
     reportingValidators: 0,
-    degraded: true
+    degraded: false
   });
   assert.equal(rows[1].trading, 'paused');
   assert.equal(rows[1].deposits, 'partial');
   assert.equal(rows[1].withdrawals, 'enabled');
   assert.equal(rows[1].lpActions, 'partial');
   assert.equal(rows[1].signing, 'enabled');
+});
+
+test('expected LP restrictions do not degrade the network', () => {
+  const chains = buildChainStatuses([
+    {
+      chain: 'BTC',
+      halted: false,
+      global_trading_paused: false,
+      chain_trading_paused: false,
+      chain_lp_actions_paused: true
+    },
+    {
+      chain: 'ETH',
+      halted: false,
+      global_trading_paused: false,
+      chain_trading_paused: false,
+      chain_lp_actions_paused: false
+    }
+  ], {
+    'PAUSELPDEPOSIT-ETH-USDC-0X123': 1
+  }, [
+    { chain: 'BTC', thorchain: 100 },
+    { chain: 'ETH', thorchain: 100 }
+  ]);
+
+  assert.deepEqual(chains.map((chain) => ({
+    chain: chain.chain,
+    lpActions: chain.lpActions,
+    degraded: chain.degraded
+  })), [
+    { chain: 'BTC', lpActions: 'paused', degraded: false },
+    { chain: 'ETH', lpActions: 'partial', degraded: false }
+  ]);
+
+  const summary = summarizeNetwork(chains);
+  assert.equal(summary.label, 'Operational');
+  assert.equal(summary.tone, 'ok');
+  assert.deepEqual(summary.degradedChains, []);
+  assert.equal(summary.lpEnabled, 0);
+  assert.equal(summary.lpPartial, 1);
 });
 
 test('chain status does not fall back to stale observe-chain heights without scanner reports', () => {
@@ -293,7 +333,7 @@ test('chain status excludes missing, invalid, and negative scanner diffs', () =>
   })), [{ tipHeight: 500, avgBlocksBehindTip: 1, reportingValidators: 1 }]);
 });
 
-test('network summary is degraded when any chain action is unavailable', () => {
+test('network summary is degraded when chain trading is unavailable', () => {
   const summary = summarizeNetwork([
     { chain: 'BTC', trading: 'enabled', deposits: 'enabled', withdrawals: 'enabled', lpActions: 'enabled', signing: 'enabled', degraded: false },
     { chain: 'SOL', trading: 'paused', deposits: 'paused', withdrawals: 'paused', lpActions: 'paused', signing: 'enabled', degraded: true }
@@ -321,6 +361,7 @@ test('a full chain halt blocks LP deposits and withdrawals even without PauseLP'
   assert.equal(row.withdrawals, 'paused');
   assert.equal(row.lpActions, 'paused');
   assert.equal(row.signing, 'paused');
+  assert.equal(row.degraded, true);
 });
 
 test('signing halts remain independent from trading and LP state', () => {
@@ -350,7 +391,9 @@ test('signing halts remain independent from trading and LP state', () => {
   assert.equal(rows[0].trading, 'enabled');
   assert.equal(rows[0].lpActions, 'enabled');
   assert.equal(rows[0].signing, 'paused');
+  assert.equal(rows[0].degraded, true);
   assert.equal(rows[1].signing, 'enabled');
+  assert.equal(rows[1].degraded, false);
 });
 
 test('churn status uses latest Midgard churn and height-aware halt state', () => {
