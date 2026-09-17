@@ -71,6 +71,86 @@ test('missing boundary poll falls back to labelled completed days without interp
   assert.equal(rolling.combinePoolAnalysisSnapshots(sample, [], prefixes)[0].volume_rune_e8, null);
 });
 
+test('a missed XRP 24h boundary is fetched exactly so the table includes live fees', async () => {
+  const { ingestPoolAnalysisHistory } = await import('../src/shared/pool-analysis-ingestion.js');
+  const xrp = 'XRP.XRP';
+  const liveCutoff = Date.parse('2026-09-17T19:15:00Z') / 1000;
+  const boundary = liveCutoff - 86400;
+  const snapshots = [
+    { bucket_end: '2026-09-16T19:00:00.000Z', volume_rune_e8: '38000000000000', volume_usd_e2: '18000000', fees_rune_e8: '39246216223', rune_price_usd: '0.49' },
+    { bucket_end: '2026-09-16T19:30:00.000Z', volume_rune_e8: '40000000000000', volume_usd_e2: '20000000', fees_rune_e8: '39816129197', rune_price_usd: '0.49' }
+  ];
+  const swapRequests = [];
+  let published;
+  await ingestPoolAnalysisHistory({}, {
+    rolling: true,
+    assets: [xrp],
+    now: '2026-09-17T19:18:00Z',
+    coreSnapshot: null,
+    loadPendingDays: async () => [],
+    loadCompletedDays: async () => [completed('2026-09-16', {
+      volume_rune_e8: '43555344897273', volume_usd_e2: '21413928',
+      fees_rune_e8: '44243401899', rune_price_usd: '0.4932330155821272',
+      completed_at: '2026-09-17T00:45:23Z'
+    })],
+    loadBoundarySnapshots: async () => snapshots,
+    loadRollingEdges: async () => null,
+    saveIntradaySnapshot: async (_client, head) => snapshots.push({
+      bucket_end: head.interval_end,
+      volume_rune_e8: head.volume_rune_e8,
+      volume_usd_e2: head.volume_usd_e2,
+      fees_rune_e8: head.fees_rune_e8,
+      rune_price_usd: head.rune_price_usd
+    }),
+    saveRollingSnapshot: async (_client, _asset, periods) => { published = periods; },
+    upsert: async (_client, rows) => rows.length,
+    updateSyncState: async () => {},
+    fetchMidgard: async (route) => {
+      if (route === '/health') return { database: true, inSync: true, lastAggregated: { height: 1, timestamp: liveCutoff } };
+      swapRequests.push(route);
+      const url = new URL(route, 'https://midgard.invalid');
+      const from = Number(url.searchParams.get('from'));
+      const to = Number(url.searchParams.get('to'));
+      assert.equal(url.searchParams.get('pool'), xrp);
+      assert.equal(url.searchParams.has('interval'), false);
+      assert.equal(url.searchParams.has('count'), false);
+      if (to === liveCutoff) return { meta: {
+        startTime: String(from), endTime: String(to), totalVolume: '678710530995116',
+        totalVolumeUSD: '342884835', totalFees: '854602573066', runePriceUSD: '0.5005047762777458'
+      } };
+      assert.equal(to, boundary);
+      return { meta: {
+        startTime: String(from), endTime: String(to), totalVolume: '38938978892801',
+        totalVolumeUSD: '19139894', totalFees: '39576896837', runePriceUSD: '0.4868645060115576'
+      } };
+    }
+  });
+  assert.equal(swapRequests.length, 2, 'one live prefix and one exact missing boundary');
+  assert.equal(snapshots.some((row) => row.bucket_end === '2026-09-16T19:15:00.000Z'), true);
+  const metric = published.find((period) => period.period_id === '24h');
+  assert.equal(metric.window_mode, 'rolling');
+  assert.equal(metric.snapshot_ready, true);
+  assert.equal(metric.window_start, '2026-09-16T19:15:00.000Z');
+  assert.equal(metric.fees_rune_e8, '859269078128');
+  assert.ok(metric.fees_usd > 4200 && metric.fees_usd < 4400);
+});
+
+test('boundary lookup includes only 24h adjacent samples needed to prove an isolated gap', async () => {
+  const { loadPoolAnalysisBoundarySnapshots } = await import('../src/shared/pool-analysis-store.js');
+  let queryParams;
+  await loadPoolAnalysisBoundarySnapshots({ query: async (_sql, params) => {
+    queryParams = params;
+    return { rows: [] };
+  } }, asset, cutoff, [{ id: '24h', days: 1 }, { id: '7d', days: 7 }]);
+  assert.equal(queryParams[0], asset);
+  assert.deepEqual(queryParams[1], [
+    '2026-09-04T12:00:00.000Z',
+    '2026-09-04T12:15:00.000Z',
+    '2026-09-04T12:30:00.000Z',
+    '2026-08-29T12:15:00.000Z'
+  ]);
+});
+
 test('midnight uses complete days without zero-length queries or a cross-day cumulative delta', async () => {
   const midnight = Date.parse('2026-09-06T00:00:00Z') / 1000;
   const sample = await rolling.fetchPoolAnalysisSnapshot(asset, midnight, { fetchMidgard: async () => assert.fail('No query at midnight') });
@@ -120,6 +200,8 @@ test('ingestion reuses durable same-quarter sample, makes one source call, and r
     } };
   await ingestPoolAnalysisHistory({}, options);
   assert.equal(calls, 1);
+  assert.equal(published.find((period) => period.period_id === '24h').window_mode, 'completed-days',
+    'a cold ledger must not repeatedly fetch yesterday on every live poll');
   watermark += 100;
   await ingestPoolAnalysisHistory({}, options);
   assert.equal(calls, 1);

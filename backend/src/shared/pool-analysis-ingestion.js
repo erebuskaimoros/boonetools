@@ -1,7 +1,7 @@
-import { fetchPoolAnalysisSnapshot, combinePoolAnalysisSnapshots } from './pool-analysis-rolling.js';
+import { fetchPoolAnalysisSnapshot, combinePoolAnalysisSnapshots, POOL_ANALYSIS_SNAPSHOT_SECONDS } from './pool-analysis-rolling.js';
 import { config } from '../lib/config.js';
 import { sleep } from '../lib/utils.js';
-import { fetchMidgard, MIDGARD_BASES } from './midgard.js';
+import { fetchMidgard, isMidgardRateLimitError, MIDGARD_BASES } from './midgard.js';
 import { coreSnapshotValue, getThorNodeCoreSnapshot } from './thornode-core-snapshot.js';
 import {
   POOL_ANALYSIS_START_DATE,
@@ -192,6 +192,19 @@ function pendingRanges(pending, yesterday) {
     || a.startDate.localeCompare(b.startDate) || a.asset.localeCompare(b.asset) || a.lane.localeCompare(b.lane));
 }
 
+function missingIsolated24hBoundary(cutoff, daily, prefixes) {
+  const boundary = cutoff - 86400;
+  if (boundary % 86400 === 0) return null;
+  const ends = new Set(prefixes.map((row) => Date.parse(row.bucket_end) / 1000));
+  if (ends.has(boundary) || !ends.has(boundary - POOL_ANALYSIS_SNAPSHOT_SECONDS)
+    || !ends.has(boundary + POOL_ANALYSIS_SNAPSHOT_SECONDS)) return null;
+  const firstDay = new Date(boundary * 1000).toISOString().slice(0, 10);
+  const complete = daily.some((row) => dateKey(row.day) === firstDay && row.partial === false
+    && Boolean(row.completed_at) && ['volume_rune_e8', 'volume_usd_e2', 'fees_rune_e8']
+      .every((key) => nonNegativeBaseString(row[key]) !== null));
+  return complete ? boundary : null;
+}
+
 async function historyWatermark(client, options, bases) {
   const health = await (options.fetchMidgard || fetchMidgard)('/health', {
     cooldownClient: client, bases,
@@ -331,17 +344,35 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
   };
   const selected = [...rotate(newlyClosed, limit), ...rotate(backlog, available)].slice(0, limit);
   await mapWithConcurrency(selected, concurrency, (task) => request(task, watermark, bases));
-  for (const [asset, edges] of rollingEdges) {
+  // Repair at most one isolated 24H hole per pool. A cold ledger cannot satisfy
+  // the adjacent-snapshot gate, while a successful repair is durable. Stop new
+  // repair calls after a provider rate limit; other live aggregates still publish.
+  let repairRateLimited = false;
+  await mapWithConcurrency([...rollingEdges], concurrency, async ([asset, edges]) => {
     try {
       const daily = await (options.loadCompletedDays || loadPoolAnalysisCompletedDays)(client, asset, edges.cutoff);
       const prefixes = await (options.loadBoundarySnapshots || loadPoolAnalysisBoundarySnapshots)(client, asset, edges.cutoff, POOL_ANALYSIS_TABLE_PERIODS);
+      const missingBoundary = missingIsolated24hBoundary(edges.cutoff, daily, prefixes);
+      if (missingBoundary !== null && !repairRateLimited) {
+        try {
+          const repaired = await fetchPoolAnalysisSnapshot(asset, missingBoundary, {
+            ...options, client, bases,
+            onRequest: () => { byAsset.get(asset).swaps.pages++; }
+          });
+          await (options.saveIntradaySnapshot || savePoolAnalysisIntradaySnapshot)(client, repaired.head);
+          prefixes.push({ ...repaired.head, bucket_end: repaired.head.interval_end });
+        } catch (error) {
+          if (isMidgardRateLimitError(error)) repairRateLimited = true;
+          byAsset.get(asset).swaps.errors.push(`24H boundary ${new Date(missingBoundary * 1000).toISOString()}: ${error?.message || String(error)}`);
+        }
+      }
       const periods = combinePoolAnalysisSnapshots(edges, daily, prefixes);
       await (options.saveRollingSnapshot || savePoolAnalysisRollingSnapshot)(client, asset, periods, new Date(edges.cutoff * 1000).toISOString());
     } catch (error) {
       byAsset.get(asset).swaps.errors.push(error?.message || String(error));
       await (options.markRollingFailure || markPoolAnalysisRollingFailure)(client, asset, error?.message || String(error));
     }
-  }
+  });
   const allStates = [...byAsset.values()];
   for (const [asset, state] of byAsset) {
     const days = state.swaps.rows.map((row) => row.day).sort();

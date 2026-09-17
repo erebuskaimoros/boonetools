@@ -566,10 +566,12 @@ Migration `066_pool_analysis_intraday_snapshots.sql` preserves cumulative pool
 activity at 15-minute UTC boundaries. The collector floors the same-provider
 Midgard aggregation watermark to the latest quarter-hour and requests only the
 current day's prefix using `from`/`to` without `interval` or `count`. This replaces
-the existing current-day swap request; it does not add per-period boundary
-queries. A repeated cutoff reuses its durable snapshot. The shared health
-request and bounded historical repair remain centralized, independent of
-visitor count.
+the existing current-day swap request. A repeated cutoff reuses its durable
+snapshot. The only automatic historical-prefix exception is one exact 24-hour
+boundary repair when both adjacent 15-minute snapshots and the completed
+starting day prove an isolated missed poll; a cold ledger does not backfill.
+The shared health request and bounded historical repair remain centralized,
+independent of visitor count.
 
 The intraday ledger stores cumulative RUNE volume, USD volume in cents, and
 pool-generated RUNE fees, keyed by pool and bucket end. It is a boundary snapshot,
@@ -582,10 +584,11 @@ Snapshots accumulate prospectively. A period retains its completed-UTC-day
 metrics until the required starting snapshot and daily history exist, and the UI
 identifies whether that pool's selected period is daily or rolling. Rolling
 windows end on a quarter-hour and expose their actual timestamps. Failed
-refreshes preserve prior observations and mark them stale. No historical
+refreshes preserve prior observations and mark them stale. No broad historical
 snapshot backfill runs automatically. USD fees remain an estimate using each
 source piece's mean RUNE price; RUNE amounts and USD-volume cents are stored as
-exact integers. Charts retain daily UTC buckets.
+exact integers. Charts retain daily UTC buckets, so their current partial-day
+bar differs from a rolling 24-hour table value by the prior-day tail.
 
 Migration `059_pool_analysis_depth.sql` adds an independent
 `pool_analysis_depth_daily` ledger of Midgard daily closing asset/RUNE balances

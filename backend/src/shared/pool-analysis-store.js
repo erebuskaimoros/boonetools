@@ -313,7 +313,15 @@ export async function savePoolAnalysisIntradaySnapshot(client, head) {
 }
 
 export async function loadPoolAnalysisBoundarySnapshots(client, asset, cutoff, periods) {
-  const ends = periods.map((period) => new Date((cutoff - period.days * 86400) * 1000).toISOString());
+  // The 24H neighbors distinguish an isolated missed poll from a cold ledger.
+  // Other periods remain read-only: repairing their history on every sweep
+  // would multiply provider requests without improving the live 24H table.
+  const ends = periods.flatMap((period) => {
+    const boundary = cutoff - period.days * 86400;
+    const seconds = period.id === '24h' && boundary % 86400 !== 0
+      ? [boundary - 900, boundary, boundary + 900] : [boundary];
+    return seconds.map((value) => new Date(value * 1000).toISOString());
+  });
   const { rows } = await client.query(
     `select bucket_end, volume_rune_e8::text, volume_usd_e2::text, fees_rune_e8::text, rune_price_usd::text
      from pool_analysis_intraday_snapshots where asset = $1 and bucket_end = any($2::timestamptz[])`, [asset, ends]);
