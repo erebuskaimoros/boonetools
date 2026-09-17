@@ -32,8 +32,22 @@ export function integerAmount(value) {
   return /^\d+$/.test(String(value ?? '')) ? String(value) : null;
 }
 
+// Midgard can report negative block rewards when the interval's net rewards
+// are below zero. Other Financials amounts remain unsigned.
+export function signedIntegerAmount(value) {
+  if (typeof value === 'string') return /^-?\d+$/.test(value) ? value : null;
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+  if (typeof value === 'bigint') return value.toString();
+  return null;
+}
+
 function amount(value, scale = 1e8) {
   const integer = integerAmount(value);
+  return integer === null ? null : Number(integer) / scale;
+}
+
+function signedAmount(value, scale = 1e8) {
+  const integer = signedIntegerAmount(value);
   return integer === null ? null : Number(integer) / scale;
 }
 
@@ -76,7 +90,7 @@ export function buildFinancialsPoints({ swaps = [], earnings = [], bonds = {}, f
       incomeRune,
       incomeUsd: incomeRune === null || runePriceUsd === null ? null : incomeRune * runePriceUsd,
       feesRune: amount(income?.liquidityFees),
-      blockRewardsRune: amount(income?.blockRewards),
+      blockRewardsRune: signedAmount(income?.blockRewards),
       bondingEarningsRune: amount(income?.bondingEarnings),
       activeBondRune: amount(bond?.activeBondE8),
       bondingApr: dailyBondingApr(income?.bondingEarnings, bond?.activeBondE8),

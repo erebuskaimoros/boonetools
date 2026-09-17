@@ -1,5 +1,5 @@
 import { BinaryReader } from 'cosmjs-types/binary.js';
-import { DAY_SECONDS, integerAmount } from '../../../shared/financials/model.js';
+import { DAY_SECONDS, integerAmount, signedIntegerAmount } from '../../../shared/financials/model.js';
 
 export const FINANCIALS_MIDGARD = 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
 export const FINANCIALS_RPC = 'https://gateway.liquify.com/chain/thorchain_rpc';
@@ -139,7 +139,8 @@ export async function fetchFinancialLiveTotals(from, through, { getJson }) {
       const row = rows.get(start);
       if (!row || Number(row.endTime) !== start + 300) throw new Error(`Incomplete live ${kind} coverage`);
       for (const field of fields) {
-        const value = integerAmount(row[field]);
+        const value = kind === 'earnings' && field === 'blockRewards'
+          ? signedIntegerAmount(row[field]) : integerAmount(row[field]);
         if (value === null) throw new Error(`Invalid live ${kind} ${field}`);
         totals[field] += BigInt(value);
       }

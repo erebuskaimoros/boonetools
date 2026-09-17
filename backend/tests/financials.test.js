@@ -158,6 +158,35 @@ test('Live totals sum completed five-minute buckets exactly and ignore future ze
   } }), /Incomplete live/);
 });
 
+test('Live Financials accepts signed block rewards without freezing today at the first negative bucket', async () => {
+  const getJson = async () => ({ intervals: [
+    { startTime: from, endTime: from + 300, totalVolume: '100', totalVolumeUSD: '10',
+      earnings: '22', liquidityFees: '20', blockRewards: '2', bondingEarnings: '10', runePriceUSD: '2' },
+    { startTime: from + 300, endTime: from + 600, totalVolume: '200', totalVolumeUSD: '20',
+      earnings: '15', liquidityFees: '20', blockRewards: '-5', bondingEarnings: '8', runePriceUSD: '2' }
+  ] });
+  const totals = await fetchFinancialLiveTotals(from, from + 600, { getJson });
+  assert.equal(totals.earnings.blockRewards, '-3');
+  assert.equal(totals.earnings.earnings, '37');
+  const point = buildLiveFinancialsPoint({ from, through: from + 600, ...totals });
+  assert.equal(point.blockRewardsRune, -3e-8);
+  assert.equal(point.incomeRune, 37e-8);
+});
+
+test('Signed block rewards retain their sign in completed days and malformed live values still fail', async () => {
+  const [day] = buildFinancialsPoints({ from, to: from + DAY,
+    earnings: [interval(0, { earnings: '15', liquidityFees: '20', blockRewards: '-5', bondingEarnings: '8', runePriceUSD: '2' })]
+  });
+  assert.equal(day.blockRewardsRune, -5e-8);
+  for (const blockRewards of ['--5', '1.5', 'not-a-number']) {
+    await assert.rejects(fetchFinancialLiveTotals(from, from + 300, {
+      getJson: async () => ({ intervals: [{ startTime: from, endTime: from + 300,
+        totalVolume: '1', totalVolumeUSD: '1', earnings: '1', liquidityFees: '1',
+        blockRewards, bondingEarnings: '1', runePriceUSD: '2' }] })
+    }), /Invalid live earnings blockRewards/);
+  }
+});
+
 test('Long history paginates beyond the 400-day cap without count/from/to overconstraint', async () => {
   const calls = [];
   const rows = await fetchFinancialHistory('earnings', { from, to: from + 401 * DAY,
