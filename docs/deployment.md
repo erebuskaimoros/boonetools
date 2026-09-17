@@ -23,19 +23,17 @@ git status --short
 
 ## Clean Release Checkout
 
-Commit and push the intended patch first. A local clone copies committed `main`
-without touching unrelated working files or downloading another copy of the
-repository's history. Create a fresh checkout if a previous temporary one has
-expired. This macOS example uses the physical `/private/tmp` path consistently:
+Commit and push the intended patch first. Clone production `main` into a fresh
+release checkout without touching unrelated local working files. Cloning the
+canonical checkout's local `main` and then fast-forwarding can fail when that
+branch contains unpushed divergent work. This macOS example uses the physical
+`/private/tmp` path consistently:
 
 ```bash
 boonetools_source_dir="$(git rev-parse --show-toplevel)"
 boonetools_release_dir="$(mktemp -d /private/tmp/boonetools-release.XXXXXX)"
-git clone --local --no-hardlinks --branch main "$boonetools_source_dir" "$boonetools_release_dir"
+git clone --branch main https://github.com/erebuskaimoros/boonetools.git "$boonetools_release_dir"
 cd "$boonetools_release_dir"
-git remote set-url origin https://github.com/erebuskaimoros/boonetools.git
-git fetch origin main
-git merge --ff-only origin/main
 if test -f "$boonetools_source_dir/.env"; then
   cp "$boonetools_source_dir/.env" .env
 fi
