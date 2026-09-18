@@ -22,6 +22,22 @@ past 271 epochs before a public archive 429. Historical issuance gaps remain;
 this deployment does not establish complete CF/NEAR coverage.
 See [the rollout record](sessions/2026-09-18/session-2.md).
 
+### Backfill lifecycle repair
+
+The first production run reached the 30-minute systemd timeout at 16:32:53
+UTC. It durably acquired 291 CF issuance days (up from 52) and 286 NEAR epochs
+(up from 201), but the public snapshot still showed the seed because publication
+only occurred after the entire collector returned. Rebuilding from production's
+raw cache showed seven additional complete CF months, January–July 2026.
+
+The lifecycle repair publishes recovered cache before provider calls and
+republishes each durable checkpoint, explicitly stale/in progress. Acquisition
+has a 20-minute budget, including abortable HTTP requests and FastNear pacing,
+so it can publish final partial progress before the unchanged 30-minute service
+limit. Deferred work alone does not fail the job; actual source errors still do.
+No issuance accounting, runtime allowlist or historical-coverage rules change.
+See [the repair record](sessions/2026-09-18/session-3.md) for rollout verification.
+
 ## Accounting
 
 - TC: daily Midgard `liquidityFees / 1e8 * runePriceUSD` less the signed

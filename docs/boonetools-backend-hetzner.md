@@ -65,6 +65,16 @@ Archive backfill resumes after interruption and can span several collector
 runs on rate-limited public providers; public traffic never triggers it. Existing snapshots survive
 provider failures and expose stale/coverage information.
 
+The collector publishes recovered checkpoints before acquisition starts and
+republishes after each durable checkpoint. These interim snapshots are marked
+stale/in progress; they are not presented as a successful source refresh. A
+20-minute acquisition budget aborts in-flight requests and pacing waits, then
+publishes the final partial progress and leaves remaining work for the next
+run. This leaves headroom below the service's 30-minute systemd timeout.
+Budget exhaustion alone is a successful deferred run; genuine provider errors
+still fail the job after publishing useful observations. Do not increase the
+systemd timeout to compensate for missing checkpoint publication.
+
 NEAR wallet attribution now uses the public FastNear transfer index, with
 pagination, internal-transfer exclusion and no contract-call deposits.
 Dune query **8767542** and its SQL are retained only for reconciliation, not

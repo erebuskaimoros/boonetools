@@ -14,8 +14,8 @@
 
 | Date | Focus | Summary | Link |
 |------|-------|---------|------|
+| 2026-09-18 #3 | Protocol comparison backfill lifecycle | Regression-first repair: recovery/checkpoint publication and abortable 20-minute budget; rollout verification pending | [Session](2026-09-18/session-3.md) |
 | 2026-09-18 #2 | Financials ECharts and protocol comparison | Deployed CI-green `d828fa5` to backend/frontend; seeded local history and checkpoints before fetching; API, assets and browser verified | [Session](2026-09-18/session-2.md) |
 | 2026-09-18 #1 | Simplified Production Deployment | Deployed CI-green `85baecc` to backend/frontend; backend services and timers remained running; public artifacts verified | [Session](2026-09-18/session-1.md) |
 | 2026-09-17 #1 | Production Dashboard Corrections | Deployed signed-reward and XRP 24-hour fee fixes; resolved two release-checkout papercuts | [Session](2026-09-17/session-1.md) |
 | 2026-09-05 #1 | API Efficiency and Dashboard Fixes | Deployed repair reuse and four UI fixes; upstream historical repair remains blocked | [Session](2026-09-05/session-1.md) |
-| 2026-09-02 #1 | Bond Tracker No-Bond Recovery | Deployed no-bond form results and saved-query cleanup; resolved 16 release-workflow papercuts | [Session](2026-09-02/session-1.md) |
