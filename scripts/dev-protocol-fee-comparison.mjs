@@ -3,7 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { ageComparisonPayload, COMPARISON_REFRESH_MS, hasComparisonData } from '../shared/protocol-fee-comparison/model.js';
 import { buildComparisonPayload, collectComparison, emptyComparisonCache } from '../backend/src/protocol-fee-comparison/collector.js';
-import { comparisonRequest } from '../backend/src/jobs/protocol-fee-comparison.js';
+import { createComparisonRequest } from '../shared/protocol-fee-comparison/request.js';
 
 export const comparisonCacheFile = fileURLToPath(new URL('../node_modules/.cache/protocol-fee-comparison/state.json', import.meta.url));
 export async function readComparisonCache(cacheFile = comparisonCacheFile) {
@@ -29,7 +29,7 @@ export function createProtocolFeeComparisonDevPlugin() {
         try {
           const saved = await readComparisonCache();
           if (!saved.payload?.asOf || Date.now() - Date.parse(saved.payload.asOf) >= COMPARISON_REFRESH_MS) {
-            running = collectComparison({ cache: saved.cache, request: comparisonRequest(),
+            running = collectComparison({ cache: saved.cache, request: createComparisonRequest(),
               save: saveComparisonCache, log: (message) => server.config.logger.info(`[protocol comparison] ${message}`) });
             await running;
           }

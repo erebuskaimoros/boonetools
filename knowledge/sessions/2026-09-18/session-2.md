@@ -15,9 +15,18 @@
 
 ## Release status
 
-Release verification and production activation are in progress. Production has
-no existing comparison records or collector units; import will precede deployment
-and timer activation. No unrelated canonical-checkout changes are included.
+CI-green `a98dd7e` was published to main and deployed to the backend. The
+production seed transaction committed at 16:00:23 UTC, before timer activation
+at 16:00:53 and the first collector run at 16:02:53. It contains 382 days,
+383 CF boundaries, 201 NEAR epochs and 52 CF issuance days. Public monthly data
+exactly matched the seed. By 16:03:40 the collector had resumed to 211 epochs.
+
+The isolated frontend build then caught a dev-plugin import of backend-only
+configuration (`dotenv`). The old frontend remained live. A failing regression
+test reproduced the import leak; the request transport is now runtime-neutral,
+with backend metrics/cooldown hooks injected only by the production job.
+Frontend-only build verification and the corrected rollout are in progress.
+No unrelated canonical-checkout changes are included.
 
 ## Remaining work
 
