@@ -191,10 +191,10 @@ BooneTools deploys must be run from the BooneTools website checkout, not from th
 cd /Users/boonewheeler/Desktop/Projects/THORChain/boonetools/website
 ```
 
-The guarded scripts require clean, CI-green `main` matching `origin/main`. If
-the broader THORChain/Thornode worktree is dirty, use a clean BooneTools
-checkout/worktree for the intended patch. Do not work around that by manually
-deploying from the wrong repo.
+The guarded scripts accept an explicit CI-passing commit on production main.
+Any BooneTools checkout/worktree is usable, even with unrelated local changes:
+artifacts and activation helpers come from the selected Git commit. No manual
+release clone is needed. See [deployment](docs/deployment.md).
 
 The live frontend is served from:
 
@@ -211,19 +211,21 @@ https://boone.tools/
 Frontend deploy script:
 
 ```bash
-npm run boonetools:deploy:frontend
+npm run boonetools:deploy:frontend -- <commit-sha>
 ```
 
 Backend deploy script:
 
 ```bash
-npm run boonetools:deploy:backend
+npm run boonetools:deploy:backend -- <commit-sha>
 ```
 
 Both flows use checksummed immutable releases, one server-wide deployment lock,
 an atomic `current` symlink, post-switch health gates, and verified automatic
 rollback. BooneTools application deploys do not modify the host-wide Caddy
-configuration.
+configuration. Routine backend releases restart affected persistent services;
+timers pick up new code on their next normal run. Schema/unit changes use a
+coordinated restart, without forcing every dashboard or backfill to refresh.
 
 After a frontend deploy, verify the built bundle still contains the expected API base:
 

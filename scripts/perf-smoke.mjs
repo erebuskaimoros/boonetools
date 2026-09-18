@@ -48,6 +48,7 @@ function parseArgs(argv) {
     concurrency: 1,
     endpoint: '',
     requests: 1,
+    healthOnly: false,
     requireCompression: false,
     allowStale: false,
     allowStaleEndpoints: new Set()
@@ -58,6 +59,7 @@ function parseArgs(argv) {
     else if (value === '--concurrency') options.concurrency = Number(argv[++index]);
     else if (value === '--endpoint') options.endpoint = String(argv[++index] || '');
     else if (value === '--requests') options.requests = Number(argv[++index]);
+    else if (value === '--health-only') options.healthOnly = true;
     else if (value === '--require-compression') options.requireCompression = true;
     else if (value === '--allow-stale') options.allowStale = true;
     else if (value === '--allow-stale-endpoint') {
@@ -159,8 +161,8 @@ async function main() {
     const checks = [
       errors.length === 0,
       staleAllowed || stale.length === 0,
-      p95 <= endpoint.maxMs,
-      maxBytes <= endpoint.maxBytes,
+      options.healthOnly || p95 <= endpoint.maxMs,
+      options.healthOnly || maxBytes <= endpoint.maxBytes,
       !options.requireCompression || compressed,
       jsonResponses
     ];
@@ -173,8 +175,9 @@ async function main() {
 
     if (errors.length) failures.push(`${endpoint.name}: ${errors.length} non-2xx response(s)`);
     if (!staleAllowed && stale.length) failures.push(`${endpoint.name}: ${stale.length} stale response(s)`);
-    if (p95 > endpoint.maxMs) failures.push(`${endpoint.name}: p95 ${p95.toFixed(0)}ms > ${endpoint.maxMs}ms`);
-    if (maxBytes > endpoint.maxBytes) failures.push(`${endpoint.name}: ${maxBytes} bytes > ${endpoint.maxBytes}`);
+    if (!options.healthOnly && p95 > endpoint.maxMs) failures.push(`${endpoint.name}: p95 ${p95.toFixed(0)}ms > ${endpoint.maxMs}ms`);
+    if (!options.healthOnly && maxBytes > endpoint.maxBytes) failures.push(`${endpoint.name}: ${maxBytes} bytes > ${endpoint.maxBytes}`);
+    if (staleAllowed && stale.length) console.warn(`${endpoint.name}: cached data is stale; its scheduled collector must recover freshness independently`);
     if (options.requireCompression && !compressed) failures.push(`${endpoint.name}: response was not compressed`);
     if (!jsonResponses) failures.push(`${endpoint.name}: response content type was not JSON`);
   }

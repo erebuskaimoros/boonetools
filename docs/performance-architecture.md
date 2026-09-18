@@ -215,9 +215,11 @@ npm run perf:smoke -- --base http://127.0.0.1:8787/functions/v1 --endpoint statu
 
 The backend deploy creates a checksummed immutable release, installs its
 dependencies before production mutation, and serializes backend/frontend
-activation through one host lock. It quiesces writers only for migration and
-cutover, atomically changes `/opt/boonetools-backend/current`, primes models in
-dependency order, verifies every timer's next trigger, and runs public
-performance and all-domain health gates. Failure after cutover switches the
-symlink and systemd manifest back to the previous verified release. Caddy is
+activation through one host lock. Routine code releases atomically change
+`/opt/boonetools-backend/current`, restart affected persistent services, and
+leave scheduled jobs on their normal cadence. Schema, package, or unit changes
+coordinate existing services, without forced provider warmups. Focused public
+health checks gate activation; stale cache warnings and full performance
+budgets remain separate from release health. Failure after cutover restores
+the previous symlink and affected service state (and manifest when changed). Caddy is
 owned by Web Ops and is not modified or reloaded by an application deploy.

@@ -658,7 +658,6 @@ test('migration, job registry, timer, and deploy encode the production contract'
     repairService,
     timer,
     repairTimer,
-    deploy
   ] = await Promise.all([
     readFile(new URL('../migrations/031_pool_dislocation.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/033_pool_dislocation_provenance.sql', import.meta.url), 'utf8'),
@@ -669,7 +668,6 @@ test('migration, job registry, timer, and deploy encode the production contract'
     readFile(new URL('../../ops/systemd/boonetools-pool-dislocation-repair.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-dislocation.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-dislocation-repair.timer', import.meta.url), 'utf8'),
-    readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8')
   ]);
   assert.match(migration, /primary key \(observed_at, asset\)/i);
   assert.match(provenanceMigration, /historical_backfill/);
@@ -688,6 +686,4 @@ test('migration, job registry, timer, and deploy encode the production contract'
   assert.match(repairService, /TimeoutStartSec=10m/);
   assert.match(timer, /OnCalendar=\*-\*-\* \*:0\/5:00 UTC/);
   assert.match(repairTimer, /OnCalendar=\*-\*-\* \*:2\/15:00 UTC/);
-  assert.match(deploy, /prime_read_models[\s\S]*boonetools-pool-dislocation-repair\.service/);
-  assert.match(deploy, /prime_read_models[\s\S]*boonetools-pool-dislocation\.service/);
 });

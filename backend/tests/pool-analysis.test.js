@@ -376,8 +376,8 @@ test('Pool Analysis handlers are provider-free and validate detail requests', as
   assert.equal(invalid.status, 400);
 });
 
-test('migration, route, jobs, units, deploy, and performance gate encode Pool Analysis', async () => {
-  const [migration, feeScopeMigration, server, runJob, timer, service, backfill, deploy, smoke] = await Promise.all([
+test('migration, route, jobs, units, and performance gate encode Pool Analysis', async () => {
+  const [migration, feeScopeMigration, server, runJob, timer, service, backfill, smoke] = await Promise.all([
     readFile(new URL('../migrations/051_pool_analysis.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/052_pool_analysis_fee_scope.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
@@ -385,7 +385,6 @@ test('migration, route, jobs, units, deploy, and performance gate encode Pool An
     readFile(new URL('../../ops/systemd/boonetools-pool-analysis.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-analysis.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pool-analysis-backfill.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8'),
     readFile(new URL('../../scripts/perf-smoke.mjs', import.meta.url), 'utf8')
   ]);
   assert.match(migration, /pool_analysis_daily/);
@@ -397,33 +396,5 @@ test('migration, route, jobs, units, deploy, and performance gate encode Pool An
   assert.match(timer, /OnUnitActiveSec=15min/);
   assert.match(service, /pool-analysis-scheduler/);
   assert.match(backfill, /pool-analysis-backfill/);
-  assert.match(deploy, /boonetools-pool-analysis\.service/);
   assert.match(smoke, /name: 'pool-analysis'/);
-});
-
-test('deployment does not roll back when the independently scheduled pool-dislocation repair provider is unavailable', async () => {
-  const deploy = await readFile(
-    new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url),
-    'utf8'
-  );
-  assert.match(
-    deploy,
-    /if \[\[ "\$unit" == boonetools-pool-dislocation-repair\.service \]\]; then[\s\S]*?continuing with its cached read model while systemd retries it[\s\S]*?return/
-  );
-  assert.match(
-    deploy,
-    /systemctl --failed --no-legend[\s\S]*?grep -Ev '\^boonetools-pool-dislocation-repair\\\.service\$'[\s\S]*?grep -Eq '\^\(boonetools-/
-  );
-  assert.match(deploy, /--allow-stale-endpoint app-earnings/);
-  assert.match(deploy, /--allow-stale-endpoint treasury/);
-  assert.match(
-    deploy,
-    /start_and_verify_timers\nrefresh_status_models_after_long_primes\n\nprime_read_model_unit "boonetools-treasury-snapshot\.service"\n\nlog "Running post-deployment health and performance gates"/
-  );
-  assert.match(deploy, /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-pool-analysis/);
-  assert.match(deploy, /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-pol-tracker/);
-  assert.match(deploy, /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-burn-tracker/);
-  assert.match(deploy, /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-wasm-arb-economics/);
-  assert.match(deploy, /systemctl reset-failed "\$unit"/);
-  assert.match(deploy, /grep -Ev "\$OPTIONAL_PRIME_UNIT_PATTERN"/);
 });

@@ -18,11 +18,16 @@ CURRENT_LINK="$DEST/current"
 CONFIG_DIR="$DEST/config"
 ENV_FILE="$CONFIG_DIR/backend.env"
 LOCK_FILE=/var/lock/boonetools-deploy.lock
-OPTIONAL_PRIME_UNIT_PATTERN='^(boonetools-node-votes-backfill\.service|boonetools-pool-dislocation-repair\.service|boonetools-pool-analysis\.service|boonetools-pol-tracker\.service|boonetools-burn-tracker\.service|boonetools-wasm-arb-economics\.service|boonetools-wasm-arb-economics-fees\.service|boonetools-wasm-arb-economics-oracle\.service)$'
 
 PREVIOUS_TARGET=
 ROLLBACK_REQUIRED=false
-QUIESCED=false
+MODE=routine
+MIGRATE=false
+RESTART_UNITS=()
+CHECK_ENDPOINTS=()
+ACTIVE_UNITS=()
+ENABLED_UNITS=()
+STARTED_UNITS=()
 
 log() {
   printf '==> %s\n' "$*"
@@ -36,12 +41,11 @@ die() {
 require_safe_arguments() {
   [[ "$EUID" -eq 0 ]] || die "remote release activation must run as root"
   [[ "$DEST" == /opt/* ]] || die "DEST must be an absolute path below /opt"
-  [[ "$RELEASE_ID" =~ ^[A-Za-z0-9._-]+$ ]] || die "unsafe release identifier"
+  [[ "$RELEASE_ID" =~ ^[a-f0-9]{40}$ ]] || die "unsafe release identifier"
   [[ "$ARCHIVE" == /var/tmp/* ]] || die "release archive must be staged below /var/tmp"
   [[ "$EXPECTED_SHA256" =~ ^[a-f0-9]{64}$ ]] || die "invalid SHA-256"
   [[ "$KEEP_RELEASES" =~ ^[0-9]+$ && "$KEEP_RELEASES" -ge 2 ]] || die "KEEP_RELEASES must be at least 2"
   command -v flock >/dev/null 2>&1 || die "flock is required"
-  command -v rsync >/dev/null 2>&1 || die "rsync is required"
   command -v systemctl >/dev/null 2>&1 || die "systemd is required"
   command -v runuser >/dev/null 2>&1 || die "runuser is required"
   id deploy >/dev/null 2>&1 || die "the deploy user does not exist"
@@ -152,7 +156,14 @@ stage_release() {
     die "release $RELEASE_ID is already active"
   fi
 
-  rm -rf "$RELEASE_DIR"
+  if [[ -e "$RELEASE_DIR" ]]; then
+    # A failed activation can retry its complete artifact without replacing code
+    # that another process may still be using.
+    [[ -f "$RELEASE_DIR/RELEASE" ]] && grep -qx "archive_sha256=$EXPECTED_SHA256" "$RELEASE_DIR/RELEASE" \
+      || die "existing release is incomplete or has a different checksum; refusing to overwrite it"
+    log "Reusing the already staged immutable artifact"
+    return 0
+  fi
   install -d -o deploy -g deploy -m 0755 "$RELEASE_DIR"
   tar -xzf "$ARCHIVE" --no-same-owner -C "$RELEASE_DIR"
   chown -R deploy:deploy "$RELEASE_DIR"
@@ -176,300 +187,121 @@ stage_release() {
   chmod 0644 "$RELEASE_DIR/RELEASE"
 }
 
-check_url() {
-  local url="$1"
-  local expected="$2"
-  local code
-  code="$(curl -sS -L --max-redirs 8 --connect-timeout 8 --max-time 30 -o /dev/null -w '%{http_code}' "$url")"
-  [[ "$code" == "$expected" ]] || {
-    echo "Health check failed: $url returned $code, expected $expected" >&2
-    return 1
-  }
+read_plan() {
+  node "$RELEASE_DIR/scripts/backend-deploy-plan.mjs" "$PREVIOUS_TARGET" "$RELEASE_DIR" > "$RELEASE_DIR/DEPLOY_PLAN"
+  local kind value
+  while read -r kind value; do
+    case "$kind" in
+      mode) MODE="$value" ;;
+      migrate) MIGRATE="$value" ;;
+      restart) RESTART_UNITS+=("$value") ;;
+      check) CHECK_ENDPOINTS+=("$value") ;;
+      *) die "unknown deployment plan entry: $kind" ;;
+    esac
+  done < "$RELEASE_DIR/DEPLOY_PLAN"
+  log "Deployment scope: $MODE; migrations: $MIGRATE"
+  log "Persistent restart candidates: ${RESTART_UNITS[*]:-none}"
+  log "Endpoint checks: ${CHECK_ENDPOINTS[*]:-status}"
 }
 
-verify_host_routes() {
-  check_url https://theaiguys.ai/ 200
-  check_url https://theaiguys.ai/traffic/ 401
-  check_url https://themememap.com/health 200
-  check_url https://boone.tools/ 200
-  check_url https://boonewheeler.com/landlord 200
-  check_url https://mail.theaiguys.ai/ 200
-  check_url https://mail.themememap.com/ 200
+installed_units() {
+  local unit_file
+  for unit_file in /etc/systemd/system/boonetools-*.service /etc/systemd/system/boonetools-*.timer \
+    /etc/systemd/system/rapid-swap-listener.service /etc/systemd/system/rapid-swap-listener.timer; do
+    [[ -f "$unit_file" ]] && basename "$unit_file"
+  done
+  return 0
+}
+
+snapshot_unit_state() {
+  local unit active
+  while read -r unit; do
+    active="$(systemctl show "$unit" --property=ActiveState --value)"
+    case "$active" in active|activating|reloading) ACTIVE_UNITS+=("$unit") ;; esac
+    if systemctl is-enabled --quiet "$unit"; then ENABLED_UNITS+=("$unit"); fi
+  done < <(installed_units)
+}
+
+contains_unit() {
+  local wanted="$1" unit
+  shift
+  for unit in "$@"; do [[ "$unit" == "$wanted" ]] && return 0; done
+  return 1
+}
+
+stop_managed_units() {
+  local unit timers=() services=()
+  while read -r unit; do
+    case "$unit" in *.timer) timers+=("$unit") ;; *) services+=("$unit") ;; esac
+  done < <(installed_units)
+  if [[ "${#timers[@]}" -gt 0 ]]; then systemctl stop "${timers[@]}" || return 1; fi
+  if [[ "${#services[@]}" -gt 0 ]]; then systemctl stop "${services[@]}" || return 1; fi
+}
+
+install_units_from_release() {
+  local source_release="$1" unit unit_file
+  while read -r unit; do
+    if [[ ! -f "$source_release/ops/systemd/$unit" ]]; then
+      systemctl disable --now "$unit" || return 1
+      rm -f "/etc/systemd/system/$unit" || return 1
+    fi
+  done < <(installed_units)
+  for unit_file in "$source_release"/ops/systemd/*.service "$source_release"/ops/systemd/*.timer; do
+    [[ -f "$unit_file" ]] || continue
+    install -o root -g root -m 0644 "$unit_file" "/etc/systemd/system/${unit_file##*/}" || return 1
+  done
+  systemctl daemon-reload
 }
 
 start_postgres_and_wait() {
-  local container
+  local container attempt
   container="$(env_value BOONETOOLS_DB_CONTAINER)"
   container="${container:-boonetools-postgres}"
-
-  log "Ensuring Postgres is running"
-  (
-    cd "$DEST"
-    docker compose \
-      -f "$RELEASE_DIR/ops/docker/boonetools-postgres.compose.yml" \
-      --env-file "$ENV_FILE" \
-      up -d
-  )
-
-  local attempt
+  (cd "$DEST" && docker compose -f "$RELEASE_DIR/ops/docker/boonetools-postgres.compose.yml" --env-file "$ENV_FILE" up -d)
   for attempt in $(seq 1 60); do
-    if docker exec "$container" sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then
-      return
-    fi
+    if docker exec "$container" sh -lc 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"' >/dev/null 2>&1; then return; fi
     sleep 2
   done
   die "Postgres did not become ready within 120 seconds"
 }
 
-stop_writers() {
-  log "Quiescing BooneTools timers and background services"
-  shopt -s nullglob
-  local timer_paths=(/etc/systemd/system/boonetools-*.timer)
-  local service_paths=(
-    /etc/systemd/system/boonetools-*.service
-  )
-  [[ -e /etc/systemd/system/rapid-swap-listener.service ]] \
-    && service_paths+=(/etc/systemd/system/rapid-swap-listener.service)
-  local units=()
-  local path unit
-
-  for path in "${timer_paths[@]}"; do
-    units+=("$(basename "$path")")
-  done
-  for path in "${service_paths[@]}"; do
-    unit="$(basename "$path")"
-    [[ "$unit" == boonetools-api.service ]] && continue
-    units+=("$unit")
-  done
-  shopt -u nullglob
-
-  if [[ "${#units[@]}" -gt 0 ]]; then
-    systemctl stop "${units[@]}"
-  fi
-  QUIESCED=true
-  ROLLBACK_REQUIRED=true
-}
-
-install_units_from_release() {
-  local source_release="$1"
-  local unit_dir="$source_release/ops/systemd"
-  [[ -d "$unit_dir" ]] || die "release has no systemd directory: $source_release"
-
-  shopt -s nullglob
-  local desired_paths=("$unit_dir"/*.service "$unit_dir"/*.timer)
-  local current_paths=(
-    /etc/systemd/system/boonetools-*.service
-    /etc/systemd/system/boonetools-*.timer
-  )
-  [[ -e /etc/systemd/system/rapid-swap-listener.service ]] \
-    && current_paths+=(/etc/systemd/system/rapid-swap-listener.service)
-  [[ -e /etc/systemd/system/rapid-swap-listener.timer ]] \
-    && current_paths+=(/etc/systemd/system/rapid-swap-listener.timer)
-  local desired_names=" "
-  local path name
-
-  for path in "${desired_paths[@]}"; do
-    desired_names+="$(basename "$path") "
-  done
-  for path in "${current_paths[@]}"; do
-    name="$(basename "$path")"
-    if [[ "$desired_names" != *" $name "* ]]; then
-      systemctl disable --now "$name" >/dev/null 2>&1 || true
-      rm -f "$path"
-    fi
-  done
-  for path in "${desired_paths[@]}"; do
-    install -o root -g root -m 0644 "$path" "/etc/systemd/system/$(basename "$path")"
-  done
-  shopt -u nullglob
-
-  systemctl daemon-reload
-}
-
-start_unit_with_retry() {
-  local unit="$1"
-  local attempt
-  local retry_delay_seconds=35
-  for attempt in 1 2 3; do
-    if systemctl start "$unit"; then
-      return
-    fi
-    if [[ "$attempt" -lt 3 ]]; then
-      echo "Prime attempt $attempt for $unit failed; retrying in ${retry_delay_seconds} seconds..." >&2
-      sleep "$retry_delay_seconds"
-    fi
-  done
-  return 1
-}
-
-prime_read_model_unit() {
-  local unit="$1"
-  if [[ "$unit" == boonetools-visitor-data.service ]]; then
-    refresh_core_and_visitor_models
-    return
-  fi
-  if [[ "$unit" == boonetools-pool-dislocation-repair.service ]]; then
-    if ! systemctl start "$unit"; then
-      log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
-      systemctl reset-failed "$unit" || true
-    fi
-    return
-  fi
-  if [[ "$unit" =~ $OPTIONAL_PRIME_UNIT_PATTERN ]]; then
-    if ! systemctl start "$unit"; then
-      log "$unit could not reach its current source target; continuing with its cached read model while systemd retries it"
-      systemctl reset-failed "$unit" || true
-    fi
-    return
-  fi
-  start_unit_with_retry "$unit"
-}
-
-refresh_status_models_after_long_primes() {
-  local attempt
-  local retry_delay_seconds=35
-  for attempt in 1 2 3; do
-    systemctl start boonetools-thornode-core-snapshot.service || true
-    if systemctl start boonetools-status-live.service \
-      && systemctl start boonetools-status-dashboard.service; then
-      return
-    fi
-    if [[ "$attempt" -lt 3 ]]; then
-      echo "Post-prime status refresh attempt $attempt failed; retrying in ${retry_delay_seconds} seconds..." >&2
-      sleep "$retry_delay_seconds"
-    fi
-  done
-  return 1
-}
-
-refresh_core_and_app_layer_models() {
-  local attempt
-  local retry_delay_seconds=35
-  for attempt in 1 2 3; do
-    systemctl start boonetools-thornode-core-snapshot.service || true
-    if systemctl start boonetools-app-layer-live-state.service; then
-      return
-    fi
-    if [[ "$attempt" -lt 3 ]]; then
-      echo "Core/App Layer refresh attempt $attempt failed; retrying in ${retry_delay_seconds} seconds..." >&2
-      sleep "$retry_delay_seconds"
-    fi
-  done
-  return 1
-}
-
-refresh_core_and_visitor_models() {
-  local attempt
-  # Failed snapshot work is deferred for one minute. A shorter retry skips
-  # the queued work and can exhaust the mandatory warmup without acquiring it.
-  local retry_delay_seconds=65
-  for attempt in 1 2 3; do
-    # Timers remain quiesced during deployment. Earlier primes and this retry
-    # delay can both outlive the core TTL, so refresh immediately before use.
-    systemctl start boonetools-thornode-core-snapshot.service || true
-    if systemctl start boonetools-visitor-data.service; then
-      return
-    fi
-    if [[ "$attempt" -lt 3 ]]; then
-      echo "Core/visitor refresh attempt $attempt failed; retrying in ${retry_delay_seconds} seconds..." >&2
-      sleep "$retry_delay_seconds"
-    fi
-  done
-  return 1
-}
-
-start_persistent_services() {
-  local persistent=(
-    boonetools-api.service
-    boonetools-chain-stream-listener.service
-  )
-  # Conditional for compatibility when rolling back to a pre-Financials release.
-  if [[ -f "$CURRENT_LINK/ops/systemd/boonetools-financials.service" ]]; then
-    persistent+=(boonetools-financials.service)
-  fi
-  systemctl enable "${persistent[@]}" >/dev/null
-  systemctl restart "${persistent[@]}"
-}
-
-prime_read_models() {
-  local prime_units=(
-    boonetools-rujira-base-fees.service
-    boonetools-analytics-read-models.service
-    boonetools-node-votes-backfill.service
-    boonetools-node-votes-summary.service
-    boonetools-rapid-swaps-market-history.service
-    boonetools-treasury-snapshot.service
-    boonetools-visitor-data.service
-    boonetools-pool-dislocation-repair.service
-    boonetools-pool-dislocation.service
-    boonetools-pool-analysis.service
-    boonetools-pol-tracker.service
-    boonetools-system-income-pol.service
-    boonetools-burn-tracker.service
-    boonetools-wasm-arb-economics.service
-    boonetools-wasm-arb-economics-fees.service
-    boonetools-wasm-arb-economics-oracle.service
-  )
-  local unit
-  # Settlement ingestion must precede the App Layer earnings snapshot so any
-  # requeued catch-up payment is conserved in 01 during this deployment.
-  prime_read_model_unit "boonetools-rujira-reserve-payments.service"
-  refresh_core_and_app_layer_models
-  for unit in "${prime_units[@]}"; do
-    prime_read_model_unit "$unit"
-  done
-  # Publish the newly ingested Wasm rows before the public API gate.
-  start_unit_with_retry boonetools-analytics-read-models.service
-  # Long-running provider primes can outlive short model TTLs. Refresh the
-  # shared core, App Layer live model, and Status models immediately before
-  # the public performance gate so deployment work cannot make them stale.
-  refresh_core_and_app_layer_models
-  refresh_status_models_after_long_primes
-}
-
-start_and_verify_timers() {
-  shopt -s nullglob
-  local timer_paths=("$CURRENT_LINK"/ops/systemd/*.timer)
-  local timers=()
-  local path timer timer_row attempt target_unit target_state
-  local timer_state_wait_seconds=90
-  for path in "${timer_paths[@]}"; do
-    timers+=("$(basename "$path")")
-  done
-  shopt -u nullglob
-  [[ "${#timers[@]}" -gt 0 ]] || die "release contains no timers"
-
-  systemctl enable "${timers[@]}" >/dev/null
-  systemctl restart "${timers[@]}"
-
-  for timer in "${timers[@]}"; do
-    systemctl is-enabled --quiet "$timer" || die "$timer is not enabled"
-    systemctl is-active --quiet "$timer" || die "$timer is not active"
-    timer_row=
-    target_unit=
-    target_state=
-    for attempt in $(seq 1 "$timer_state_wait_seconds"); do
-      timer_row="$(systemctl list-timers --all --no-legend "$timer")"
-      if [[ -n "$timer_row" ]] \
-        && ! grep -Eq '^[[:space:]]*n/a[[:space:]]' <<<"$timer_row"; then
-        break
-      fi
-      sleep 1
+activate_services() {
+  local unit unit_file
+  if [[ "$MODE" == coordinated ]]; then
+    # Restore existing activity, including interrupted oneshots. Do not wake
+    # inactive backfills or re-enable intentionally disabled timers.
+    for unit in "${ACTIVE_UNITS[@]}"; do
+      [[ -f "$RELEASE_DIR/ops/systemd/$unit" ]] && STARTED_UNITS+=("$unit")
     done
-    [[ -n "$timer_row" ]] || die "$timer has no timer state"
-    if grep -Eq '^[[:space:]]*n/a[[:space:]]' <<<"$timer_row"; then
-      # Preserve the full settle window so ordinary timer jobs finish before the
-      # performance gate. A legitimately long OnUnitActiveSec oneshot may still
-      # report NEXT=n/a; its next trigger is scheduled when that target exits.
-      target_unit="$(systemctl show "$timer" --property=Triggers --value | awk '{ print $1 }')"
-      if [[ -n "$target_unit" ]]; then
-        target_state="$(systemctl show "$target_unit" --property=ActiveState --value)"
+    # Only newly introduced timers and persistent services get enabled.
+    for unit_file in "$RELEASE_DIR"/ops/systemd/*.service "$RELEASE_DIR"/ops/systemd/*.timer; do
+      [[ -f "$unit_file" ]] || continue
+      unit="${unit_file##*/}"
+      [[ -n "$PREVIOUS_TARGET" && -f "$PREVIOUS_TARGET/ops/systemd/$unit" ]] && continue
+      if [[ "$unit" == *.timer ]] || grep -Eq '^Type=(simple|exec|notify)$' "$unit_file"; then
+        systemctl enable "$unit"
+        contains_unit "$unit" "${STARTED_UNITS[@]}" || STARTED_UNITS+=("$unit")
       fi
-      if [[ "$target_state" == active || "$target_state" == activating || "$target_state" == reloading ]]; then
-        log "$timer target $target_unit is still $target_state after the settle window; its next trigger will be scheduled after the target exits"
-      else
-        die "$timer has no future trigger after waiting ${timer_state_wait_seconds} seconds"
-      fi
+    done
+  else
+    for unit in "${RESTART_UNITS[@]}"; do
+      contains_unit "$unit" "${ACTIVE_UNITS[@]}" && STARTED_UNITS+=("$unit")
+    done
+  fi
+
+  start_selected_units
+}
+
+start_selected_units() {
+  local unit
+  for unit in "${STARTED_UNITS[@]}"; do
+    if [[ "$unit" == *.timer ]]; then
+      systemctl start "$unit" || return 1
+    elif grep -q '^Type=oneshot$' "$CURRENT_LINK/ops/systemd/$unit"; then
+      # Timers resume their normal cadence; provider acquisition is not a gate.
+      systemctl start --no-block "$unit" || return 1
+    else
+      systemctl restart "$unit" || return 1
     fi
   done
 }
@@ -477,39 +309,29 @@ start_and_verify_timers() {
 wait_for_api() {
   local attempt
   for attempt in $(seq 1 30); do
-    if curl -fsS --max-time 5 http://127.0.0.1:8787/health >/dev/null; then
-      return
-    fi
+    if curl -fsS --max-time 5 http://127.0.0.1:8787/health >/dev/null; then return 0; fi
     sleep 2
   done
-  die "BooneTools API did not become healthy within 60 seconds"
+  echo "BooneTools API did not become healthy within 60 seconds" >&2
+  return 1
 }
 
 verify_release() {
-  wait_for_api
-  node "$CURRENT_LINK/scripts/perf-smoke.mjs" \
-    --base https://boone.tools/functions/v1 \
-    --allow-stale-endpoint pol-tvl \
-    --allow-stale-endpoint rapid-market \
-    --allow-stale-endpoint burn-tracker \
-    --allow-stale-endpoint app-earnings \
-    --allow-stale-endpoint treasury \
-    --allow-stale-endpoint pool-analysis \
-    --require-compression
-  node "$CURRENT_LINK/scripts/perf-smoke.mjs" \
-    --base https://boone.tools/functions/v1 \
-    --endpoint status \
-    --requests 50 \
-    --concurrency 50 \
-    --require-compression
-  verify_host_routes
-  if systemctl --failed --no-legend \
-    | awk '{ print $1 }' \
-    | grep -Ev '^boonetools-pool-dislocation-repair\.service$' \
-    | grep -Ev "$OPTIONAL_PRIME_UNIT_PATTERN" \
-    | grep -Eq '^(boonetools-|rapid-swap-listener)'; then
-    die "a BooneTools systemd unit is failed"
-  fi
+  wait_for_api || return 1
+  local endpoint unit
+  # Always exercise one DB-backed public route, even for deployment-only changes.
+  local endpoints=("${CHECK_ENDPOINTS[@]}")
+  [[ "${#endpoints[@]}" -gt 0 ]] || endpoints=(status)
+  for endpoint in "${endpoints[@]}"; do
+    node "$RELEASE_DIR/scripts/perf-smoke.mjs" \
+      --base https://boone.tools/functions/v1 --endpoint "$endpoint" \
+      --health-only --allow-stale --require-compression || return 1
+  done
+  for unit in "${STARTED_UNITS[@]}"; do
+    if [[ "$unit" == *.timer ]] || ! grep -q '^Type=oneshot$' "$CURRENT_LINK/ops/systemd/$unit"; then
+      systemctl is-active --quiet "$unit" || return 1
+    fi
+  done
 }
 
 restore_previous_release() {
@@ -517,104 +339,94 @@ restore_previous_release() {
     echo "No previous release is available for rollback." >&2
     return 1
   }
-
   log "Rolling back to ${PREVIOUS_TARGET##*/}"
-  atomic_point_current "$PREVIOUS_TARGET"
-  install_units_from_release "$PREVIOUS_TARGET"
-  start_persistent_services
-
-  shopt -s nullglob
-  local timer_paths=("$PREVIOUS_TARGET"/ops/systemd/*.timer)
-  local timers=()
-  local path
-  for path in "${timer_paths[@]}"; do
-    timers+=("$(basename "$path")")
-  done
-  shopt -u nullglob
-  if [[ "${#timers[@]}" -gt 0 ]]; then
-    systemctl enable "${timers[@]}" >/dev/null
-    systemctl restart "${timers[@]}"
+  if [[ "$MODE" == coordinated ]]; then
+    stop_managed_units || return 1
   fi
+  atomic_point_current "$PREVIOUS_TARGET" || return 1
+  if [[ "$MODE" == coordinated ]]; then
+    install_units_from_release "$PREVIOUS_TARGET" || return 1
+    if [[ "${#ENABLED_UNITS[@]}" -gt 0 ]]; then systemctl enable "${ENABLED_UNITS[@]}" || return 1; fi
+    STARTED_UNITS=("${ACTIVE_UNITS[@]}")
+  fi
+  start_selected_units || return 1
+  # Rollback checks the same changed endpoints, not unrelated sites/providers.
+  verify_release
+}
 
-  wait_for_api
-  verify_host_routes
+release_in_use() {
+  local candidate="$1" process_cwd resolved
+  # An untouched listener or in-flight oneshot may still use an older release.
+  # Its cwd resolves to the physical directory, not the new current symlink.
+  for process_cwd in /proc/[0-9]*/cwd; do
+    resolved="$(readlink -f "$process_cwd" 2>/dev/null || true)"
+    if [[ "$resolved" == "$candidate" || "$resolved" == "$candidate/"* ]]; then return 0; fi
+  done
+  return 1
 }
 
 cleanup_releases() {
-  local active_target previous
+  local active_target entry release_path kept=0
   active_target="$(installed_release_target || true)"
-  previous="$PREVIOUS_TARGET"
-  local kept=0
-  local entry path
   while IFS= read -r entry; do
-    path="${entry#* }"
-    if [[ "$path" == "$active_target" || "$path" == "$previous" || "$kept" -lt "$KEEP_RELEASES" ]]; then
+    release_path="${entry#* }"
+    if [[ "$release_path" == "$active_target" || "$release_path" == "$PREVIOUS_TARGET" || "$kept" -lt "$KEEP_RELEASES" ]] \
+      || release_in_use "$release_path"; then
       kept=$((kept + 1))
       continue
     fi
-    rm -rf "$path"
+    rm -rf "$release_path"
   done < <(find "$RELEASES_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -nr)
 }
 
 handle_exit() {
-  local status=$?
+  local exit_code=$?
   trap - EXIT
   rm -f "$ARCHIVE"
-
-  if [[ "$status" -ne 0 && "$ROLLBACK_REQUIRED" == true ]]; then
+  if [[ "$exit_code" -ne 0 && "$ROLLBACK_REQUIRED" == true ]]; then
     echo "Deployment failed; attempting verified rollback." >&2
     if ! restore_previous_release; then
       echo "CRITICAL: automated rollback did not verify successfully." >&2
       exit 70
     fi
     echo "Previous release restored and verified." >&2
-  elif [[ "$status" -ne 0 && "$QUIESCED" == true ]]; then
-    echo "Deployment failed after writers were stopped and no rollback target was available." >&2
   fi
-  exit "$status"
+  exit "$exit_code"
 }
 
 require_safe_arguments
 exec 9>"$LOCK_FILE"
-if ! flock -n 9; then
-  die "another BooneTools deployment is already running"
-fi
+if ! flock -n 9; then die "another BooneTools deployment is already running"; fi
 trap handle_exit EXIT
 
 prepare_server_config
 bootstrap_legacy_release
 validate_archive
 stage_release
+read_plan
 
 if [[ -n "$PREVIOUS_TARGET" ]]; then
-  log "Confirming the existing public baseline before production mutation"
-  verify_host_routes
+  log "Checking the existing API before activation"
+  wait_for_api
 fi
-
-start_postgres_and_wait
-stop_writers
-
-log "Applying backward-compatible database migrations"
-BOONETOOLS_ENV_FILE="$ENV_FILE" bash "$RELEASE_DIR/scripts/boonetools-db-migrate.sh" </dev/null
-
-log "Installing the release unit manifest"
-install_units_from_release "$RELEASE_DIR"
+snapshot_unit_state
+ROLLBACK_REQUIRED=true
+if [[ "$MODE" == coordinated ]]; then
+  log "Schema, dependency, or unit changes: coordinating existing services"
+  stop_managed_units
+  start_postgres_and_wait
+  if [[ "$MIGRATE" == true ]]; then
+    log "Applying backward-compatible database migrations"
+    BOONETOOLS_ENV_FILE="$ENV_FILE" bash "$RELEASE_DIR/scripts/boonetools-db-migrate.sh" </dev/null
+  fi
+  install_units_from_release "$RELEASE_DIR"
+fi
 
 log "Atomically activating release $RELEASE_ID"
 atomic_point_current "$RELEASE_DIR"
-ROLLBACK_REQUIRED=true
-
-start_persistent_services
-prime_read_models
-start_and_verify_timers
-refresh_status_models_after_long_primes
-
-prime_read_model_unit "boonetools-treasury-snapshot.service"
-
-log "Running post-deployment health and performance gates"
+activate_services
+log "Checking affected API routes and restarted services"
 verify_release
-
 ROLLBACK_REQUIRED=false
-QUIESCED=false
 cleanup_releases
-log "Backend release $RELEASE_ID is active and verified"
+log "Backend release $RELEASE_ID is active and verified; scheduled jobs continue on their normal cadence"

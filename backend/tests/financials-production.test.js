@@ -124,10 +124,9 @@ test('Financials provider transport is allowlisted, bounded, and uses shared lif
 
 test('Production deployment installs the collector and keeps durable cache outside releases', async () => {
   const unit = await readFile(new URL('../../ops/systemd/boonetools-financials.service', import.meta.url), 'utf8');
-  const deploy = await readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8');
+  const deploy = await readFile(new URL('../../scripts/backend-deploy-plan.mjs', import.meta.url), 'utf8');
   assert.match(unit, /StateDirectory=boonetools-financials/);
   assert.match(unit, /FINANCIALS_CACHE_DIR=\/var\/lib\/boonetools-financials/);
   assert.match(unit, /Restart=always/);
-  assert.match(deploy, /if \[\[ -f "\$CURRENT_LINK\/ops\/systemd\/boonetools-financials.service" \]\]/);
-  assert.match(deploy, /persistent\+=\(boonetools-financials.service\)/);
+  assert.match(deploy, /boonetools-financials\.service/);
 });

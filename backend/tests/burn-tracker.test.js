@@ -241,7 +241,7 @@ test('scheduled and manual Burn Tracker jobs share the isolated lock and publish
 });
 
 test('migrations, jobs, route, timer, and deploy encode the Burn Tracker production contract', async () => {
-  const [migration, blockMigration, runJob, server, timer, service, backfill, deploy, smoke] = await Promise.all([
+  const [migration, blockMigration, runJob, server, timer, service, backfill, smoke] = await Promise.all([
     readFile(new URL('../migrations/049_system_income_burn_tracker.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/050_system_income_burn_blocks.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
@@ -249,7 +249,6 @@ test('migrations, jobs, route, timer, and deploy encode the Burn Tracker product
     readFile(new URL('../../ops/systemd/boonetools-burn-tracker.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-burn-tracker.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-burn-tracker-backfill.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8'),
     readFile(new URL('../../scripts/perf-smoke.mjs', import.meta.url), 'utf8')
   ]);
   assert.match(migration, /create table if not exists public\.system_income_burn_daily/);
@@ -260,7 +259,5 @@ test('migrations, jobs, route, timer, and deploy encode the Burn Tracker product
   assert.match(timer, /OnUnitActiveSec=5min/);
   assert.match(service, /src\/run-job\.js burn-tracker-scheduler/);
   assert.match(backfill, /src\/run-job\.js burn-tracker-backfill/);
-  assert.match(deploy, /boonetools-burn-tracker\.service/);
-  assert.match(deploy, /--allow-stale-endpoint burn-tracker/);
   assert.match(smoke, /name: 'burn-tracker', path: '\/burn-tracker'/);
 });

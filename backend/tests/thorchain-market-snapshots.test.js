@@ -94,14 +94,13 @@ test('canonical historical block time uses a dedicated live-RPC cooldown lane', 
   assert.ok(urls.some((url) => /rpc\.thorchain\.liquify\.com/.test(url)));
 });
 
-test('Wasm production lanes are independently registered, timed, and primed', async () => {
-  const [migration, registry, activity, fees, oracle, deploy] = await Promise.all([
+test('Wasm production lanes are independently registered and independently timed', async () => {
+  const [migration, registry, activity, fees, oracle] = await Promise.all([
     readFile(new URL('../migrations/038_provider_lanes_and_market_snapshots.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-wasm-arb-economics.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-wasm-arb-economics-fees.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-wasm-arb-economics-oracle.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8')
   ]);
   assert.match(migration, /create table if not exists public\.thorchain_market_snapshots/i);
   assert.match(registry, /'wasm-arb-economics-scheduler': runWasmArbEconomicsScheduler/);
@@ -111,5 +110,4 @@ test('Wasm production lanes are independently registered, timed, and primed', as
   assert.match(fees, /wasm-arb-economics-fees/);
   assert.match(fees, /TimeoutStartSec=10min/);
   assert.match(oracle, /wasm-arb-economics-oracle/);
-  assert.match(deploy, /boonetools-wasm-arb-economics\.service[\s\S]*boonetools-wasm-arb-economics-fees\.service[\s\S]*boonetools-wasm-arb-economics-oracle\.service/);
 });

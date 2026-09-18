@@ -534,7 +534,7 @@ test('POL Tracker retries transient history failures', async () => {
 });
 
 test('migration, jobs, route, timer, and deployment encode the POL Tracker production contract', async () => {
-  const [migration, poolBreakdownMigration, systemIncomeMigration, runJob, server, timer, service, backfill, deploy] = await Promise.all([
+  const [migration, poolBreakdownMigration, systemIncomeMigration, runJob, server, timer, service, backfill] = await Promise.all([
     readFile(new URL('../migrations/046_pol_tracker.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/047_pol_tracker_pool_breakdown.sql', import.meta.url), 'utf8'),
     readFile(new URL('../migrations/056_pol_tvl_system_income_pol.sql', import.meta.url), 'utf8'),
@@ -543,7 +543,6 @@ test('migration, jobs, route, timer, and deployment encode the POL Tracker produ
     readFile(new URL('../../ops/systemd/boonetools-pol-tracker.timer', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pol-tracker.service', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-pol-tracker-backfill.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8')
   ]);
   assert.match(migration, /create table if not exists public\.pol_tracker_daily/);
   assert.match(migration, /runepool_provider_owned_rune_e8/);
@@ -564,7 +563,6 @@ test('migration, jobs, route, timer, and deployment encode the POL Tracker produ
   assert.match(service, /RestartSec=15m/);
   assert.match(backfill, /src\/run-job\.js pol-tracker-backfill/);
   assert.match(backfill, /TimeoutStartSec=infinity/);
-  assert.match(deploy, /boonetools-pol-tracker\.service/);
 });
 
 test('scheduled POL job publishes before failing an incomplete current target for retry', async () => {

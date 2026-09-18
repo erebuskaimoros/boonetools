@@ -1,152 +1,100 @@
-# BooneTools Frontend Deployment
+# BooneTools Deployment
 
-The BooneTools frontend is served from [boone.tools](https://boone.tools/). The DB-backed API is deployed separately; see [boonetools-backend-hetzner.md](./boonetools-backend-hetzner.md).
+Deploy an explicit, CI-passing commit from any checkout or linked worktree of
+`https://github.com/erebuskaimoros/boonetools.git`. The local branch can be
+detached or dirty: local edits are never packaged, reset, or stashed.
 
-## Canonical Repo
-
-Deploy the frontend only from the BooneTools website checkout:
-
-- repo root: `/Users/boonewheeler/Desktop/Projects/THORChain/boonetools/website`
-- expected `origin`: `https://github.com/erebuskaimoros/boonetools.git`
-
-Do not do BooneTools deploy work from the outer THORChain workspace, the Thornode repo, or any other sibling checkout. If the current shell is in `/Users/boonewheeler/Desktop/Projects/THORChain`, `/Users/boonewheeler/Desktop/Projects/THORChain/ThorNode`, or a similarly broad workspace, stop and switch to the BooneTools website checkout before building or deploying.
-
-Before a deploy, verify the context:
+After committing/pushing the intended changes and waiting for that commit's
+GitHub Actions `verify` check:
 
 ```bash
-pwd
-git remote get-url origin
-git status --short
+npm run boonetools:deploy:backend -- <commit-sha>
+npm run boonetools:deploy:frontend -- <commit-sha>
 ```
 
-`pwd` should be the BooneTools `website` repo root shown above, and `origin` should be the BooneTools remote. The deploy guard requires clean `main`, exact parity with `origin/main`, and a successful GitHub Actions `verify` check. A dirty Thornode or outer THORChain worktree is not a reason to deploy manually from that location. For unrelated local changes, use the clean release checkout below. An ordinary detached worktree fails the guard's `main` branch requirement.
+Run only the component that changed; deploy backend first when both change.
+No separate release clone or repeated full local test/build sequence is needed.
+CI owns the complete verification suite; use focused local tests during development.
+The guard fetches production main, requires the selected commit to belong to its
+history, and verifies that commit's latest Actions `verify` result. There is no
+dirty-tree or skip-CI bypass. Run from this repo, not the outer THORChain workspace.
 
-## Clean Release Checkout
+## What a deploy does
 
-Commit and push the intended patch first. Clone production `main` into a fresh
-release checkout without touching unrelated local working files. Cloning the
-canonical checkout's local `main` and then fast-forwarding can fail when that
-branch contains unpushed divergent work. This macOS example uses the physical
-`/private/tmp` path consistently:
+Both entrypoints package the selected Git object and use the remote activation
+helper from that same commit. Both retain checksums, the shared deployment lock,
+immutable releases, atomic cutover, and automatic rollback on failed health checks.
+
+The backend compares the current release with the selected artifact:
+
+- Ordinary code changes restart only affected long-running processes, using
+  their relative module dependencies in both the old and new source trees.
+  Existing scheduled jobs finish normally and load the new release on their
+  next scheduled run. There is no blanket warmup or historical backfill.
+- Schema, dependency manifests, database scripts, or systemd/Docker manifest
+  changes coordinate the services. Existing active work is resumed; inactive
+  backfills and intentionally disabled timers remain inactive. Newly added
+  timers and persistent services are enabled.
+- Only new migrations run. Rewriting/removing historical migrations is rejected.
+  Migrations must remain backward compatible: application rollback does not undo SQL.
+- Checks cover local API health, affected DB-backed public endpoints, and
+  restarted persistent services/timers. Deploy-only changes use Status as the
+  DB-backed smoke check. Stale cached data is reported as a warning; normal
+  collectors recover freshness independently. Unrelated websites and provider
+  backfills are not deployment gates. Full performance/freshness testing remains
+  available through `npm run perf:smoke`.
+- At least three releases are retained by default, plus the rollback target and
+  any older release still used by a running process. A failed activation can
+  reuse its fully staged, checksum-matching artifact without overwriting it.
+
+The printed backend plan is also saved as `DEPLOY_PLAN` in the release.
+For a local, read-only comparison of two extracted source trees:
 
 ```bash
-boonetools_source_dir="$(git rev-parse --show-toplevel)"
-boonetools_release_dir="$(mktemp -d /private/tmp/boonetools-release.XXXXXX)"
-git clone --branch main https://github.com/erebuskaimoros/boonetools.git "$boonetools_release_dir"
-cd "$boonetools_release_dir"
-if test -f "$boonetools_source_dir/.env"; then
-  cp "$boonetools_source_dir/.env" .env
-fi
-npm ci
-npm --prefix backend ci
-npm run check
-npm test
-npm run backend:test
-git status --short
+node scripts/backend-deploy-plan.mjs /path/to/previous /path/to/next
 ```
 
-Install both dependency trees before running the complete checks. The frontend
-test command is `npm test`. The `node_modules/` ignore rules cover directories;
-a symlink named `node_modules` appears as untracked and fails the clean-source
-guard. `npm ci` creates the expected directory from the lockfile.
+The frontend runs `npm ci` and its production build in an automatically created
+temporary directory containing only the selected commit. It validates asset
+paths, switches atomically, and compares a public hashed asset against the
+staged file. Local `.env` files are not copied; the default API base is the
+same-origin `/functions/v1`. Export any intentional `VITE_*` build overrides
+explicitly. Server-owned backend secrets are never uploaded.
 
-Use the full commit SHA when locating its CI run; an abbreviated SHA can return
-no results:
+## Production layout
 
-```bash
-boonetools_release_commit="$(git rev-parse HEAD)"
-gh run list --repo erebuskaimoros/boonetools --workflow ci.yml --commit "$boonetools_release_commit" --limit 1
-```
-
-After the matching `verify` check succeeds, run the guarded deploy command from
-this clean checkout. It independently checks branch, source cleanliness, remote
-parity, and CI before building.
-
-```bash
-npm run boonetools:deploy:frontend
-```
-
-Once deployment and all artifact comparisons have finished, return to the source
-checkout and move the temporary checkout to Trash for recoverable cleanup:
-
-```bash
-cd "$boonetools_source_dir"
-boonetools_trash_dir="$HOME/.Trash/${boonetools_release_dir##*/}"
-test ! -e "$boonetools_trash_dir" && mv "$boonetools_release_dir" "$boonetools_trash_dir"
-```
-
-## Server
-
-| Property | Value |
-|----------|-------|
-| Provider | Hetzner Cloud |
-| Host | `boone.tools` |
+| Component | Location |
+| --- | --- |
 | SSH | `root@boone.tools` |
-| Static dir | `/var/www/boone-tools/` |
-| Public URL | [https://boone.tools/](https://boone.tools/) |
-| Legacy redirect | `https://boonewheeler.com/boonetools/*` forwards to the equivalent `https://boone.tools/*` path |
+| Backend | `/opt/boonetools-backend/current` |
+| Backend configuration | `/opt/boonetools-backend/config/backend.env` |
+| Frontend releases | `/var/www/boone-tools-releases/releases/<commit>` |
+| Frontend public directory | `/var/www/boone-tools` |
+| Website | [boone.tools](https://boone.tools/) |
 
-## Deploy
+Defaults can be overridden with `SERVER`, `DEST`, and `KEEP_RELEASES` (minimum 2).
+Frontend also accepts `VERIFY_URL` (HTTPS).
+Application deploys do not change or reload host-wide Caddy configuration.
+Do not bypass the release lock and rollback with a manual production rsync.
 
-For an already clean canonical checkout, run the guarded frontend deploy script:
-
-```bash
-cd /Users/boonewheeler/Desktop/Projects/THORChain/boonetools/website
-npm run boonetools:deploy:frontend
-```
-
-That script:
-
-1. Verifies clean, CI-green `main` from the canonical BooneTools checkout
-2. Builds and checksums an immutable frontend artifact
-3. Acquires the shared BooneTools deployment lock
-4. Stages the release under `/var/www/boone-tools-releases/releases/<commit>`
-5. Verifies every `index.html` asset before atomically switching `current`
-6. Compares a public hashed asset with the staged file and rolls back automatically on failure
-
-Optional overrides:
-
-```bash
-SERVER=root@boone.tools
-DEST=/var/www/boone-tools
-VERIFY_URL=https://boone.tools/
-KEEP_RELEASES=3
-```
-
-Example:
-
-```bash
-SERVER=root@boone.tools DEST=/var/www/boone-tools VERIFY_URL=https://boone.tools/ npm run boonetools:deploy:frontend
-```
-
-## Manual Sync
-
-Do not deploy the production frontend with manual `rsync`; it bypasses the release lock, atomic cutover, artifact verification, and automatic rollback.
-
-Do not use manual `rsync` as a workaround for being in the wrong repo. Use the
-clean release checkout above to deploy committed changes while preserving
-unrelated local work.
+A fresh backend installation still needs server-owned configuration and initial
+data acquisition. Routine deployment does not populate a cold database or prove
+historical completeness; provision/bootstrap new features deliberately. See
+[backend operations](./boonetools-backend-hetzner.md) for feature-specific jobs.
 
 ## Troubleshooting
 
-If the deploy script refuses to run:
+A refused deploy identifies missing CI, an unpublished commit, a wrong origin,
+or an already-active/conflicting release. A fully staged release can be retried;
+an incomplete staging directory requires inspecting the failure before removing
+that exact directory. Never overwrite a release that a running process uses.
 
-- make sure you are inside the BooneTools repo, not the outer THORChain workspace repo
-- check `git remote get-url origin`
-- check `git rev-parse --show-toplevel`
-
-If the site looks stale after deploy:
-
-- hard refresh the browser so it picks up the latest hashed assets
-- verify the current asset list on the server:
+For service diagnostics:
 
 ```bash
-ssh root@boone.tools 'ls -la /var/www/boone-tools/assets | tail -n 20'
+ssh root@boone.tools 'systemctl status boonetools-api'
+ssh root@boone.tools 'journalctl -u boonetools-api --since "10 min ago"'
 ```
 
-If Caddy appears unhealthy:
-
-```bash
-ssh root@boone.tools 'systemctl status caddy'
-ssh root@boone.tools 'journalctl -u caddy --since "10 min ago"'
-```
+After a frontend change, hard refresh to load new hashed assets. If routing itself
+is unhealthy, inspect Caddy independently rather than changing it in an app deploy.

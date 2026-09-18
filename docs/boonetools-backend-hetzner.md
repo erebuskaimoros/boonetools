@@ -123,8 +123,8 @@ details are derived from those same stored actions.
 `/dynamic-fee-snapshot`, `/dynamic-fee-history`, and
 `/vault-explorer-snapshot` also read shared observations and enqueue refreshes.
 Cold responses return 503 with Retry-After; browsers retry while visible and
-keep previously displayed values during refresh. The visitor worker primes
-the two global snapshots during deploy, then refreshes on demand. Individual
+keep previously displayed values during refresh. The visitor worker refreshes
+the two global snapshots on its normal schedule, then on demand. Individual
 field observation times remain available; republishing does not renew their
 source age. Affiliate earnings USD remains refreshable because Midgard values
 it using current RUNE price, while daily RUNE-price buckets reuse the shared
@@ -324,22 +324,27 @@ Production configuration is server-owned at
 ## Deploy
 
 ```bash
-npm run boonetools:deploy:backend
+npm run boonetools:deploy:backend -- <commit-sha>
 ```
 
 That script:
 
-1. Requires a clean `main` commit matching `origin/main` with a successful GitHub Actions `verify` check
+1. Requires an explicit commit on production main with a successful GitHub Actions `verify` check, independently of local branch/dirty state
 2. Creates and checksums an immutable commit artifact
 3. Acquires the server-wide BooneTools deployment lock
 4. Stages code and production dependencies under `/opt/boonetools-backend/releases/<commit>`
-5. Confirms the existing public baseline, quiesces writers, and applies backward-compatible migrations
-6. Installs the release's exact systemd manifest and atomically switches `/opt/boonetools-backend/current`
-7. Restarts listeners, primes read models, verifies that every timer has a future trigger, and runs API, performance, and all-domain health gates
+5. Computes affected persistent services and endpoint checks from the old/new source; schema/package/unit changes select coordinated activation
+6. Coordinates services and applies new backward-compatible migrations only when required, then atomically switches `/opt/boonetools-backend/current`
+7. Restarts affected active persistent services and checks local API health, affected public read models, and resumed timers/services; scheduled acquisition continues normally without blanket priming
 
 If any post-switch gate fails, the deploy atomically restores the previous
-release, reinstalls its unit manifest, restarts it, and verifies both API and
-public-route health. At least three immutable releases are retained by default.
+release, restores affected service state (and its manifest when changed), and
+verifies API and relevant public-route health. At least three immutable releases
+are retained, plus any release still used by a running process. Disabled timers
+and inactive backfills are not started. Cached staleness is warned about, not
+treated as an application activation failure. Full performance/freshness checks
+remain an explicit `npm run perf:smoke` diagnostic. See
+[deployment workflow](./deployment.md) for source selection and recovery.
 Migrations must use expand/contract compatibility because schema changes are
 forward-only during application rollback.
 
@@ -515,8 +520,8 @@ unavailable, and current headline valuations retain the live core price.
 Optional controls are `SYSTEM_INCOME_POL_ACTIVATION_HEIGHT`,
 `SYSTEM_INCOME_POL_REPAIR_BLOCKS_PER_RUN`,
 `SYSTEM_INCOME_POL_REPAIR_CONCURRENCY`, `SYSTEM_INCOME_POL_LP_CONCURRENCY`, and
-`SYSTEM_INCOME_POL_TIMEOUT_MS`. A deployment primes the publisher before the
-public performance gate; subsequent repair is resumable and idempotent.
+`SYSTEM_INCOME_POL_TIMEOUT_MS`. The normal timer publishes the model; repair
+is resumable and idempotent. Deployment does not force historical acquisition.
 
 Migration `049_system_income_burn_tracker.sql` adds route-specific daily RUNE
 burn history and resumable sync state. `boonetools-burn-tracker.timer` refreshes

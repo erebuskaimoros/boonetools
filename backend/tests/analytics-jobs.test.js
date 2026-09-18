@@ -225,60 +225,24 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(bondRefreshTimer, /OnUnitActiveSec=1min/);
   assert.match(voteBackfillTimer, /OnActiveSec=15min/);
   assert.match(voteBackfillTimer, /OnUnitActiveSec=1h/);
-  assert.match(sourceGuard, /production releases require a clean main commit matching origin\/main/);
+  assert.match(sourceGuard, /merge-base --is-ancestor/);
   assert.match(sourceGuard, /check-runs\?per_page=100/);
   assert.match(deployScript, /git .*archive/s);
   assert.match(deployScript, /ARCHIVE_SHA256/);
-  assert.match(
-    deployScript,
-    /tar --no-xattrs --no-mac-metadata[\s\S]*backend shared scripts ops/
-  );
   assert.match(remoteDeployScript, /flock -n 9/);
   assert.match(remoteDeployScript, /atomic_point_current/);
   assert.match(remoteDeployScript, /Rolling back to/);
   assert.match(remoteDeployScript, /chmod 0640 "\$ENV_FILE"/);
   assert.match(remoteDeployScript, /npm ci --omit=dev/);
   assert.match(remoteDeployScript, /boonetools-db-migrate\.sh/);
-  assert.match(remoteDeployScript, /local retry_delay_seconds=35/);
-  assert.match(
-    remoteDeployScript,
-    /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-pol-tracker/
-  );
-  assert.match(
-    remoteDeployScript,
-    /OPTIONAL_PRIME_UNIT_PATTERN=.*boonetools-node-votes-backfill/
-  );
-  assert.match(
-    remoteDeployScript,
-    /if \[\[ "\$unit" =~ \$OPTIONAL_PRIME_UNIT_PATTERN \]\]; then[\s\S]*continuing with its cached read model/
-  );
-  assert.match(remoteDeployScript, /local timer_state_wait_seconds=90/);
-  assert.match(remoteDeployScript, /systemctl show "\$timer" --property=Triggers --value/);
-  assert.match(remoteDeployScript, /target_state" == activating/);
-  assert.match(remoteDeployScript, /still \$target_state after the settle window/);
-  assert.match(remoteDeployScript, /next trigger will be scheduled after the target exits/);
-  assert.match(remoteDeployScript, /refresh_status_models_after_long_primes/);
-  assert.match(remoteDeployScript, /refresh_core_and_app_layer_models/);
-  assert.match(
-    remoteDeployScript,
-    /prime_read_models\(\)[\s\S]*prime_read_model_unit "boonetools-rujira-reserve-payments\.service"[\s\S]*refresh_core_and_app_layer_models/
-  );
-  assert.match(
-    remoteDeployScript,
-    /prime_read_models[\s\S]*boonetools-wasm-arb-economics\.service[\s\S]*boonetools-analytics-read-models\.service[\s\S]*refresh_core_and_app_layer_models[\s\S]*refresh_status_models_after_long_primes/
-  );
-  assert.match(
-    remoteDeployScript,
-    /prime_read_models\(\)[\s\S]*boonetools-node-votes-backfill\.service[\s\S]*boonetools-node-votes-summary\.service/
-  );
-  assert.match(remoteDeployScript, /has no future trigger/);
-  assert.match(remoteDeployScript, /https:\/\/mail\.theaiguys\.ai\//);
+  assert.match(remoteDeployScript, /backend-deploy-plan\.mjs/);
+  assert.doesNotMatch(remoteDeployScript, /prime_read_models|verify_host_routes/);
   assert.doesNotMatch(remoteDeployScript, /systemctl reload caddy/);
   assert.doesNotMatch(remoteDeployScript, /Caddyfile\.boone\.tools/);
   assert.match(frontendDeployScript, /ARCHIVE_SHA256/);
   assert.match(
     frontendDeployScript,
-    /tar --no-xattrs --no-mac-metadata -C "\$ROOT\/dist" -czf "\$ARCHIVE" \./
+    /tar -C "\$BUILD_DIR\/dist" -czf "\$ARCHIVE" \./
   );
   assert.match(remoteFrontendDeployScript, /flock -n 9/);
   assert.match(remoteFrontendDeployScript, /atomic_point_current/);
@@ -287,8 +251,6 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(perfSmoke, /allowStale: false/);
   assert.match(perfSmoke, /--allow-stale-endpoint/);
   assert.match(perfSmoke, /allowStaleEndpoints\.has\(endpoint\.name\)/);
-  assert.match(remoteDeployScript, /--allow-stale-endpoint pol-tvl/);
-  assert.match(remoteDeployScript, /--allow-stale-endpoint rapid-market/);
   assert.match(perfSmoke, /stale response\(s\)/);
   assert.match(perfSmoke, /response content type was not JSON/);
 });

@@ -345,17 +345,14 @@ test('migration and deployment install one persistent consolidated listener', as
   const [migration, unit, deploy] = await Promise.all([
     readFile(new URL('../migrations/043_chain_block_headers.sql', import.meta.url), 'utf8'),
     readFile(new URL('../../ops/systemd/boonetools-chain-stream-listener.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../scripts/deploy-boonetools-backend-remote.sh', import.meta.url), 'utf8')
+    readFile(new URL('../../scripts/backend-deploy-plan.mjs', import.meta.url), 'utf8')
   ]);
-  const persistentStart = deploy.indexOf('start_persistent_services()');
-  const persistentEnd = deploy.indexOf('\n}\n', persistentStart);
-  const persistentFunction = deploy.slice(persistentStart, persistentEnd);
 
   assert.match(migration, /create table if not exists public\.chain_block_headers/i);
   assert.match(migration, /height bigint primary key/i);
   assert.match(migration, /interval_ms integer/i);
   assert.match(unit, /src\/chain-stream-listener\.js/);
-  assert.match(persistentFunction, /boonetools-chain-stream-listener\.service/);
-  assert.doesNotMatch(persistentFunction, /rujira-(?:base-fees|reserve)-listener/);
-  assert.doesNotMatch(persistentFunction, /rapid-swap-listener/);
+  assert.match(deploy, /boonetools-chain-stream-listener\.service/);
+  assert.doesNotMatch(deploy, /rujira-(?:base-fees|reserve)-listener/);
+  assert.doesNotMatch(deploy, /rapid-swap-listener/);
 });
