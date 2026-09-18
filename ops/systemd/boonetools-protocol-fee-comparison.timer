@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh protocol fee comparison every six hours
+
+[Timer]
+OnActiveSec=2m
+OnCalendar=*-*-* 00,06,12,18:20:00 UTC
+AccuracySec=1m
+Persistent=true
+Unit=boonetools-protocol-fee-comparison.service
+
+[Install]
+WantedBy=timers.target

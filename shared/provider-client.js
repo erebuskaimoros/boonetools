@@ -93,6 +93,7 @@ export async function requestFromProviders(options = {}) {
     path = '/',
     timeoutMs = 10000,
     responseType = 'json',
+    allowHtml = false,
     headers = {},
     request = {},
     fetchImpl = globalThis.fetch,
@@ -153,7 +154,10 @@ export async function requestFromProviders(options = {}) {
         throw new ProviderRequestError(message, details);
       }
 
-      if (isProviderChallengeResponse(response)) {
+      // Explicit public-page consumers may expect HTML. Cloudflare's challenge
+      // marker still fails; JSON/API consumers retain the original default.
+      if (isProviderChallengeResponse(response)
+        && !(allowHtml && responseType === 'text' && !response.headers?.get?.('cf-mitigated'))) {
         throw new ProviderRequestError(`Challenge response for ${url}`, {
           url,
           provider: String(base)

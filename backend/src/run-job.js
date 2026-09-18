@@ -1,4 +1,5 @@
 import { closePool } from './db/pool.js';
+import { runProtocolFeeComparison } from './jobs/protocol-fee-comparison.js';
 import { createJobCompletionLog, createJobFailureLog } from './lib/job-log.js';
 import { runAnalyticsReadModels } from './jobs/analytics-read-models.js';
 import { runAppLayerLiveStateScheduler } from './jobs/app-layer-live-state-scheduler.js';
@@ -31,6 +32,7 @@ const jobName = process.argv[2] || '';
 const startedAt = Date.now();
 
 const runners = {
+  'protocol-fee-comparison': runProtocolFeeComparison,
   'analytics-read-models': runAnalyticsReadModels,
   'app-layer-live-state-scheduler': runAppLayerLiveStateScheduler,
   'bond-history-refresh': runBondHistoryRefreshQueue,

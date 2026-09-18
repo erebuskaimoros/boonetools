@@ -13,6 +13,7 @@ const RAPID_RANGE_FROM = Math.floor(Date.UTC(
 ) / 1000);
 const RAPID_RANGE_TO = Math.floor(Date.now() / 1000);
 const ENDPOINTS = [
+  { name: 'protocol-fee-comparison', path: '/protocol-fee-comparison', maxMs: 1_000, maxBytes: 50_000 },
   { name: 'status', path: '/status-dashboard', maxMs: 750, maxBytes: 25_000 },
   { name: 'status-live', path: '/status-live', maxMs: 500, maxBytes: 5_000 },
   { name: 'treasury', path: '/treasury-snapshot', maxMs: 1_500, maxBytes: 200_000 },

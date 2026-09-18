@@ -10,6 +10,7 @@ const persistent = {
   'boonetools-financials.service': 'backend/src/financials-collector.js'
 };
 const endpointGroups = [
+  [/protocol-fee-comparison/, ['protocol-fee-comparison']],
   [/pool-analysis/, ['pool-analysis']],
   [/financials/, ['financials']],
   [/pool-dislocation/, ['pool-dislocation']],

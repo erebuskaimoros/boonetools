@@ -5,6 +5,7 @@ import path from 'path'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { createFinancialsDevPlugin } from './scripts/dev-financials.mjs'
+import { createProtocolFeeComparisonDevPlugin } from './scripts/dev-protocol-fee-comparison.mjs'
 
 const THORNODE_PRIMARY = 'https://gateway.liquify.com/chain/thorchain_api'
 export const THORNODE_ARCHIVE = 'https://thornode-archive.ninerealms.com'
@@ -323,6 +324,7 @@ export default defineConfig({
     nodePolyfills({ include: ['buffer', 'crypto', 'stream', 'process'] }),
     createTreasuryLpProxy(),
     createFinancialsDevPlugin(),
+    createProtocolFeeComparisonDevPlugin(),
     createRujiraBaseLayerDataProxy()
   ],
   // The production SPA is served from the domain root. Root-relative entry

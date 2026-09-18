@@ -26,6 +26,7 @@ import { handleDynamicFeeTransactions } from './handlers/dynamic-fee-transaction
 import { handleDynamicFeeSnapshot, handleDynamicFeeHistory, handleVaultExplorerSnapshot } from './handlers/visitor-snapshots.js';
 import { handleHealth } from './handlers/health.js';
 import { handleFinancials } from './handlers/financials.js';
+import { handleProtocolFeeComparison } from './handlers/protocol-fee-comparison.js';
 import { handleNodeopLeaderboard } from './handlers/nodeop-leaderboard.js';
 import { handleNodeopMeta } from './handlers/nodeop-meta.js';
 import { handleNodeopPerformance } from './handlers/nodeop-performance.js';
@@ -76,6 +77,7 @@ const routes = new Map([
   ['/pool-analysis', route(handlePoolAnalysis, 1, 64)],
   ['/pool-analysis-series', route(handlePoolAnalysisSeries, 2, 16)],
   ['/financials', route(handleFinancials, 1, 64)],
+  ['/protocol-fee-comparison', route(handleProtocolFeeComparison, 1, 64)],
   ['/pol-tracker', route(handleSystemIncomePol, 1, 64)],
   ['/pol-tvl', route(handlePolTracker, 1, 64)],
   ['/burn-tracker', route(handleBurnTracker, 1, 64)],

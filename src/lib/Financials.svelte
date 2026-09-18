@@ -1,7 +1,8 @@
 <script>
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
-  import { FINANCIALS_SERIES, renderFinancialsChart } from './financials/charts.js';
+  import ProtocolComparison from './protocol-fee-comparison/Comparison.svelte';
+  import { FINANCIALS_SERIES } from './financials/series.js';
   import { fetchFinancials } from './financials/api.js';
   import {
     FINANCIALS_RANGES, formatFinancialAmount, formatFinancialDay,
@@ -16,12 +17,12 @@
   let error = '';
   let hidden = [];
   let zoomWindow = null;
-  let canvas;
-  let chart;
   let request;
   let timer;
   let sequence = 0;
   let destroyed = false;
+  let ChartComponent = null;
+  let chartError = '';
 
   $: points = payload?.range === range ? payload.points : [];
   $: selectedPoints = zoomWindow ? points.filter((row) => row.day >= zoomWindow.startDay && row.day <= zoomWindow.endDay) : points;
@@ -34,6 +35,7 @@
   $: amount = (value, compact = true) => formatFinancialAmount(value, currency, compact);
 
   onMount(() => {
+    loadChart();
     load();
     const onVisible = () => { if (document.visibilityState === 'visible') load(true); };
     document.addEventListener('visibilitychange', onVisible);
@@ -44,16 +46,16 @@
     sequence++;
     clearTimeout(timer);
     request?.abort();
-    chart?.destroy();
   });
 
-  async function draw() {
-    await tick();
-    if (destroyed || !canvas) return;
-    chart?.destroy();
-    chart = hasData ? renderFinancialsChart(canvas, points, {
-      currency, hidden, onZoom(window) { zoomWindow = window; }
-    }) : null;
+  async function loadChart() {
+    chartError = '';
+    try {
+      const module = await import('./financials/Chart.svelte');
+      if (!destroyed) ChartComponent = module.default;
+    } catch (failure) {
+      if (!destroyed) chartError = failure.message || 'Chart could not be loaded.';
+    }
   }
 
   async function load(silent = false) {
@@ -70,9 +72,7 @@
       const sameWindow = payload?.range === data.range && payload?.throughDay === data.throughDay;
       payload = data;
       loading = false;
-      await tick();
-      if (sameWindow && chart) chart.updatePoints(data.points);
-      else { zoomWindow = null; await draw(); }
+      if (!sameWindow) zoomWindow = null;
     } catch (failure) {
       if (failure.name !== 'AbortError' && id === sequence) error = failure.message || 'Protocol history could not be loaded';
     } finally {
@@ -99,22 +99,18 @@
     if (next === range) return;
     range = next;
     zoomWindow = null;
-    chart?.destroy();
-    chart = null;
     load();
   }
 
-  async function selectCurrency(next) {
+  function selectCurrency(next) {
     if (next === currency) return;
     currency = next;
     zoomWindow = null;
-    await draw();
   }
 
   function toggleSeries(id) {
     if (!hidden.includes(id) && hidden.length === FINANCIALS_SERIES.length - 1) return;
     hidden = hidden.includes(id) ? hidden.filter((value) => value !== id) : [...hidden, id];
-    chart?.setVisible(id, !hidden.includes(id));
   }
 </script>
 
@@ -200,17 +196,16 @@
           </button>
         {/each}
       </div>
-      {#if zoomWindow}<button class="bracket-button" on:click={() => chart?.resetZoom()}><span>[↺]</span> reset zoom</button>{/if}
+      {#if zoomWindow}<button class="bracket-button" on:click={() => zoomWindow = null}><span>[↺]</span> reset zoom</button>{/if}
     </div>
 
-    <div class="chart-frame" aria-busy={loading}>
-      <canvas bind:this={canvas} aria-label="Daily THORChain swap volume and system income bars with a bonding APR line. Each series has its own labeled axis. Daily values are available in the table below."></canvas>
-      {#if loading}
-        <div class="chart-message" role="status"><span class="loader" aria-hidden="true">▓░░░░</span> Loading {range === 'all' ? 'mainnet' : 'daily'} history…</div>
-      {:else if !hasData}
-        <div class="chart-message">{error ? 'History could not be loaded. Use retry above.' : 'No protocol history is available for this range.'}</div>
-      {/if}
-    </div>
+    {#if chartError}
+      <TerminalAlert tone="err" tag="ERR">{chartError} <button class="inline-action" on:click={loadChart}>retry chart</button></TerminalAlert>
+    {:else if ChartComponent}
+      <svelte:component this={ChartComponent} {points} {currency} {hidden} {zoomWindow} {loading} {hasData} onZoom={(window) => zoomWindow = window} />
+    {:else}
+      <div class="chart-loading" role="status">Loading chart renderer…</div>
+    {/if}
     <div class="chart-footer">
       <span>{formatFinancialDay(selectedPoints[0]?.day)} → {formatFinancialDay(selectedPoints.at(-1)?.day)} <span class="muted-text">· UTC</span></span>
       <span>Independent scales <span class="muted-text">·</span> Drag or pinch to zoom</span>
@@ -232,6 +227,8 @@
       <div class="coverage-note">Some daily values are missing. Totals and averages include only observed days.</div>
     {/if}
   </section>
+
+  <ProtocolComparison />
 
   <section class="methodology" aria-label="Metric definitions">
     <div><h2><span class="volume-value">01</span> VOLUME</h2><p>Executed swap volume across every pool, including trade, secured, and synth swaps. Cross-asset swaps contribute both pool legs.</p></div>
@@ -305,10 +302,7 @@
   .legend button > span { width: 11px; height: 11px; background: var(--series-color); }
   .legend button > span.line-swatch { height: 2px; width: 18px; }
   .legend button.muted > span { background: var(--term-text-4); }
-  .chart-frame { position: relative; height: 430px; width: 100%; }
-  .chart-frame canvas { width: 100%; height: 100%; }
-  .chart-message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 12px; background: var(--term-surface); font-family: var(--term-font-mono); font-size: 12px; color: var(--term-text-3); }
-  .loader { color: var(--term-accent); animation: blink 1s steps(1) infinite; }
+  .chart-loading { display: grid; place-items: center; height: 430px; color: var(--term-text-3); font-size: 12px; }
   .chart-footer { justify-content: space-between; flex-wrap: wrap; border-top: 1px solid var(--term-border); padding-top: 14px; margin-top: 16px; font-size: 11px; color: var(--term-text-3); }
   .coverage-note { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--term-border); color: var(--term-text-3); font-size: 11px; line-height: 1.6; }
   .live-note { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--term-border); font-size: 11px; line-height: 1.8; color: var(--term-text-2); }
@@ -353,10 +347,10 @@
     .button-group button { padding: 7px 10px; }
     .chart-toolbar { align-items: flex-start; flex-direction: column; gap: 2px; margin: 14px 0; }
     .legend { gap: 3px 14px; }
-    .chart-frame { height: 360px; }
+    .chart-loading { height: 360px; }
     .chart-footer { gap: 10px; line-height: 1.6; }
     .methodology { grid-template-columns: 1fr; gap: 20px; }
     .daily-data summary span { display: block; margin: 8px 0 0 15px; }
   }
-  @media (prefers-reduced-motion: reduce) { .cursor, .loader, .source-state i.live { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .cursor, .source-state i.live { animation: none; } }
 </style>

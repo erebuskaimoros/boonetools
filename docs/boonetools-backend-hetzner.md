@@ -46,6 +46,61 @@ verify `/financials?range=30d` before publishing the frontend. Source gaps remai
 explicit, and today's annualized APR is a partial-day estimate. See
 [Financials accounting and operation](../knowledge/financials.md).
 
+### Monthly protocol comparison
+
+`GET /functions/v1/protocol-fee-comparison` serves the second Financials chart:
+monthly swap income less token subsidy for THORChain, NEAR Intents and Chainflip.
+The provider-free reader returns a warming `503` until verified observations
+can produce a monthly value. Unknown/missing observations remain unavailable.
+Current-month values end at the same completed UTC day for all three protocols;
+an old partial month is never promoted to a complete month.
+
+`boonetools-protocol-fee-comparison.timer` runs two minutes after activation,
+then at 00:20, 06:20, 12:20 and 18:20 UTC. The advisory-locked job checkpoints
+daily source observations and finalized Chainflip emission segments in
+`source_observations`, and publishes `protocol-fee-comparison:v1` in
+`api_read_models`. Migration 061 already supplies the acquisition table.
+The window rolls over twelve complete UTC months plus the current month.
+Archive backfill resumes after interruption and can span several collector
+runs on rate-limited public providers; public traffic never triggers it. Existing snapshots survive
+provider failures and expose stale/coverage information.
+
+NEAR wallet attribution now uses the public FastNear transfer index, with
+pagination, internal-transfer exclusion and no contract-call deposits.
+Dune query **8767542** and its SQL are retained only for reconciliation, not
+as an acquisition dependency. NEAR archive blocks supply exact epoch mints;
+the official dashboard's explicitly labeled issuance model is retained until
+the full archive window is verified. Public FastNear calls are paced and each
+run acquires at most 100 new epochs, checkpointing each one. No secrets enter
+the frontend. Deploy the backend and verify this endpoint before the frontend.
+For an authorized manual warmup, run
+`systemctl start boonetools-protocol-fee-comparison.service` and inspect its
+journal; do not run another writer against its acquisition cache.
+
+For the first production rollout, seed the existing database **before deploying
+the new timer**. Copy the local Vite `state.json` to an immutable local snapshot,
+then validate it with
+`node backend/scripts/seed-protocol-fee-comparison.mjs --check SNAPSHOT.json`.
+The same command with `--sql` emits a transaction for `psql -v ON_ERROR_STOP=1`.
+It inserts both the raw acquisition cache (including unfinished archive
+checkpoints) and the rebuilt public read model. It takes the collector's
+advisory lock and refuses to overwrite either existing production record.
+It preserves original observation timestamps and known gaps; it never calls
+providers or promotes modeled NEAR issuance to verified on-chain issuance.
+Verify both records and their `metadata_json.cacheSha256` before deploying
+the backend. The newly introduced timer may then fetch on its normal cadence.
+Do not commit the snapshot/SQL or place it in public frontend assets.
+
+Local Vite has its own six-hour background collector and ignored
+`node_modules/.cache/protocol-fee-comparison/state.json`; its
+`/__protocol-fee-comparison` GET is also read-only. No Dune key is required.
+The UI calls out NEAR's provisional wallet-receipt attribution and allocation
+of 100% of the whole chain's issuance, identifying modeled versus on-chain
+observations. Chainflip uses historical
+on-chain gross emissions, not supply change or a prorated monthly estimate;
+unreviewed runtime versions fail closed. See
+[accounting and Chainflip verification](../knowledge/protocol-fee-comparison.md).
+
 Frontend/runtime env should point to:
 
 ```bash
