@@ -25,8 +25,20 @@ The isolated frontend build then caught a dev-plugin import of backend-only
 configuration (`dotenv`). The old frontend remained live. A failing regression
 test reproduced the import leak; the request transport is now runtime-neutral,
 with backend metrics/cooldown hooks injected only by the production job.
-Frontend-only build verification and the corrected rollout are in progress.
-No unrelated canonical-checkout changes are included.
+The regression test and a production build with backend dependencies removed
+passed. Corrected release `d828fa52e03a7b9a5a4beaa471b5d58ffa83fbdc` passed CI
+and is active on both backend and frontend. Its backend activation was routine
+with no persistent service restarts, preserving the running backfill.
+
+Verified public index, Financials, chart and ECharts renderer asset SHA-256
+hashes against the local production build. Browser checks confirmed both
+charts, 1Y selection, USD/RUNE and legend controls, the 13-month coverage table,
+and no captured browser errors. The API, Financials service and comparison
+timer are active. No unrelated canonical-checkout changes are included.
+
+The end-session skill kept publication scoped to this release worktree and
+preserved unrelated canonical edits. Logged SSH multiplexing friction as
+`pc-20260918-155638-abb103`; no backlog review was requested or performed.
 
 ## Remaining work
 
@@ -34,5 +46,6 @@ No unrelated canonical-checkout changes are included.
   cover August and partial September 2026; NEAR covers January–September 2026
   using the labeled official issuance model until its full on-chain window is
   verified. THORChain covers the full rolling year.
-- Verify the seeded database, deployed public API and production chart before
-  recording rollout completion.
+- The first production run persisted more NEAR epochs (at least 271) before
+  the public archive returned HTTP 429. Checkpoints survive and later scheduled
+  runs resume; the complete on-chain NEAR window is not yet published.

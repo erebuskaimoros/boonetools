@@ -5,18 +5,35 @@ current month partial through a common completed UTC day. Metric is swap
 income minus gross token subsidy, following the September 18, 2026 report
 in the workspace's `artifacts/protocol-fee-comparison/2026-09-18/`.
 
+## Production status — September 18, 2026
+
+CI-green `d828fa5` is deployed to both backend and frontend. Financials uses
+ECharts in production, with the monthly comparison below the main chart.
+The local cache/read model was seeded transactionally at 16:00:23 UTC, before
+timer activation at 16:00:53 and first fetching at 16:02:53. Seed: 382 daily
+observations, 383 CF boundary records, 201 NEAR epoch checkpoints and 52
+verified CF issuance days. Cache SHA-256:
+`6e690197906c0e41cb890788a741aa615e072b35d669ab45e5e0766069c72d4c`.
+
+The public API initially matched the seed exactly. Both release pointers,
+public asset bytes and the browser charts/controls/coverage table were verified.
+The six-hour timer is enabled, and the initial run resumed NEAR checkpoints
+past 271 epochs before a public archive 429. Historical issuance gaps remain;
+this deployment does not establish complete CF/NEAR coverage.
+See [the rollout record](sessions/2026-09-18/session-2.md).
+
 ## Accounting
 
 - TC: daily Midgard `liquidityFees / 1e8 * runePriceUSD` less the signed
   `blockRewards` field at that price. Preserve accounting residuals and
   describe this as reported Reserve rewards, not an audited release ledger.
 - NEAR: daily published Intents revenue multiplied by non-frontend receipts
-  divided by all three fee-wallet receipts. Dune query **8767542**, ISO text
-  parameters `start_date` inclusive and `end_date` exclusive, excludes
-  transfers among the three wallets. Deduct the official revenue dashboard's
-  daily modeled whole-chain NEAR issuance at historical daily USD prices.
-  This is explicitly a 100% network-subsidy scenario and provisional income,
-  not Intents operating profit. Render the Powered by Dune link.
+  divided by all three fee-wallet receipts. Public FastNear transfers exclude
+  internal transfers and contract-call deposits. The official daily whole-chain
+  issuance model remains explicitly labeled until the complete archive mint
+  window is verified. Dune query **8767542** is a reconciliation reference only,
+  not a production dependency. This is a 100% network-subsidy scenario and
+  provisional income, not Intents operating profit.
 - CF: DeFiLlama `chainflip-amm` dailyRevenue (swap Network Fee, not LP fees)
   minus gross FLIP issuance at each day's historical price. Do not use the
   report's 334,000/31 daily pace or net supply as issuance.
@@ -233,7 +250,7 @@ References: [emissions implementation](https://github.com/chainflip-io/chainflip
   No new DB migration is needed. **Not deployed or committed.** Configure the
   local server-only Dune key (or deploy with the existing production key) for
   ongoing wallet acquisition. Deploy backend before the frontend.
-# Production rollout preparation — September 18, 2026
+## Production rollout implementation — September 18, 2026
 
 - Financials now uses lazy-loaded ECharts in production, not the dev-only
   comparison switch. Shared range/currency/legend/zoom controls and colored
