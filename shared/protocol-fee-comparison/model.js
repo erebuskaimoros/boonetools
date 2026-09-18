@@ -4,6 +4,7 @@ export function comparisonStartDay(now = Date.now()) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 12, 1)).toISOString().slice(0, 10);
 }
 export const COMPARISON_MODEL_KEY = 'protocol-fee-comparison:v1';
+export const COMPARISON_METHODOLOGY = 'swap-income-less-gross-network-subsidy-v2';
 export const COMPARISON_REFRESH_MS = 6 * 60 * 60_000;
 export const DAY_MS = 86_400_000;
 export const PROTOCOLS = Object.freeze([
@@ -51,8 +52,10 @@ export function monthlyComparison(daily, { now = Date.now(), startDay = comparis
     const protocols = Object.fromEntries(PROTOCOLS.map(({ id }) => {
       const observed = days.map((day) => index.get(day)?.[id]).filter((row) => finite(row?.netUsd) !== null);
       const complete = calendarComplete && observed.length === days.length;
-      const sum = (key) => complete ? observed.reduce((total, row) => total + row[key], 0) : null;
+      const sum = (key) => complete && observed.every(row => finite(row[key]) !== null)
+        ? observed.reduce((total, row) => total + Number(row[key]), 0) : null;
       return [id, { incomeUsd: sum('incomeUsd'), subsidyUsd: sum('subsidyUsd'), netUsd: sum('netUsd'),
+        ...(id === 'near' ? { frontendIncomeUsd: sum('frontendIncomeUsd'), otherIncomeUsd: sum('otherIncomeUsd') } : {}),
         observedDays: observed.length, expectedDays, complete }];
     }));
     return { month, partial, fromDay: days[0], throughDay: days.at(-1), expectedDays, protocols };
@@ -73,7 +76,8 @@ export function ageComparisonPayload(payload, now = Date.now()) {
     if (month.fromDay === start && nextDay(month.throughDay) === end) return { ...month, partial: false };
     const expectedDays = (dayTime(end) - dayTime(start)) / DAY_MS;
     return { ...month, partial: false, expectedDays, protocols: Object.fromEntries(PROTOCOLS.map(({ id }) => [id,
-      { ...month.protocols[id], incomeUsd: null, subsidyUsd: null, netUsd: null, expectedDays, complete: false }
+      { ...month.protocols[id], incomeUsd: null, subsidyUsd: null, netUsd: null, expectedDays, complete: false,
+        ...(id === 'near' ? { frontendIncomeUsd: null, otherIncomeUsd: null } : {}) }
     ])) };
   });
   return { ...payload, months, stale: Boolean(payload.stale || !payload.throughDay || nextDay(payload.throughDay) < dayOf(now)

@@ -104,6 +104,20 @@ Do not commit the snapshot/SQL or place it in public frontend assets.
 Local Vite has its own six-hour background collector and ignored
 `node_modules/.cache/protocol-fee-comparison/state.json`; its
 `/__protocol-fee-comparison` GET is also read-only. No Dune key is required.
+Methodology `swap-income-less-gross-network-subsidy-v2` includes NEAR's own
+frontend earnings in total retained Intents income. Published `dailyRevenue`
+already includes that wallet, so do not add its receipts again. Daily receipt
+ratios split the total into frontend and other retained income for disclosure;
+third-party payouts, transfers between the three wallets and contract-call
+deposits remain excluded. Monthly payloads expose `frontendIncomeUsd` and
+`otherIncomeUsd`; incomplete months keep both unavailable.
+
+After a methodology release, `runProtocolFeeComparison({ rebuildOnly: true })`
+can republish the saved production cache under the normal collector advisory
+lock. This mode makes no provider calls, never writes acquisition data, retains
+source warnings/observation timestamps, and refuses an empty rebuild. It does
+not establish fresh source coverage. Keep the acquisition timer enabled.
+
 The UI calls out NEAR's provisional wallet-receipt attribution and allocation
 of 100% of the whole chain's issuance, identifying modeled versus on-chain
 observations. Chainflip uses historical

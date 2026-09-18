@@ -1,4 +1,4 @@
-import { calendarDays, comparisonStartDay, contribution, DAY_MS, dayOf, dayTime, finite, monthlyComparison, nextDay, PROTOCOLS } from '../../../shared/protocol-fee-comparison/model.js';
+import { calendarDays, COMPARISON_METHODOLOGY, comparisonStartDay, contribution, DAY_MS, dayOf, dayTime, finite, monthlyComparison, nextDay, PROTOCOLS } from '../../../shared/protocol-fee-comparison/model.js';
 import { createChainflipReader } from './chainflip.js';
 import { collectNearIssuance, nearWalletDays } from './near.js';
 
@@ -62,15 +62,21 @@ export function deriveComparisonDay(day, raw = {}) {
   const validRunePrice = runePrice > 0;
   const wallets = raw.wallets;
   const front = finite(wallets?.frontend_near), other = finite(wallets?.other_near);
-  const retainedFraction = front !== null && other !== null && front >= 0 && other >= 0 && front + other > 0 ? other / (front + other) : null;
   const nearRevenue = finite(raw.nearRevenue), nearPrice = finite(raw.nearPrice), nearIssuance = finite(raw.nearIssuance);
+  // dailyRevenue already includes the proprietary frontend, not third-party
+  // distribution fees. Keep the full retained amount; split it for disclosure,
+  // never add frontend receipts to that total a second time.
+  const validWallets = front !== null && other !== null && front >= 0 && other >= 0;
+  const nearIncome = nearRevenue !== null && nearRevenue >= 0 && validWallets
+    && (front + other > 0 || nearRevenue === 0) ? nearRevenue : null;
+  const frontendIncomeUsd = nearIncome === null ? null : front + other > 0 ? nearIncome * front / (front + other) : 0;
   const flipPrice = finite(raw.flipPrice);
   const flipTokens = raw.flipIssuance?.atomic !== undefined ? Number(BigInt(raw.flipIssuance.atomic)) / 1e18 : null;
   return { day,
     thorchain: contribution(validRunePrice && feesRune !== null ? feesRune / 1e8 * runePrice : null,
       validRunePrice && rewardsRune !== null ? rewardsRune / 1e8 * runePrice : null),
-    near: contribution(nearRevenue === 0 && front === 0 && other === 0 ? 0 : retainedFraction !== null && nearRevenue !== null ? nearRevenue * retainedFraction : null,
-      nearPrice > 0 && nearIssuance !== null ? nearPrice * nearIssuance : null),
+    near: { ...contribution(nearIncome, nearPrice > 0 && nearIssuance !== null ? nearPrice * nearIssuance : null),
+      frontendIncomeUsd, otherIncomeUsd: nearIncome === null ? null : nearIncome - frontendIncomeUsd },
     chainflip: contribution(raw.chainflipRevenue, flipPrice > 0 && flipTokens !== null ? flipTokens * flipPrice : null)
   };
 }
@@ -85,9 +91,9 @@ export function buildComparisonPayload(cache, { now = Date.now(), startDay = com
     throughDay: throughDay || null, currency: 'USD', interval: 'month',
     stale: errors.length > 0 || !throughDay || nextDay(throughDay) < endDay
       || months.some((month) => PROTOCOLS.some(({ id }) => !month.protocols[id].complete)),
-    errors, months, methodology: 'swap-income-less-gross-network-subsidy-v1',
+    errors, months, methodology: COMPARISON_METHODOLOGY,
     chainflipIssuance: 'Historical on-chain emission amounts × finalized block counts; not net supply or a reported monthly pace.',
-    nearAllocation: '100% of whole-chain NEAR issuance; non-frontend Intents wallet-receipt income proxy.',
+    nearAllocation: '100% of whole-chain NEAR issuance; retained Intents wallet-receipt income including its own frontend, excluding third-party payouts.',
     nearIssuanceMethod: daysSourceMethod(cache, startDay, endDay, 'nearIssuanceMethod', 'nearIssuance', 'dashboard-model'),
     nearWalletMethod: daysSourceMethod(cache, startDay, endDay, 'source', 'wallets', 'dune'),
     nearWalletSource: 'https://docs.fastnear.com/transfers/query' };

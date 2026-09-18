@@ -2,10 +2,11 @@
   import { onMount, onDestroy } from 'svelte';
   import TerminalAlert from '../components/terminal/TerminalAlert.svelte';
   import { booneToolsApi } from '../api/boonetools.js';
-  import { PROTOCOLS, comparisonStartDay, formatComparisonMonth, formatComparisonUsd } from '../../../shared/protocol-fee-comparison/model.js';
+  import { PROTOCOLS, COMPARISON_METHODOLOGY, comparisonStartDay, formatComparisonMonth, formatComparisonUsd } from '../../../shared/protocol-fee-comparison/model.js';
   let payload, Chart, error = '', loading = true, hidden = [], timer, request, destroyed = false, generation = 0;
   $: incomplete = payload?.months?.some(month => PROTOCOLS.some(({ id }) => !month.protocols[id].complete));
   $: nearOnchain = payload?.nearIssuanceMethod === 'onchain-epoch-mints-v1';
+  $: includesFrontend = payload?.methodology === COMPARISON_METHODOLOGY;
   async function load() {
     const current = ++generation;
     request?.abort(); request = new AbortController(); clearTimeout(timer);
@@ -46,11 +47,11 @@
   {#if Chart && payload?.months?.length}<svelte:component this={Chart} months={payload.months} {hidden} />
   {:else}<div class="empty" role="status">{loading ? 'Loading monthly comparison…' : 'Waiting for verified source coverage. No estimates are substituted for missing data.'}</div>{/if}
   <div class="footer"><span>{payload?.fromDay || comparisonStartDay()} → {payload?.throughDay || 'pending'} · UTC</span><span>{payload?.stale ? 'SOURCE DELAYED' : 'REFRESHES EVERY 6 HOURS'} · * partial month</span></div>
-  <p class="qualification"><strong>100% network-subsidy scenario, not operating profit.</strong> NEAR Intents uses provisional non-frontend wallet receipts and deducts {nearOnchain ? 'on-chain' : 'modeled'} issuance for the entire NEAR chain, which also secures other applications. THORChain includes reported Reserve block rewards; Chainflip uses historical on-chain issuance before burns.</p>
+  <p class="qualification"><strong>100% network-subsidy scenario, not operating profit.</strong> NEAR Intents uses provisional retained wallet receipts{includesFrontend ? ', including its own frontend,' : ', excluding its frontend in this older snapshot,'} and deducts {nearOnchain ? 'on-chain' : 'modeled'} issuance for the entire NEAR chain, which also secures other applications. THORChain includes reported Reserve block rewards; Chainflip uses historical on-chain issuance before burns.</p>
   <details><summary>METHODOLOGY &amp; MONTHLY DATA</summary>
     <p>THORChain: Midgard liquidity fees minus reported block rewards, valued using each day’s RUNE price. The signed block-reward field can contain accounting residuals; it is not an audited gross Reserve-release ledger.</p>
     <p>Chainflip: AMM Network Fee income only, minus historical FLIP emissions reconstructed from finalized blocks and their on-chain emission amounts. LP, broker, gas and lending income are excluded. Unverified runtime upgrades leave a data gap, never an assumed emission rate.</p>
-    <p>NEAR: published Intents revenue allocated by daily NEAR/wNEAR receipts to the 1Click fund and buyback wallets, excluding the frontend wallet, internal transfers and contract-call deposits; minus {nearOnchain ? 'gross whole-chain issuance measured from epoch-boundary supply changes plus included chunk burns' : 'the official dashboard’s daily whole-chain issuance model (retained until the archive backfill is verified)'}. The receipt proxy does not reconcile with the dashboard’s other revenue streams. No verifier fee is added again.</p>
+    <p>NEAR: {includesFrontend ? 'total retained Intents revenue across its proprietary frontend, 1Click fund and buyback wallets. The included frontend share is allocated using each day’s NEAR/wNEAR receipt split and shown in the tooltip' : 'this older snapshot excludes the proprietary frontend share from retained Intents revenue'}. Third-party payouts, internal transfers and contract-call deposits are excluded. Deducts {nearOnchain ? 'gross whole-chain issuance measured from epoch-boundary supply changes plus included chunk burns' : 'the official dashboard’s daily whole-chain issuance model (retained until the archive backfill is verified)'}. The receipt proxy does not reconcile with the dashboard’s other revenue streams. No verifier fee or frontend income is added a second time.</p>
     <p>Subsidies use historical daily USD prices before summing months. All series share the same cutoff, using completed UTC days. Missing days make that protocol’s month unavailable; the current month may be partial.</p>
     {#if payload?.errors?.length}<p class="diagnostic">{payload.errors.join(' · ')}</p>{/if}
     {#if payload?.months?.length}

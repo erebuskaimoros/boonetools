@@ -3,7 +3,7 @@ import { withAdvisoryLock } from '../db/lock.js';
 import { requestFromProviders } from '../lib/provider-client.js';
 import { loadAcquisition, saveAcquisition } from '../shared/acquisition-cache.js';
 import { providerLifecycleHooks } from '../shared/provider-cooldown.js';
-import { publishReadModel } from '../shared/read-models.js';
+import { getReadModel, publishReadModel } from '../shared/read-models.js';
 import { buildComparisonPayload, collectComparison, emptyComparisonCache } from '../protocol-fee-comparison/collector.js';
 import { createComparisonRequest } from '../../../shared/protocol-fee-comparison/request.js';
 
@@ -21,10 +21,22 @@ export async function runProtocolFeeComparison(options = {}) {
       ...buildComparisonPayload(current, { now, errors: ['Source acquisition is in progress; displaying verified checkpoints.'] }),
       asOf, stale: true, acquisitionInProgress: true
     });
-    const publish = async (payload) => {
+    const publish = async (payload, publication = {}) => {
       if (hasComparisonData(payload)) await publishReadModel(COMPARISON_MODEL_KEY, payload, {
-        client, ttlMs: COMPARISON_REFRESH_MS * 2, sourceUpdatedAt: `${nextDay(payload.throughDay)}T00:00:00Z` });
+        client, ttlMs: COMPARISON_REFRESH_MS * 2, sourceUpdatedAt: `${nextDay(payload.throughDay)}T00:00:00Z`, ...publication });
     };
+    if (options.rebuildOnly) {
+      // Methodology releases can republish saved history without refetching or
+      // modifying raw observations. Preserve source warnings and observation age.
+      const previous = await getReadModel(COMPARISON_MODEL_KEY, { client });
+      const payload = { ...buildComparisonPayload(cache, { now,
+        errors: previous?.payload?.errors || ['Rebuilt from saved observations; source refresh is pending.'] }),
+        asOf: cached?.observedAt, acquisitionInProgress: false };
+      if (!hasComparisonData(payload) || !payload.asOf) throw new Error('Saved comparison has no aligned observations to rebuild');
+      payload.stale ||= Boolean(previous?.stale || previous?.payload?.stale);
+      await publish(payload, { generatedAt: payload.asOf });
+      return { months: payload.months.length, throughDay: payload.throughDay, rebuilt: true };
+    }
     // A previous process can have saved months of history before being killed.
     // Expose that durable work before making any new provider requests, without
     // representing recovery as a successfully completed source refresh.

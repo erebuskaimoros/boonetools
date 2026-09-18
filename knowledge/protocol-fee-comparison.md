@@ -52,8 +52,12 @@ See [the repair record](sessions/2026-09-18/session-3.md) for rollout verificati
 - TC: daily Midgard `liquidityFees / 1e8 * runePriceUSD` less the signed
   `blockRewards` field at that price. Preserve accounting residuals and
   describe this as reported Reserve rewards, not an audited release ledger.
-- NEAR: daily published Intents revenue multiplied by non-frontend receipts
-  divided by all three fee-wallet receipts. Public FastNear transfers exclude
+- NEAR: total daily published retained Intents revenue, **including its own
+  frontend earnings**. This user-approved methodology v2 supersedes the report's
+  narrower backend-only boundary. The total already includes the frontend; do
+  not add wallet receipts to it again. Daily receipt ratios disclose the frontend
+  and other retained shares separately in the tooltip. Third-party payouts remain
+  outside retained income. Public FastNear transfers exclude
   internal transfers and contract-call deposits. The official daily whole-chain
   issuance model remains explicitly labeled until the complete archive mint
   window is verified. Dune query **8767542** is a reconciliation reference only,

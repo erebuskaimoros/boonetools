@@ -5,7 +5,7 @@ import { comparisonOption, comparisonTooltip } from '../src/lib/protocol-fee-com
 
 const now = Date.parse('2026-09-18T12:00:00Z');
 const days = calendarDays('2026-08-01', '2026-09-18').map((day) => ({ day,
-  thorchain: contribution(100, 1), near: contribution(20, 200), chainflip: contribution(15, 10) }));
+  thorchain: contribution(100, 1), near: { ...contribution(20, 200), frontendIncomeUsd: 5, otherIncomeUsd: 15 }, chainflip: contribution(15, 10) }));
 const months = monthlyComparison(days, { now, startDay: '2026-08-01', endDay: '2026-09-18' });
 
 test('rolling year starts at UTC month boundary and retains twelve full months plus current month', () => {
@@ -23,6 +23,8 @@ test('calendar months sum daily USD and retain signed contribution and the curre
   assert.deepEqual(months.map((row) => [row.month, row.partial, row.expectedDays]), [['2026-08', false, 31], ['2026-09', true, 17]]);
   assert.equal(months[0].protocols.thorchain.netUsd, 31 * 99);
   assert.equal(months[1].protocols.near.netUsd, 17 * -180);
+  assert.equal(months[1].protocols.near.frontendIncomeUsd, 17 * 5);
+  assert.equal(months[1].protocols.near.otherIncomeUsd, 17 * 15);
   assert.equal(months[1].throughDay, '2026-09-17');
 });
 
@@ -32,6 +34,7 @@ test('a missing day makes only the affected protocol unavailable; real zero is r
   rows[1].chainflip = contribution(0, 0);
   const result = monthlyComparison(rows, { now, startDay: '2026-08-01', endDay: '2026-09-18' });
   assert.equal(result[0].protocols.near.netUsd, null);
+  assert.equal(result[0].protocols.near.frontendIncomeUsd, null);
   assert.equal(result[0].protocols.near.observedDays, 30);
   assert.equal(result[0].protocols.thorchain.complete, true);
   assert.equal(result[0].protocols.chainflip.netUsd, 30 * 5);
@@ -53,6 +56,8 @@ test('last month-to-date snapshot becomes unavailable, never a completed histori
   assert.equal(aged.months[0].protocols.near.netUsd, -5580);
   assert.equal(aged.months[1].partial, false);
   assert.equal(aged.months[1].protocols.near.netUsd, null);
+  assert.equal(aged.months[1].protocols.near.frontendIncomeUsd, null);
+  assert.equal(aged.months[1].protocols.near.otherIncomeUsd, null);
   assert.equal(aged.months[1].protocols.near.expectedDays, 30);
   assert.equal(payload.months[1].partial, true);
   assert.equal(hasComparisonData(aged), true);
@@ -85,7 +90,21 @@ test('tooltip has matching square swatches, components, cutoff and NEAR qualific
   assert.match(tooltip, /2026-09-17 UTC/);
   assert.equal((tooltip.match(/data-series=/g) || []).length, 3);
   assert.match(tooltip, /Swap income:/); assert.match(tooltip, /Token subsidy:/);
+  assert.match(tooltip, /Own frontend \(included\): \$85/);
+  assert.match(tooltip, /Other retained income: \$255/);
   assert.match(tooltip, /100% of chain issuance/);
   assert.doesNotMatch(comparisonTooltip(months[0], ['near']), /data-series="near"/);
   assert.equal(comparisonOption(months, ['near']).series.length, 2);
+});
+
+test('legacy or incomplete NEAR breakdowns are not shown as zero', () => {
+  const legacy = structuredClone(months[0]);
+  delete legacy.protocols.near.frontendIncomeUsd;
+  delete legacy.protocols.near.otherIncomeUsd;
+  assert.doesNotMatch(comparisonTooltip(legacy), /Own frontend|Other retained income/);
+  const missing = structuredClone(days);
+  delete missing[0].near.frontendIncomeUsd;
+  const result = monthlyComparison(missing, { now, startDay: '2026-08-01', endDay: '2026-09-18' });
+  assert.equal(result[0].protocols.near.frontendIncomeUsd, null);
+  assert.equal(result[0].protocols.near.incomeUsd, 620);
 });

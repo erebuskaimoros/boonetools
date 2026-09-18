@@ -11,17 +11,31 @@ import { requestFromProviders } from '../../shared/provider-client.js';
 import { readComparisonCache, saveComparisonCache } from '../../scripts/dev-protocol-fee-comparison.mjs';
 import { FEE_WALLETS, nearEpochMint, nearWalletDays } from '../src/protocol-fee-comparison/near.js';
 
-test('report boundary subtracts subsidies once and excludes frontend receipts; signed reserve residuals survive', () => {
+test('retained NEAR income includes its frontend exactly once; subsidies and signed reserve residuals survive', () => {
   const row = deriveComparisonDay('2026-09-17', {
     earnings: { liquidityFees: '10000000000', blockRewards: '-1000000', runePriceUSD: '2' },
     wallets: { frontend_near: 1, other_near: 3 }, nearRevenue: 100, nearPrice: 2, nearIssuance: 200,
     chainflipRevenue: 30, flipPrice: .5, flipIssuance: { atomic: '20000000000000000000' }
   });
   assert.equal(row.thorchain.netUsd, 200.02);
-  assert.deepEqual(row.near, { incomeUsd: 75, subsidyUsd: 400, netUsd: -325 });
+  assert.deepEqual(row.near, { incomeUsd: 100, frontendIncomeUsd: 25, otherIncomeUsd: 75, subsidyUsd: 400, netUsd: -300 });
   assert.deepEqual(row.chainflip, { incomeUsd: 30, subsidyUsd: 10, netUsd: 20 });
   assert.equal(deriveComparisonDay('2026-09-17', { nearRevenue: 0 }).near.netUsd, null);
   assert.equal(deriveComparisonDay('2026-09-17', { chainflipRevenue: 30, flipPrice: .5 }).chainflip.netUsd, null);
+});
+
+test('NEAR frontend allocation handles zero receipts and refuses missing or inconsistent observations', () => {
+  const raw = { nearRevenue: 100, nearPrice: 2, nearIssuance: 200 };
+  const derive = wallets => deriveComparisonDay('2026-09-17', { ...raw, wallets }).near;
+  assert.equal(derive({ frontend_near: 4, other_near: 0 }).incomeUsd, 100);
+  assert.equal(derive({ frontend_near: 4, other_near: 0 }).frontendIncomeUsd, 100);
+  assert.equal(derive({ frontend_near: 0, other_near: 4 }).frontendIncomeUsd, 0);
+  for (const wallets of [undefined, { frontend_near: 1 }, { frontend_near: -1, other_near: 3 }, { frontend_near: 0, other_near: 0 }]) {
+    assert.equal(derive(wallets).incomeUsd, null);
+    assert.equal(derive(wallets).frontendIncomeUsd, null);
+  }
+  const zero = deriveComparisonDay('2026-09-17', { ...raw, nearRevenue: 0, wallets: { frontend_near: 0, other_near: 0 } }).near;
+  assert.deepEqual(zero, { incomeUsd: 0, frontendIncomeUsd: 0, otherIncomeUsd: 0, subsidyUsd: 400, netUsd: -400 });
 });
 
 test('NEAR server props are decoded as JSON without executing script and missing model fails closed', () => {
@@ -174,7 +188,10 @@ test('collector aligns independently refreshed daily sources and preserves verif
   assert.equal(result.payload.throughDay, '2026-08-02');
   const points = result.payload.months[0].protocols;
   assert.equal(points.thorchain.netUsd, 396);
-  assert.equal(points.near.netUsd, -250);
+  assert.equal(points.near.netUsd, -200);
+  assert.equal(points.near.frontendIncomeUsd, 50);
+  assert.equal(points.near.otherIncomeUsd, 150);
+  assert.equal(result.payload.methodology, 'swap-income-less-gross-network-subsidy-v2');
   assert.equal(points.chainflip.netUsd, 180);
   const failed = await collectComparison({ cache, now: Date.parse('2026-08-03'), startDay: '2026-08-01', request: async () => { throw new Error('offline'); } });
   assert.equal(failed.payload.stale, true);

@@ -12,11 +12,12 @@ const day = (withFlip = true) => ({
   ...(withFlip ? { flipIssuance: { atomic: '1000000000000000000' } } : {})
 });
 
-function database(cache) {
+function database(cache, previous) {
   const published = [], saved = [];
   return { published, saved, async query(sql, args = []) {
     if (/select namespace/.test(sql)) return { rows: [{ payload_json: cache,
       observed_at: '2026-09-02T12:00:00Z', expires_at: '2026-09-02T18:00:00Z' }] };
+    if (/select model_key/.test(sql)) return { rows: previous ? [{ model_key: 'protocol-fee-comparison:v1', payload_json: previous }] : [] };
     if (/insert into source_observations/.test(sql)) {
       const payload = JSON.parse(args[2]); saved.push(payload);
       return { rows: [{ payload_json: payload, observed_at: args[4], expires_at: args[5] }] };
@@ -50,6 +51,37 @@ test('job publishes recovered history before acquisition and each checkpoint bef
   }), /simulated process interruption/);
   assert.equal(enteredCollector, true);
   assert.equal(client.published.at(-1).throughDay, '2026-09-02');
+});
+
+test('cache-only rebuild uses the collector lock, preserves warnings and freshness, and never acquires or overwrites raw data', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('Rebuild must not call providers'); });
+  const cache = emptyComparisonCache();
+  cache.days['2026-09-01'] = { ...day(), wallets: { frontend_near: 1, other_near: 2 } };
+  const original = structuredClone(cache);
+  const client = database(cache, { errors: ['NEAR archive rate-limited'] });
+  const result = await runProtocolFeeComparison({ now: NOW, rebuildOnly: true,
+    lockRunner: async (key, run) => { assert.equal(key, 'boonetools:protocol-fee-comparison'); return run(client); },
+    collector: async () => { throw new Error('Rebuild must not acquire'); } });
+  assert.equal(result.rebuilt, true);
+  assert.deepEqual(cache, original);
+  assert.equal(client.saved.length, 0);
+  assert.equal(client.published.length, 1);
+  const payload = client.published[0];
+  assert.equal(payload.methodology, 'swap-income-less-gross-network-subsidy-v2');
+  assert.equal(payload.months.at(-1).protocols.near.incomeUsd, 3);
+  assert.equal(payload.months.at(-1).protocols.near.frontendIncomeUsd, 1);
+  assert.equal(payload.asOf, '2026-09-02T12:00:00.000Z');
+  assert.equal(payload.acquisitionInProgress, false);
+  assert.equal(payload.stale, true);
+  assert.deepEqual(payload.errors, ['NEAR archive rate-limited']);
+});
+
+test('cache-only rebuild refuses to replace the public model without usable saved data', async () => {
+  const client = database(emptyComparisonCache());
+  await assert.rejects(runProtocolFeeComparison({ now: NOW, rebuildOnly: true,
+    lockRunner: async (_key, run) => run(client), collector: async () => { throw new Error('must not acquire'); } }), /no aligned/i);
+  assert.equal(client.published.length, 0);
+  assert.equal(client.saved.length, 0);
 });
 
 test('collector stops starting days at its runtime budget and returns saved progress for publication', async () => {
