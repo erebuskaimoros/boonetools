@@ -14,7 +14,7 @@
 
 | Date | Focus | Summary | Link |
 |------|-------|---------|------|
-| 2026-09-18 #3 | Protocol comparison backfill lifecycle | Regression-first repair: recovery/checkpoint publication and abortable 20-minute budget; rollout verification pending | [Session](2026-09-18/session-3.md) |
+| 2026-09-18 #3 | Protocol comparison backfill lifecycle | Deployed CI-green `89203bb`; live bounded run published CF December–September, preserving progress and NEAR cooldown reporting | [Session](2026-09-18/session-3.md) |
 | 2026-09-18 #2 | Financials ECharts and protocol comparison | Deployed CI-green `d828fa5` to backend/frontend; seeded local history and checkpoints before fetching; API, assets and browser verified | [Session](2026-09-18/session-2.md) |
 | 2026-09-18 #1 | Simplified Production Deployment | Deployed CI-green `85baecc` to backend/frontend; backend services and timers remained running; public artifacts verified | [Session](2026-09-18/session-1.md) |
 | 2026-09-17 #1 | Production Dashboard Corrections | Deployed signed-reward and XRP 24-hour fee fixes; resolved two release-checkout papercuts | [Session](2026-09-17/session-1.md) |

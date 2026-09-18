@@ -7,8 +7,9 @@ in the workspace's `artifacts/protocol-fee-comparison/2026-09-18/`.
 
 ## Production status — September 18, 2026
 
-CI-green `d828fa5` is deployed to both backend and frontend. Financials uses
-ECharts in production, with the monthly comparison below the main chart.
+CI-green `89203bb` is deployed to the backend with the lifecycle repair below;
+the frontend remains at `d828fa5`. Financials uses ECharts in production, with
+the monthly comparison below the main chart.
 The local cache/read model was seeded transactionally at 16:00:23 UTC, before
 timer activation at 16:00:53 and first fetching at 16:02:53. Seed: 382 daily
 observations, 383 CF boundary records, 201 NEAR epoch checkpoints and 52
@@ -17,9 +18,11 @@ verified CF issuance days. Cache SHA-256:
 
 The public API initially matched the seed exactly. Both release pointers,
 public asset bytes and the browser charts/controls/coverage table were verified.
-The six-hour timer is enabled, and the initial run resumed NEAR checkpoints
-past 271 epochs before a public archive 429. Historical issuance gaps remain;
-this deployment does not establish complete CF/NEAR coverage.
+The six-hour timer is enabled. Following lifecycle repair, production has 300
+verified CF days and 286 NEAR epoch checkpoints. Published CF months cover
+December 2025–September 2026 (September partial); NEAR January–September retains
+the labeled issuance model. Older historical gaps and NEAR archive throttling
+remain; this deployment does not establish complete CF/NEAR coverage.
 See [the rollout record](sessions/2026-09-18/session-2.md).
 
 ### Backfill lifecycle repair
@@ -36,6 +39,12 @@ has a 20-minute budget, including abortable HTTP requests and FastNear pacing,
 so it can publish final partial progress before the unchanged 30-minute service
 limit. Deferred work alone does not fail the job; actual source errors still do.
 No issuance accounting, runtime allowlist or historical-coverage rules change.
+Release `89203bb` passed CI and deployed without migrations or persistent service
+restarts. A live advisory-locked run with a 60-second budget completed in 60.177
+seconds, acquired nine additional CF days, published December 2025, and left
+`acquisitionInProgress=false`. It reported the existing NEAR archive cooldown as
+a source failure and the budget as deferred work; it was not killed by systemd.
+The public monthly values exactly matched a rebuild from persisted observations.
 See [the repair record](sessions/2026-09-18/session-3.md) for rollout verification.
 
 ## Accounting
