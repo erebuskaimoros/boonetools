@@ -7,9 +7,9 @@ in the workspace's `artifacts/protocol-fee-comparison/2026-09-18/`.
 
 ## Production status — September 18, 2026
 
-CI-green `89203bb` is deployed to the backend with the lifecycle repair below;
-the frontend remains at `d828fa5`. Financials uses ECharts in production, with
-the monthly comparison below the main chart.
+CI-green `80e7641` is deployed to backend and frontend, including the lifecycle
+repair below and NEAR methodology v2. Financials uses ECharts in production,
+with the monthly comparison below the main chart.
 The local cache/read model was seeded transactionally at 16:00:23 UTC, before
 timer activation at 16:00:53 and first fetching at 16:02:53. Seed: 382 daily
 observations, 383 CF boundary records, 201 NEAR epoch checkpoints and 52
@@ -18,12 +18,19 @@ verified CF issuance days. Cache SHA-256:
 
 The public API initially matched the seed exactly. Both release pointers,
 public asset bytes and the browser charts/controls/coverage table were verified.
-The six-hour timer is enabled. Following lifecycle repair, production has 300
-verified CF days and 286 NEAR epoch checkpoints. Published CF months cover
-December 2025–September 2026 (September partial); NEAR January–September retains
+The six-hour timer is enabled. Following scheduled backfill, production has 382
+verified CF days and 371 NEAR epoch checkpoints. Published CF months cover
+September 2025–September 2026 (current September partial); NEAR January–September retains
 the labeled issuance model. Older historical gaps and NEAR archive throttling
 remain; this deployment does not establish complete CF/NEAR coverage.
 See [the rollout record](sessions/2026-09-18/session-2.md).
+
+Methodology v2 includes NEAR's own frontend income, as requested after reviewing
+the report's narrower backend-only definition. A cache-only rebuild preserved
+raw observations and source warnings. September through the 17th now has
+$772,560 total retained NEAR income, including $204,720.97 frontend income;
+the whole-chain subsidy deduction is unchanged. The tooltip discloses both
+income components. See [the methodology rollout](sessions/2026-09-18/session-4.md).
 
 ### Backfill lifecycle repair
 

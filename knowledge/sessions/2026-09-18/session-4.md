@@ -33,10 +33,28 @@ explicitly supersedes its narrower NEAR business boundary for the live chart.
 
 ## Rollout
 
-CI and production deployment are pending. A new advisory-locked
-`rebuildOnly` mode will publish saved observations under the new methodology
-without provider calls or acquisition writes, preserving observation age and
-source warnings. The six-hour timer remains unchanged.
+CI-green `80e7641d5e498046c309e7b8d1f93cde2e481503` is deployed to backend and
+frontend. CI passed 337 frontend tests and 628 backend tests (12 additional
+expected skips), checks and production build. Backend activation was routine,
+without migrations; only the affected API service restarted. The frontend's
+isolated build and public artifact verification passed.
+
+The advisory-locked `rebuildOnly` job completed successfully in 165ms and
+published all 13 monthly buckets with methodology v2, without provider calls
+or acquisition writes. The raw cache SHA-256 remained
+`aaf419c23af23b129b7463d7dde1c85f9e66786d51f647034761eec3e6bb01dc`,
+and its observation timestamp remained September 18 at 18:31:23.964 UTC.
+The cache now contains 382 CF days and 371 NEAR epochs from the scheduled run
+that preceded this change. NEAR's existing archive HTTP 429 warning is preserved.
+
+Public monthly values exactly match rebuilding that raw cache. Checked all
+months against the pre-release API: TC/CF and NEAR subsidies are unchanged;
+each NEAR income increase equals the included frontend share. The ordinary
+public URL serves v2. Browser verification confirmed the updated qualification,
+methodology text, September table values, and visible tooltip: $772,560 total,
+$204,721 own frontend, $567,839 other retained income, -$2,660,521 after subsidy.
+Both release pointers and active API/Financials/timer were verified. The
+six-hour timer remains unchanged; older NEAR gaps remain explicit.
 
 The end-session skill scopes publication to this release worktree; unrelated
 canonical edits are preserved. No papercut backlog review was requested.
