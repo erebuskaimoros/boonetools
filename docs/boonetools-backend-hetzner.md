@@ -442,6 +442,16 @@ that queue every minute. Normal request handlers never perform historical
 provider scans, including on cold misses: they return `202` until the worker
 has materialized a cache row. The frontend polls `refresh=status`, which reads
 the cache without re-enqueueing work or disturbing retry backoff.
+
+Bond History historical node and network acquisition uses RPC `abci_query`
+with an exact response-height check. REST may return current state despite a
+historical height parameter. Verified observations and verified empty-churn
+proofs use separate v2 cache namespaces; older unverified raw observations
+are not reused. Existing materialized history is preserved. The repair script
+uses the same verified acquisition path; archive failures leave gaps to retry
+rather than recording current state as historical data. A deployment does not
+trigger a full historical rebuild or certify every existing row.
+
 Maintenance timers use `OnActiveSec` for their initial activation so restarting
 them on a long-running host always produces a next trigger; `OnBootSec` must
 not be used for deploy-restarted timers.

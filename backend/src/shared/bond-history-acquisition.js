@@ -1,52 +1,44 @@
-import { fetchThorchain } from './thornode.js';
 import { calculateBondHistoryRow, hasBondHistoryValue } from './bond-history.js';
 import { acquisitionSourceKey, acquireCached, loadAcquisition, saveAcquisition } from './acquisition-cache.js';
-
-function unsigned(value) { return /^\d+$/.test(String(value ?? '')); }
-
-function validNode(payload, address) {
-  return payload?.node_address === address && unsigned(payload?.current_award)
-    && unsigned(payload?.bond_providers?.node_operator_fee)
-    && Array.isArray(payload?.bond_providers?.providers)
-    && payload.bond_providers.providers.every((provider) => typeof provider?.bond_address === 'string' && unsigned(provider?.bond));
-}
+import {
+  historicalBondHeight, fetchHistoricalBondNode, fetchHistoricalBondNetwork,
+  validHistoricalNode, validHistoricalNetwork
+} from './bond-history-rpc.js';
 
 export async function fetchNodeAtHeight(nodeAddress, height, options = {}) {
-  if (!Number.isSafeInteger(Number(height)) || Number(height) <= 0) throw new Error('Invalid historical node height');
+  height = historicalBondHeight(height);
   const result = await (options.acquireCached || acquireCached)(options.client, {
-    namespace: 'thorchain-mainnet:historical-node:v1', identity: { address: nodeAddress, height: Number(height) },
-    source: 'thornode:node', immutable: true,
-    validate: (payload) => validNode(payload, nodeAddress),
-    load: (client) => (options.fetchThorchain || fetchThorchain)(`/thorchain/node/${nodeAddress}?height=${height}`, {
-      historical: true, cooldownClient: client, sharedCooldown: true,
-      validateResponse: (payload) => validNode(payload, nodeAddress) ? null : 'Invalid historical node response'
-    })
+    namespace: 'thorchain-mainnet:historical-node:v2', identity: { address: nodeAddress, height },
+    source: 'thorchain-rpc:types.Query/Node', immutable: true,
+    validate: (payload) => validHistoricalNode(payload, nodeAddress, height),
+    load: (client) => fetchHistoricalBondNode(nodeAddress, height, { ...options, client })
   });
-  return result.payload;
+  return result.payload.data;
 }
 
 export async function fetchNetworkAtHeight(height, options = {}) {
-  if (!Number.isSafeInteger(Number(height)) || Number(height) <= 0) throw new Error('Invalid historical network height');
-  const valid = (payload) => unsigned(payload?.rune_price_in_tor);
+  height = historicalBondHeight(height);
   const result = await (options.acquireCached || acquireCached)(options.client, {
-    namespace: 'thorchain-mainnet:historical-network:v1', identity: String(height),
-    source: 'thornode:network', immutable: true, validate: valid,
-    load: (client) => (options.fetchThorchain || fetchThorchain)(`/thorchain/network?height=${height}`, {
-      historical: true, cooldownClient: client, sharedCooldown: true,
-      validateResponse: (payload) => valid(payload) ? null : 'Invalid historical network response'
-    })
+    namespace: 'thorchain-mainnet:historical-network:v2', identity: String(height),
+    source: 'thorchain-rpc:types.Query/Network', immutable: true,
+    validate: (payload) => validHistoricalNetwork(payload, height),
+    load: (client) => fetchHistoricalBondNetwork(height, { ...options, client })
   });
-  return result.payload;
+  return result.payload.data;
 }
 
 export async function processChurn(bondAddress, nodeAddresses, churnHeight, churnTimestamp, ratesJson, options = {}) {
-  const namespace = 'bond-history:empty-churn:v1';
-  const identity = acquisitionSourceKey({ bondAddress, nodes: [...new Set(nodeAddresses)].sort(), churnHeight });
+  const namespace = 'bond-history:empty-churn:v2';
+  const nodes = [...new Set(nodeAddresses)].sort();
+  const identity = acquisitionSourceKey({ bondAddress, nodes, churnHeight });
   const empty = await (options.loadAcquisition || loadAcquisition)(options.client, namespace, identity, { requireComplete: true });
-  if (empty?.completedAt && empty?.payload?.churn_height === churnHeight && !hasBondHistoryValue(empty.payload)) {
-    return { ...empty.payload, rates_json: ratesJson };
+  const proof = empty?.payload;
+  if (empty?.completedAt && proof?.node_height === churnHeight - 1 && proof.network_height === churnHeight
+    && Array.isArray(proof.nodes) && JSON.stringify(proof.nodes) === JSON.stringify(nodes)
+    && proof.row?.churn_height === churnHeight && proof.row.rune_stack === 0 && proof.row.user_bond === 0) {
+    return { ...proof.row, rates_json: ratesJson };
   }
-  const nodePromises = nodeAddresses.map(async (address) => {
+  const nodePromises = nodes.map(async (address) => {
     try {
       return {
         ok: true,
@@ -88,8 +80,10 @@ export async function processChurn(bondAddress, nodeAddresses, churnHeight, chur
   });
   if (!hasBondHistoryValue(row)) {
     await (options.saveAcquisition || saveAcquisition)(options.client, {
-      namespace, identity, payload: { ...row, rates_json: null },
-      source: 'thornode:verified-empty-churn', completedAt: new Date().toISOString()
+      namespace, identity, payload: {
+        row: { ...row, rates_json: null }, node_height: churnHeight - 1, network_height: churnHeight, nodes
+      },
+      source: 'thorchain-rpc:verified-empty-churn', completedAt: new Date().toISOString()
     });
   }
   return row;

@@ -7,15 +7,24 @@ function toFiniteNumber(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-export function getEffectiveChurnPeriodSeconds({ lastChurnTimestamp, churnIntervalSeconds, now = Date.now() / 1000 }) {
-  const normalizedNow = toFiniteNumber(now, Date.now() / 1000);
+function normalizeMinProgressRatio(minProgressRatio) {
+  return Math.max(0, Math.min(1, toFiniteNumber(minProgressRatio, MIN_CHURN_PROGRESS_RATIO)));
+}
+
+export function getEffectiveChurnPeriodSeconds({
+  lastChurnTimestamp,
+  churnIntervalSeconds,
+  now = Date.now() / 1000,
+  minProgressRatio = MIN_CHURN_PROGRESS_RATIO
+}) {
+  const normalizedNow = toFiniteNumber(now, 0);
   const normalizedLastChurn = toFiniteNumber(lastChurnTimestamp, 0);
-  const elapsedSeconds = Math.max(0, normalizedNow - normalizedLastChurn);
+  if (normalizedLastChurn <= 0 || normalizedNow <= normalizedLastChurn) return 0;
+
+  const elapsedSeconds = normalizedNow - normalizedLastChurn;
   const normalizedIntervalSeconds = Math.max(0, toFiniteNumber(churnIntervalSeconds, 0));
 
-  return normalizedIntervalSeconds > 0
-    ? Math.max(elapsedSeconds, normalizedIntervalSeconds)
-    : elapsedSeconds;
+  return Math.max(elapsedSeconds, normalizedIntervalSeconds * normalizeMinProgressRatio(minProgressRatio));
 }
 
 export function getEffectiveChurnProgress({
@@ -28,10 +37,7 @@ export function getEffectiveChurnProgress({
   const progressRatio = normalizedTotalBlocks > 0
     ? normalizedProgressedBlocks / normalizedTotalBlocks
     : 0;
-  const normalizedMinProgressRatio = Math.max(
-    0,
-    Math.min(1, toFiniteNumber(minProgressRatio, MIN_CHURN_PROGRESS_RATIO))
-  );
+  const normalizedMinProgressRatio = normalizeMinProgressRatio(minProgressRatio);
 
   return {
     progressRatio,
@@ -53,7 +59,11 @@ export function estimateCurrentChurnYields({
   now = Date.now() / 1000,
   compoundingPeriods = 365
 }) {
-  const normalizedReward = toFiniteNumber(reward, 0);
+  const normalizedReward = Math.max(0, toFiniteNumber(reward, 0));
+  const normalizedPrincipal = Math.max(0, toFiniteNumber(principal, 0));
+  const normalizedCompoundingPeriods = toFiniteNumber(compoundingPeriods, 365) > 0
+    ? toFiniteNumber(compoundingPeriods, 365)
+    : 365;
   const progress = getEffectiveChurnProgress({
     progressedBlocks,
     totalBlocks,
@@ -69,10 +79,15 @@ export function estimateCurrentChurnYields({
     ? normalizedProgressedBlocks * normalizedSecondsPerBlock
     : 0;
 
-  if ((blockPeriodSeconds > 0 || elapsedBlockPeriodSeconds > 0) && normalizedReward > 0) {
-    const effectivePeriodSeconds = Math.max(blockPeriodSeconds, elapsedBlockPeriodSeconds);
-    const apr = calculateAPR(normalizedReward, principal, effectivePeriodSeconds);
-    const apy = calculateAPY(apr, compoundingPeriods);
+  if (elapsedBlockPeriodSeconds > 0) {
+    // current_award has accrued only since the last payout. Annualize that
+    // elapsed period, with a small floor to limit noise immediately after churn.
+    const effectivePeriodSeconds = Math.max(
+      elapsedBlockPeriodSeconds,
+      blockPeriodSeconds * normalizeMinProgressRatio(minProgressRatio)
+    );
+    const apr = calculateAPR(normalizedReward, normalizedPrincipal, effectivePeriodSeconds);
+    const apy = calculateAPY(apr, normalizedCompoundingPeriods);
 
     return {
       apr,
@@ -81,18 +96,20 @@ export function estimateCurrentChurnYields({
       progressRatio: progress.progressRatio,
       effectiveProgressRatio: progress.effectiveProgressRatio,
       effectivePeriodSeconds,
-      isProlonged: elapsedBlockPeriodSeconds > blockPeriodSeconds
+      isProlonged: blockPeriodSeconds > 0 && elapsedBlockPeriodSeconds > blockPeriodSeconds
     };
   }
 
   const effectivePeriodSeconds = getEffectiveChurnPeriodSeconds({
     lastChurnTimestamp,
     churnIntervalSeconds,
-    now
+    now,
+    minProgressRatio
   });
 
-  const apr = calculateAPR(normalizedReward, principal, effectivePeriodSeconds);
-  const apy = calculateAPY(apr, compoundingPeriods);
+  const apr = calculateAPR(normalizedReward, normalizedPrincipal, effectivePeriodSeconds);
+  const apy = calculateAPY(apr, normalizedCompoundingPeriods);
+  const normalizedIntervalSeconds = Math.max(0, toFiniteNumber(churnIntervalSeconds, 0));
 
   return {
     apr,
@@ -101,6 +118,6 @@ export function estimateCurrentChurnYields({
     progressRatio: progress.progressRatio,
     effectiveProgressRatio: progress.effectiveProgressRatio,
     effectivePeriodSeconds,
-    isProlonged: false
+    isProlonged: normalizedIntervalSeconds > 0 && effectivePeriodSeconds > normalizedIntervalSeconds
   };
 }

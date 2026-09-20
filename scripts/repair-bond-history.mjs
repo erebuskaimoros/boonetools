@@ -7,7 +7,8 @@ import {
   hasBondHistoryValue
 } from '../backend/src/shared/bond-history.js';
 import { fetchMidgardActions, fetchMidgardBond } from '../backend/src/shared/midgard.js';
-import { fetchThorchain } from '../backend/src/shared/thornode.js';
+import { fetchNodeAtHeight as acquireNodeAtHeight, fetchNetworkAtHeight as acquireNetworkAtHeight }
+  from '../backend/src/shared/bond-history-acquisition.js';
 
 function parseCli(argv) {
   const options = {
@@ -79,16 +80,16 @@ async function retry(fn, label, attempts = 3, delayMs = 400) {
   throw lastError;
 }
 
-async function fetchNodeAtHeight(nodeAddress, height) {
+async function fetchNodeAtHeight(nodeAddress, height, client) {
   return retry(
-    () => fetchThorchain(`/thorchain/node/${nodeAddress}?height=${height}`, { historical: true }),
+    () => acquireNodeAtHeight(nodeAddress, height, { client }),
     `node ${nodeAddress} at ${height}`
   );
 }
 
-async function fetchNetworkAtHeight(height) {
+async function fetchNetworkAtHeight(height, client) {
   return retry(
-    () => fetchThorchain(`/thorchain/network?height=${height}`, { historical: true }),
+    () => acquireNetworkAtHeight(height, { client }),
     `network at ${height}`
   );
 }
@@ -297,13 +298,13 @@ try {
           for (const nodeAddress of nodeAddresses) {
             const cacheKey = `${nodeAddress}:${row.churnHeight - 1}`;
             if (!nodeSnapshotCache.has(cacheKey)) {
-              nodeSnapshotCache.set(cacheKey, await fetchNodeAtHeight(nodeAddress, row.churnHeight - 1));
+              nodeSnapshotCache.set(cacheKey, await fetchNodeAtHeight(nodeAddress, row.churnHeight - 1, client));
             }
             nodePayloads.push(nodeSnapshotCache.get(cacheKey));
           }
 
           if (!networkCache.has(row.churnHeight)) {
-            networkCache.set(row.churnHeight, await fetchNetworkAtHeight(row.churnHeight));
+            networkCache.set(row.churnHeight, await fetchNetworkAtHeight(row.churnHeight, client));
           }
 
           const computed = calculateBondHistoryRow({
