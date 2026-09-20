@@ -3,7 +3,8 @@
 ## Findings and release status
 
 The current-churn APY is understated before the expected churn boundary.
-A correction is implemented and tested; deployment is tracked separately below.
+The correction and historical-height safeguard are deployed in release
+`6793446eb5f8c5d8abcaa87846f8f1d3fabf3f85`; verification is recorded below.
 The latest three completed churns for sampled bond provider `...hxff` match
 height-verified historical state exactly. This is a sample, not verification
 of every address or older cached row. No affected address was supplied with
@@ -101,10 +102,32 @@ the three sampled rows are accurate, and this is not a global history rebuild.
 The user subsequently authorized patching and deployment. The release includes
 both the current-APY correction and verified historical acquisition. Historical
 height regression tests were written and observed failing against the previous
-implementation before the acquisition change. Exact release and production
-verification results are recorded after activation.
+implementation before the acquisition change.
 
 Release validation: 54 focused frontend/backend bond tests pass. A live check
 of the new RPC decoder at node height 27,914,369 and network height 27,914,370
 reproduced the sampled provider's stored stack, principal, and RUNE price
 exactly. The pre-release browser baseline was 0.38% aggregate APY.
+
+Release `6793446eb5f8c5d8abcaa87846f8f1d3fabf3f85` passed
+[CI](https://github.com/erebuskaimoros/boonetools/actions/runs/35537775358)
+and was deployed backend first, then frontend, on September 20. Backend
+activation was routine, with no migrations and only the API selected for a
+persistent restart. The Bond History timer remained enabled and its latest
+job completed successfully. Existing unrelated stale-cache warnings were
+reported by health checks and left to their normal collectors.
+
+Post-deployment verification:
+
+- Backend and frontend release pointers both resolve to the release above.
+- Public HTML loads `/assets/index-CryWkBeO.js`; its bytes and the lazy Bond
+  Tracker bundle `/assets/BondTrackerV2-BlxdqBpz.js` match the server artifacts
+  by SHA-256.
+- The deployed RPC helper returned node `...ne9y` at exactly 27,914,369 and
+  network state at exactly 27,914,370. Historical award was 1,039.47874569 RUNE
+  and RUNE price was 0.56269725, matching the independently verified sample.
+- The live browser shows **7.52% APY** for provider `...hxff`, compared with
+  **0.38%** before deployment; accrued rewards moved from 117.5 to 117.7 RUNE
+  between observations.
+- All 102 cached historical rows are identical to the pre-deployment response.
+  No historical rebuild or cache deletion was performed.
