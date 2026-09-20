@@ -83,6 +83,12 @@ the official dashboard's explicitly labeled issuance model is retained until
 the full archive window is verified. Public FastNear calls are paced and each
 run acquires at most 100 new epochs, checkpointing each one. No secrets enter
 the frontend. Deploy the backend and verify this endpoint before the frontend.
+Skipped NEAR heights may return HTTP 422 with a structured JSON-RPC
+`UNKNOWN_BLOCK` cause. The archive reader recognizes that specific response
+while searching at most 100 heights for the next produced block, then verifies
+its parent hash and epoch ID before checkpointing. Other HTTP/RPC failures
+remain errors; never treat all 422 responses as harmless gaps. A previously
+stalled run resumes from saved epochs without clearing or reseeding the cache.
 For an authorized manual warmup, run
 `systemctl start boonetools-protocol-fee-comparison.service` and inspect its
 journal; do not run another writer against its acquisition cache.

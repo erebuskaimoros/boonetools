@@ -61,6 +61,16 @@ export function nearEpochMint(block, previous) {
     previousHash: p.hash, previousHeight: p.height, atomic: mint.toString(), burnedAtomic: burns.toString(), protocolVersion: h.latest_protocol_version };
 }
 
+function isUnknownBlockError(error) {
+  // Successful HTTP responses expose the JSON-RPC error through rpc() below.
+  if (error?.status == null) return /UNKNOWN_BLOCK|unknown block|has never been observed/i.test(error?.message || '');
+  // FastNear also returns missing heights as HTTP 422. The shared transport
+  // preserves its bounded response body separately from the HTTP error message.
+  if (error.status !== 422 || typeof error.body !== 'string') return false;
+  try { return JSON.parse(error.body)?.error?.cause?.name === 'UNKNOWN_BLOCK'; }
+  catch { return false; }
+}
+
 /** Follow consecutive epoch starts, not every block. Persist each verified mint for resumable acquisition. */
 export async function collectNearIssuance({ request, epochs = {}, startDay, endDay, save = async () => {}, log = () => {}, maxEpochs = 2000, maxNewEpochs = 100 }) {
   let sequence = 0;
@@ -89,7 +99,7 @@ export async function collectNearIssuance({ request, epochs = {}, startDay, endD
       let prior;
       for (let skip = 1; skip <= 100; skip++) {
         try { prior = await rpc('block', { block_id: anchor.header.height + skip }); break; }
-        catch (error) { if (!/UNKNOWN_BLOCK|unknown block|has never been observed/i.test(error.message)) throw error; }
+        catch (error) { if (!isUnknownBlockError(error)) throw error; }
       }
       if (!prior || row.height !== info.epoch_start_height || prior.header.epoch_id !== previous.header.epoch_id
         || prior.header.prev_hash !== anchor.header.hash || !(prior.header.height < row.height)) throw new Error('NEAR epoch history has a gap');
