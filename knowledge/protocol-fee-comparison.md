@@ -5,6 +5,38 @@ current month partial through a common completed UTC day. Metric is swap
 income minus gross token subsidy, following the September 18, 2026 report
 in the workspace's `artifacts/protocol-fee-comparison/2026-09-18/`.
 
+## NEAR skipped-height repair — September 20, 2026
+
+Production's exact NEAR issuance backfill stopped at 676 saved epochs, oldest
+February 26, after FastNear returned HTTP 422 with JSON-RPC cause
+`UNKNOWN_BLOCK` for height 187199524. Height 187199525 exists and directly
+references the known anchor at 187199523. The reader's skip logic only checked
+the HTTP error message, while the RPC cause was in the transport's `body`.
+This was separate from earlier rate limits and the publication lifecycle bug.
+
+Patch `34a4c2f` recognizes only a valid HTTP-422 JSON body with cause
+`UNKNOWN_BLOCK`. Other statuses, malformed bodies, and unrelated RPC causes
+still fail closed; parent/epoch checks and the 100-height bound are unchanged.
+Ten transport-backed regression cases cover resumption, existing HTTP-200
+errors, unrelated failures and invalid links; all 53 focused tests pass.
+A read-only live replay using a copy of production's cache advanced to 679
+epochs and verified `previousEpochStart=187199525` without changing any saved
+production observations.
+
+CI passed 337 frontend and 638 backend tests (12 expected skips), checks and
+the production build. Backend release `34a4c2f` deployed without migrations or
+persistent service restarts; the frontend remains `80e7641`. The affected public
+endpoint passed its health gate. A normal collector run started at 14:08:13
+UTC and durably passed the stuck checkpoint by 14:08:37: 679 saved epochs,
+oldest February 26 at 08:15 UTC, with the verified preceding start 187199525.
+At 14:09:02 UTC a second check confirmed 686 epochs through February 24 and
+publication of those checkpoints. The public API returned HTTP 200 with all
+13 monthly buckets, the correct September 19 cutoff and only the expected
+acquisition-in-progress notice (no HTTP-422 error).
+The run continues under the usual limits; the six-hour timer remains enabled.
+TC/CF are complete through September 19 (384 days). NEAR's modeled series and
+older gaps remain labeled until the full exact archive window is acquired.
+
 ## Production status — September 18, 2026
 
 CI-green `80e7641` is deployed to backend and frontend, including the lifecycle
