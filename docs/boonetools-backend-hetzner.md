@@ -113,10 +113,13 @@ Local Vite has its own six-hour background collector and ignored
 Methodology `swap-income-less-gross-network-subsidy-v2` includes NEAR's own
 frontend earnings in total retained Intents income. Published `dailyRevenue`
 already includes that wallet, so do not add its receipts again. Daily receipt
-ratios split the total into frontend and other retained income for disclosure;
+ratios split the total into frontend and other retained income in the payload;
 third-party payouts, transfers between the three wallets and contract-call
 deposits remain excluded. Monthly payloads expose `frontendIncomeUsd` and
 `otherIncomeUsd`; incomplete months keep both unavailable.
+The tooltip shows only total swap income, token subsidy and after-subsidy
+income. The included frontend/other breakdown stays in the API but is not
+displayed as additional income lines.
 
 After a methodology release, `runProtocolFeeComparison({ rebuildOnly: true })`
 can republish the saved production cache under the normal collector advisory

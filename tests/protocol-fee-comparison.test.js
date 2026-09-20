@@ -84,24 +84,25 @@ test('chart has monthly categories, grouped signed bars, one zero-based USD axis
   assert.ok(options.tooltip.textStyle.fontSize >= 12);
 });
 
-test('tooltip has matching square swatches, components, cutoff and NEAR qualification', () => {
+test('tooltip shows income, subsidy and net without the included NEAR breakdown', () => {
   const tooltip = comparisonTooltip(months[1]);
   assert.match(tooltip, /PARTIAL/);
   assert.match(tooltip, /2026-09-17 UTC/);
   assert.equal((tooltip.match(/data-series=/g) || []).length, 3);
   assert.match(tooltip, /Swap income:/); assert.match(tooltip, /Token subsidy:/);
-  assert.match(tooltip, /Own frontend \(included\): \$85/);
-  assert.match(tooltip, /Other retained income: \$255/);
+  assert.doesNotMatch(tooltip, /Own frontend|Other retained income/);
+  assert.match(tooltip, /Swap income: \$340<br>Token subsidy: \$3,400<br><strong>After subsidy: -\$3,060/);
   assert.match(tooltip, /100% of chain issuance/);
   assert.doesNotMatch(comparisonTooltip(months[0], ['near']), /data-series="near"/);
   assert.equal(comparisonOption(months, ['near']).series.length, 2);
 });
 
-test('legacy or incomplete NEAR breakdowns are not shown as zero', () => {
+test('legacy or incomplete NEAR breakdowns do not affect the displayed total', () => {
   const legacy = structuredClone(months[0]);
   delete legacy.protocols.near.frontendIncomeUsd;
   delete legacy.protocols.near.otherIncomeUsd;
   assert.doesNotMatch(comparisonTooltip(legacy), /Own frontend|Other retained income/);
+  assert.equal(comparisonTooltip(legacy), comparisonTooltip(months[0]));
   const missing = structuredClone(days);
   delete missing[0].near.frontendIncomeUsd;
   const result = monthlyComparison(missing, { now, startDay: '2026-08-01', endDay: '2026-09-18' });

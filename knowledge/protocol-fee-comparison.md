@@ -5,6 +5,15 @@ current month partial through a common completed UTC day. Metric is swap
 income minus gross token subsidy, following the September 18, 2026 report
 in the workspace's `artifacts/protocol-fee-comparison/2026-09-18/`.
 
+## Tooltip simplification — September 20, 2026
+
+At the user's request, the monthly tooltip shows only swap income, token
+subsidy and after-subsidy income. Removed the frontend and other-retained
+income display lines because both are already included in swap income.
+Accounting, API breakdown fields, source acquisition and backfill are unchanged;
+the NEAR whole-chain issuance/provisional-income qualification remains visible.
+Tests cover both populated and absent breakdown metadata with identical output.
+
 ## NEAR skipped-height repair — September 20, 2026
 
 Production's exact NEAR issuance backfill stopped at 676 saved epochs, oldest
@@ -94,8 +103,8 @@ See [the repair record](sessions/2026-09-18/session-3.md) for rollout verificati
 - NEAR: total daily published retained Intents revenue, **including its own
   frontend earnings**. This user-approved methodology v2 supersedes the report's
   narrower backend-only boundary. The total already includes the frontend; do
-  not add wallet receipts to it again. Daily receipt ratios disclose the frontend
-  and other retained shares separately in the tooltip. Third-party payouts remain
+  not add wallet receipts to it again. Daily receipt ratios retain the frontend
+  and other shares separately in the API, not the tooltip. Third-party payouts remain
   outside retained income. Public FastNear transfers exclude
   internal transfers and contract-call deposits. The official daily whole-chain
   issuance model remains explicitly labeled until the complete archive mint
