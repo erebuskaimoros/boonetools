@@ -70,6 +70,8 @@ test('estimated-fees headline owns an accessible, initially collapsed daily char
   assert.match(source, /<button\s+type="button"\s+class="metric metric--fees metric-toggle"[\s\S]*?aria-expanded=\{feesExpanded\}[\s\S]*?aria-controls="pol-fees-history"[\s\S]*?on:click=\{\(\) => feesExpanded = !feesExpanded\}/);
   assert.match(source, /id="pol-fees-history" hidden=\{!feesExpanded\}/);
   assert.match(source, /<DailyFeeChart daily=\{dashboard.daily\}/);
+  assert.doesNotMatch(source, /fee-toggle-hint|(?:VIEW|HIDE) DAILY FEES/);
+  assert.doesNotMatch(source, /\.metric-toggle\[aria-expanded="true"\]/);
 });
 
 test('System Income POL owns /pol-tracker and appears in navigation', async () => {

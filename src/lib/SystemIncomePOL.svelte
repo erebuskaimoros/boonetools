@@ -384,7 +384,6 @@
         </span>
       </span>
       <small class="metric-foot">{feeAprCoverageLabel(feeApr24h)}</small>
-      <span class="fee-toggle-hint">[{feesExpanded ? '−' : '+'}] {feesExpanded ? 'HIDE' : 'VIEW'} DAILY FEES</span>
     </button>
     <article class="metric">
       <span class="metric-index">04</span>
@@ -725,8 +724,6 @@
   .metric--fees strong { color: var(--term-amber); }
   .metric-toggle { width: 100%; border: 0; border-right: 1px solid var(--term-border); border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
   .metric-toggle:focus-visible { outline: 2px solid var(--term-accent); outline-offset: -2px; }
-  .metric-toggle[aria-expanded="true"] { background: var(--term-surface-hover); }
-  .fee-toggle-hint { display: block; margin-top: 9px; color: var(--term-accent); font-size: 11px; letter-spacing: .04em; }
   .metric-pair { display: grid; grid-template-columns: auto auto auto; align-items: flex-start; justify-content: start; gap: 10px; }
   .metric-pair > span { min-width: 0; }
   .metric-pair strong { font-size: clamp(21px, 1.6vw, 25px); white-space: nowrap; }
