@@ -1,6 +1,7 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
+  import DailyFeeChart from './system-income-pol/DailyFeeChart.svelte';
   import { subscribeChainHeads } from './api/chain-stream.js';
   import { getAssetLogo } from './constants/assets.js';
   import { fetchSystemIncomePol } from './system-income-pol/api.js';
@@ -26,6 +27,7 @@
   let loadError = '';
   let rangeId = '30d';
   let chartUnit = 'rune';
+  let feesExpanded = false;
   let hoverIndex = -1;
   let zoomStartDay = '';
   let zoomEndDay = '';
@@ -360,10 +362,17 @@
         <small>TOTAL · EXACT BLOCK FLOW</small>
       {/if}
     </article>
-    <article class="metric metric--fees">
+    <button
+      type="button"
+      class="metric metric--fees metric-toggle"
+      aria-expanded={feesExpanded}
+      aria-controls="pol-fees-history"
+      aria-label="Estimated fees earned daily chart"
+      on:click={() => feesExpanded = !feesExpanded}
+    >
       <span class="metric-index">03</span>
       <span class="metric-label">EST. FEES EARNED</span>
-      <div class="metric-pair fee-metric-pair">
+      <span class="metric-pair fee-metric-pair">
         <span>
           <strong>{formatE8Usd(dashboard.summary.totalEstimatedFeesUsdE8, true)}</strong>
           <small>TOTAL EST.</small>
@@ -373,9 +382,10 @@
           <strong>{formatPercent(feeApr24h?.aprPercent, 1)}</strong>
           <small>24H EST. APR</small>
         </span>
-      </div>
+      </span>
       <small class="metric-foot">{feeAprCoverageLabel(feeApr24h)}</small>
-    </article>
+      <span class="fee-toggle-hint">[{feesExpanded ? '−' : '+'}] {feesExpanded ? 'HIDE' : 'VIEW'} DAILY FEES</span>
+    </button>
     <article class="metric">
       <span class="metric-index">04</span>
       <span class="metric-label">SYSTEM INCOME → POL</span>
@@ -398,6 +408,10 @@
       </div>
     </article>
   </section>
+
+  <div id="pol-fees-history" hidden={!feesExpanded}>
+    {#if feesExpanded}<DailyFeeChart daily={dashboard.daily} />{/if}
+  </div>
 
   <section class="panel asset-panel" aria-labelledby="assets-title">
     <div class="panel-heading">
@@ -709,6 +723,10 @@
   .metric .metric-value--green { color: var(--term-accent); }
   .metric .metric-value--orange { color: var(--term-amber); }
   .metric--fees strong { color: var(--term-amber); }
+  .metric-toggle { width: 100%; border: 0; border-right: 1px solid var(--term-border); border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .metric-toggle:focus-visible { outline: 2px solid var(--term-accent); outline-offset: -2px; }
+  .metric-toggle[aria-expanded="true"] { background: var(--term-surface-hover); }
+  .fee-toggle-hint { display: block; margin-top: 9px; color: var(--term-accent); font-size: 11px; letter-spacing: .04em; }
   .metric-pair { display: grid; grid-template-columns: auto auto auto; align-items: flex-start; justify-content: start; gap: 10px; }
   .metric-pair > span { min-width: 0; }
   .metric-pair strong { font-size: clamp(21px, 1.6vw, 25px); white-space: nowrap; }

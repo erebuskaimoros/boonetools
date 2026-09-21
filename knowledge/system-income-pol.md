@@ -76,6 +76,27 @@ The public handler is provider-free: it reads `system-income-pol:v1` and
 overlays committed blocks newer than the model watermark. The frontend applies
 each SSE height once and shows independent event, position, and fee freshness.
 
+## Daily estimated fee drill-down
+
+The estimated-fees headline is a keyboard-accessible disclosure button. It
+opens a daily bar chart directly below the headline grid, initially collapsed,
+with independent USD/RUNE and 30D/90D/180D/ALL controls. Bars use the read model's
+daily `estimated_fees_e8` (hourly attributed fees summed across POL positions),
+never cumulative fees, deployments, or APR-derived estimates.
+
+USD bars multiply those daily RUNE fees by the matching day's stored closing
+price, using the same price contract as deposit history below. The headline
+continues to value total estimated RUNE fees at the current price, so summing
+historically priced USD bars need not match it. Partial/open-hour estimates
+and provisional prices are labeled and visually distinguished, without
+extrapolating a full day. Seeded ownership is disclosed in the selected-day
+readout. Null estimates and missing nonzero-day prices remain visible gaps;
+known zero-fee days remain zero even without a price. Hover, keyboard focus,
+or tapping a day exposes its date, value, and provisional/seeded status.
+
+This chart uses the existing payload and refresh lifecycle; opening it makes
+no additional API or provider requests.
+
 ## Historical deposit dollars
 
 The deposit chart's USD mode multiplies each UTC day's deployed RUNE by that

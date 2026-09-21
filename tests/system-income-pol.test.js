@@ -7,6 +7,7 @@ import {
   applySystemIncomePolHead,
   buildSystemIncomePolAssetInventory,
   buildSystemIncomePolChart,
+  buildSystemIncomePolFeeChart,
   formatE8Asset,
   formatE8Rune,
   formatE8Usd,
@@ -15,6 +16,61 @@ import {
   projectSystemIncomePolChartSelection,
   selectSystemIncomePolRange
 } from '../src/lib/system-income-pol/model.js';
+
+test('daily fee bars use daily estimates and historical prices, not cumulative fees or deposits', () => {
+  const { daily } = normalizeSystemIncomePolPayload({ daily: [
+    { day: '2026-09-01', estimated_fees_e8: '100000000', cumulative_estimated_fees_e8: '9000000000', deployed_e8: '50000000000', rune_price_usd: '2' },
+    { day: '2026-09-02', estimated_fees_e8: '300000000', cumulative_estimated_fees_e8: '9300000000', rune_price_usd: '4', partial: true, fee_coverage: { covered_hours: 3, total_hours: 3, seeded_hours: 1, provisional_hours: 1 } }
+  ] });
+  const usd = buildSystemIncomePolFeeChart(daily, { unit: 'usd', width: 360 });
+  const rune = buildSystemIncomePolFeeChart(daily, { unit: 'rune' });
+  assert.deepEqual(usd.bars.map(bar => bar.value), [2, 12]);
+  assert.deepEqual(rune.bars.map(bar => bar.value), [1, 3]);
+  assert.deepEqual(daily[1].feeCoverage, { coveredHours: 3, totalHours: 3, seededHours: 1, provisionalHours: 1 });
+  assert.equal(usd.bars[1].provisional, true);
+  assert.equal(usd.bars[0].provisional, false);
+  assert.equal(usd.width, 360);
+  assert.ok(usd.bars.every(bar => bar.left >= usd.plot.left && bar.left + usd.barWidth <= usd.plot.right));
+  assert.ok(usd.bars[1].height > usd.bars[0].height);
+  assert.deepEqual(buildSystemIncomePolFeeChart(daily.slice(1)).bars.map(bar => bar.value), [12]);
+});
+
+test('daily fee chart distinguishes missing estimates, unpriced fees and known zero days', () => {
+  const { daily } = normalizeSystemIncomePolPayload({ daily: [
+    { day: '2026-09-01', estimated_fees_e8: null, rune_price_usd: '2' },
+    { day: '2026-09-02', estimated_fees_e8: '200000000' },
+    { day: '2026-09-03', estimated_fees_e8: '0' },
+    { day: '2026-09-04', estimated_fees_e8: '100000000', rune_price_usd: '3', price_provisional: true }
+  ] });
+  const usd = buildSystemIncomePolFeeChart(daily);
+  assert.equal(usd.missingDays, 2);
+  assert.deepEqual(usd.points.map(point => point.value), [null, null, 0, 3]);
+  assert.equal(usd.points[0].missingReason, 'Fee estimate unavailable');
+  assert.equal(usd.points[1].missingReason, 'Daily USD price unavailable');
+  assert.equal(usd.bars[0].height, 0);
+  assert.equal(usd.bars[1].provisional, true);
+  const rune = buildSystemIncomePolFeeChart(daily, { unit: 'rune' });
+  assert.equal(rune.missingDays, 1);
+  assert.deepEqual(rune.bars.map(bar => bar.value), [2, 0, 1]);
+  assert.equal(rune.bars.at(-1).provisional, false);
+});
+
+test('daily fee chart handles empty and all-missing ranges without fabricated bars', () => {
+  for (const daily of [[], normalizeSystemIncomePolPayload({ daily: [{ day: '2026-09-01' }] }).daily]) {
+    const chart = buildSystemIncomePolFeeChart(daily, { width: 300 });
+    assert.equal(chart.bars.length, 0);
+    assert.equal(chart.points.length, daily.length);
+    assert.ok(chart.yTicks.every(tick => Number.isFinite(tick.y) && Number.isFinite(tick.value)));
+  }
+});
+
+test('estimated-fees headline owns an accessible, initially collapsed daily chart', async () => {
+  const source = await readFile(new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url), 'utf8');
+  assert.match(source, /let feesExpanded = false/);
+  assert.match(source, /<button\s+type="button"\s+class="metric metric--fees metric-toggle"[\s\S]*?aria-expanded=\{feesExpanded\}[\s\S]*?aria-controls="pol-fees-history"[\s\S]*?on:click=\{\(\) => feesExpanded = !feesExpanded\}/);
+  assert.match(source, /id="pol-fees-history" hidden=\{!feesExpanded\}/);
+  assert.match(source, /<DailyFeeChart daily=\{dashboard.daily\}/);
+});
 
 test('System Income POL owns /pol-tracker and appears in navigation', async () => {
   const [appSource, dashboardSource] = await Promise.all([

@@ -184,6 +184,7 @@ function normalizeDaily(row = {}) {
   const price = finite(row.rune_price_usd);
   const runePriceUsd = price > 0 ? price : null;
   const deployedRune = e8ToNumber(deployedE8);
+  const estimatedFeesRune = e8ToNumber(estimatedFeesE8);
   return {
     day: utcDay(row.day),
     fundedE8,
@@ -204,7 +205,15 @@ function normalizeDaily(row = {}) {
     priceProvisional: Boolean(row.price_provisional),
     deployedUsd: deployedRune === 0 ? 0
       : deployedRune !== null && runePriceUsd !== null ? deployedRune * runePriceUsd : null,
-    estimatedFeesRune: e8ToNumber(estimatedFeesE8),
+    estimatedFeesRune,
+    estimatedFeesUsd: estimatedFeesRune === 0 ? 0
+      : estimatedFeesRune !== null && runePriceUsd !== null ? estimatedFeesRune * runePriceUsd : null,
+    feeCoverage: {
+      coveredHours: Math.max(0, Math.trunc(finite(row.fee_coverage?.covered_hours, 0))),
+      totalHours: Math.max(0, Math.trunc(finite(row.fee_coverage?.total_hours, 0))),
+      seededHours: Math.max(0, Math.trunc(finite(row.fee_coverage?.seeded_hours, 0))),
+      provisionalHours: Math.max(0, Math.trunc(finite(row.fee_coverage?.provisional_hours, 0)))
+    },
     partial: Boolean(row.partial),
     coverage: row.coverage && typeof row.coverage === 'object' ? row.coverage : {}
   };
@@ -358,6 +367,47 @@ function niceCeiling(value) {
   const magnitude = 10 ** Math.floor(Math.log10(value));
   const normalized = value / magnitude;
   return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * magnitude;
+}
+
+export function buildSystemIncomePolFeeChart(rows = [], options = {}) {
+  const width = Math.max(300, finite(options.width, 1000));
+  const height = 240;
+  const unit = options.unit === 'rune' ? 'rune' : 'usd';
+  const plot = { left: 64, right: width - 24, top: 20, bottom: height - 34 };
+  const slotWidth = (plot.right - plot.left) / Math.max(1, rows.length);
+  const barWidth = Math.min(32, slotWidth * 0.72);
+  const points = rows.map((row, index) => {
+    const rawValue = unit === 'usd' ? row.estimatedFeesUsd : row.estimatedFeesRune;
+    const value = Number.isFinite(rawValue) && rawValue >= 0 ? rawValue : null;
+    return {
+      ...row,
+      value,
+      missingReason: value !== null ? '' : row.estimatedFeesRune == null
+        ? 'Fee estimate unavailable' : 'Daily USD price unavailable',
+      provisional: Boolean(row.partial || row.feeCoverage?.provisionalHours > 0
+        || (unit === 'usd' && row.priceProvisional)),
+      x: plot.left + slotWidth * (index + 0.5)
+    };
+  });
+  const yMax = niceCeiling(Math.max(0, ...points.map(point => point.value ?? 0)));
+  const y = value => plot.bottom - (value / yMax) * (plot.bottom - plot.top);
+  const tickCount = Math.min(5, rows.length);
+  const tickIndexes = [...new Set(Array.from({ length: tickCount }, (_, index) =>
+    Math.round(index / Math.max(1, tickCount - 1) * Math.max(0, rows.length - 1))
+  ))];
+  return {
+    width, height, unit, plot, points, slotWidth, barWidth, yMax,
+    bars: points.filter(point => point.value !== null).map(point => ({
+      ...point, left: point.x - barWidth / 2, y: y(point.value),
+      height: plot.bottom - y(point.value)
+    })),
+    missingDays: points.filter(point => point.value === null).length,
+    yTicks: Array.from({ length: 5 }, (_, index) => {
+      const value = yMax * index / 4;
+      return { value, y: y(value) };
+    }),
+    xTicks: tickIndexes.map(index => ({ x: points[index].x, day: points[index].day }))
+  };
 }
 
 function linePath(points, key, y) {
