@@ -369,6 +369,15 @@ function niceCeiling(value) {
   return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * magnitude;
 }
 
+export function positionSystemIncomePolFeeTooltip(pointX, chartWidth, containerWidth) {
+  const inset = 8;
+  const width = Math.min(280, Math.max(0, containerWidth - inset * 2));
+  const anchor = pointX / chartWidth * containerWidth;
+  const preferredLeft = anchor + 12 + width <= containerWidth - inset
+    ? anchor + 12 : anchor - width - 12;
+  return { width, left: Math.max(inset, Math.min(preferredLeft, containerWidth - width - inset)) };
+}
+
 export function buildSystemIncomePolFeeChart(rows = [], options = {}) {
   const width = Math.max(300, finite(options.width, 1000));
   const height = 240;

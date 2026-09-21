@@ -90,9 +90,14 @@ continues to value total estimated RUNE fees at the current price, so summing
 historically priced USD bars need not match it. Partial/open-hour estimates
 and provisional prices are labeled and visually distinguished, without
 extrapolating a full day. Seeded ownership is disclosed in the selected-day
-readout. Null estimates and missing nonzero-day prices remain visible gaps;
+tooltip. Null estimates and missing nonzero-day prices remain visible gaps;
 known zero-fee days remain zero even without a price. Hover, keyboard focus,
-or tapping a day exposes its date, value, and provisional/seeded status.
+or tapping a day exposes a styled in-chart tooltip with its UTC date, fee value,
+coverage pool-hours (summed across positions), USD pricing reference, and provisional/seeded status. Tooltips
+flip and clamp to the chart edges on narrow screens. Click/tap (or Enter/Space)
+pins a day; repeat activation, Escape, an outside tap, or a control change
+dismisses it. Unpinned tooltips dismiss on chart exit or focus loss. The headline
+keeps its original appearance, without a view/hide hint.
 
 This chart uses the existing payload and refresh lifecycle; opening it makes
 no additional API or provider requests.

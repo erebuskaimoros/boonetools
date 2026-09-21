@@ -13,9 +13,38 @@ import {
   formatE8Usd,
   formatPercent,
   normalizeSystemIncomePolPayload,
+  positionSystemIncomePolFeeTooltip,
   projectSystemIncomePolChartSelection,
   selectSystemIncomePolRange
 } from '../src/lib/system-income-pol/model.js';
+
+test('daily fee tooltips stay inside narrow charts and flip at the right edge', () => {
+  assert.deepEqual(positionSystemIncomePolFeeTooltip(80, 1000, 1000), { left: 92, width: 280 });
+  assert.deepEqual(positionSystemIncomePolFeeTooltip(970, 1000, 1000), { left: 678, width: 280 });
+  for (const containerWidth of [260, 320, 390, 1000]) {
+    for (const pointX of [0, 64, 500, 1000]) {
+      const position = positionSystemIncomePolFeeTooltip(pointX, 1000, containerWidth);
+      assert.ok(position.left >= 8);
+      assert.ok(position.left + position.width <= containerWidth - 8);
+    }
+  }
+});
+
+test('daily fee chart provides a styled, dismissible tooltip for pointer, keyboard and touch', async () => {
+  const source = await readFile(new URL('../src/lib/system-income-pol/DailyFeeChart.svelte', import.meta.url), 'utf8');
+  assert.match(source, /id="daily-fees-tooltip"[\s\S]*?role="tooltip"/);
+  assert.match(source, /aria-describedby=\{selectedDay === point.day \? 'daily-fees-tooltip'/);
+  assert.match(source, /on:mouseenter=/);
+  assert.match(source, /on:focus=/);
+  assert.match(source, /on:click=\{\(\) => pinDay\(point.day\)\}/);
+  assert.match(source, /on:pointerdown=\{dismissOutside\}/);
+  assert.match(source, /event.key === 'Escape'/);
+  assert.match(source, /on:mouseleave=\{leaveChart\}/);
+  assert.match(source, /selected.missingReason/);
+  assert.match(source, /selected.feeCoverage.coveredHours/);
+  assert.match(source, /PARTIAL \/ PROVISIONAL/);
+  assert.doesNotMatch(source, /<title>|class="readout"/);
+});
 
 test('daily fee bars use daily estimates and historical prices, not cumulative fees or deposits', () => {
   const { daily } = normalizeSystemIncomePolPayload({ daily: [

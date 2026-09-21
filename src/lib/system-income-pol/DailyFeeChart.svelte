@@ -2,6 +2,7 @@
   import {
     SYSTEM_INCOME_POL_RANGES,
     buildSystemIncomePolFeeChart,
+    positionSystemIncomePolFeeTooltip,
     selectSystemIncomePolRange
   } from './model.js';
 
@@ -10,10 +11,15 @@
   let unit = 'usd';
   let chartWidth = 0;
   let selectedDay = '';
+  let pinnedDay = '';
+  let chartElement;
 
   $: rows = selectSystemIncomePolRange(daily, rangeId);
   $: chart = buildSystemIncomePolFeeChart(rows, { unit, width: chartWidth || 1000 });
   $: selected = chart.points.find(point => point.day === selectedDay) || null;
+  $: tooltipPosition = selected
+    ? positionSystemIncomePolFeeTooltip(selected.x, chart.width, chartWidth || chart.width)
+    : null;
 
   function dayLabel(day) {
     return new Date(`${day}T00:00:00Z`).toLocaleDateString('en-US', {
@@ -38,9 +44,29 @@
   function selectWithKeyboard(event, day) {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    selectedDay = day;
+    pinDay(day);
+  }
+
+  function pinDay(day) {
+    pinnedDay = pinnedDay === day ? '' : day;
+    selectedDay = pinnedDay;
+  }
+
+  function dismissTooltip() {
+    selectedDay = '';
+    pinnedDay = '';
+  }
+
+  function leaveChart() {
+    selectedDay = pinnedDay;
+  }
+
+  function dismissOutside(event) {
+    if (!chartElement?.contains(event.target)) dismissTooltip();
   }
 </script>
+
+<svelte:window on:pointerdown={dismissOutside} on:keydown={(event) => { if (event.key === 'Escape') dismissTooltip(); }} />
 
 <section class="fee-panel" aria-labelledby="daily-fees-title">
   <header>
@@ -50,12 +76,12 @@
     </div>
     <div class="controls">
       <div class="unit-controls" role="group" aria-label="Daily fee denomination">
-        <button type="button" class:active={unit === 'usd'} aria-pressed={unit === 'usd'} on:click={() => unit = 'usd'}>[USD]</button>
-        <button type="button" class:active={unit === 'rune'} aria-pressed={unit === 'rune'} on:click={() => unit = 'rune'}>[RUNE]</button>
+        <button type="button" class:active={unit === 'usd'} aria-pressed={unit === 'usd'} on:click={() => { unit = 'usd'; dismissTooltip(); }}>[USD]</button>
+        <button type="button" class:active={unit === 'rune'} aria-pressed={unit === 'rune'} on:click={() => { unit = 'rune'; dismissTooltip(); }}>[RUNE]</button>
       </div>
       <div class="range-controls" role="group" aria-label="Daily fee history range">
         {#each SYSTEM_INCOME_POL_RANGES as range}
-          <button type="button" class:active={rangeId === range.id} aria-pressed={rangeId === range.id} on:click={() => { rangeId = range.id; selectedDay = ''; }}>[{range.label}]</button>
+          <button type="button" class:active={rangeId === range.id} aria-pressed={rangeId === range.id} on:click={() => { rangeId = range.id; dismissTooltip(); }}>[{range.label}]</button>
         {/each}
       </div>
     </div>
@@ -63,7 +89,7 @@
 
   {#if rows.length}
     <div class="chart-container">
-      <div class="chart" bind:clientWidth={chartWidth}>
+      <div class="chart" bind:this={chartElement} bind:clientWidth={chartWidth} role="group" aria-label="Daily fee chart" on:mouseleave={leaveChart}>
         <svg viewBox={`0 0 ${chart.width} ${chart.height}`} role="group" aria-label={`Daily estimated POL fees in ${unit.toUpperCase()}. Each day can be focused for details.`}>
           {#each chart.yTicks as tick}
             <line class="grid" x1={chart.plot.left} x2={chart.plot.right} y1={tick.y} y2={tick.y} />
@@ -83,13 +109,14 @@
               role="button"
               tabindex="0"
               aria-label={pointLabel(point)}
-              aria-pressed={selectedDay === point.day}
-              on:mouseenter={() => selectedDay = point.day}
-              on:focus={() => selectedDay = point.day}
-              on:click={() => selectedDay = point.day}
+              aria-pressed={pinnedDay === point.day}
+              aria-describedby={selectedDay === point.day ? 'daily-fees-tooltip' : undefined}
+              on:mouseenter={() => { if (!pinnedDay) selectedDay = point.day; }}
+              on:focus={() => { pinnedDay = ''; selectedDay = point.day; }}
+              on:blur={leaveChart}
+              on:click={() => pinDay(point.day)}
               on:keydown={(event) => selectWithKeyboard(event, point.day)}
             >
-              <title>{pointLabel(point)}</title>
               {#if point.value === null}
                 <text class="missing-mark" x={point.x} y={chart.plot.bottom - 6}>×</text>
               {/if}
@@ -97,22 +124,33 @@
             </g>
           {/each}
         </svg>
+        {#if selected}
+          <div
+            id="daily-fees-tooltip"
+            class="fee-tooltip"
+            role="tooltip"
+            style={`left:${tooltipPosition.left}px;width:${tooltipPosition.width}px`}
+          >
+            <strong>{selected.day} <span>UTC</span></strong>
+            <div class="tooltip-value"><span>EST. FEES</span><b>{valueLabel(selected.value)}</b></div>
+            {#if selected.missingReason}<p>{selected.missingReason}</p>{/if}
+            {#if selected.feeCoverage?.totalHours > 0}
+              <p>COVERAGE · {selected.feeCoverage.coveredHours}/{selected.feeCoverage.totalHours} POOL-HOURS</p>
+            {/if}
+            {#if unit === 'usd' && selected.runePriceUsd > 0}
+              <p>{selected.priceProvisional ? 'LATEST' : 'DAY-END'} PRICE · ${selected.runePriceUsd.toLocaleString('en-US', { maximumFractionDigits: 6 })} / RUNE</p>
+            {/if}
+            {#if selected.provisional}<p class="provisional-note">PARTIAL / PROVISIONAL</p>{/if}
+            {#if selected.feeCoverage?.seededHours > 0}<p>INCLUDES SEEDED OWNERSHIP</p>{/if}
+          </div>
+        {/if}
       </div>
-    </div>
-    <div class="readout">
-      {#if selected}
-        <strong>{selected.day} UTC</strong>
-        <span class="value">{selected.missingReason || `${valueLabel(selected.value)} EST. FEES`}</span>
-        {#if selected.provisional}<span>PARTIAL / PROVISIONAL</span>{/if}
-        {#if selected.feeCoverage?.seededHours > 0}<span>INCLUDES SEEDED OWNERSHIP</span>{/if}
-      {:else}
-        <span>Hover, tap or focus a day for details.</span>
-      {/if}
     </div>
     <footer>
       <span><i></i> DAILY EST. FEES · {unit.toUpperCase()}</span>
       <span><i class="provisional"></i> PARTIAL / PROVISIONAL</span>
       {#if chart.missingDays}<span>× {chart.missingDays} UNAVAILABLE {chart.missingDays === 1 ? 'DAY' : 'DAYS'}</span>{/if}
+      <span>HOVER / FOCUS FOR DETAILS · TAP TO PIN · ESC TO DISMISS</span>
     </footer>
     {#if chart.bars.length === 0}
       <p class="note">No {unit.toUpperCase()} fee estimates are available in this range. Unavailable days are not zero-fee days.</p>
@@ -139,7 +177,7 @@
   button:hover, button.active { border-color: var(--term-accent); color: var(--term-accent); }
   button:focus-visible { outline: 2px solid var(--term-accent); outline-offset: 3px; }
   .chart-container { padding: 10px 18px 0; }
-  .chart { width: 100%; }
+  .chart { position: relative; width: 100%; }
   svg { display: block; width: 100%; height: 240px; overflow: visible; }
   .grid { stroke: var(--term-border-faint); }
   .y-label, .x-label, .missing-mark { fill: var(--term-text-3); font: 12px 'JetBrains Mono', monospace; }
@@ -151,9 +189,14 @@
   .day-target { fill: transparent; cursor: crosshair; }
   .day-target.selected, g:hover .day-target, g:focus .day-target { fill: var(--term-accent-soft); stroke: var(--term-accent); stroke-width: 1; }
   g:focus { outline: none; }
-  .readout { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 42px; box-sizing: border-box; padding: 10px 18px; border-top: 1px solid var(--term-border-faint); color: var(--term-text-3); }
-  .readout strong { color: var(--term-text); }
-  .readout .value { color: var(--term-amber); }
+  .fee-tooltip { position: absolute; z-index: 2; top: 12px; box-sizing: border-box; padding: 12px; border: 1px solid var(--term-amber-edge); background: var(--term-surface-deep); color: var(--term-text-2); font: 12px/1.5 'JetBrains Mono', monospace; pointer-events: none; }
+  .fee-tooltip strong, .fee-tooltip span, .fee-tooltip b { font-family: 'JetBrains Mono', monospace; }
+  .fee-tooltip strong { display: block; margin-bottom: 8px; color: var(--term-text); }
+  .fee-tooltip strong span { color: var(--term-text-3); font-weight: 400; }
+  .tooltip-value { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; padding-bottom: 8px; border-bottom: 1px solid var(--term-border); }
+  .tooltip-value b { color: var(--term-amber); font-size: 14px; }
+  .fee-tooltip p { margin: 7px 0 0; font: inherit; }
+  .fee-tooltip .provisional-note { color: var(--term-amber); }
   footer { display: flex; flex-wrap: wrap; gap: 10px 20px; padding: 10px 18px; border-top: 1px solid var(--term-border-faint); }
   footer span { display: flex; align-items: center; gap: 7px; }
   i { width: 12px; height: 8px; background: var(--term-amber); }
