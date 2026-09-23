@@ -54,3 +54,22 @@ The full frontend/backend suites passed before final review additions; CI
 verifies the complete release. Architecture/surface/Svelte checks passed with
 zero errors and the existing 56 warnings. A live read-only queue scan retrieved
 712 entries across eight 100-entry requests in approximately 0.7 seconds.
+
+## Deployment verification
+
+Backend and frontend release `e0d87f9a004824a6eb86a77b7f5d11de217b26e1`
+were deployed on September 23 after [CI run 35922738541](https://github.com/erebuskaimoros/boonetools/actions/runs/35922738541)
+passed: 362 frontend tests, 679 backend tests, 12 existing environment-dependent
+skips, architecture/diagnostics checks, and production build.
+
+At 21:33:43 UTC, RPC was at 27,958,035 and live status at 27,958,034;
+consensus reported signing with a seven-second block age. Both compact read
+models had republished, the queue-size warning was gone, and the raw header
+feed was current. The browser showed Degraded for actual GAIA/SOL trading
+pauses, HALTCHURNING=1, no false stall banner, unavailable scanner lag, and a
+single scanner-delay notice with `PARTIAL DATA`. Initial browser navigation
+reused the old HTML bundle; reload selected the verified new frontend.
+
+Vanaheimex's genuine rate-limit cooldown remained until 21:48:31 UTC. It was
+not cleared or bypassed. No historical data rebuild, secret/config change, or
+database migration was required.
