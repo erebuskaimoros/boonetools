@@ -10,6 +10,7 @@ import {
 const START = new Date('2026-07-27T12:00:00.000Z');
 
 function payloadFor(path) {
+  if (path === '/thorchain/lastblock') return [{ chain: 'BTC', thorchain: 27957812 }];
   if (path === '/cosmos/bank/v1beta1/supply/by_denom?denom=rune') {
     return { amount: { denom: 'rune', amount: '35402165993252075' } };
   }
@@ -193,4 +194,200 @@ test('durable core freshness includes model TTL and required field health', () =
   assert.equal(isThorNodeCoreSnapshotStale({ payload, stale: false }, ['nodes']), false);
   assert.equal(isThorNodeCoreSnapshotStale({ payload, stale: false }, ['mimir']), true);
   assert.equal(isThorNodeCoreSnapshotStale({ payload, stale: true }, ['nodes']), true);
+});
+
+
+test('lagging THORNode fallback cannot replace current state or renew its freshness', async () => {
+  const first = await buildThorNodeCoreSnapshot({
+    now: () => START,
+    fetchThorchain: async path => path === '/thorchain/lastblock' ? [{ chain: 'BTC', thorchain: 27957812 }] : payloadFor(path),
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({}),
+    fetchBifrostScannerInfo: async () => scannerPayload()
+  });
+  const lagging = await buildThorNodeCoreSnapshot({
+    now: () => new Date(START.getTime() + 300001),
+    previousSnapshot: first,
+    fetchThorchain: async path => path === '/thorchain/lastblock' ? [{ chain: 'BTC', thorchain: 27943798 }] : path === '/thorchain/mimir' ? { HALTTRADING: 1 } : payloadFor(path),
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({}),
+    fetchBifrostScannerInfo: async () => scannerPayload()
+  });
+  assert.equal(lagging.stale, true);
+  assert.deepEqual(lagging.lastblock, first.lastblock);
+  assert.deepEqual(lagging.mimir, first.mimir, 'other state from the lagging node is also untrustworthy');
+  assert.equal(lagging.field_meta.lastblock.fetched_at, first.field_meta.lastblock.fetched_at);
+});
+
+test('durable chain head rejects a lagging source even when the previous snapshot was already behind', async () => {
+  const sourceHeight = 27943798;
+  const fetchThorchain = async path => path === '/thorchain/lastblock'
+    ? [{ chain: 'BTC', thorchain: sourceHeight }]
+    : payloadFor(path);
+  const dependencies = {
+    fetchThorchain,
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({}),
+    fetchBifrostScannerInfo: async () => scannerPayload()
+  };
+  const previous = await buildThorNodeCoreSnapshot({ now: () => START, ...dependencies });
+  const rejected = await buildThorNodeCoreSnapshot({
+    now: () => new Date(START.getTime() + 15001),
+    previousSnapshot: previous,
+    loadLatestChainHead: async () => ({ height: 27957812 }),
+    ...dependencies
+  });
+  assert.equal(rejected.stale, true);
+  assert.match(rejected.errors.lastblock, /behind the known chain head/);
+  assert.equal(rejected.field_meta.mimir.status, 'reused');
+  assert.equal(rejected.field_meta.mimir.fetched_at, previous.field_meta.mimir.fetched_at);
+});
+
+test('same-height responses remain valid during a real chain stall', async () => {
+  const dependencies = {
+    fetchThorchain: async path => payloadFor(path),
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({}),
+    fetchBifrostScannerInfo: async () => scannerPayload(),
+    loadLatestChainHead: async () => ({ height: 27957812, time: START.toISOString() })
+  };
+  const previous = await buildThorNodeCoreSnapshot({ now: () => START, ...dependencies });
+  const current = await buildThorNodeCoreSnapshot({
+    now: () => new Date(START.getTime() + 3600000),
+    previousSnapshot: previous,
+    ...dependencies
+  });
+  assert.equal(current.stale, false);
+  assert.equal(current.field_meta.lastblock.status, 'fresh');
+});
+
+test('current THORNode source is selected before reading other state and pins subsequent requests', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  const laggingBase = 'https://lagging.example';
+  const currentBase = 'https://current.example';
+  globalThis.fetch = async (url) => {
+    const request = new URL(url);
+    calls.push({ base: request.origin, path: request.pathname });
+    const value = request.pathname === '/thorchain/lastblock'
+      ? [{ chain: 'BTC', thorchain: request.origin === laggingBase ? 27943798 : 27957812 }]
+      : payloadFor(`${request.pathname}${request.search}`);
+    return new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
+  };
+  try {
+    const current = await buildThorNodeCoreSnapshot({
+      now: () => START,
+      thornodeBases: [laggingBase, currentBase],
+      sharedCooldown: false,
+      loadLatestChainHead: async () => ({ height: 27957812 }),
+      fetchMidgardChurns: async () => [],
+      fetchMidgardNetwork: async () => ({}),
+      fetchBifrostScannerInfo: async () => scannerPayload()
+    });
+    assert.equal(current.stale, false);
+    assert.equal(current.lastblock[0].thorchain, 27957812);
+    assert.deepEqual(calls.filter(call => call.base === laggingBase), [
+      { base: laggingBase, path: '/thorchain/lastblock' }
+    ]);
+    assert.ok(calls.some(call => call.base === currentBase && call.path === '/thorchain/mimir'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('field failures on the verified source cannot fall back to an unverified source', async () => {
+  const dependencies = {
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({}),
+    fetchBifrostScannerInfo: async () => scannerPayload()
+  };
+  const previous = await buildThorNodeCoreSnapshot({
+    now: () => START,
+    fetchThorchain: async path => payloadFor(path),
+    ...dependencies
+  });
+  const originalFetch = globalThis.fetch;
+  const primaryBase = 'https://current.example';
+  const fallbackBase = 'https://lagging.example';
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    const request = new URL(url);
+    calls.push(request.origin);
+    if (request.pathname === '/thorchain/mimir') return new Response('unavailable', { status: 503 });
+    return new Response(JSON.stringify(payloadFor(`${request.pathname}${request.search}`)), {
+      headers: { 'Content-Type': 'application/json' }
+    });
+  };
+  try {
+    const current = await buildThorNodeCoreSnapshot({
+      now: () => new Date(START.getTime() + 60001),
+      previousSnapshot: previous,
+      thornodeBases: [primaryBase, fallbackBase],
+      sharedCooldown: false,
+      ...dependencies
+    });
+    assert.equal(current.field_meta.mimir.status, 'reused');
+    assert.equal(current.field_meta.mimir.fetched_at, previous.field_meta.mimir.fetched_at);
+    assert.deepEqual(current.mimir, previous.mimir);
+    assert.ok(calls.length > 1);
+    assert.ok(calls.every(base => base === primaryBase));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('normal RPC head advances preserve field cadences and allow two blocks of REST skew', async () => {
+  const dependencies = {
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({}),
+    fetchBifrostScannerInfo: async () => scannerPayload()
+  };
+  const previous = await buildThorNodeCoreSnapshot({
+    now: () => START,
+    fetchThorchain: async path => payloadFor(path),
+    ...dependencies
+  });
+  const calls = [];
+  const current = await buildThorNodeCoreSnapshot({
+    now: () => new Date(START.getTime() + 15001),
+    previousSnapshot: previous,
+    loadLatestChainHead: async () => ({ height: 27957815 }),
+    fetchThorchain: async path => {
+      calls.push(path);
+      return [{ chain: 'BTC', thorchain: 27957813 }];
+    },
+    ...dependencies
+  });
+  assert.equal(current.stale, false);
+  assert.deepEqual(calls, ['/thorchain/lastblock']);
+  assert.equal(current.field_meta.mimir.status, 'cached');
+});
+
+test('schema upgrade refreshes all previously unverified THORNode state immediately', async () => {
+  const dependencies = {
+    fetchMidgardChurns: async () => [],
+    fetchMidgardNetwork: async () => ({}),
+    fetchBifrostScannerInfo: async () => scannerPayload()
+  };
+  const previous = await buildThorNodeCoreSnapshot({
+    now: () => START,
+    fetchThorchain: async path => payloadFor(path),
+    ...dependencies
+  });
+  previous.schema_version = 3;
+  previous.mimir = { HALTTRADING: 1 };
+  const calls = [];
+  const current = await buildThorNodeCoreSnapshot({
+    now: () => new Date(START.getTime() + 1),
+    previousSnapshot: previous,
+    fetchThorchain: async path => {
+      calls.push(path);
+      return payloadFor(path);
+    },
+    ...dependencies
+  });
+  assert.equal(current.stale, false);
+  assert.equal(current.mimir.HALTTRADING, 0);
+  assert.equal(current.field_meta.constants.status, 'fresh');
+  assert.equal(calls.length, THORNODE_CORE_FIELDS.filter(field => field.provider === 'thornode').length);
 });

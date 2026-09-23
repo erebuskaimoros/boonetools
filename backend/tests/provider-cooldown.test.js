@@ -6,6 +6,8 @@ import {
   ProviderCooldownError,
   assertProviderAvailable,
   providerCooldownKeys,
+  isProviderGatewayRateLimitError,
+  isProviderPayloadSizeError,
   isProviderRateLimitError,
   recordProviderFailure,
   recordProviderSuccess
@@ -149,4 +151,65 @@ test('provider cooldown skips blocked hosts and clears state after success', asy
     enabled: true
   });
   assert.equal(queries.at(-1).params[0], 'service:gateway.liquify.com/chain/thorchain_api');
+});
+
+
+test('oversized gRPC responses do not disable unrelated provider services', async () => {
+  const queries = [];
+  const client = { query: async (sql, params) => (queries.push({ sql, params }), { rows: [] }) };
+  const error = Object.assign(new Error('Request failed (429) for /thorchain/queue/swap/paginated'), {
+    status: 429,
+    body: '{"code":8,"message":"grpc: received message larger than max (18456216 vs. 10485760)","details":[]}'
+  });
+  await recordProviderFailure('https://gateway.liquify.com/chain/thorchain_api', error, { client, enabled: true });
+  assert.equal(isProviderRateLimitError(error), false);
+  assert.equal(isProviderGatewayRateLimitError(error), false);
+  assert.equal(queries.length, 0, 'a request-size error must not open any provider-wide circuit');
+});
+
+test('payload-size classification preserves explicit provider backoff', async () => {
+  const queries = [];
+  const client = { query: async (sql, params) => (queries.push({ sql, params }), { rows: [] }) };
+  const error = Object.assign(new Error('Request failed (429)'), {
+    status: 429,
+    body: { code: 8, message: 'grpc: received message larger than max (18456216 vs. 10485760)' },
+    retryAfterSeconds: 3600
+  });
+  assert.equal(isProviderPayloadSizeError(error), true);
+  assert.equal(isProviderRateLimitError(error), true);
+  assert.equal(isProviderGatewayRateLimitError(error), true);
+  const before = Date.now();
+  await recordProviderFailure('https://gateway.liquify.com/chain/thorchain_api', error, { client, enabled: true });
+  assert.equal(queries[0].params[0], 'global:gateway.liquify.com');
+  assert.ok(Date.parse(queries[0].params[3]) >= before + 3_600_000);
+});
+
+test('gRPC resource exhaustion alone is not mistaken for an oversized response', () => {
+  const error = Object.assign(new Error('Request failed (429)'), {
+    status: 429,
+    body: '{"code":8,"message":"rate limit exceeded"}'
+  });
+  assert.equal(isProviderPayloadSizeError(error), false);
+  assert.equal(isProviderRateLimitError(error), true);
+});
+
+test('provider availability ignores legacy payload-size cooldowns but still honors real blocked lanes', async () => {
+  const legacy = {
+    provider_key: 'global:gateway.liquify.com',
+    blocked_until: '2099-07-27T13:00:00.000Z',
+    last_error: 'Request failed (429) for /thorchain/queue/swap/paginated {"code":8,"message":"grpc: received message larger than max (18456216 vs. 10485760)"}',
+    failure_count: 12
+  };
+  let rows = [legacy];
+  const options = { client: { query: async () => ({ rows }) }, enabled: true };
+  const base = 'https://gateway.liquify.com/chain/thorchain_api';
+  await assert.doesNotReject(assertProviderAvailable(base, options));
+  rows = [legacy, {
+    provider_key: 'service:gateway.liquify.com/chain/thorchain_api',
+    blocked_until: '2099-07-27T13:00:00.000Z',
+    last_error: 'HTTP 503 Service Unavailable'
+  }];
+  await assert.rejects(assertProviderAvailable(base, options), ProviderCooldownError);
+  rows = [{ ...legacy, last_error: `${legacy.last_error} [Retry-After: 3600s]` }];
+  await assert.rejects(assertProviderAvailable(base, options), ProviderCooldownError);
 });

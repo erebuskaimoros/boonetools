@@ -340,12 +340,13 @@ test('live status snapshot excludes heavy dashboard lanes', async () => {
   });
 });
 
-test('live status snapshot derives consensus liveness from the durable chain head', async () => {
+test('live status confirms a genuine stall with a fresh synced RPC observation', async () => {
   const client = { name: 'status-client' };
   let receivedClient;
   const snapshot = await buildStatusLiveSnapshot({
     client,
     generatedAt: '2026-07-18T12:02:00Z',
+    loadRpcHead: async () => ({ height: 1000, time: '2026-07-18T12:00:00Z', verified_at: '2026-07-18T12:02:00Z', catching_up: false }),
     loadNetworkSnapshot: async () => sources().networkSnapshot,
     loadLatestChainHead: async (inputClient) => {
       receivedClient = inputClient;
@@ -366,6 +367,34 @@ test('live status snapshot derives consensus liveness from the durable chain hea
   });
   assert.equal(snapshot.payload.network.summary.label, 'Stalled');
   assert.equal(snapshot.payload.network.summary.tone, 'err');
+});
+
+test('RPC failure cannot turn a stale durable header into a consensus stall', async () => {
+  const snapshot = await buildStatusLiveSnapshot({
+    generatedAt: '2026-07-18T12:05:00Z',
+    loadNetworkSnapshot: async () => sources().networkSnapshot,
+    loadLatestChainHead: async () => ({ height: 1000, time: '2026-07-18T12:00:00Z' }),
+    loadRpcHead: async () => { throw new Error('RPC unavailable'); }
+  });
+  assert.equal(snapshot.payload.network.consensus.state, 'unknown');
+  assert.equal(snapshot.payload.partial, true);
+  assert.notEqual(snapshot.payload.network.summary.label, 'Stalled');
+});
+
+test('live RPC head supersedes replaying WebSocket history and is published for SSE consumers', async () => {
+  const writes = [];
+  const network = sources().networkSnapshot;
+  network.lastblock = [{ chain: 'BTC', thorchain: 1100 }];
+  const snapshot = await buildStatusLiveSnapshot({
+    client: {},
+    generatedAt: '2026-07-18T12:05:00Z',
+    loadNetworkSnapshot: async () => network,
+    loadLatestChainHead: async () => ({ height: 1000, time: '2026-07-17T12:00:00Z' }),
+    loadRpcHead: async () => ({ height: 1100, time: '2026-07-18T12:04:58Z', verified_at: '2026-07-18T12:05:00Z', catching_up: false }),
+    persistHead: async (_client, head) => writes.push(head)
+  });
+  assert.equal(snapshot.payload.network.consensus.state, 'signing');
+  assert.equal(writes[0].height, 1100);
 });
 
 test('live status does not confuse lagging header ingestion with a chain stall', async () => {

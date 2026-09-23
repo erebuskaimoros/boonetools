@@ -44,6 +44,7 @@ import {
   writeRujiraReservePaymentListenerHeartbeat
 } from './shared/rujira-reserve-payments.js';
 import { saveSystemIncomePolBlock } from './shared/system-income-pol-store.js';
+import { classifyStreamBlock } from './shared/chain-head-probe.js';
 
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
@@ -65,6 +66,7 @@ let reconnectAttempt = 0;
 let pingTimer = null;
 let activeRpcWsIndex = 0;
 let connectedAt = 0;
+let connectionHasFreshBlock = false;
 let messagesReceived = 0;
 let eventsSeen = 0;
 let streamingSwapEventsSeen = 0;
@@ -106,7 +108,8 @@ async function sendHeartbeat() {
   const blockStallSeconds = hasSeenBlock
     ? Math.max(0, Math.floor((now - lastBlockReceivedAt) / 1000))
     : null;
-  const streamFresh = hasSeenBlock && (now - lastBlockReceivedAt) <= config.rapidSwapsListenerBlockStallMs;
+  const streamFresh = connectionHasFreshBlock && hasSeenBlock
+    && (now - lastBlockReceivedAt) <= config.rapidSwapsListenerBlockStallMs;
   const streamStatus = !hasSeenBlock
     ? 'starting'
     : streamFresh
@@ -200,7 +203,7 @@ function isBlockStreamStalled() {
     return false;
   }
 
-  const referenceMs = lastBlockReceivedAt || connectedAt;
+  const referenceMs = Math.max(lastBlockReceivedAt, connectedAt);
   return Date.now() - referenceMs > config.rapidSwapsListenerBlockStallMs;
 }
 
@@ -563,6 +566,9 @@ function handleMessage(message) {
   }
 
   if (data.TxResult || data.tx_result) {
+    // Replayed tx subscriptions must not be timestamped as current activity
+    // before this connection has proved it is streaming current blocks.
+    if (!connectionHasFreshBlock) return;
     if (config.nodeVotesWsIngestionEnabled) {
       const nodeVotes = parseNodeVotesFromTxMessage(message, data);
       processNodeVotes(nodeVotes).catch((error) => {
@@ -579,8 +585,25 @@ function handleMessage(message) {
   const blockHeight = Number(data.block?.header?.height) || 0;
   const blockTime = String(data.block?.header?.time || '');
   if (blockHeight > 0) {
+    const freshness = classifyStreamBlock({ height: blockHeight, time: blockTime }, {
+      lastHeight: lastBlockHeight
+    });
+    if (!freshness.accept) {
+      if (freshness.reconnect && ws?.readyState === WebSocket.OPEN) {
+        connectionHasFreshBlock = false;
+        lastChainError = `WebSocket ${freshness.reason} at block ${blockHeight}`;
+        log(`${lastChainError}; rotating and reconnecting...`);
+        rotateRpcWsUrl();
+        ws.terminate();
+      }
+      return;
+    }
     lastBlockHeight = blockHeight;
     lastBlockReceivedAt = Date.now();
+    connectionHasFreshBlock = true;
+    // Merely opening a connection does not recover a replaying feed. Keep
+    // exponential backoff until a fresh advancing block has been accepted.
+    reconnectAttempt = 0;
     blocksProcessed += 1;
     if (blockTime && Number.isFinite(Date.parse(blockTime))) {
       recentBlockTimes.set(blockHeight, new Date(blockTime).toISOString());
@@ -677,6 +700,7 @@ function rotateRpcWsUrl() {
 function connect() {
   const rpcWsUrl = getActiveRpcWsUrl();
   let opened = false;
+  connectionHasFreshBlock = false;
   log(`Connecting to ${rpcWsUrl}...`);
   ws = new WebSocket(rpcWsUrl, {
     headers: {
@@ -688,7 +712,6 @@ function connect() {
     log('Connected. Subscribing to NewBlock and enabled tx event streams...');
     opened = true;
     connectedAt = Date.now();
-    reconnectAttempt = 0;
     chainProcessQueue = chainProcessQueue.catch(() => {}).then(async () => {
       const client = await getClient();
       try { await resetCollectorEventCoverage(client); } finally { client.release(); }

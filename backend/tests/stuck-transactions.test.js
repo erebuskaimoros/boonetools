@@ -3,7 +3,8 @@ import test from 'node:test';
 
 import {
   buildStuckTransactionSnapshot,
-  classifyStuckTransactions
+  classifyStuckTransactions,
+  fetchSwapQueue
 } from '../src/shared/stuck-transactions.js';
 
 const TX_ID = 'CF8793762848DD0712843397786D8AAB635D94F74334DDC86E1730B071BC0A80';
@@ -252,4 +253,127 @@ test('stuck transaction scans reuse unchanged per-hash lookups across scheduler 
   assert.equal(statusCalls, 1);
   assert.equal(second.transactions.length, 1);
   assert.equal(second.transactions[0].overdue_blocks, 1001);
+});
+
+
+test('swap queue scanning uses bounded pages and includes transactions after the first page', async () => {
+  const input = baseInput();
+  const offsets = [];
+  const inspected = [];
+  const fetcher = async (endpoint) => {
+    if (endpoint.startsWith('/thorchain/queue/swap/paginated')) {
+      const url = new URL(endpoint, 'https://example.test');
+      const limit = Number(url.searchParams.get('limit'));
+      const offset = Number(url.searchParams.get('offset'));
+      assert.ok(limit <= 100, 'queue pages must stay below the observed gRPC payload limit');
+      offsets.push(offset);
+      if (offset === 0) return { swap_queue: Array.from({ length: limit }, (_, i) => ({ tx: { id: `LIMIT-${i}` }, swap_type: 'limit' })), pagination: { offset, limit, total: limit + 1, has_next: true } };
+      return { swap_queue: [{ tx: { id: TX_ID }, swap_type: 'market' }], pagination: { offset, limit, total: offset + 1, has_next: false } };
+    }
+    if (endpoint === '/thorchain/queue/outbound' || endpoint === '/thorchain/queue/scheduled' || endpoint === '/thorchain/swaps/streaming') return [];
+    if (endpoint.startsWith('/thorchain/tx/status/')) { inspected.push(endpoint); return input.statuses.get(TX_ID); }
+    if (endpoint.startsWith('/thorchain/tx/details/')) return {};
+    throw new Error(`Unexpected endpoint ${endpoint}`);
+  };
+  await buildStuckTransactionSnapshot(fetcher, { coreSnapshot: { lastblock: input.lastBlocks, mimir: input.mimir, constants: input.constants, inbound_addresses: input.inboundAddresses, stale: false } });
+  assert.ok(offsets.length >= 2);
+  assert.ok(inspected.some(endpoint => endpoint.endsWith(TX_ID)), 'later-page market swap must be inspected');
+});
+
+function swapQueuePage(endpoint, rows, total) {
+  const url = new URL(endpoint, 'https://example.test');
+  const offset = Number(url.searchParams.get('offset'));
+  const limit = Number(url.searchParams.get('limit'));
+  return { swap_queue: rows, pagination: { offset, limit, total, has_next: offset + rows.length < total } };
+}
+
+test('swap queue retries oversized pages at the same offset with a smaller limit', async () => {
+  const calls = [];
+  const oversized = Object.assign(new Error('Request failed (429)'), {
+    status: 429,
+    body: '{"code":8,"message":"grpc: received message larger than max (18456216 vs. 10485760)"}'
+  });
+  const rows = Array.from({ length: 75 }, (_, i) => ({ tx: { id: `SWAP-${i}` } }));
+  const result = await fetchSwapQueue(async (endpoint, options) => {
+    const url = new URL(endpoint, 'https://example.test');
+    const offset = Number(url.searchParams.get('offset'));
+    const limit = Number(url.searchParams.get('limit'));
+    calls.push([offset, limit]);
+    assert.equal(options.shouldStop(oversized), true);
+    if (limit > 50) throw oversized;
+    return swapQueuePage(endpoint, rows.slice(offset, offset + limit), rows.length);
+  });
+  assert.deepEqual(calls, [[0, 100], [0, 50], [50, 50]]);
+  assert.deepEqual(result, rows);
+});
+
+test('swap queue deduplicates entries repeated across pages', async () => {
+  const first = Array.from({ length: 100 }, (_, i) => ({ tx: { id: `SWAP-${i}` } }));
+  const result = await fetchSwapQueue(async (endpoint) => {
+    const offset = Number(new URL(endpoint, 'https://example.test').searchParams.get('offset'));
+    return swapQueuePage(endpoint, offset === 0 ? first : [first[99], { tx: { id: 'LAST' } }], 102);
+  });
+  assert.equal(result.length, 101);
+  assert.equal(result.at(-1).tx.id, 'LAST');
+});
+
+test('swap queue fails the whole scan when a later page fails', async () => {
+  const failure = new Error('second page unavailable');
+  await assert.rejects(fetchSwapQueue(async (endpoint) => {
+    const offset = Number(new URL(endpoint, 'https://example.test').searchParams.get('offset'));
+    if (offset > 0) throw failure;
+    return swapQueuePage(endpoint, Array.from({ length: 100 }, (_, i) => ({ tx: { id: `SWAP-${i}` } })), 101);
+  }), failure);
+});
+
+test('swap queue respects genuine throttling instead of shrinking and retrying', async () => {
+  for (const error of [
+    Object.assign(new Error('Too many requests'), { status: 429 }),
+    Object.assign(new Error('grpc: received message larger than max'), { status: 429, retryAfterSeconds: 60 })
+  ]) {
+    let calls = 0;
+    await assert.rejects(fetchSwapQueue(async (endpoint, options) => {
+      calls += 1;
+      assert.equal(options.shouldStop(error), false);
+      throw error;
+    }), error);
+    assert.equal(calls, 1);
+  }
+});
+
+test('swap queue stops shrinking when one entry still exceeds the payload limit', async () => {
+  const error = Object.assign(new Error('Payload too large'), { status: 413 });
+  const limits = [];
+  await assert.rejects(fetchSwapQueue(async (endpoint) => {
+    limits.push(Number(new URL(endpoint, 'https://example.test').searchParams.get('limit')));
+    throw error;
+  }), error);
+  assert.deepEqual(limits, [100, 50, 25, 12, 6, 3, 1]);
+});
+
+test('swap queue rejects invalid or truncated pagination', async () => {
+  for (const payload of [
+    {},
+    { swap_queue: [{ tx: { id: 'FIRST' } }] },
+    { swap_queue: [], pagination: { offset: 0, limit: 100, total: 10, has_next: true } },
+    { swap_queue: [{ tx: { id: 'FIRST' } }], pagination: { offset: 0, limit: 100, total: 101, has_next: false } },
+    { swap_queue: [], pagination: { offset: 100, limit: 100, total: 0, has_next: false } }
+  ]) {
+    await assert.rejects(fetchSwapQueue(async () => payload), /Invalid swap queue/);
+  }
+});
+
+test('swap queue rejects a provider that repeats a page without making progress', async () => {
+  const rows = Array.from({ length: 100 }, (_, i) => ({ tx: { id: `SWAP-${i}` } }));
+  await assert.rejects(fetchSwapQueue(async (endpoint) => swapQueuePage(endpoint, rows, 1000)), /made no progress/);
+});
+
+test('swap queue bounds scanning and fails rather than publishing a truncated queue', async () => {
+  let calls = 0;
+  await assert.rejects(fetchSwapQueue(async (endpoint) => {
+    calls += 1;
+    const offset = Number(new URL(endpoint, 'https://example.test').searchParams.get('offset'));
+    return swapQueuePage(endpoint, Array.from({ length: 100 }, (_, i) => ({ tx: { id: `SWAP-${offset + i}` } })), 1_000_000);
+  }), /exceeded 200 pages/);
+  assert.equal(calls, 200);
 });

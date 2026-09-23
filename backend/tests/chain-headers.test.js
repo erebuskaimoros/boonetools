@@ -9,6 +9,7 @@ const {
   listMissingHeaderRanges,
   loadBlockIntervalSeries,
   normalizeChainHeader,
+  notifyChainHead,
   parseChainHeaderFromNewBlock,
   repairChainHeaderGaps,
   serializeChainHead,
@@ -57,6 +58,44 @@ test('chain header parser extracts the live timing and compact event hints', () 
     source: 'liquify-ws'
   });
   assert.equal(serializeChainHead({ ...header, intervalMs: 6250 }).interval_ms, 6250);
+});
+
+test('a sparse polled head keeps its unknown interval through storage and SSE notification', async () => {
+  const head = {
+    height: 103,
+    block_time: '2026-08-05T12:00:18Z',
+    block_hash: 'C',
+    interval_ms: null,
+    source: 'rpc-status'
+  };
+  assert.equal(serializeChainHead(head).interval_ms, null);
+  const notifications = [];
+  const client = {
+    async query(sql, params) {
+      if (sql.includes('where height = any')) return { rows: [head] };
+      if (sql.includes('pg_notify')) notifications.push(JSON.parse(params[1]));
+      return { rows: [], rowCount: 0 };
+    }
+  };
+  const [stored] = await upsertChainHeaders(client, [head]);
+  assert.equal(stored.intervalMs, null);
+  await notifyChainHead(client, stored);
+  assert.equal(notifications[0].interval_ms, null);
+  assert.match(formatChainHeadSse(notifications[0]), /"interval_ms":null/);
+});
+
+test('sparse RPC heads leave missing heights available to repair and absent from interval points', async () => {
+  assert.deepEqual(listMissingHeaderRanges([100, 103], 100, 103), [{ minHeight: 101, maxHeight: 102 }]);
+  const result = await loadBlockIntervalSeries({
+    async query(sql) {
+      // Sparse heads have interval_ms=NULL until their predecessor arrives;
+      // the interval endpoint must exclude them instead of emitting zeroes.
+      assert.match(sql, /interval_ms is not null/);
+      return { rows: [{ height: 100, block_time: '2026-08-05T12:00:00Z', interval_ms: 6000 }] };
+    }
+  }, { nowMs: Date.parse('2026-08-05T12:01:00Z') });
+  assert.equal(result.as_of_height, 100);
+  assert.deepEqual(result.points, [[100, Date.parse('2026-08-05T12:00:00Z'), 6000, 0]]);
 });
 
 test('consolidated parser adapts NewBlock finalize results without another RPC request', async () => {

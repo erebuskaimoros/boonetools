@@ -7,7 +7,8 @@ import {
   buildStatusNetworkReadModel
 } from '../shared/status-live.js';
 import { getNetworkSnapshot } from '../shared/network-snapshot.js';
-import { loadLatestChainHead } from '../shared/chain-headers.js';
+import { loadLatestChainHead, notifyChainHead, upsertChainHeader } from '../shared/chain-headers.js';
+import { fetchCurrentRpcHead } from '../shared/chain-head-probe.js';
 
 const LOCK_KEY = 'boonetools:status-live';
 
@@ -40,16 +41,44 @@ export async function buildStatusLiveSnapshot(options = {}) {
       ? loadLatestChainHead
       : async () => null
   );
-  const [networkSnapshot, latestBlock] = await Promise.all([
+  const [networkSnapshot, storedBlock] = await Promise.all([
     loadNetwork(),
     loadLatestBlock(options.client)
   ]);
+  const loadRpcHead = options.loadRpcHead || (
+    typeof options.client?.query === 'function' ? fetchCurrentRpcHead : async () => null
+  );
+  let latestBlock = null;
+  let probeWarning = '';
+  try {
+    latestBlock = await loadRpcHead({ client: options.client, minimumHeight: storedBlock?.height });
+    if (latestBlock && latestBlock.height < (storedBlock?.height || 0)) {
+      throw new Error('RPC chain head is behind the durable watermark');
+    }
+    // The REST fallback keeps SSE and the core snapshot's durable watermark
+    // current during a broken/replaying WebSocket connection. Header upserts
+    // preserve richer event-derived income, fees and swap flags already stored.
+    const persistHead = options.persistHead || (async (client, head) => {
+      const stored = await upsertChainHeader(client, { ...head, blockTime: head.time });
+      if (stored) await notifyChainHead(client, stored);
+    });
+    if (latestBlock && (options.persistHead || typeof options.client?.query === 'function')) {
+      await persistHead(options.client, latestBlock);
+    }
+  } catch {
+    latestBlock = null;
+    probeWarning = 'Current RPC chain head could not be verified; consensus status is unavailable.';
+  }
   if (networkSnapshot?.stale) {
     throw new Error('Network providers did not produce a fresh live status snapshot');
   }
   const generatedAt = options.generatedAt || new Date().toISOString();
   const payload = buildStatusNetworkReadModel({
-    networkSnapshot,
+    networkSnapshot: probeWarning ? {
+      ...networkSnapshot,
+      partial: true,
+      warnings: [...(networkSnapshot.warnings || []), probeWarning]
+    } : networkSnapshot,
     generatedAt,
     latestBlock,
     stallThresholdMs: options.stallThresholdMs

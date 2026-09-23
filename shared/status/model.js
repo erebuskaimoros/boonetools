@@ -5,6 +5,8 @@ export const MAX_BLOCK_PRODUCTION_POINTS = 150;
 // but require 90 seconds without a committed block before declaring a stall.
 export const STATUS_CONSENSUS_DELAY_THRESHOLD_MS = 30_000;
 export const STATUS_CONSENSUS_STALL_THRESHOLD_MS = 90_000;
+const CONSENSUS_OBSERVATION_TTL_MS = 45_000;
+const MAX_HEAD_SKEW_BLOCKS = 15;
 
 function numberValue(value) {
   const numeric = Number(value);
@@ -193,7 +195,9 @@ function buildConsensusStatus(latestBlock, nowMs, currentHeight, stallThresholdM
     !lastBlockReliable ||
     !lastBlockAt ||
     latestBlockHeight <= 0 ||
-    latestBlockHeight < currentHeight
+    latestBlockHeight < currentHeight ||
+    latestBlockHeight - currentHeight > MAX_HEAD_SKEW_BLOCKS ||
+    latestBlock?.catching_up === true
   ) {
     return {
       state: 'unknown',
@@ -205,6 +209,15 @@ function buildConsensusStatus(latestBlock, nowMs, currentHeight, stallThresholdM
 
   const lastBlockMs = Date.parse(lastBlockAt);
   const blockAgeMs = Math.max(0, nowMs - lastBlockMs);
+  const observedMs = Date.parse(latestBlock?.verified_at);
+  const verified = Number.isFinite(observedMs) && observedMs <= nowMs + 5_000
+    && nowMs - observedMs <= CONSENSUS_OBSERVATION_TTL_MS
+    && latestBlock?.catching_up === false;
+  // A saved header's age describes ingestion, not consensus. Only a fresh,
+  // synced RPC observation can prove that the network has stopped advancing.
+  if (blockAgeMs >= STATUS_CONSENSUS_DELAY_THRESHOLD_MS && !verified) {
+    return { state: 'unknown', signing_blocks: null, last_block_at: null, block_age_seconds: null };
+  }
   const stalled = blockAgeMs >= stallThresholdMs;
   const delayed = !stalled && blockAgeMs >= Math.min(
     STATUS_CONSENSUS_DELAY_THRESHOLD_MS,
@@ -391,7 +404,14 @@ export function buildStatusNetworkReadModel(input = {}) {
   const mimir = networkSnapshot.mimir && typeof networkSnapshot.mimir === 'object'
     ? networkSnapshot.mimir
     : {};
-  const scanners = Array.isArray(networkSnapshot.bifrost_scanners)
+  const scannerMeta = networkSnapshot.field_meta?.bifrost_scanners;
+  const scannerFetchedMs = Date.parse(scannerMeta?.fetched_at);
+  const scannerCadenceMs = Number(scannerMeta?.cadence_ms) || 300_000;
+  const scannersExpired = Boolean(scannerMeta && (
+    scannerMeta.status === 'error' || !Number.isFinite(scannerFetchedMs)
+    || nowMs - scannerFetchedMs > scannerCadenceMs
+  ));
+  const scanners = !scannersExpired && Array.isArray(networkSnapshot.bifrost_scanners)
     ? networkSnapshot.bifrost_scanners
     : [];
   const chains = buildChainStatuses(
@@ -426,7 +446,10 @@ export function buildStatusNetworkReadModel(input = {}) {
   const warnings = warningValues(
     networkSnapshot.warnings,
     Object.values(networkSnapshot.errors || {}),
-    networkSnapshot.warning
+    networkSnapshot.warning,
+    scannersExpired ? 'Bifrost scanner data is delayed; current chain lag is unavailable.' : '',
+    input.latestBlock && consensus.state === 'unknown'
+      ? 'Chain head sources are delayed or inconsistent; consensus status is unavailable.' : ''
   );
 
   return {

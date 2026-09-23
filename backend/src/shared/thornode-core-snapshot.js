@@ -6,15 +6,18 @@ import {
   isBifrostScannerInfo
 } from './bifrost-scanner.js';
 import { fetchMidgardChurns, fetchMidgardNetwork } from './midgard.js';
-import { fetchThorchain } from './thornode.js';
+import { extractThorHeight, fetchThorchain } from './thornode.js';
+import { loadLatestChainHead } from './chain-headers.js';
 
 export const THORNODE_CORE_MODEL_KEY = 'thornode-core:v1';
-export const THORNODE_CORE_SCHEMA_VERSION = 3;
+export const THORNODE_CORE_SCHEMA_VERSION = 4;
 export const THORNODE_CORE_TTL_MS = 45_000;
 export const THORNODE_CORE_LOCK_KEY = 'boonetools:thornode-core';
 
+const THORNODE_CORE_RECOVERY_GAP_BLOCKS = 100;
+
 export const THORNODE_CORE_FIELDS = Object.freeze([
-  { key: 'lastblock', path: '/thorchain/lastblock', cadenceMs: 15_000, valid: Array.isArray, provider: 'thornode' },
+  { key: 'lastblock', path: '/thorchain/lastblock', cadenceMs: 15_000, valid: lastblockValue, provider: 'thornode' },
   { key: 'inbound_addresses', path: '/thorchain/inbound_addresses', cadenceMs: 60_000, valid: Array.isArray, provider: 'thornode' },
   { key: 'mimir', path: '/thorchain/mimir', cadenceMs: 60_000, valid: objectValue, provider: 'thornode' },
   { key: 'rune_supply', path: '/cosmos/bank/v1beta1/supply/by_denom?denom=rune', cadenceMs: 60_000, valid: runeSupplyValue, provider: 'thornode' },
@@ -31,6 +34,47 @@ export const THORNODE_CORE_FIELDS = Object.freeze([
 
 function objectValue(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function lastblockValue(value) {
+  const height = extractThorHeight(value);
+  return Array.isArray(value) && Number.isSafeInteger(height) && height > 0;
+}
+
+async function knownChainHeight(options) {
+  if (!options.loadLatestChainHead && !options.client?.query) return 0;
+  try {
+    const head = await (options.loadLatestChainHead || loadLatestChainHead)(options.client);
+    const height = Number(head?.height);
+    return Number.isSafeInteger(height) && height > 0 ? height : 0;
+  } catch {
+    // Header storage is an additional watermark. The last-good REST head still
+    // protects against regression when that optional read is unavailable.
+    return 0;
+  }
+}
+
+async function selectThorNodeSource(fetchThor, options, minimumHeight) {
+  let base = null;
+  const validate = (value, context = {}) => {
+    if (!lastblockValue(value)) return 'Invalid /thorchain/lastblock response';
+    const height = extractThorHeight(value);
+    if (height < minimumHeight) {
+      return `THORNode provider is behind the known chain head (${height} < ${minimumHeight})`;
+    }
+    base = context.base || base;
+    return null;
+  };
+  const lastblock = await fetchThor('/thorchain/lastblock', {
+    bases: options.thornodeBases,
+    cooldownClient: options.client,
+    sharedCooldown: options.sharedCooldown,
+    validateResponse: validate
+  });
+  // Injected fetchers need not implement the transport's validation hook.
+  const invalid = validate(lastblock);
+  if (invalid) throw new Error(invalid);
+  return { base, lastblock };
 }
 
 function objectOrArray(value) {
@@ -113,23 +157,57 @@ export async function buildThorNodeCoreSnapshot(options = {}) {
   const nowMs = now.getTime();
   const nowIso = now.toISOString();
   const previous = previousPayload(options.previousSnapshot);
-  const dueFields = THORNODE_CORE_FIELDS.filter((field) => isDue(field, previous, nowMs));
+  const previousHeight = lastblockValue(previous?.lastblock) ? extractThorHeight(previous.lastblock) : 0;
+  const knownHeight = await knownChainHeight(options);
+  // The independently sampled RPC head may lead REST by a couple of blocks.
+  // Never allow a regression relative to the last accepted REST response.
+  const minimumHeight = Math.max(previousHeight, knownHeight - 2);
+  const refreshThorFields = previous && (
+    previous.schema_version !== THORNODE_CORE_SCHEMA_VERSION
+    // Repair a previously poisoned cache immediately without defeating the
+    // field cadences for ordinary advances between 15-second snapshots.
+    || knownHeight - previousHeight > THORNODE_CORE_RECOVERY_GAP_BLOCKS
+  );
+  const dueFields = THORNODE_CORE_FIELDS.filter((field) => (
+    (refreshThorFields && field.provider === 'thornode') || isDue(field, previous, nowMs)
+  ));
   const fetchThor = options.fetchThorchain || fetchThorchain;
   const fetchChurns = options.fetchMidgardChurns || fetchMidgardChurns;
   const fetchNetwork = options.fetchMidgardNetwork || fetchMidgardNetwork;
   const fetchScanners = options.fetchBifrostScannerInfo || fetchBifrostScannerInfo;
+  let thorSource = null;
+  let thorSourceError = null;
+  if (dueFields.some((field) => field.provider === 'thornode')) {
+    const headField = THORNODE_CORE_FIELDS.find((field) => field.key === 'lastblock');
+    if (!dueFields.includes(headField)) dueFields.unshift(headField);
+    try {
+      thorSource = await selectThorNodeSource(fetchThor, options, minimumHeight);
+    } catch (error) {
+      thorSourceError = error;
+    }
+  }
   const results = await mapWithConcurrency(
     dueFields,
     Math.max(1, Math.trunc(Number(options.concurrency) || 3)),
     async (field) => {
       try {
+        if (field.provider === 'thornode' && thorSourceError) throw thorSourceError;
         const value = field.provider === 'midgard'
           ? field.key === 'churns'
             ? await fetchChurns({ cooldownClient: options.client })
             : await fetchNetwork({ cooldownClient: options.client })
           : field.provider === BIFROST_SCANNER_PROVIDER
             ? await fetchScanners({ cooldownClient: options.client })
-            : await fetchThor(field.path, { cooldownClient: options.client });
+            : field.key === 'lastblock'
+              ? thorSource.lastblock
+              : await fetchThor(field.path, {
+                // A healthy head from one source cannot validate another
+                // source's Mimir, nodes, or inbound state after fallback.
+                bases: thorSource.base ? [thorSource.base] : options.thornodeBases,
+                cooldownClient: options.client,
+                sharedCooldown: options.sharedCooldown,
+                validateResponse: (value) => field.valid(value) ? null : `Invalid ${field.path} response`
+              });
         if (!field.valid(value)) throw new Error(`Invalid ${field.path} response`);
         return { field, ok: true, value };
       } catch (error) {
