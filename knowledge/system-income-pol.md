@@ -76,6 +76,28 @@ The public handler is provider-free: it reads `system-income-pol:v1` and
 overlays committed blocks newer than the model watermark. The frontend applies
 each SSE height once and shows independent event, position, and fee freshness.
 
+### Income-share recovery
+
+An incomplete live head or a gap in observed heights makes the cumulative
+system-income denominator unknown; missing income is never treated as zero.
+The frontend retains only the last confirmed percentage for display and labels
+it `OF INCOME · SYNCING`, with a tooltip explaining that it is awaiting complete
+block data. An initial load without any confirmed percentage still displays
+an unavailable value. The configured Mimir allocation remains independent.
+
+Recent heads are deduplicated by height and replayed in order from a snapshot
+baseline. Corrected same-height observations and late missing blocks can restore
+the percentage without double-counting funding or deposits; header-only repeats
+cannot replace complete observations. A bounded 512-head window compacts older
+observations into the baseline before eviction so long refresh outages do not
+erase previously observed flows. Income gaps compacted out of that window await
+an authoritative snapshot, and older snapshots cannot rewind the baseline.
+
+Incomplete replacement snapshots carry forward only the percentage display
+fields, not a fabricated denominator or old holdings/fees. A complete snapshot
+clears the syncing state. Recovery uses the existing SSE stream and two-minute
+refresh cadence, without additional API or provider requests.
+
 ## Daily estimated fee drill-down
 
 The estimated-fees headline is a keyboard-accessible disclosure button. It

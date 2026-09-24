@@ -6,8 +6,12 @@
   import { getAssetLogo } from './constants/assets.js';
   import { fetchSystemIncomePol } from './system-income-pol/api.js';
   import {
+    acceptSystemIncomePolSnapshot,
+    bufferSystemIncomePolHead,
+    replaySystemIncomePolHeads
+  } from './system-income-pol/live.js';
+  import {
     SYSTEM_INCOME_POL_RANGES,
-    applySystemIncomePolHead,
     buildSystemIncomePolAssetInventory,
     buildSystemIncomePolChart,
     formatE8Asset,
@@ -22,6 +26,7 @@
   const REFRESH_MS = 2 * 60 * 1000;
   const REDUNDANT_FEE_WARNING = 'Estimated fees exclude hours without an ownership seed';
   let payload = null;
+  let snapshotPayload = null;
   let loading = true;
   let refreshing = false;
   let loadError = '';
@@ -67,9 +72,9 @@
     else loading = true;
     loadError = '';
     try {
-      let nextPayload = await fetchSystemIncomePol({ forceRefresh });
-      for (const head of recentHeads) nextPayload = applySystemIncomePolHead(nextPayload, head);
-      payload = nextPayload;
+      const nextSnapshot = await fetchSystemIncomePol({ forceRefresh });
+      snapshotPayload = acceptSystemIncomePolSnapshot(snapshotPayload, nextSnapshot);
+      payload = replaySystemIncomePolHeads(snapshotPayload, recentHeads, payload);
     } catch (error) {
       loadError = error?.message || 'System Income POL data could not be loaded.';
     } finally {
@@ -79,10 +84,11 @@
   }
 
   function handleChainHead(head) {
-    const isNewHead = !recentHeads.some((candidate) => candidate.height === head.height);
-    recentHeads = [...recentHeads.filter((candidate) => candidate.height !== head.height), head]
-      .sort((left, right) => left.height - right.height)
-      .slice(-512);
+    const isNewHead = head.height > (snapshotPayload?.live?.through_height || 0)
+      && !recentHeads.some((candidate) => candidate.height === head.height);
+    const buffered = bufferSystemIncomePolHead(snapshotPayload, recentHeads, head);
+    snapshotPayload = buffered.snapshot;
+    recentHeads = buffered.recentHeads;
     const deployments = Array.isArray(head.pol_reserve_deployments)
       ? head.pol_reserve_deployments
       : [];
@@ -100,7 +106,7 @@
         if (deploymentPulse?.height === head.height) deploymentPulse = null;
       }, 1000);
     }
-    if (payload) payload = applySystemIncomePolHead(payload, head);
+    if (snapshotPayload) payload = replaySystemIncomePolHeads(snapshotPayload, recentHeads, payload);
   }
 
   onMount(() => {
@@ -402,7 +408,12 @@
         <span class="metric-separator" aria-hidden="true">/</span>
         <span>
           <strong class="metric-value--orange">{formatPercent(dashboard.summary.runeHeldSystemIncomeSharePercent, 1)}</strong>
-          <small>OF SYSTEM INCOME</small>
+          <small
+            class:income-pending={dashboard.summary.systemIncomeSharePending}
+            title={dashboard.summary.systemIncomeSharePending
+              ? 'Last confirmed percentage. Waiting for complete system-income block data.'
+              : undefined}
+          >{dashboard.summary.systemIncomeSharePending ? 'OF INCOME · SYNCING' : 'OF SYSTEM INCOME'}</small>
         </span>
       </div>
     </article>
@@ -719,6 +730,7 @@
   .metric-label { display: block; margin-bottom: 12px; color: var(--term-text-3); }
   .metric strong { display: block; color: var(--term-text); font-size: 25px; line-height: 1.1; }
   .metric small { display: block; margin-top: 8px; color: var(--term-text-3); font-size: 12px; letter-spacing: .04em; }
+  .metric small.income-pending { color: var(--term-amber); }
   .metric .metric-value--green { color: var(--term-accent); }
   .metric .metric-value--orange { color: var(--term-amber); }
   .metric--fees strong { color: var(--term-amber); }

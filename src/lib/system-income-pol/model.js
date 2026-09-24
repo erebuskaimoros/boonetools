@@ -100,6 +100,7 @@ function normalizeSummary(summary = {}) {
   return {
     totalFundedE8: base(summary.total_funded_e8 ?? summary.funded_rune_e8),
     totalSystemIncomeE8: optionalBase(summary.total_system_income_e8),
+    systemIncomeSharePending: Boolean(summary.system_income_share_pending),
     systemIncomePolShareBps,
     systemIncomePolSharePercent: systemIncomePolShareBps === null ? null : systemIncomePolShareBps / 100,
     polReserveSystemIncomeBps,
@@ -257,6 +258,24 @@ export function normalizeSystemIncomePolPayload(payload = {}) {
   };
 }
 
+// The percentages may retain their last confirmed display value while the
+// income denominator catches up. Never carry the old raw denominator (or any
+// holdings/fees) into an incomplete replacement snapshot.
+export function reconcileSystemIncomePolSnapshot(snapshot = {}, previous = {}) {
+  const summary = { ...(snapshot.summary || {}) };
+  const alreadyPending = Boolean(summary.system_income_share_pending);
+  const pending = alreadyPending || optionalBase(summary.total_system_income_e8) === null;
+  summary.system_income_share_pending = pending;
+  if (pending) {
+    summary.total_system_income_e8 = null;
+    for (const key of ['system_income_pol_share_bps', 'rune_held_system_income_share_bps']) {
+      summary[key] = finite(previous?.summary?.[key])
+        ?? (alreadyPending ? finite(summary[key]) : null);
+    }
+  }
+  return { ...snapshot, summary };
+}
+
 export function applySystemIncomePolHead(payload = {}, head = {}) {
   const height = Math.trunc(finite(head.height, 0));
   const throughHeight = Math.trunc(finite(payload.live?.through_height, 0));
@@ -273,18 +292,25 @@ export function applySystemIncomePolHead(payload = {}, head = {}) {
     .filter((deployment) => deployment.asset);
   const deployedE8 = addBase(...deployments.map((deployment) => deployment.runeE8));
   const summary = { ...(payload.summary || {}) };
+  const priorIncomeE8 = optionalBase(summary.total_system_income_e8);
+  const skippedHeight = height !== throughHeight + 1;
+  const incomePending = Boolean(summary.system_income_share_pending)
+    || priorIncomeE8 === null || systemIncomeE8 === null || skippedHeight;
+  const confirmedPolShareBps = finite(summary.system_income_pol_share_bps)
+    ?? ratioBps(summary.total_funded_e8 ?? summary.funded_rune_e8, priorIncomeE8);
+  const confirmedRuneHeldShareBps = finite(summary.rune_held_system_income_share_bps)
+    ?? ratioBps(summary.total_rune_held_e8, priorIncomeE8);
   summary.total_funded_e8 = addBase(summary.total_funded_e8 ?? summary.funded_rune_e8, rewardE8);
-  summary.total_system_income_e8 = summary.total_system_income_e8 == null || systemIncomeE8 === null
+  summary.total_system_income_e8 = incomePending
     ? null
-    : addBase(summary.total_system_income_e8, systemIncomeE8);
-  summary.system_income_pol_share_bps = ratioBps(
-    summary.total_funded_e8,
-    summary.total_system_income_e8
-  );
-  summary.rune_held_system_income_share_bps = ratioBps(
-    summary.total_rune_held_e8,
-    summary.total_system_income_e8
-  );
+    : addBase(priorIncomeE8, systemIncomeE8);
+  summary.system_income_share_pending = incomePending;
+  summary.system_income_pol_share_bps = incomePending
+    ? confirmedPolShareBps
+    : ratioBps(summary.total_funded_e8, summary.total_system_income_e8);
+  summary.rune_held_system_income_share_bps = incomePending
+    ? confirmedRuneHeldShareBps
+    : ratioBps(summary.total_rune_held_e8, summary.total_system_income_e8);
   summary.total_deployed_e8 = addBase(summary.total_deployed_e8 ?? summary.deployed_rune_e8, deployedE8);
   const pools = (Array.isArray(payload.pools) ? payload.pools : []).map((pool) => ({ ...pool }));
   for (const deployment of deployments) {
@@ -306,7 +332,8 @@ export function applySystemIncomePolHead(payload = {}, head = {}) {
       daily.push(row);
     }
     row.funded_e8 = addBase(row.funded_e8 ?? row.funded_rune_e8, rewardE8);
-    row.system_income_e8 = row.system_income_e8 == null || systemIncomeE8 === null
+    row.system_income_e8 = optionalBase(row.system_income_e8) === null
+      || systemIncomeE8 === null || skippedHeight
       ? null
       : addBase(row.system_income_e8, systemIncomeE8);
     row.deployed_e8 = addBase(row.deployed_e8 ?? row.deployed_rune_e8, deployedE8);
@@ -314,7 +341,7 @@ export function applySystemIncomePolHead(payload = {}, head = {}) {
       row.cumulative_funded_e8 = addBase(row.cumulative_funded_e8, rewardE8);
     }
     if (row.cumulative_system_income_e8 !== undefined && row.cumulative_system_income_e8 !== null) {
-      row.cumulative_system_income_e8 = systemIncomeE8 === null
+      row.cumulative_system_income_e8 = incomePending
         ? null
         : addBase(row.cumulative_system_income_e8, systemIncomeE8);
     }
