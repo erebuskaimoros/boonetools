@@ -2,6 +2,7 @@
   import { onDestroy, onMount } from 'svelte';
 
   import { fetchStatusDashboard, fetchStatusLive } from './status/api.js';
+  import { mergeLiveStatus, statusPresentation, summarizeStatusWarnings } from './status/freshness.js';
   import BlockProductionChart from './status/BlockProductionChart.svelte';
   import { formatChurnCountdown, getChurnDisplayState } from './status/churn-countdown.js';
   import { groupStuckTransactionsByChain } from './status/stuck-transactions.js';
@@ -49,9 +50,11 @@
     last_block_at: null,
     block_age_seconds: null
   };
-  $: consensusStalled = networkConsensus.state === 'stalled';
-  $: displayNetworkTone = consensusStalled ? 'err' : networkSummary.tone;
-  $: displayNetworkLabel = consensusStalled ? 'Stalled' : networkSummary.label;
+  $: freshness = statusPresentation(currentDashboard, countdownNowMs);
+  $: consensusStalled = freshness.consensusState === 'stalled';
+  $: dataDelayed = freshness.consensusState === 'unknown';
+  $: displayNetworkTone = consensusStalled ? 'err' : dataDelayed ? 'warn' : networkSummary.tone;
+  $: displayNetworkLabel = consensusStalled ? 'Stalled' : dataDelayed ? 'Data delayed' : networkSummary.label;
   $: activeNodeCount = Number(currentDashboard?.network?.active_node_count || 0);
   $: networkVersion = currentDashboard?.network?.majority_version || '-';
   $: thorchainHeight = Number(currentDashboard?.network?.height || 0);
@@ -79,7 +82,7 @@
   $: haltedTransactionGroups = groupStuckTransactionsByChain(haltedTransactions);
   $: hasStuckTransactions = stuckTransactions.length > 0 || Number(stuckDashboard?.count || 0) > 0;
   $: haltedChains = chainStatuses.filter((chain) => chain.trading === 'paused').map((chain) => chain.chain);
-  $: statusError = [coreError, liveError].filter(Boolean).join('; ');
+  $: statusError = summarizeStatusWarnings(coreError, liveError);
   $: lastUpdated = newestDate(
     currentDashboard?.sources?.network?.as_of,
     currentDashboard?.as_of
@@ -122,42 +125,6 @@
       .map((value) => Date.parse(String(value || '')))
       .filter(Number.isFinite);
     return timestamps.length ? new Date(Math.max(...timestamps)) : null;
-  }
-
-  function mergeLiveStatus(snapshot, live) {
-    if (!snapshot) {
-      if (!live) return null;
-      return {
-        schema_version: 1,
-        as_of: live.as_of,
-        network: live.network,
-        chains: live.chains,
-        churn: live.churn,
-        sources: { network: live.source },
-        partial: true,
-        stale: Boolean(live.stale),
-        warnings: live.warnings || []
-      };
-    }
-    if (!live) return snapshot;
-    const snapshotTime = Date.parse(snapshot?.sources?.network?.as_of || '');
-    const liveTime = Date.parse(live?.source?.as_of || live?.as_of || '');
-    if (Number.isFinite(snapshotTime) && (!Number.isFinite(liveTime) || liveTime < snapshotTime)) {
-      return snapshot;
-    }
-    return {
-      ...snapshot,
-      network: live.network || snapshot.network,
-      chains: live.chains || snapshot.chains,
-      churn: live.churn || snapshot.churn,
-      sources: {
-        ...snapshot.sources,
-        network: live.source || snapshot?.sources?.network
-      },
-      partial: Boolean(snapshot.partial || live.partial),
-      stale: Boolean(snapshot.stale || live.stale),
-      warnings: [...new Set([...(snapshot.warnings || []), ...(live.warnings || [])])]
-    };
   }
 
   async function loadStatus(options = {}) {
@@ -393,6 +360,9 @@
           {#if consensusStalled}
             <p><strong>No new block commits are being finalized.</strong> Network height remains at {number.format(thorchainHeight)}.</p>
             <p>Configured lane state remains visible below for incident context; it does not mean transactions can execute.</p>
+          {:else if dataDelayed}
+            <p><strong>Live network state could not be verified.</strong></p>
+            <p>Last available chain settings are shown below. Delayed data does not establish a network stall.</p>
           {:else}
             <p>
               Trading is available on <strong>{networkSummary.tradingEnabled} of {networkSummary.total}</strong> connected chains.
@@ -762,8 +732,8 @@
       </section>
     </div>
 
-    <div class="source-line" class:stalled={consensusStalled}>
-      <span><i></i> {consensusStalled ? 'NO NEW BLOCKS' : 'LIVE'}</span>
+    <div class="source-line" class:stalled={consensusStalled} class:delayed={dataDelayed}>
+      <span><i></i> {freshness.sourceLabel}</span>
       THORNode live state 15s · block headers, stuck-tx scan, and node-vote history 60s
       {#if lastUpdated}<em>updated {formatDateTime(lastUpdated)}</em>{/if}
     </div>
@@ -1205,6 +1175,11 @@
   .source-line > span { color: #00cc66; }
   .source-line i { display: inline-block; width: 5px; height: 5px; margin-right: 4px; animation: pulse-dot 2s infinite; }
   .source-line.stalled > span { color: var(--term-error); }
+  .source-line.delayed i {
+    animation: none;
+    background: var(--term-amber, #d4a017);
+  }
+
   .source-line.stalled i { background: var(--term-error); animation: none; }
   .source-line em { margin-left: auto; color: var(--term-text-4); font-style: normal; }
 

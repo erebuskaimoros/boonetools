@@ -23,7 +23,8 @@ scanner `chain_height`. Standby validators and missing, invalid, or negative
 scanner reports are excluded without falling back to the transaction-driven
 `observe_chains` height. The scanner aggregate refreshes every five minutes,
 stores only the fields needed for this calculation, and reuses its last good
-snapshot with a scoped warning when the provider is unavailable.
+snapshot with a scoped warning when the provider is unavailable. Expired or
+reused scanner reports are omitted from the current lag display.
 
 Signing is independent of trading and LP actions. Global or per-chain `HaltSigning` values become active once their configured height is reached; a full chain halt also reports signing as paused. The top churn card applies the same height-aware rule to `HaltChurning`, shows elapsed time since Midgard's latest successful churn, and counts down each second to Midgard `/network`'s `nextChurnHeight` using the six-second target block interval. It reports `CHURNING` while the existing `/thorchain/network` snapshot has `vaults_migrating=true`, meaning retiring vaults are still moving funds to the new active vaults, and exposes `https://churn.thorchain.org/` only for that active migration. The Thornode and Midgard network fields reuse their two-minute core snapshots rather than adding status-page provider requests. If the Midgard target is unavailable, a future last-churn-plus-`CHURNINTERVAL` target is labeled estimated; stale past targets are not presented as a live countdown. If churn history is unavailable, the card estimates from the newest active-node `status_since` height without failing current chain status.
 
@@ -76,3 +77,12 @@ state; a provider-total THORNode failure marks the core stale and leaves all
 downstream publishers on their prior last-good models. A stuck-scan or
 vote-history failure leaves current chain availability visible with a scoped
 warning. The page refreshes every 60 seconds.
+
+## Provider freshness hardening
+
+See [the September 23 incident and recovery contract](status-provider-freshness-2026-09-23.md)
+for the oversized queue response, lagging fallback, and false consensus-stall
+regressions. Current-state acquisition validates its provider height before
+publishing; queue response-size failures do not create gateway-wide cooldowns.
+The live collector verifies consensus through RPC independently of WebSocket
+arrival, and the browser expires live/stall assertions after 45 seconds.

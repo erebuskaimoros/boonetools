@@ -169,7 +169,23 @@ the durable `thornode-core:v1` model published by
 `boonetools-thornode-core-snapshot.timer`. THORNode fields use mixed cadences
 based on volatility and retain their last successful value independently. A
 Midgard-only result can never be published as a fresh network snapshot when
-all due THORNode work failed.
+all due THORNode work failed. Each refresh first validates its THORNode head
+against the last accepted height and durable chain-header watermark, then pins
+its due THORNode fields to that verified provider. Schema v4 refreshes legacy
+unverified current-state fields immediately without rebuilding history.
+
+The 15-second Status live collector also probes the configured RPC providers
+for a synced, non-regressing head. It persists that header and sends the normal
+head notification when WebSocket ingestion is unavailable. Delayed/stalled
+consensus requires a recent RPC verification; a stream gap alone is insufficient.
+The five-minute header repair still fills intermediate missing blocks. Replaying
+or regressing WebSocket connections rotate/reconnect with bounded backoff.
+
+Swap queues use at most 100 entries per request, shrink oversized replies, and
+fail the scan on incomplete pagination. An explicit response-size error does
+not cool down unrelated services; already-persisted size-error cooldowns are
+ignored. Genuine throttling/Retry-After remains enforced. Expired scanner
+statistics are unavailable instead of being displayed as current lag.
 
 The public `/functions/v1/node-votes-summary` payload includes one deduplicated
 `active_nodes` roster from the same THORNode state used for current vote

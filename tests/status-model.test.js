@@ -54,6 +54,8 @@ test('live status reports a consensus stall even when every Mimir lane looks ope
     latestBlock: {
       height: 27_500_000,
       time: '2026-08-26T12:00:00Z',
+      verified_at: '2026-08-26T12:05:00Z',
+      catching_up: false,
       source: 'liquify-thorchain-block-headers'
     },
     networkSnapshot: {
@@ -95,7 +97,7 @@ test('consensus liveness separates normal slow blocks from delay and stall state
   };
   const buildAt = (generatedAt) => buildStatusNetworkReadModel({
     generatedAt,
-    latestBlock: { height: 100, time: '2026-08-26T12:00:00Z' },
+    latestBlock: { height: 100, time: '2026-08-26T12:00:00Z', verified_at: generatedAt, catching_up: false },
     networkSnapshot
   });
 
@@ -616,4 +618,58 @@ test('governance votes are newest first with bounded progress', () => {
 
   assert.equal(votes[0].key, 'CONFIG');
   assert.equal(votes[1].progress, 100);
+});
+
+
+test('inconsistent API and header heights indicate a source problem, not a consensus stall', () => {
+  const payload = buildStatusNetworkReadModel({
+    generatedAt: '2026-09-23T21:08:34.910Z',
+    latestBlock: { height: 27957787, time: '2026-09-23T21:05:44.000Z' },
+    networkSnapshot: {
+      lastblock: [{ chain: 'BTC', thorchain: 27943798 }],
+      field_meta: { lastblock: { status: 'fresh', fetched_at: '2026-09-23T21:08:30Z' } },
+      inbound_addresses: [{ chain: 'BTC' }], nodes: [], mimir: {}, churns: [],
+      as_of: '2026-09-23T21:08:30Z', stale: false
+    }
+  });
+  assert.equal(payload.network.consensus.state, 'unknown');
+  assert.notEqual(payload.network.summary.label, 'Stalled');
+  assert.equal(payload.partial, true);
+});
+
+test('expired scanner data is not presented as current chain lag', () => {
+  const payload = buildStatusNetworkReadModel({
+    generatedAt: '2026-09-23T21:08:34.910Z',
+    networkSnapshot: {
+      lastblock: [{ chain: 'BTC', thorchain: 27957812 }],
+      field_meta: { bifrost_scanners: { status: 'reused', fetched_at: '2026-09-23T20:43:22Z', cadence_ms: 300000 } },
+      inbound_addresses: [{ chain: 'BTC' }], nodes: [{node_address: 'thor1active', status: 'Active'}], mimir: {}, churns: [],
+      bifrost_scanners: [{node_address: 'thor1active', scanner: {BTC: {chain_height: 968317, scanner_height_diff: 0}}}],
+      as_of: '2026-09-23T21:08:30Z', stale: false
+    }
+  });
+  assert.equal(payload.chains[0].avgBlocksBehindTip, null);
+  assert.equal(payload.chains[0].tipHeight, 0);
+  assert.equal(payload.partial, true);
+  assert.match(payload.warnings.join(' '), /scanner data is delayed/);
+});
+
+test('aged headers require a fresh synced RPC observation before claiming a stall', () => {
+  for (const verification of [
+    {},
+    { verified_at: '2026-09-23T21:00:00Z', catching_up: false },
+    { verified_at: '2026-09-23T21:08:30Z', catching_up: true }
+  ]) {
+    const payload = buildStatusNetworkReadModel({
+      generatedAt: '2026-09-23T21:08:35Z',
+      latestBlock: { height: 27957812, time: '2026-09-23T21:00:00Z', ...verification },
+      networkSnapshot: {
+        lastblock: [{ chain: 'BTC', thorchain: 27957812 }],
+        inbound_addresses: [{ chain: 'BTC' }], nodes: [], mimir: {}, churns: [],
+        as_of: '2026-09-23T21:08:30Z', stale: false
+      }
+    });
+    assert.equal(payload.network.consensus.state, 'unknown');
+    assert.equal(payload.partial, true);
+  }
 });

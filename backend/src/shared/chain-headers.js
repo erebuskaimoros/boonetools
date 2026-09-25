@@ -255,7 +255,10 @@ export async function upsertChainHeader(client, input) {
 function normalizeStoredHeader(row = {}) {
   const normalized = normalizeChainHeader(row);
   if (!normalized) return null;
-  const intervalMs = Number(row.intervalMs ?? row.interval_ms);
+  const rawInterval = row.intervalMs ?? row.interval_ms;
+  // A head polled without its predecessor has no measured interval. Keep that
+  // unknown through persistence/notifications instead of Number(null) => 0.
+  const intervalMs = rawInterval == null ? NaN : Number(rawInterval);
   return {
     ...normalized,
     intervalMs: Number.isFinite(intervalMs) && intervalMs >= 0 ? Math.trunc(intervalMs) : null

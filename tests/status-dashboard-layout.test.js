@@ -15,7 +15,7 @@ test('long network-change vote keys stay inside their dashboard card', () => {
 });
 
 test('a consensus stall is unmistakable before configured chain availability', () => {
-  assert.match(source, /consensusStalled\s*=\s*networkConsensus\.state\s*===\s*'stalled'/);
+  assert.match(source, /consensusStalled\s*=\s*freshness\.consensusState\s*===\s*'stalled'/);
   assert.match(source, /\{#if consensusStalled\}[\s\S]*class="alert err stall-alert"[^>]*role="alert"/);
   assert.match(source, /Block production is stalled/);
   assert.match(source, /No THORChain block has committed for/);
@@ -34,7 +34,7 @@ test('a consensus stall is unmistakable before configured chain availability', (
 test('stalled block timing replaces false live indicators', () => {
   assert.match(source, /no new block for \{formatDurationSeconds\(networkConsensus\.block_age_seconds\)\}/);
   assert.match(source, /class:stalled=\{consensusStalled\}/);
-  assert.match(source, /\{consensusStalled \? 'NO NEW BLOCKS' : 'LIVE'\}/);
+  assert.match(source, /\{freshness\.sourceLabel\}/);
   assert.match(source, /\.source-line\.stalled i \{[^}]*animation:\s*none/);
 });
 

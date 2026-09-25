@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { TtlSingleFlightCache } from '../lib/ttl-cache.js';
 import { extractThorHeight, fetchThorchain } from './thornode.js';
+import { isProviderPayloadSizeError } from './provider-cooldown.js';
 import {
   getThorNodeCoreSnapshot,
   isThorNodeCoreSnapshotStale
@@ -9,6 +10,8 @@ import {
 const CACHE_TTL_MS = 30_000;
 const STATUS_CONCURRENCY = 6;
 const MARKET_SWAP_GRACE_BLOCKS = 300;
+const SWAP_QUEUE_PAGE_SIZE = 100;
+const MAX_SWAP_QUEUE_PAGES = 200;
 
 const snapshotCache = new TtlSingleFlightCache({ ttlMs: CACHE_TTL_MS });
 
@@ -485,6 +488,67 @@ function buildDetailsFingerprints(hashes, swapQueue) {
   ]));
 }
 
+export async function fetchSwapQueue(fetcher = fetchThorchain) {
+  const swaps = new Map();
+  let offset = 0;
+  let limit = SWAP_QUEUE_PAGE_SIZE;
+  const canShrink = (error) => isProviderPayloadSizeError(error)
+    && !(Number(error?.retryAfterSeconds) > 0);
+
+  for (let page = 0; page < MAX_SWAP_QUEUE_PAGES; page += 1) {
+    let payload;
+    // Stop provider fallback for a size error so the smaller query can use the
+    // same healthy provider instead of silently switching data sources.
+    while (true) {
+      try {
+        payload = await fetcher(`/thorchain/queue/swap/paginated?offset=${offset}&limit=${limit}`, {
+          shouldStop: canShrink
+        });
+        break;
+      } catch (error) {
+        if (!canShrink(error) || limit === 1) throw error;
+        limit = Math.max(1, Math.floor(limit / 2));
+      }
+    }
+
+    const rows = payload?.swap_queue;
+    const pagination = payload?.pagination;
+    if (!Array.isArray(rows)) throw new Error('Invalid swap queue response');
+    // Older empty-queue responses omitted pagination entirely.
+    if (!pagination && offset === 0 && rows.length === 0) return [];
+    const pageOffset = Number(pagination?.offset);
+    const pageLimit = Number(pagination?.limit);
+    const total = Number(pagination?.total);
+    if (!Number.isSafeInteger(pageOffset) || pageOffset !== offset
+      || !Number.isSafeInteger(pageLimit) || pageLimit < 1 || pageLimit > limit
+      || !Number.isSafeInteger(total) || total < 0
+      || typeof pagination?.has_next !== 'boolean'
+      || rows.length !== Math.min(pageLimit, Math.max(0, total - offset))
+      || pagination.has_next !== (offset + rows.length < total)) {
+      throw new Error(`Invalid swap queue pagination at offset ${offset}`);
+    }
+
+    const previousSize = swaps.size;
+    for (const row of rows) {
+      if (!row?.tx?.id) throw new Error(`Invalid swap queue entry at offset ${offset}`);
+      // An advancing queue can repeat an entry across offsets. Keep its newest
+      // representation while preserving distinct swap legs for the same tx.
+      const key = JSON.stringify([row.tx.id, row.swap_type, row.target_asset, row.destination]);
+      swaps.set(key, row);
+    }
+    if (!pagination.has_next) return [...swaps.values()];
+    if (rows.length === 0 || swaps.size === previousSize) {
+      throw new Error(`Swap queue pagination made no progress at offset ${offset}`);
+    }
+    offset += rows.length;
+    limit = pageLimit;
+  }
+
+  // A failed scan preserves the last successful snapshot rather than publishing
+  // a truncated queue as a complete scan with no stuck transactions.
+  throw new Error(`Swap queue scan exceeded ${MAX_SWAP_QUEUE_PAGES} pages`);
+}
+
 export async function buildStuckTransactionSnapshot(fetcher = fetchThorchain, options = {}) {
   let coreSnapshot = options.coreSnapshot || null;
   let core = coreSnapshot?.payload || coreSnapshot || null;
@@ -504,12 +568,12 @@ export async function buildStuckTransactionSnapshot(fetcher = fetchThorchain, op
   const [
     outboundQueueRaw,
     scheduledQueueRaw,
-    swapQueuePayload,
+    swapQueue,
     streamingSwapsRaw
   ] = await Promise.all([
     fetcher('/thorchain/queue/outbound'),
     fetcher('/thorchain/queue/scheduled'),
-    fetcher('/thorchain/queue/swap/paginated?offset=0&limit=1000'),
+    fetchSwapQueue(fetcher),
     fetcher('/thorchain/swaps/streaming')
   ]);
   const [lastBlocks, mimir, constants, inboundAddresses] = core
@@ -523,7 +587,6 @@ export async function buildStuckTransactionSnapshot(fetcher = fetchThorchain, op
 
   const outboundQueue = Array.isArray(outboundQueueRaw) ? outboundQueueRaw : [];
   const scheduledQueue = Array.isArray(scheduledQueueRaw) ? scheduledQueueRaw : [];
-  const swapQueue = Array.isArray(swapQueuePayload?.swap_queue) ? swapQueuePayload.swap_queue : [];
   const streamingSwaps = Array.isArray(streamingSwapsRaw) ? streamingSwapsRaw : [];
   const streamingIds = new Set(streamingSwaps.map((swap) => String(swap?.tx_id || '')));
   const marketSwapIds = swapQueue
