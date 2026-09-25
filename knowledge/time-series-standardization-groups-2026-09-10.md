@@ -7,13 +7,13 @@ its monthly protocol comparison shipped with ECharts on September 18. The
 September 22 `feat/shared-echarts-time-series` worktree extracts the shared
 daily mixed-series foundation and migrates Financials, Burn Tracker, Pool
 Analysis, Rapid's six overviews, both System Income POL charts, App Layer's
-five charts and POL TVL onto it;
-that follow-up is not deployed. See
+five charts and POL TVL onto it. The subsequent sitewide controls and competitor
+adapter shipped with that foundation in release `9b80a6e` on September 25. See
 [implementation status and contract](shared-echarts-time-series.md).
 
 This grouping derives from the [chart survey](chart-formatting-survey-2026-09-10.md). It classifies existing features, not a newly tested implementation. The survey remains the source inventory; this document supersedes its provisional Chart.js time-series adapter recommendation.
 
-The September 10 survey recorded **28 primary time/event-series chart configurations**: then 24 with Chart.js and 4 with SVG. These include the five Wasm Arb Economics charts on a public direct route that is hidden from navigation. Its Financials renderer comparison was an alternative for the same configuration, not another chart in that count. The subsequently added monthly protocol-income comparison remains outside the shared-foundation pass. System Income POL's newer expandable daily-fee chart also falls outside the original count; it now uses the overview profile, bringing shared adoption to 17 configurations (16 original plus this newer one).
+The September 10 survey recorded **28 primary time/event-series chart configurations**: then 24 with Chart.js and 4 with SVG. These include the five Wasm Arb Economics charts on a public direct route that is hidden from navigation. Its Financials renderer comparison was an alternative for the same configuration, not another chart in that count. The subsequently added protocol-income comparison and System Income POL's expandable daily-fee chart bring the control rollout to 30 configurations: 18 shared ECharts configurations, nine Chart.js compatibility integrations, and three native event/SVG views with optional ECharts calendar views. The renderer migration is not yet complete.
 
 Excluded from this pass: two Sankeys, seven Rapid Swaps categorical/ranking/distribution plots, development-only market candles, watchlist sparklines, static briefing plots, and HTML progress/flow diagrams. TC Fee Dash's navigator is an accessory to the time-series system, not another primary chart.
 

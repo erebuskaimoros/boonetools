@@ -2,6 +2,8 @@
 
 ## Current Work In Progress
 
+- Time-series renderer migration: shared controls are deployed; nine Chart.js integrations and native event views remain supported pending later migration
+
 - App Layer fee-share settlement: monitor POL scheduler/backfill freshness, pricing, and separated Reserve/POL totals
 - App Layer generated-fee ingestion: monitor source freshness, the forward watermark, provider quota, and lane 03 reconciliation
 - Wasm Arb Economics: monitor the remaining oracle source gap and history compaction
@@ -14,8 +16,8 @@
 
 | Date | Focus | Summary | Link |
 |------|-------|---------|------|
+| 2026-09-25 #1 | Shared time-series toolkit | Deployed CI-green `9b80a6e` to backend/frontend; sitewide controls, selected summaries, LP pendulum split, and verified cache-only daily comparison publication | [Session](2026-09-25/session-1.md) |
 | 2026-09-18 #4 | NEAR retained frontend income | Deployed CI-green `80e7641`; cache-only rebuild includes own frontend exactly once; public values and tooltip verified | [Session](2026-09-18/session-4.md) |
 | 2026-09-18 #3 | Protocol comparison backfill lifecycle | Deployed CI-green `89203bb`; live bounded run published CF December–September, preserving progress and NEAR cooldown reporting | [Session](2026-09-18/session-3.md) |
 | 2026-09-18 #2 | Financials ECharts and protocol comparison | Deployed CI-green `d828fa5` to backend/frontend; seeded local history and checkpoints before fetching; API, assets and browser verified | [Session](2026-09-18/session-2.md) |
 | 2026-09-18 #1 | Simplified Production Deployment | Deployed CI-green `85baecc` to backend/frontend; backend services and timers remained running; public artifacts verified | [Session](2026-09-18/session-1.md) |
-| 2026-09-17 #1 | Production Dashboard Corrections | Deployed signed-reward and XRP 24-hour fee fixes; resolved two release-checkout papercuts | [Session](2026-09-17/session-1.md) |

@@ -1,6 +1,12 @@
 # Shared ECharts time series
 
-## Status — September 22, 2026
+## Status — September 25, 2026
+
+Published to production main and deployed to backend/frontend as CI-green
+`9b80a6e7bec506fc22d3a3597b3397df77dbbcdc`. This includes the September 22–25
+changes below and retains the newer Status freshness and POL live-recovery
+fixes from published main. The unrelated dirty/divergent canonical checkout
+was not changed. See [release record](sessions/2026-09-25/session-1.md).
 
 September 23 follow-up: removed the four per-chart summary cards and their
 coverage captions from all six Rapid Swaps overview plots by user request.
@@ -23,9 +29,8 @@ payloads can still expose D/W/M. Other toolbars keep their existing disclosure.
 TC Fee Dash now splits the residual income between bond providers and LPs using
 current cached pendulum inputs; see `knowledge/tc-fee-dash.md`.
 
-Implemented on `feat/shared-echarts-time-series`, based on main `7265d0b`.
-Not committed, merged or deployed by this task. Financials already uses
-ECharts in production; this pass moves it onto a common foundation and
+Implemented on `feat/shared-echarts-time-series`, originally based on `7265d0b`.
+Financials already used ECharts in production; this pass moves it onto a common foundation and
 replaces the Burn Tracker and Pool Analysis Chart.js renderers. The second
 pass migrates Rapid Swaps' six overview charts and both System Income POL
 charts (deposits and expandable daily fees).
@@ -83,9 +88,11 @@ retain their native views alongside a shared ECharts calendar view.
 - Protocol comparison's additive backend `daily` field exposes the same derived
   daily accounting and common verified cutoff as the existing monthly payload.
   Existing collectors/caches require no migration or new source calls. Old
-  snapshots without this field stay monthly-only with disabled D/W/rolling
-  controls. Deploying the backend and publishing its next snapshot enables
-  those finer views. This task has not deployed anything.
+  snapshots without this field stay monthly-only, with unavailable D/W hidden
+  in the competitor toolbar and rolling controls disabled. The September 25
+  backend release and cache-only publication now expose 389 daily observations
+  through September 24, enabling finer views without changing the 13 monthly
+  buckets. The chart still defaults to monthly.
 - Source-only weekly App Layer fallbacks cannot be reconstructed into daily or
   calendar-month buckets. The controls disclose/disable unavailable resolutions.
   Categorical charts, Sankeys, watchlist sparklines, navigation accessories,
@@ -97,10 +104,13 @@ transitions, Chart.js compatibility tests, existing domain suites and focused
 backend collector tests. Desktop browser checks cover Financials, TC Fee Dash,
 Status, Pool Dislocation, all five WASM controls, ADR26's epoch exception and
 its affiliate D/W/M/average controls, and Pool Analysis. Final verification:
-406 frontend tests and 26 focused backend tests pass; production build passes;
+445 frontend tests and 679 backend tests pass after merging current production
+main (12 database-dependent backend tests skipped); CI and production build pass;
 Svelte check stays at 0 errors / 56 existing warnings. Bond remains covered by
 source/model wiring, not a newly supplied address-dependent live fixture.
-Preview reads public snapshots only; no production acquisition or deployment.
+Preview reads public snapshots only. The release used cached comparison
+observations without starting acquisition; public assets and browser controls
+were verified after guarded deployment.
 
 Earlier sections below record the preceding migration passes. This section
 supersedes their Pool-only control and 17-chart renderer counts.

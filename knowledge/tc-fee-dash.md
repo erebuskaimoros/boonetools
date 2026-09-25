@@ -20,8 +20,10 @@ Five system-income lanes resolve an active Mimir before their compiled default:
 
 The remainder `max(0, 10,000 - explicit allocation BPS)` is split between
 Bond Providers and Liquidity Providers by the incentive pendulum. It is not
-entirely a bond-provider allocation. The September 25 implementation on
-`feat/shared-echarts-time-series` is local, not deployed.
+entirely a bond-provider allocation. The September 25 implementation shipped
+in frontend/backend release `9b80a6e`; production browser verification showed
+53.68% for bond providers and 5.32% for LPs, plus 41% explicit lanes at that check.
+These are live estimates, not fixed protocol percentages.
 
 `distribution.js` mirrors THORNode v3.20.2 `getPoolShare`:
 
