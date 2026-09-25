@@ -1,5 +1,7 @@
 <script>
-  import { onDestroy, onMount, tick } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
+  import RangeSummary from './charts/RangeSummary.svelte';
+  import TimeSeriesChart from './charts/TimeSeriesChart.svelte';
   import { createVisiblePoll } from './utils/visible-poll.js';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
   import { subscribeChainHeads } from './api/chain-stream.js';
@@ -15,8 +17,8 @@
   } from './burn-tracker/model.js';
   import {
     BURN_BAR_COLOR,
-    renderBurnTrackerChart,
-    setBurnTrackerPriceVisible
+    BURN_SERIES,
+    buildBurnTrackerOption
   } from './burn-tracker/charts.js';
 
   const REFRESH_MS = 5 * 60 * 1000;
@@ -28,8 +30,7 @@
   let chartUnit = 'rune';
   let showPrice = false;
   let zoomWindow = null;
-  let chartCanvas;
-  let chart;
+  let hidden = ['price'];
   let refreshTimer;
   let chainSubscription;
   let chainStreamConnected = false;
@@ -40,16 +41,7 @@
   $: windowStart = zoomWindow?.startDay || rows[0]?.day || '';
   $: windowEnd = zoomWindow?.endDay || rows.at(-1)?.day || '';
   $: currentDay = dashboard.daily.at(-1) || null;
-
-  async function drawChart() {
-    await tick();
-    if (!chartCanvas || !rows.length) return;
-    chart = renderBurnTrackerChart(chartCanvas, chart, rows, {
-      unit: chartUnit,
-      showPrice,
-      onZoom(range) { zoomWindow = range; }
-    });
-  }
+  $: showPrice = !hidden.includes('price');
 
   async function load(forceRefresh = false) {
     if (payload) refreshing = true;
@@ -59,7 +51,6 @@
       let nextPayload = await fetchBurnTracker({ forceRefresh });
       for (const head of recentHeads) nextPayload = applyBurnTrackerHeadPayload(nextPayload, head);
       payload = nextPayload;
-      await drawChart();
     } catch (error) {
       loadError = error?.message || 'Burn Tracker data could not be loaded';
     } finally {
@@ -78,29 +69,28 @@
     const nextPayload = applyBurnTrackerHeadPayload(payload, head);
     if (nextPayload === payload || Number(head.height) <= previousHeight) return;
     payload = nextPayload;
-    if (head.income_burn_e8 !== null && head.income_burn_e8 !== '0') await drawChart();
   }
 
-  async function selectRange(range) {
+  function selectRange(range) {
     rangeId = range;
     zoomWindow = null;
-    await drawChart();
   }
 
-  async function selectChartUnit(unit) {
+  function selectChartUnit(unit) {
     if (unit === chartUnit) return;
     chartUnit = unit;
     zoomWindow = null;
-    await drawChart();
   }
 
   function togglePrice() {
-    showPrice = !showPrice;
-    setBurnTrackerPriceVisible(chart, showPrice);
+    toggleSeries('price');
+  }
+
+  function toggleSeries(id) {
+    hidden = hidden.includes(id) ? hidden.filter((item) => item !== id) : [...hidden, id];
   }
 
   function resetZoom() {
-    chart?.resetZoom?.();
     zoomWindow = null;
   }
 
@@ -133,7 +123,6 @@
   onDestroy(() => {
     refreshTimer?.stop();
     chainSubscription?.close();
-    chart?.destroy();
   });
 </script>
 
@@ -250,19 +239,14 @@
       <div class="zoom-hint">DRAG TO ZOOM · PINCH ON TOUCH · DOUBLE-CLICK TO RESET</div>
     </div>
 
-    {#if loading && !rows.length}
-      <div class="chart-loading" aria-live="polite">LOADING BURN HISTORY<span>_</span></div>
-    {:else if rows.length}
-      <div class="chart-wrap">
-        <canvas
-          bind:this={chartCanvas}
-          aria-label={`Daily burn in ${chartUnit === 'usd' ? 'US dollars' : 'RUNE'} as bars and cumulative burn as a line. Optional RUNE price can be enabled.`}
-          on:dblclick={resetZoom}
-        ></canvas>
-      </div>
-    {:else}
-      <div class="chart-loading">NO BURN HISTORY AVAILABLE</div>
-    {/if}
+
+    <RangeSummary {rows} window={zoomWindow} metrics={[{ field: chartUnit === 'usd' ? 'burnedUsd' : 'burnedRune', label: 'Burn', kind: 'flow', unit: chartUnit === 'usd' ? 'usd' : 'RUNE' }]} />
+    <div class="chart-wrap">
+      <TimeSeriesChart points={rows} historyPoints={dashboard.daily} options={{ unit: chartUnit, hidden }} onHiddenChange={(ids) => hidden = ids} buildOption={buildBurnTrackerOption}
+        {zoomWindow} onZoom={(window) => zoomWindow = window} {loading} hasData={rows.length > 0}
+        height="450px" narrowHeight="370px" loadingText="LOADING BURN HISTORY" emptyText="NO BURN HISTORY AVAILABLE"
+        ariaLabel={`Daily burn in ${chartUnit === 'usd' ? 'US dollars' : 'RUNE'} as bars and cumulative burn as a line. Optional RUNE price can be enabled. Daily values are in the table below.`} />
+    </div>
 
     <div class="chart-foot">
       <span>DAILY {chartUnit === 'usd' ? '$' : 'ᚱ'} <b style:color={BURN_BAR_COLOR}>■</b></span>
@@ -521,7 +505,7 @@
     background: transparent;
     color: var(--term-text-3);
     cursor: pointer;
-    font: 700 10px var(--term-font-mono);
+    font: 700 11px var(--term-font-mono);
   }
   .chart-controls button:hover:not(:disabled),
   .chart-controls button:focus-visible,
@@ -542,18 +526,8 @@
 
   .chart-wrap {
     position: relative;
-    height: 470px;
     padding: 12px 10px 5px;
   }
-  .chart-wrap canvas { touch-action: pan-y; }
-  .chart-loading {
-    display: grid;
-    height: 470px;
-    place-items: center;
-    color: var(--term-text-4);
-    font: 11px var(--term-font-mono);
-  }
-  .chart-loading span { color: var(--term-accent); animation: pulse 1s steps(2, end) infinite; }
 
   .chart-foot {
     flex-wrap: wrap;
@@ -603,8 +577,7 @@
   @keyframes pulse { 50% { opacity: 0.25; } }
 
   @media (prefers-reduced-motion: reduce) {
-    .refreshing .status-dot,
-    .chart-loading span { animation: none; }
+    .refreshing .status-dot { animation: none; }
   }
 
   @media (max-width: 800px) {
@@ -617,7 +590,6 @@
     .range-group { display: grid; grid-template-columns: repeat(4, 1fr); }
     .control-actions { justify-content: flex-start; }
     .chart-controls button { flex: 1; }
-    .chart-wrap, .chart-loading { height: 390px; }
     .chart-foot .source { width: 100%; margin-left: 0; }
   }
 </style>

@@ -714,8 +714,10 @@ export function compactWasmArbMonitoringRows(rows = [], options = {}) {
   };
 }
 
+/** @param {any[]} rows @param {number | string} grainSeconds */
 export function aggregateWasmArbEconomicsBuckets(rows = [], grainSeconds = 60 * 60) {
   const normalized = normalizeWasmArbEconomicsBuckets(rows);
+  const monthly = grainSeconds === 'month';
   const size = Math.max(FIVE_MINUTES_SECONDS, Math.trunc(finiteNumber(grainSeconds, 3600)));
   const groups = new Map();
 
@@ -723,9 +725,12 @@ export function aggregateWasmArbEconomicsBuckets(rows = [], grainSeconds = 60 * 
     // Monitoring history is compacted from hourly to daily source rows over time.
     // Never present a coarse source row as if it were a finer observation: preserve
     // its native duration when the requested chart grain is smaller.
-    const effectiveSize = Math.max(size, row.bucketSeconds);
+    const date = new Date(row.startSeconds * 1000);
+    const monthStart = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) / 1000;
+    const monthEnd = Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1) / 1000;
+    const effectiveSize = monthly ? monthEnd - monthStart : Math.max(size, row.bucketSeconds);
     const weekOffset = effectiveSize === 7 * DAY_SECONDS ? 4 * DAY_SECONDS : 0;
-    const start = Math.floor((row.startSeconds - weekOffset) / effectiveSize)
+    const start = monthly ? monthStart : Math.floor((row.startSeconds - weekOffset) / effectiveSize)
       * effectiveSize + weekOffset;
     const key = `${start}:${effectiveSize}`;
     const group = groups.get(key) || {

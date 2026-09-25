@@ -1,4 +1,8 @@
 <script>
+  import EventTimeSeriesChart from '../charts/EventTimeSeriesChart.svelte';
+  let hiddenSeries = [];
+  const calendarMetrics = [{ id: 'seconds', label: 'BLOCK INTERVAL', color: '#00cc66', value: row => row.seconds, weight: row => row.blocks, format: value => `${value.toFixed(2)}s` }];
+  import RangeSummary from '../charts/RangeSummary.svelte';
   import { onDestroy, onMount } from 'svelte';
   import { createVisiblePoll } from '../utils/visible-poll.js';
   import { subscribeChainHeads } from '../api/chain-stream.js';
@@ -371,13 +375,17 @@
     </div>
   </div>
 
-  <div class="chart-summary" aria-label="Block interval summary">
-    <div><span>LATEST</span><strong>{formatSeconds(latestSeconds)}</strong></div>
-    <div><span>WEIGHTED AVG</span><strong>{formatSeconds(weightedAverage)}</strong></div>
-    <div><span>MAX</span><strong>{formatSeconds(maxSeconds)}</strong></div>
-    <div><span>OBSERVED</span><strong>{totalBlocks.toLocaleString('en-US')}</strong><small>blocks</small></div>
-  </div>
+  <RangeSummary rows={points} bucket="sample" cards={[
+    { label: 'Latest block interval', value: points.length ? latestSeconds : null, unit: 's' },
+    { label: 'Weighted avg interval', value: totalBlocks ? weightedAverage : null, unit: 's' },
+    { label: 'Max sampled interval', value: points.length ? maxSeconds : null, unit: 's' },
+    { label: 'Observed blocks', value: points.length ? totalBlocks : null, unit: 'blocks' }
+  ]} note="Average is weighted by observed block count, including when samples are grouped. Maximum uses the displayed sample resolution." />
 
+  <EventTimeSeriesChart events={allPoints} metrics={calendarMetrics} bind:hidden={hiddenSeries}
+    zoomWindow={zoomStart === null ? null : { startDay: new Date(zoomStart).toISOString().slice(0, 10), endDay: new Date(zoomEnd).toISOString().slice(0, 10) }}
+    onZoom={window => { zoomStart = window ? Date.parse(window.startDay) : null; zoomEnd = window ? Date.parse(window.endDay) + 86400000 - 1 : null; }}
+    ariaLabel="Calendar block intervals, weighted by observed block count">
   {#if points.length > 1}
     <div class="chart-scroll">
       <svg
@@ -401,8 +409,10 @@
         <line class="target-line" x1={LEFT} x2={WIDTH - RIGHT} y1={targetY} y2={targetY} />
         <text class="target-label" x={WIDTH - RIGHT - 4} y={targetY - 6}>6S TARGET</text>
 
+        {#if !hiddenSeries.includes('seconds')}
         <path class="series-area" d={areaPath}></path>
         <path class="series-line" d={linePath}></path>
+        {/if}
 
         <rect
           class="zoom-capture"
@@ -429,7 +439,7 @@
           </g>
         {/if}
 
-        {#if activePoint}
+        {#if activePoint && !hiddenSeries.includes('seconds')}
           <line class="tooltip-guide" x1={activePointX} x2={activePointX} y1={TOP} y2={BOTTOM}></line>
           <circle class="tooltip-anchor" cx={activePointX} cy={activePointY} r="4"></circle>
           <g class="chart-tooltip" transform={`translate(${tooltipX} ${tooltipY})`} aria-hidden="true">
@@ -450,6 +460,8 @@
   {:else}
     <div class="empty-chart"><span>▓░░░░</span> Collecting block headers...</div>
   {/if}
+
+  </EventTimeSeriesChart>
 
   <div class="chart-source">
     <span>Liquify / THORChain block headers</span>
@@ -507,23 +519,6 @@
 
   .reset-zoom span { color: #00cc66; }
   .reset-zoom:hover, .reset-zoom:focus-visible { border-color: #00cc66; color: #00cc66; outline: none; }
-
-  .chart-summary {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    border-bottom: 1px solid #1a1a1a;
-  }
-
-  .chart-summary > div {
-    min-height: 62px;
-    padding: 11px 14px;
-    border-right: 1px solid #111;
-  }
-
-  .chart-summary > div:last-child { border-right: 0; }
-  .chart-summary span { display: block; color: var(--term-text-3, #c8c8c8); font: 700 11px/1.3 'JetBrains Mono', monospace; letter-spacing: .08em; }
-  .chart-summary strong { display: inline-block; margin-top: 7px; color: var(--term-text, #f5f5f5); font: 800 15px/1 'JetBrains Mono', monospace; }
-  .chart-summary small { margin-left: 5px; color: var(--term-text-3, #c8c8c8); font: 11px/1.2 'JetBrains Mono', monospace; }
 
   .chart-scroll {
     overflow-x: auto;
@@ -597,9 +592,6 @@
   @keyframes loader { 50% { opacity: .35; } }
 
   @media (max-width: 560px) {
-    .chart-summary { grid-template-columns: repeat(2, 1fr); }
-    .chart-summary > div:nth-child(2) { border-right: 0; }
-    .chart-summary > div:nth-child(-n + 2) { border-bottom: 1px solid #111; }
     .chart-source { display: block; }
     .chart-source em { display: block; margin-top: 3px; }
   }

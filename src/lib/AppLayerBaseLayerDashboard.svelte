@@ -37,13 +37,7 @@
     targetRatePerSecond,
     targetSummary
   } from './app-layer/model.js';
-  import {
-    APP_LAYER_SERIES,
-    buildAccruedValueTooltipDetails,
-    buildPolAccrualTooltipDetails,
-    collectedFlowTooltip,
-    renderAppLayerSeriesChart
-  } from './app-layer/charts.js';
+  import AppLayerChart from './app-layer/Chart.svelte';
 
   const DATA_BASE = '/data/rujira-base-layer-fees';
   const THORCHAIN_NET_BASE = 'https://thorchain.net';
@@ -234,15 +228,10 @@
   let lastLiveRefresh = null;
   let dashboardRefreshRunning = false;
 
-  let collectedCanvas;
   let collectedChart;
-  let accruedValueCanvas;
   let accruedValueChart;
-  let paymentCanvas;
   let paymentChart;
-  let polPaymentCanvas;
   let polPaymentChart;
-  let generatedFeesCanvas;
   let generatedFeesChart;
 
   // Two independent per-chart toggles: bucket size (daily default, weekly
@@ -255,17 +244,17 @@
 
   function setGranularity(key, value) {
     granularity = { ...granularity, [key]: value };
-    zoomed = { ...zoomed, [key]: false };
+    resetZoom(key);
   }
 
   function setChartRange(key, value) {
     chartRange = { ...chartRange, [key]: value };
-    zoomed = { ...zoomed, [key]: false };
+    resetZoom(key);
   }
 
   function setView(key, value) {
     view = { ...view, [key]: value };
-    zoomed = { ...zoomed, [key]: false };
+    resetZoom(key);
   }
 
   const chartByKey = () => ({
@@ -463,120 +452,11 @@
     .slice(0, 8);
   $: baseRuneRatePerSecond = targetRatePerSecond(configs.base, 'rune');
 
-  function renderAccruedValueChart(pick, chartView, range) {
-    accruedValueChart = renderSeriesChart(accruedValueCanvas, accruedValueChart, {
-      zoomKey: 'accrued',
-      rangeDays: range === 'all' ? null : 30,
-      rows: pick.rows,
-      grain: pick.grain,
-      view: chartView,
-      colors: APP_LAYER_SERIES.accrued,
-      valueField: 'accrued_value_usd',
-      cumulativeField: 'cumulative_usd',
-      barLabel: 'TC-retained accrued value (01 + 03)',
-      barSeries: [
-        {
-          label: '01 · Base Layer earnings (TC-retained share)',
-          valueField: 'inflow_usd',
-          colors: APP_LAYER_SERIES.collected
-        },
-        {
-          label: '03 · TC liquidity fees generated',
-          valueField: 'liquidity_fee_usd',
-          colors: APP_LAYER_SERIES.generated
-        }
-      ],
-      cumulativeLabel: 'Cumulative TC-retained value (01 + 03)',
-      afterBody: buildAccruedValueTooltipDetails
-    });
-  }
-
-  function renderCollectedChart(pick, chartView, range) {
-    collectedChart = renderSeriesChart(collectedCanvas, collectedChart, {
-      zoomKey: 'collected',
-      rangeDays: range === 'all' ? null : 30,
-      rows: pick.rows,
-      grain: pick.grain,
-      view: chartView,
-      colors: APP_LAYER_SERIES.collected,
-      valueField: 'inflow_usd',
-      cumulativeField: 'cumulative_usd',
-      barLabel: 'App-layer earnings retained for TC (2/3 since cutover)',
-      cumulativeLabel: 'Cumulative app-layer earnings retained for TC',
-      afterBody: (row) => collectedFlowTooltip(row, pick.grain)
-    });
-  }
-
-  function renderPaymentChart(pick, chartView, range) {
-    paymentChart = renderSeriesChart(paymentCanvas, paymentChart, {
-      zoomKey: 'paid',
-      rangeDays: range === 'all' ? null : 30,
-      rows: pick.rows,
-      grain: pick.grain,
-      view: chartView,
-      colors: APP_LAYER_SERIES.paid,
-      valueField: 'payment_usd',
-      cumulativeField: 'cumulative_usd',
-      barLabel: 'TC Reserve settlement USD',
-      cumulativeLabel: 'Cumulative TC Reserve settlement USD',
-      afterBody: (row) => [
-        `${number2.format(row.payments || 0)} Reserve deposit${row.payments === 1 ? '' : 's'}`,
-        `${number2.format(row.payment_rune || 0)} RUNE to Reserve`,
-        `${number4.format(row.rune_price_usd || row.settlement_rune_price_usd || 0)} avg historical RUNE/USD`,
-        `${number2.format(row.cumulative_rune || 0)} cumulative Reserve RUNE`
-      ]
-    });
-  }
-
-  function renderPolAccrualChart(pick, chartView, range) {
-    polPaymentChart = renderSeriesChart(polPaymentCanvas, polPaymentChart, {
-      zoomKey: 'pol',
-      rangeDays: range === 'all' ? null : 30,
-      rows: pick.rows,
-      grain: pick.grain,
-      view: chartView,
-      colors: APP_LAYER_SERIES.pol,
-      valueField: 'pol_accrued_usd',
-      cumulativeField: 'cumulative_pol_accrued_usd',
-      barLabel: 'THORChain POL accrual USD',
-      cumulativeLabel: 'Cumulative THORChain POL accrual USD',
-      afterBody: (row) => buildPolAccrualTooltipDetails(row, pick.grain)
-    });
-  }
-
-  function renderGeneratedFeesChart(pick, chartView, range) {
-    generatedFeesChart = renderSeriesChart(generatedFeesCanvas, generatedFeesChart, {
-      zoomKey: 'generated',
-      rangeDays: range === 'all' ? null : 30,
-      rows: pick.rows,
-      grain: pick.grain,
-      view: chartView,
-      colors: APP_LAYER_SERIES.generated,
-      valueField: 'liquidity_fee_usd',
-      cumulativeField: 'cumulative_usd',
-      barLabel: 'Generated fees USD',
-      cumulativeLabel: 'Cumulative generated fees USD',
-      afterBody: (row) => [
-        `${number4.format(row.liquidity_fee_rune || 0)} RUNE fees`,
-        `${number4.format(row.rune_price_usd || 0)} RUNE/USD`,
-        `${number4.format(row.cumulative_rune || 0)} cumulative RUNE`
-      ]
-    });
-  }
-
   $: accruedValuePick = pickAccruedValueRows(tcInflows, generatedFees, granularity.accrued);
   $: collectedPick = pickAggRows(tcInflows, granularity.collected);
   $: paidPick = pickPaidRows(reserveEvents, weeklyRows, granularity.paid, reserveDailyRows);
   $: polPick = pickAggRows(tcInflows, granularity.pol);
   $: generatedPick = pickAggRows(generatedFees, granularity.generated);
-
-  $: if (accruedValueCanvas && accruedValuePick.rows.length)
-    renderAccruedValueChart(accruedValuePick, view.accrued, chartRange.accrued);
-  $: if (collectedCanvas && collectedPick.rows.length) renderCollectedChart(collectedPick, view.collected, chartRange.collected);
-  $: if (paymentCanvas && paidPick.rows.length) renderPaymentChart(paidPick, view.paid, chartRange.paid);
-  $: if (polPaymentCanvas && polPick.rows.length) renderPolAccrualChart(polPick, view.pol, chartRange.pol);
-  $: if (generatedFeesCanvas && generatedPick.rows.length)
-    renderGeneratedFeesChart(generatedPick, view.generated, chartRange.generated);
 
   async function refreshDashboard() {
     if (dashboardRefreshRunning) return;
@@ -610,11 +490,6 @@
     return () => {
       mounted = false;
       refreshTimer?.stop();
-      accruedValueChart?.destroy();
-      collectedChart?.destroy();
-      paymentChart?.destroy();
-      polPaymentChart?.destroy();
-      generatedFeesChart?.destroy();
     };
   });
 
@@ -798,14 +673,6 @@
     } finally {
       liveLoading = false;
     }
-  }
-
-  function renderSeriesChart(canvas, previousChart, config) {
-    const { zoomKey, ...chartConfig } = config;
-    return renderAppLayerSeriesChart(canvas, previousChart, {
-      ...chartConfig,
-      onZoomComplete: zoomKey ? () => markZoomed(zoomKey, true) : undefined
-    });
   }
 
   function getTargetsForConfig(collectorKey, config) {
@@ -1098,18 +965,13 @@
       </div>
       <div class="chart-controls green-t">
         <div class="mode-toggle">
-          <button class:active={granularity.accrued === 'daily'} on:click={() => setGranularity('accrued', 'daily')}>[daily]</button>
-          <button class:active={granularity.accrued === 'weekly'} on:click={() => setGranularity('accrued', 'weekly')}>[weekly]</button>
+          <button class:active={view.accrued === 'bars'} aria-pressed={view.accrued === 'bars'} on:click={() => setView('accrued', 'bars')}>[bars]</button>
+          <button class:active={view.accrued === 'cumulative'} aria-pressed={view.accrued === 'cumulative'} on:click={() => setView('accrued', 'cumulative')}>[cumul]</button>
         </div>
         <span class="ctrl-div">·</span>
         <div class="mode-toggle">
-          <button class:active={view.accrued === 'bars'} on:click={() => setView('accrued', 'bars')}>[bars]</button>
-          <button class:active={view.accrued === 'cumulative'} on:click={() => setView('accrued', 'cumulative')}>[cumul]</button>
-        </div>
-        <span class="ctrl-div">·</span>
-        <div class="mode-toggle">
-          <button class:active={chartRange.accrued === '30d'} on:click={() => setChartRange('accrued', '30d')}>[30d]</button>
-          <button class:active={chartRange.accrued === 'all'} on:click={() => setChartRange('accrued', 'all')}>[all]</button>
+          <button class:active={chartRange.accrued === '30d'} aria-pressed={chartRange.accrued === '30d'} on:click={() => setChartRange('accrued', '30d')}>[30d]</button>
+          <button class:active={chartRange.accrued === 'all'} aria-pressed={chartRange.accrued === 'all'} on:click={() => setChartRange('accrued', 'all')}>[all]</button>
         </div>
         <span class="ctrl-div">·</span>
         <span class="zoom-hint">drag to zoom</span>
@@ -1125,19 +987,10 @@
       alter either series, and pre-cutover inventory paid later is not recast as new POL accrual.
     </p>
     <div class="chart-frame">
-      {#if accruedValueLoading}
-        <div class="loading-block">
-          <span class="loading-marker">▓░░░░</span>
-          <span>loading TC-retained accrued value sources</span>
-        </div>
-      {:else if !accruedValuePick.rows.length}
-        <div class="loading-block">
-          <span class="loading-marker">░░░░░</span>
-          <span>no aligned 01 + 03 rows available</span>
-        </div>
-      {:else}
-          <canvas bind:this={accruedValueCanvas} aria-label="Daily, weekly, and cumulative TC-retained app value from 01 plus 03"></canvas>
-      {/if}
+      <AppLayerChart bind:this={accruedValueChart} chartKey="accrued" pick={accruedValuePick}
+          view={view.accrued} range={chartRange.accrued} onZoom={(active) => markZoomed('accrued', active)}
+          loading={accruedValueLoading} loadingText="loading TC-retained accrued value sources" emptyText="no aligned 01 + 03 rows available"
+          ariaLabel="Daily, weekly, and cumulative TC-retained app value from 01 plus 03" />
     </div>
   </section>
 
@@ -1150,18 +1003,13 @@
       </div>
       <div class="chart-controls amber-t">
         <div class="mode-toggle">
-          <button class:active={granularity.collected === 'daily'} on:click={() => setGranularity('collected', 'daily')}>[daily]</button>
-          <button class:active={granularity.collected === 'weekly'} on:click={() => setGranularity('collected', 'weekly')}>[weekly]</button>
+          <button class:active={view.collected === 'bars'} aria-pressed={view.collected === 'bars'} on:click={() => setView('collected', 'bars')}>[bars]</button>
+          <button class:active={view.collected === 'cumulative'} aria-pressed={view.collected === 'cumulative'} on:click={() => setView('collected', 'cumulative')}>[cumul]</button>
         </div>
         <span class="ctrl-div">·</span>
         <div class="mode-toggle">
-          <button class:active={view.collected === 'bars'} on:click={() => setView('collected', 'bars')}>[bars]</button>
-          <button class:active={view.collected === 'cumulative'} on:click={() => setView('collected', 'cumulative')}>[cumul]</button>
-        </div>
-        <span class="ctrl-div">·</span>
-        <div class="mode-toggle">
-          <button class:active={chartRange.collected === '30d'} on:click={() => setChartRange('collected', '30d')}>[30d]</button>
-          <button class:active={chartRange.collected === 'all'} on:click={() => setChartRange('collected', 'all')}>[all]</button>
+          <button class:active={chartRange.collected === '30d'} aria-pressed={chartRange.collected === '30d'} on:click={() => setChartRange('collected', '30d')}>[30d]</button>
+          <button class:active={chartRange.collected === 'all'} aria-pressed={chartRange.collected === 'all'} on:click={() => setChartRange('collected', 'all')}>[all]</button>
         </div>
         <span class="ctrl-div">·</span>
         <span class="zoom-hint">drag to zoom</span>
@@ -1180,19 +1028,10 @@
 
     <div class="side-layout">
       <div class="chart-frame">
-        {#if tcInflowsLoading}
-          <div class="loading-block">
-            <span class="loading-marker">▓░░░░</span>
-            <span>loading Base Layer earnings backend</span>
-          </div>
-        {:else if !inflowRows.length}
-          <div class="loading-block">
-            <span class="loading-marker">░░░░░</span>
-            <span>no Base Layer earnings rows available</span>
-          </div>
-        {:else}
-          <canvas bind:this={collectedCanvas} aria-label="Daily, weekly, and cumulative app-layer earnings retained for TC using the accrual-date split"></canvas>
-        {/if}
+        <AppLayerChart bind:this={collectedChart} chartKey="collected" pick={collectedPick}
+          view={view.collected} range={chartRange.collected} onZoom={(active) => markZoomed('collected', active)}
+          loading={tcInflowsLoading} loadingText="loading Base Layer earnings backend" emptyText="no Base Layer earnings rows available"
+          ariaLabel="Daily, weekly, and cumulative app-layer earnings retained for TC using the accrual-date split" />
       </div>
 
       <div class="side-panel amber-p">
@@ -1241,18 +1080,13 @@
       </div>
       <div class="chart-controls green-t">
         <div class="mode-toggle">
-          <button class:active={granularity.paid === 'daily'} on:click={() => setGranularity('paid', 'daily')}>[daily]</button>
-          <button class:active={granularity.paid === 'weekly'} on:click={() => setGranularity('paid', 'weekly')}>[weekly]</button>
+          <button class:active={view.paid === 'bars'} aria-pressed={view.paid === 'bars'} on:click={() => setView('paid', 'bars')}>[bars]</button>
+          <button class:active={view.paid === 'cumulative'} aria-pressed={view.paid === 'cumulative'} on:click={() => setView('paid', 'cumulative')}>[cumul]</button>
         </div>
         <span class="ctrl-div">·</span>
         <div class="mode-toggle">
-          <button class:active={view.paid === 'bars'} on:click={() => setView('paid', 'bars')}>[bars]</button>
-          <button class:active={view.paid === 'cumulative'} on:click={() => setView('paid', 'cumulative')}>[cumul]</button>
-        </div>
-        <span class="ctrl-div">·</span>
-        <div class="mode-toggle">
-          <button class:active={chartRange.paid === '30d'} on:click={() => setChartRange('paid', '30d')}>[30d]</button>
-          <button class:active={chartRange.paid === 'all'} on:click={() => setChartRange('paid', 'all')}>[all]</button>
+          <button class:active={chartRange.paid === '30d'} aria-pressed={chartRange.paid === '30d'} on:click={() => setChartRange('paid', '30d')}>[30d]</button>
+          <button class:active={chartRange.paid === 'all'} aria-pressed={chartRange.paid === 'all'} on:click={() => setChartRange('paid', 'all')}>[all]</button>
         </div>
         <span class="ctrl-div">·</span>
         <span class="zoom-hint">drag to zoom</span>
@@ -1272,19 +1106,10 @@
       Source in use: {reservePaymentSource} · {reservePaymentBackfillLabel}.
     </p>
     <div class="chart-frame">
-      {#if reservePaymentsLoading && !weeklyRows.length}
-        <div class="loading-block">
-          <span class="loading-marker">▓░░░░</span>
-          <span>loading TC Reserve settlement stream</span>
-        </div>
-      {:else if !weeklyRows.length}
-        <div class="loading-block">
-          <span class="loading-marker">░░░░░</span>
-          <span>no TC Reserve settlement rows available</span>
-        </div>
-      {:else}
-        <canvas bind:this={paymentCanvas} aria-label="Daily, weekly, and cumulative TC Reserve settlements"></canvas>
-      {/if}
+      <AppLayerChart bind:this={paymentChart} chartKey="paid" pick={paidPick}
+          view={view.paid} range={chartRange.paid} onZoom={(active) => markZoomed('paid', active)}
+          loading={reservePaymentsLoading} loadingText="loading TC Reserve settlement stream" emptyText="no TC Reserve settlement rows available"
+          ariaLabel="Daily, weekly, and cumulative TC Reserve settlements" />
     </div>
     {#if weeklyRows.length}
       <div class="reserve-price-basis">
@@ -1336,18 +1161,13 @@
       </div>
       <div class="chart-controls amber-t">
         <div class="mode-toggle">
-          <button class:active={granularity.pol === 'daily'} on:click={() => setGranularity('pol', 'daily')}>[daily]</button>
-          <button class:active={granularity.pol === 'weekly'} on:click={() => setGranularity('pol', 'weekly')}>[weekly]</button>
+          <button class:active={view.pol === 'bars'} aria-pressed={view.pol === 'bars'} on:click={() => setView('pol', 'bars')}>[bars]</button>
+          <button class:active={view.pol === 'cumulative'} aria-pressed={view.pol === 'cumulative'} on:click={() => setView('pol', 'cumulative')}>[cumul]</button>
         </div>
         <span class="ctrl-div">·</span>
         <div class="mode-toggle">
-          <button class:active={view.pol === 'bars'} on:click={() => setView('pol', 'bars')}>[bars]</button>
-          <button class:active={view.pol === 'cumulative'} on:click={() => setView('pol', 'cumulative')}>[cumul]</button>
-        </div>
-        <span class="ctrl-div">·</span>
-        <div class="mode-toggle">
-          <button class:active={chartRange.pol === '30d'} on:click={() => setChartRange('pol', '30d')}>[30d]</button>
-          <button class:active={chartRange.pol === 'all'} on:click={() => setChartRange('pol', 'all')}>[all]</button>
+          <button class:active={chartRange.pol === '30d'} aria-pressed={chartRange.pol === '30d'} on:click={() => setChartRange('pol', '30d')}>[30d]</button>
+          <button class:active={chartRange.pol === 'all'} aria-pressed={chartRange.pol === 'all'} on:click={() => setChartRange('pol', 'all')}>[all]</button>
         </div>
         <span class="ctrl-div">·</span>
         <span class="zoom-hint">drag to zoom</span>
@@ -1362,19 +1182,10 @@
       POL accrual stays outside Σ; observed on-chain POL settlements remain summarized below.
     </p>
     <div class="chart-frame">
-      {#if tcInflowsLoading}
-        <div class="loading-block">
-          <span class="loading-marker">▓░░░░</span>
-          <span>loading POL accrual stream</span>
-        </div>
-      {:else if !polPick.rows.length}
-        <div class="loading-block">
-          <span class="loading-marker">░░░░░</span>
-          <span>no POL accrual rows available</span>
-        </div>
-      {:else}
-        <canvas bind:this={polPaymentCanvas} aria-label="Daily, weekly, and cumulative THORChain POL capital accrual"></canvas>
-      {/if}
+      <AppLayerChart bind:this={polPaymentChart} chartKey="pol" pick={polPick}
+          view={view.pol} range={chartRange.pol} onZoom={(active) => markZoomed('pol', active)}
+          loading={tcInflowsLoading} loadingText="loading POL accrual stream" emptyText="no POL accrual rows available"
+          ariaLabel="Daily, weekly, and cumulative THORChain POL capital accrual" />
     </div>
     {#if polAccrualWeeklyRows.length}
       <div class="reserve-price-basis pol-price-basis">
@@ -1426,18 +1237,13 @@
       </div>
       <div class="chart-controls blue-t">
         <div class="mode-toggle">
-          <button class:active={granularity.generated === 'daily'} on:click={() => setGranularity('generated', 'daily')}>[daily]</button>
-          <button class:active={granularity.generated === 'weekly'} on:click={() => setGranularity('generated', 'weekly')}>[weekly]</button>
+          <button class:active={view.generated === 'bars'} aria-pressed={view.generated === 'bars'} on:click={() => setView('generated', 'bars')}>[bars]</button>
+          <button class:active={view.generated === 'cumulative'} aria-pressed={view.generated === 'cumulative'} on:click={() => setView('generated', 'cumulative')}>[cumul]</button>
         </div>
         <span class="ctrl-div">·</span>
         <div class="mode-toggle">
-          <button class:active={view.generated === 'bars'} on:click={() => setView('generated', 'bars')}>[bars]</button>
-          <button class:active={view.generated === 'cumulative'} on:click={() => setView('generated', 'cumulative')}>[cumul]</button>
-        </div>
-        <span class="ctrl-div">·</span>
-        <div class="mode-toggle">
-          <button class:active={chartRange.generated === '30d'} on:click={() => setChartRange('generated', '30d')}>[30d]</button>
-          <button class:active={chartRange.generated === 'all'} on:click={() => setChartRange('generated', 'all')}>[all]</button>
+          <button class:active={chartRange.generated === '30d'} aria-pressed={chartRange.generated === '30d'} on:click={() => setChartRange('generated', '30d')}>[30d]</button>
+          <button class:active={chartRange.generated === 'all'} aria-pressed={chartRange.generated === 'all'} on:click={() => setChartRange('generated', 'all')}>[all]</button>
         </div>
         <span class="ctrl-div">·</span>
         <span class="zoom-hint">drag to zoom</span>
@@ -1454,19 +1260,10 @@
 
     <div class="side-layout">
       <div class="chart-frame">
-        {#if generatedFeesLoading && !generatedFeeRows.length}
-          <div class="loading-block">
-            <span class="loading-marker">▓░░░░</span>
-            <span>loading generated-fee scan</span>
-          </div>
-        {:else if !generatedFeeRows.length}
-          <div class="loading-block">
-            <span class="loading-marker">░░░░░</span>
-            <span>no generated-fee rows available</span>
-          </div>
-        {:else}
-          <canvas bind:this={generatedFeesCanvas} aria-label="Weekly and cumulative generated base-layer fees"></canvas>
-        {/if}
+        <AppLayerChart bind:this={generatedFeesChart} chartKey="generated" pick={generatedPick}
+          view={view.generated} range={chartRange.generated} onZoom={(active) => markZoomed('generated', active)}
+          loading={generatedFeesLoading} loadingText="loading generated-fee scan" emptyText="no generated-fee rows available"
+          ariaLabel="Weekly and cumulative generated base-layer fees" />
       </div>
 
       <div class="side-panel blue-p">
@@ -2610,15 +2407,11 @@
   /* ========== CHART ========== */
 
   .chart-frame {
-    height: 360px;
+    height: auto;
+    --app-plot-height: 310px;
     background: #080808;
     border: 1px solid #111;
     padding: 12px;
-  }
-
-  .chart-frame canvas {
-    width: 100%;
-    height: 100%;
   }
 
   .reserve-price-basis {
@@ -2674,7 +2467,7 @@
   }
 
   .side-layout .chart-frame {
-    height: 380px;
+    --app-plot-height: 330px;
   }
 
   .side-panel {
@@ -2764,34 +2557,6 @@
     line-height: 1.45;
     border-top: 1px dashed #1a1a1a;
     padding-top: 10px;
-  }
-
-  .loading-block {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    height: 100%;
-    color: var(--term-text-4, #949494);
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    text-align: center;
-    padding: 0 20px;
-  }
-
-  .loading-marker {
-    color: #00cc66;
-    font-size: 14px;
-    animation: marquee 1.2s steps(5) infinite;
-  }
-
-  @keyframes marquee {
-    0% { opacity: 0.3; }
-    50% { opacity: 1; }
-    100% { opacity: 0.3; }
   }
 
   /* ========== FOLD ========== */
@@ -3118,8 +2883,7 @@
     .fpipe-line,
     .fpipe-line-v,
     .cursor,
-    .dot.ok,
-    .loading-marker {
+    .dot.ok {
       animation: none;
     }
   }
@@ -3237,11 +3001,15 @@
     }
 
     .chart-frame {
-      height: 280px;
+      --app-plot-height: 230px;
+    }
+
+    #chart-accrued-value .chart-frame {
+      --app-plot-height: 310px;
     }
 
     .side-layout .chart-frame {
-      height: 300px;
+      --app-plot-height: 250px;
     }
   }
 </style>

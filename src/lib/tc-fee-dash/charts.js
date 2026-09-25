@@ -2,6 +2,7 @@ import Chart from 'chart.js/auto';
 import { Flow, SankeyController } from 'chartjs-chart-sankey';
 import { formatNumber, formatUSD } from '../utils/formatting.js';
 import { TERMINAL_CHART_PALETTE } from '../charts/terminal.js';
+import { formatSystemIncomePercent } from './distribution.js';
 import {
   formatTcFeeBps,
   formatTcFeeUsdCompact,
@@ -482,7 +483,7 @@ export function createSystemIncomeDistributionChart(canvas, flows = []) {
   if (!canvas || !flows.length) return null;
   const labelByNode = Object.fromEntries([
     ['System Income', 'SYSTEM INCOME · 100%'],
-    ...flows.map((flow) => [flow.to, `${flow.to} · ${flow.flow}%`])
+    ...flows.map((flow) => [flow.to, `${flow.to} · ${formatSystemIncomePercent(flow.flow)}`])
   ]);
 
   return new Chart(canvas.getContext('2d'), {
@@ -523,7 +524,7 @@ export function createSystemIncomeDistributionChart(canvas, flows = []) {
             label(context) {
               const dataset = /** @type {any} */ (context.dataset);
               const item = dataset.data[context.dataIndex];
-              return `${item.label}: ${item.flow}%`;
+              return `${item.label}: ${formatSystemIncomePercent(item.flow)}`;
             }
           }
         }

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { buildSystemIncomePolDepositOption } from '../src/lib/system-income-pol/charts.js';
 
 import {
   SYSTEM_INCOME_POL_RANGES,
@@ -13,37 +14,24 @@ import {
   formatE8Usd,
   formatPercent,
   normalizeSystemIncomePolPayload,
-  positionSystemIncomePolFeeTooltip,
-  projectSystemIncomePolChartSelection,
   selectSystemIncomePolRange
 } from '../src/lib/system-income-pol/model.js';
 
-test('daily fee tooltips stay inside narrow charts and flip at the right edge', () => {
-  assert.deepEqual(positionSystemIncomePolFeeTooltip(80, 1000, 1000), { left: 92, width: 280 });
-  assert.deepEqual(positionSystemIncomePolFeeTooltip(970, 1000, 1000), { left: 678, width: 280 });
-  for (const containerWidth of [260, 320, 390, 1000]) {
-    for (const pointX of [0, 64, 500, 1000]) {
-      const position = positionSystemIncomePolFeeTooltip(pointX, 1000, containerWidth);
-      assert.ok(position.left >= 8);
-      assert.ok(position.left + position.width <= containerWidth - 8);
-    }
-  }
-});
-
-test('daily fee chart provides a styled, dismissible tooltip for pointer, keyboard and touch', async () => {
+test('daily fee details remain dismissible and keyboard/touch accessible after migration', async () => {
   const source = await readFile(new URL('../src/lib/system-income-pol/DailyFeeChart.svelte', import.meta.url), 'utf8');
-  assert.match(source, /id="daily-fees-tooltip"[\s\S]*?role="tooltip"/);
-  assert.match(source, /aria-describedby=\{selectedDay === point.day \? 'daily-fees-tooltip'/);
-  assert.match(source, /on:mouseenter=/);
+  assert.match(source, /id="daily-fees-tooltip"[^>]*role="tooltip"/);
+  assert.match(source, /<TimeSeriesChart/);
+  assert.match(source, /onSelect=\{pinDay\}/);
+  assert.match(source, /<label for="pol-fee-day">/);
+  assert.match(source, /<select id="pol-fee-day" bind:value=\{selectedDay\}/);
+  assert.match(source, /aria-describedby=\{selected \? 'daily-fees-tooltip'/);
   assert.match(source, /on:focus=/);
-  assert.match(source, /on:click=\{\(\) => pinDay\(point.day\)\}/);
   assert.match(source, /on:pointerdown=\{dismissOutside\}/);
   assert.match(source, /event.key === 'Escape'/);
-  assert.match(source, /on:mouseleave=\{leaveChart\}/);
-  assert.match(source, /selected.missingReason/);
-  assert.match(source, /selected.feeCoverage.coveredHours/);
+  assert.match(source, /polFeeDetails\(selected, unit\)/);
   assert.match(source, /PARTIAL \/ PROVISIONAL/);
-  assert.doesNotMatch(source, /<title>|class="readout"/);
+  assert.match(source, /<button[^>]*on:click=\{dismissTooltip\}/);
+  assert.doesNotMatch(source, /<svg|<title>|class="readout"/);
 });
 
 test('daily fee bars use daily estimates and historical prices, not cumulative fees or deposits', () => {
@@ -53,15 +41,12 @@ test('daily fee bars use daily estimates and historical prices, not cumulative f
   ] });
   const usd = buildSystemIncomePolFeeChart(daily, { unit: 'usd', width: 360 });
   const rune = buildSystemIncomePolFeeChart(daily, { unit: 'rune' });
-  assert.deepEqual(usd.bars.map(bar => bar.value), [2, 12]);
-  assert.deepEqual(rune.bars.map(bar => bar.value), [1, 3]);
+  assert.deepEqual(usd.points.filter(point => point.value !== null).map(point => point.value), [2, 12]);
+  assert.deepEqual(rune.points.filter(point => point.value !== null).map(point => point.value), [1, 3]);
   assert.deepEqual(daily[1].feeCoverage, { coveredHours: 3, totalHours: 3, seededHours: 1, provisionalHours: 1 });
-  assert.equal(usd.bars[1].provisional, true);
-  assert.equal(usd.bars[0].provisional, false);
-  assert.equal(usd.width, 360);
-  assert.ok(usd.bars.every(bar => bar.left >= usd.plot.left && bar.left + usd.barWidth <= usd.plot.right));
-  assert.ok(usd.bars[1].height > usd.bars[0].height);
-  assert.deepEqual(buildSystemIncomePolFeeChart(daily.slice(1)).bars.map(bar => bar.value), [12]);
+  assert.equal(usd.points[1].provisional, true);
+  assert.equal(usd.points[0].provisional, false);
+  assert.deepEqual(buildSystemIncomePolFeeChart(daily.slice(1)).points.map(bar => bar.value), [12]);
 });
 
 test('daily fee chart distinguishes missing estimates, unpriced fees and known zero days', () => {
@@ -76,20 +61,20 @@ test('daily fee chart distinguishes missing estimates, unpriced fees and known z
   assert.deepEqual(usd.points.map(point => point.value), [null, null, 0, 3]);
   assert.equal(usd.points[0].missingReason, 'Fee estimate unavailable');
   assert.equal(usd.points[1].missingReason, 'Daily USD price unavailable');
-  assert.equal(usd.bars[0].height, 0);
-  assert.equal(usd.bars[1].provisional, true);
+  assert.equal(usd.points[2].value, 0);
+  assert.equal(usd.points[3].provisional, true);
   const rune = buildSystemIncomePolFeeChart(daily, { unit: 'rune' });
   assert.equal(rune.missingDays, 1);
-  assert.deepEqual(rune.bars.map(bar => bar.value), [2, 0, 1]);
-  assert.equal(rune.bars.at(-1).provisional, false);
+  assert.deepEqual(rune.points.filter(point => point.value !== null).map(point => point.value), [2, 0, 1]);
+  assert.equal(rune.points.at(-1).provisional, false);
 });
 
 test('daily fee chart handles empty and all-missing ranges without fabricated bars', () => {
   for (const daily of [[], normalizeSystemIncomePolPayload({ daily: [{ day: '2026-09-01' }] }).daily]) {
     const chart = buildSystemIncomePolFeeChart(daily, { width: 300 });
-    assert.equal(chart.bars.length, 0);
+    assert.ok(chart.points.every(point => point.value === null));
     assert.equal(chart.points.length, daily.length);
-    assert.ok(chart.yTicks.every(tick => Number.isFinite(tick.y) && Number.isFinite(tick.value)));
+    assert.equal(chart.missingDays, daily.length);
   }
 });
 
@@ -142,12 +127,15 @@ test('System Income POL owns /pol-tracker and appears in navigation', async () =
   assert.match(dashboardSource, /daily\.some\(row => Number\.isFinite\(row\.deployedUsd\)\)/);
   assert.doesNotMatch(dashboardSource, /USD values use the current RUNE price/);
   assert.match(dashboardSource, /USD deposits use each UTC day's closing RUNE price/);
-  assert.match(dashboardSource, /<rect class="bar deposited"/);
-  assert.match(dashboardSource, /<path class="series cumulative"/);
-  assert.match(dashboardSource, /class="chart-tooltip"/);
-  assert.match(dashboardSource, /class="zoom-capture"/);
-  assert.match(dashboardSource, /on:pointerdown=\{startZoomSelection\}/);
-  assert.match(dashboardSource, /on:dblclick=\{resetChartZoom\}/);
+  assert.match(dashboardSource, /buildSystemIncomePolChart\(dashboard.daily/);
+  assert.match(dashboardSource, /selectSystemIncomePolRange\(chart.points/);
+  assert.match(dashboardSource, /\{#if rangeRows.length\}/);
+  assert.match(dashboardSource, /<TimeSeriesChart bind:this=\{depositChart\}/);
+  assert.match(dashboardSource, /buildOption=\{buildSystemIncomePolDepositOption\}/);
+  assert.match(dashboardSource, /onZoom=\{\(window\) => zoomWindow = window\}/);
+  assert.match(dashboardSource, /depositChart\?\.resetZoom\(\)/);
+  assert.doesNotMatch(dashboardSource, /<svg|zoom-capture/);
+  assert.match(dashboardSource, /\.range-group \{ flex-wrap: wrap; \}/);
   assert.match(dashboardSource, />\[RESET\]<\/button>/);
   assert.match(dashboardSource, /class="token-name"/);
   assert.match(dashboardSource, /getAssetLogo\('THOR\.RUNE'\)/);
@@ -191,7 +179,9 @@ test('System Income POL muted copy keeps a readable contrast and type floor', as
   assert.match(dashboardSource, /\.metric small \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
   assert.match(dashboardSource, /\.panel-meta \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
   assert.match(dashboardSource, /\.asset-grid span, \.asset-grid small \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
-  assert.match(dashboardSource, /\.y-label, \.x-label \{[^}]*fill: var\(--term-text-3\);[^}]*font: 12px/);
+  const option = buildSystemIncomePolDepositOption([]);
+  assert.ok(option.yAxis.every(axis => axis.axisLabel.fontSize >= 11));
+  assert.ok(option.tooltip.textStyle.fontSize >= 12);
   assert.match(dashboardSource, /\.method-panel > p \{[^}]*color: var\(--term-text-2\);[^}]*font: 14px/);
 });
 
@@ -413,7 +403,7 @@ test('unknown undeployed RUNE stays unknown through normalization and live heads
   assert.equal(normalizeSystemIncomePolPayload(next).summary.undeployedRuneE8, null);
 });
 
-test('System Income POL history exposes ranges and chart geometry', () => {
+test('System Income POL history exposes ranges and display values', () => {
   assert.deepEqual(SYSTEM_INCOME_POL_RANGES.map(({ id }) => id), ['30d', '90d', '180d', 'all']);
   const rows = Array.from({ length: 200 }, (_, index) => ({
     day: `2026-${String(Math.floor(index / 28) + 1).padStart(2, '0')}-${String((index % 28) + 1).padStart(2, '0')}`,
@@ -425,7 +415,7 @@ test('System Income POL history exposes ranges and chart geometry', () => {
   assert.equal(selectSystemIncomePolRange(rows, 'all').length, 200);
   const chart = buildSystemIncomePolChart(rows.slice(0, 30));
   assert.equal(chart.points.length, 30);
-  assert.equal(chart.depositBars.length, 30);
+  assert.ok(chart.points.every(point => Number.isFinite(point.depositedPlotValue)));
 });
 
 test('System Income POL history charts each day\'s POL deposit as a bar', () => {
@@ -449,10 +439,7 @@ test('System Income POL history charts each day\'s POL deposit as a bar', () => 
 
   assert.deepEqual(chart.points.map((point) => point.depositedPlotRune), [690, 55]);
   assert.deepEqual(chart.points.map((point) => point.cumulativeDepositedRune), [690, 745]);
-  assert.deepEqual(chart.depositBars.map((bar) => bar.value), [690, 55]);
-  assert.ok(chart.depositBars.every((bar) => bar.height >= 0));
-  assert.match(chart.cumulativeDepositedPath, /^M/);
-  assert.equal(chart.cumulativeYTicks.length, 5);
+  assert.deepEqual(chart.points.map((point) => point.depositedPlotValue), [690, 55]);
 });
 
 test('System Income POL USD deposits use daily prices and sum historic dollars before range selection', () => {
@@ -476,9 +463,7 @@ test('System Income POL USD deposits use daily prices and sum historic dollars b
   assert.equal(chart.unitAvailable, true);
   assert.deepEqual(chart.points.map((point) => point.depositedPlotValue), [1380, 165]);
   assert.deepEqual(chart.points.map((point) => point.cumulativeDepositedValue), [1380, 1545]);
-  assert.deepEqual(chart.depositBars.map((bar) => bar.value), [1380, 165]);
   assert.deepEqual(chart.points.map((point) => point.depositedPlotRune), [690, 55]);
-  assert.match(chart.cumulativeDepositedPath, /^M/);
   const zoomed = buildSystemIncomePolChart(rows.slice(1), { unit: 'usd' });
   assert.equal(zoomed.points[0].cumulativeDepositedValue, 1545);
 });
@@ -492,7 +477,7 @@ test('System Income POL USD history leaves missing daily prices unknown', () => 
   const chart = buildSystemIncomePolChart(daily, { unit: 'usd', runePriceUsdE8: '900000000' });
   assert.deepEqual(chart.points.map(point => point.depositedPlotValue), [2, null, 3]);
   assert.deepEqual(chart.points.map(point => point.cumulativeDepositedValue), [2, null, null]);
-  assert.equal(chart.depositBars.length, 2);
+  assert.equal(chart.points.filter(point => Number.isFinite(point.depositedPlotValue)).length, 2);
 });
 
 test('live POL deposits retain their day price and midnight never borrows yesterday’s price', () => {
@@ -525,29 +510,14 @@ test('zero POL deposits do not require a price or invalidate the cumulative doll
   assert.deepEqual(daily.map(row => row.cumulativeDeployedUsd), [2, 2, 5]);
 });
 
-test('System Income POL chart selection projects drag zoom in either direction', () => {
-  const forward = projectSystemIncomePolChartSelection({
-    rowCount: 31,
-    plotLeft: 72,
-    plotRight: 928,
-    startX: 286,
-    endX: 714
-  });
-  const reverse = projectSystemIncomePolChartSelection({
-    rowCount: 31,
-    plotLeft: 72,
-    plotRight: 928,
-    startX: 714,
-    endX: 286
-  });
-
-  assert.deepEqual(forward, { startIndex: 8, endIndex: 23 });
-  assert.deepEqual(reverse, forward);
-  assert.equal(projectSystemIncomePolChartSelection({
-    rowCount: 31,
-    plotLeft: 72,
-    plotRight: 928,
-    startX: 400,
-    endX: 405
-  }), null);
+test('POL fallback cumulative RUNE is calculated before range selection', () => {
+  const rows = Array.from({ length: 40 }, (_, index) => ({
+    day: new Date(Date.UTC(2026, 7, index + 1)).toISOString().slice(0, 10),
+    deployedRune: 2, cumulativeDeployedRune: null
+  }));
+  const points = buildSystemIncomePolChart(rows).points;
+  const selected = selectSystemIncomePolRange(points, '30d');
+  assert.equal(selected[0].cumulativeDepositedValue, 22);
+  assert.equal(selected.at(-1).cumulativeDepositedValue, 80);
+  assert.equal(selected[0].depositedPlotValue, 2);
 });

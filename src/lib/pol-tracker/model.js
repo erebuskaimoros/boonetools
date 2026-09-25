@@ -102,113 +102,26 @@ export function selectPolTrackerRange(rows = [], rangeId = 'all') {
   return ordered.slice(-range.days);
 }
 
-export function projectPolTrackerChartSelection(options = {}) {
-  const count = Math.max(0, Math.trunc(Number(options.rowCount)) || 0);
-  const left = Number(options.plotLeft);
-  const right = Number(options.plotRight);
-  const first = Number(options.startX);
-  const last = Number(options.endX);
-  if (count < 2 || ![left, right, first, last].every(Number.isFinite) || right <= left) return null;
-
-  const clamp = (value) => Math.max(left, Math.min(right, value));
-  const selectionLeft = Math.min(clamp(first), clamp(last));
-  const selectionRight = Math.max(clamp(first), clamp(last));
-  if (selectionRight - selectionLeft < Math.max(0, Number(options.minDrag ?? 12) || 0)) return null;
-
-  const span = right - left;
-  const startIndex = Math.round(((selectionLeft - left) / span) * (count - 1));
-  const endIndex = Math.round(((selectionRight - left) / span) * (count - 1));
-  if (endIndex <= startIndex) return null;
-  return { startIndex, endIndex };
-}
-
-function niceCeiling(value) {
-  if (!Number.isFinite(value) || value <= 0) return 1;
-  const magnitude = 10 ** Math.floor(Math.log10(value));
-  const normalized = value / magnitude;
-  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-  return step * magnitude;
-}
-
 export function totalPolTrackerValue(row) {
   const values = POL_TRACKER_SERIES.map((series) => series.value(row));
   if (!values.every((value) => Number.isFinite(value))) return null;
   return values.reduce((total, value) => total + value, 0);
 }
 
-function buildStackPaths(points, y) {
-  const segments = [];
-  let segment = [];
-  for (const point of points) {
-    if (point) {
-      segment.push(point);
-    } else if (segment.length) {
-      segments.push(segment);
-      segment = [];
-    }
-  }
-  if (segment.length) segments.push(segment);
-
-  return {
-    path: segments.map((pointsInSegment) => pointsInSegment
-      .map((point, index) => `${index ? 'L' : 'M'}${point.x.toFixed(2)},${y(point.upper).toFixed(2)}`)
-      .join(' ')).join(' '),
-    areaPath: segments.map((pointsInSegment) => {
-      const upper = pointsInSegment
-        .map((point, index) => `${index ? 'L' : 'M'}${point.x.toFixed(2)},${y(point.upper).toFixed(2)}`)
-        .join(' ');
-      const lower = [...pointsInSegment].reverse()
-        .map((point) => `L${point.x.toFixed(2)},${y(point.lower).toFixed(2)}`)
-        .join(' ');
-      return `${upper} ${lower} Z`;
-    }).join(' ')
-  };
-}
-
-export function buildPolTrackerChart(rows = [], groupId, options = {}) {
-  const width = options.width || 1000;
-  const height = options.height || 260;
-  const plot = { left: 82, right: width - 16, top: 14, bottom: height - 32 };
-  const series = POL_TRACKER_SERIES.filter((item) => item.group === groupId);
-  const spanX = plot.right - plot.left;
-  const x = (index) => plot.left + (rows.length <= 1 ? 0 : (index / (rows.length - 1)) * spanX);
-  const cumulative = rows.map(() => 0);
-  const stackAvailable = rows.map(() => true);
-  const pointSets = series.map((item) => rows.map((row, index) => {
+// Same-height stock composition, not cumulative totals over time. A missing
+// lower valuation invalidates every layer above it; zero contributes nothing
+// but does not invalidate upper layers. Null zero layers also avoid drawing an
+// outline over the holdings below them.
+export function polTrackerStackValues(rows = []) {
+  const available = rows.map(() => true);
+  return POL_TRACKER_SERIES.map(item => rows.map((row, index) => {
     const value = item.value(row);
-    if (!stackAvailable[index] || !Number.isFinite(value) || value < 0) {
-      stackAvailable[index] = false;
+    if (!available[index] || !Number.isFinite(value) || value < 0) {
+      available[index] = false;
       return null;
     }
-    const lower = cumulative[index];
-    cumulative[index] += value;
-    // A zero-width layer has no visible holding. Keep it in the stack math,
-    // but break its paths so its outline cannot trace the layer below it.
-    return value === 0 ? null : { x: x(index), lower, upper: cumulative[index] };
+    return value === 0 ? null : value;
   }));
-  const yMax = niceCeiling(Math.max(1, ...cumulative));
-  const spanY = plot.bottom - plot.top;
-  const y = (value) => plot.bottom - (Math.max(0, value) / yMax) * spanY;
-  const paths = series.map((item, index) => ({
-    ...item,
-    ...buildStackPaths(pointSets[index], y)
-  }));
-  const tickIndexes = [...new Set(Array.from({ length: Math.min(5, rows.length) }, (_, index) =>
-    Math.round((index / Math.max(1, Math.min(5, rows.length) - 1)) * Math.max(0, rows.length - 1))
-  ))];
-  return {
-    width,
-    height,
-    plot,
-    yMax,
-    paths,
-    yTicks: Array.from({ length: 5 }, (_, index) => ({
-      value: yMax * (index / 4),
-      y: y(yMax * (index / 4))
-    })),
-    xTicks: tickIndexes.map((index) => ({ index, x: x(index), day: rows[index]?.day || '' })),
-    x
-  };
 }
 
 export function relevantPolTrackerPools(pools = []) {

@@ -1,4 +1,20 @@
 <script>
+  import EventTimeSeriesChart from './charts/EventTimeSeriesChart.svelte';
+  let historyHidden = [], historyGrain = 'native', historyWindow = null;
+  $: calendarMetrics = [
+    { id: 'rune', label: 'RUNE STACK', color: '#00cc66', value: row => row.rune, reduce: 'last', aggregate: 'last' },
+    { id: 'value', label: `${historySummaryCurrency} VALUE`, color: '#d4a017', value: row => row.value, reduce: 'last', aggregate: 'last' }
+  ];
+  $: if (historyChartInstance) {
+    historyChartInstance.setDatasetVisibility(0, !historyHidden.includes('rune'));
+    historyChartInstance.setDatasetVisibility(1, !historyHidden.includes('value'));
+    historyChartInstance.options.plugins.legend.display = false;
+    historyChartInstance.update('none');
+  }
+  $: summaryHistory = historyGrain === 'native' || !historyWindow ? historySummaryRows : historySummaryRows.filter(row => row.time.slice(0, 10) >= historyWindow.startDay && row.time.slice(0, 10) <= historyWindow.endDay);
+  import RangeSummary from './charts/RangeSummary.svelte';
+  let historySummaryRows = [];
+  let historySummaryCurrency = 'USD';
   import { onMount, onDestroy } from "svelte";
   import Chart from 'chart.js/auto';
   import { INTERACTIVE_CHART_LEGEND } from '$lib/charts/terminal.js';
@@ -712,6 +728,8 @@
     );
     const runeData = churnHistory.map(c => fromBaseUnit(c.runeStack));
     const valueData = churnHistory.map(c => convertChurnValue(c.usdValue, c, curr, rates));
+    historySummaryCurrency = curr;
+    historySummaryRows = churnHistory.map((c, index) => ({ time: c.date.toISOString(), rune: runeData[index], value: valueData[index] }));
 
     // Bond event markers: per-point styling
     const bondEvents = churnHistory.map(c => {
@@ -729,7 +747,7 @@
         chart.data.datasets.forEach((dataset, i) => {
           const meta = chart.getDatasetMeta(i);
           const lastPoint = meta.data[meta.data.length - 1];
-          if (!lastPoint) return;
+          if (!lastPoint || !chart.isDatasetVisible(i)) return;
           const value = dataset.data[dataset.data.length - 1];
           const isRune = dataset.yAxisID === 'y';
           const text = isRune
@@ -1180,6 +1198,12 @@
         </span>
       </div>
 
+      <RangeSummary rows={historyLoaded && churnHistory.length && !historyError && !bondDataError ? summaryHistory : []} loading={historyLoading} bucket="churn" metrics={[
+        { field: 'rune', label: 'Bond', kind: 'level', unit: 'RUNE' },
+        { field: 'value', label: 'Bond valuation', kind: 'level', unit: historySummaryCurrency === 'USD' ? 'usd' : historySummaryCurrency }
+      ]} note="Churn-observation averages, not time-weighted balances. Historical conversion matches the chart." />
+      <EventTimeSeriesChart events={historySummaryRows} metrics={calendarMetrics} bind:hidden={historyHidden}
+        bind:grain={historyGrain} bind:zoomWindow={historyWindow} ariaLabel="Bond history calendar closing observations">
       <div class="chart-area">
         {#if bondDataError}
           <div class="chart-msg dim">Current bond data unavailable.</div>
@@ -1196,6 +1220,7 @@
         {/if}
         <canvas bind:this={historyChartCanvas} class:hidden={!historyLoaded || churnHistory.length === 0 || !!bondDataError}></canvas>
       </div>
+      </EventTimeSeriesChart>
     </section>
 
     <!-- Churn earnings table -->

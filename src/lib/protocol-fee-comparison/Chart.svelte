@@ -1,26 +1,21 @@
 <script>
-  import { onMount } from 'svelte';
-  import { init, use } from 'echarts/core';
-  import { BarChart } from 'echarts/charts';
-  import { GridComponent, TooltipComponent, MarkLineComponent } from 'echarts/components';
-  import { CanvasRenderer } from 'echarts/renderers';
-  import { comparisonOption } from './options.js';
-  use([BarChart, GridComponent, TooltipComponent, MarkLineComponent, CanvasRenderer]);
+  import RangeSummary from '../charts/RangeSummary.svelte';
+  import { PROTOCOLS } from '../../../shared/protocol-fee-comparison/model.js';
+  import TimeSeriesChart from '../charts/TimeSeriesChart.svelte';
+  import { buildComparisonTimeSeries } from './time-series.js';
+
   export let months = [];
   export let hidden = [];
-  let host, chart;
-  function draw() { if (chart) chart.setOption(comparisonOption(months, hidden, host.clientWidth), { notMerge: true }); }
-  $: if (chart && months && hidden) draw();
-  onMount(() => {
-    chart = init(host, null, { renderer: 'canvas' }); draw();
-    const observer = new ResizeObserver(() => { chart.resize(); draw(); }); observer.observe(host);
-    return () => { observer.disconnect(); chart.dispose(); chart = null; };
-  });
+  export let daily = [];
+  let zoomWindow = null;
+  $: points = daily.length ? daily : months.map(row => ({ ...row, day: row.fromDay }));
 </script>
 
-<div class="chart" bind:this={host} role="img" aria-label="Monthly swap income less network token subsidy for THORChain, NEAR Intents, and Chainflip. Signed USD values use one scale and are available in the monthly data table."></div>
-
-<style>
-  .chart { width: 100%; height: 390px; }
-  @media (max-width: 600px) { .chart { height: 340px; } }
-</style>
+<RangeSummary rows={points} window={zoomWindow} bucket={daily.length ? 'day' : 'month'} metrics={PROTOCOLS.map(protocol => ({
+  label: protocol.label + ' net income', kind: 'flow', unit: 'usd',
+  value: row => daily.length ? row[protocol.id]?.netUsd : row.protocols?.[protocol.id]?.complete ? row.protocols[protocol.id].netUsd : null
+}))} note="After token subsidy. Only covered source buckets count. Totals and averages follow the selected range; calendar edges may be partial." />
+<TimeSeriesChart {points} options={{ hidden, sourceGrain: daily.length ? 'day' : 'month' }} buildOption={buildComparisonTimeSeries}
+  hideUnavailableGrains showSourceResolution={false}
+  {zoomWindow} onZoom={value => zoomWindow = value} initialGrain="month" hasData={points.length > 0} height="390px" narrowHeight="340px"
+  ariaLabel="Swap income less network token subsidy for THORChain, NEAR Intents, and Chainflip. Signed USD. Daily, weekly, or monthly buckets when daily source data is available." />

@@ -1,223 +1,61 @@
-import Chart from 'chart.js/auto';
-import zoomPlugin from 'chartjs-plugin-zoom';
-import {
-  INTERACTIVE_CHART_LEGEND,
-  TERMINAL_CHART_PALETTE,
-  terminalChartFont
-} from '../charts/terminal.js';
-
-Chart.register(zoomPlugin);
+import { TERMINAL_CHART_PALETTE as palette } from '../charts/terminal.js';
+import { buildTimeSeriesOption, timeSeriesTooltip, utcDayLabel } from '../charts/time-series.js';
 
 export const BURN_BAR_COLOR = '#f28c28';
-
+export const BURN_SERIES = Object.freeze([
+  { id: 'daily', label: 'DAILY BURN', mark: 'bar', color: BURN_BAR_COLOR },
+  { id: 'cumulative', label: 'CUMULATIVE BURN', mark: 'line', color: palette.amber },
+  { id: 'price', label: 'RUNE / USD', mark: 'line', color: palette.info }
+]);
+const burnFill = (row) => row.partial ? 'rgba(242,140,40,0.16)' : 'rgba(242,140,40,0.34)';
 const rune = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
-const usdBurn = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 2
-});
-const usdPrice = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 4
-});
+const usdBurn = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+const usdPrice = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 4 });
 
 function compact(value, prefix = '') {
+  if (value == null || !Number.isFinite(Number(value))) return '—';
   const amount = Number(value);
-  if (!Number.isFinite(amount)) return '—';
   const absolute = Math.abs(amount);
   if (absolute >= 1_000_000) return `${prefix}${(amount / 1_000_000).toFixed(2)}m`;
-  if (absolute >= 1_000) {
-    return `${prefix}${(amount / 1_000).toFixed(absolute < 10_000 ? 2 : 1)}k`;
-  }
+  if (absolute >= 1_000) return `${prefix}${(amount / 1_000).toFixed(absolute < 10_000 ? 2 : 1)}k`;
   return `${prefix}${amount.toFixed(absolute < 10 ? 2 : 0)}`;
 }
 
-function dateLabel(day) {
-  const parsed = new Date(`${day}T00:00:00Z`);
-  return Number.isFinite(parsed.getTime())
-    ? parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit', timeZone: 'UTC' })
-    : day;
+export function burnTrackerTooltip(row, { unit = 'rune', hidden = ['price'] } = {}) {
+  const showUsd = unit === 'usd';
+  const values = [showUsd ? row.burnedUsd : row.burnedRune,
+    showUsd ? row.cumulativeBurnedUsd : row.cumulativeBurnedRune, row.runePriceUsd];
+  return timeSeriesTooltip([
+    `${utcDayLabel(row.day)} · UTC`,
+    ...BURN_SERIES.flatMap((series, index) => hidden.includes(series.id) ? [] : [{
+      ...series, fill: index === 0 ? burnFill(row) : series.color,
+      text: `${series.label}: ${values[index] == null ? 'unavailable' : index === 2
+        ? usdPrice.format(values[index]) : showUsd ? usdBurn.format(values[index]) : `${rune.format(values[index])} ᚱ`}`
+    }]),
+    ...(row.partial ? ['LIVE PARTIAL UTC DAY'] : []),
+    ...(row.source === 'missing' ? ['MISSING SOURCE DAY'] : [])
+  ]);
 }
 
-function scaleIndex(value, labels, fallback) {
-  const numeric = Number(value);
-  if (Number.isFinite(numeric)) return numeric;
-  const index = labels.indexOf(value);
-  return index >= 0 ? index : fallback;
-}
-
-function zoomRange(chart, rows) {
-  const scale = chart?.scales?.x;
-  if (!scale || rows.length < 2) return null;
-  const labels = chart.data.labels || [];
-  const start = Math.max(0, Math.min(rows.length - 1, Math.floor(scaleIndex(scale.min, labels, 0))));
-  const end = Math.max(start, Math.min(rows.length - 1, Math.ceil(scaleIndex(scale.max, labels, rows.length - 1))));
-  if (start === 0 && end === rows.length - 1) return null;
-  return { startDay: rows[start]?.day || '', endDay: rows[end]?.day || '' };
-}
-
-export function renderBurnTrackerChart(canvas, previous, rows = [], options = {}) {
-  previous?.destroy();
-  if (!canvas) return null;
-  const showPrice = Boolean(options.showPrice);
-  const showUsd = options.unit === 'usd';
-  const labels = rows.map((row) => row.day);
-  const chart = new Chart(canvas.getContext('2d'), {
-    type: 'bar',
-    data: {
-      labels,
-      datasets: [
-        {
-          type: 'bar',
-          label: 'DAILY BURN',
-          data: rows.map((row) => showUsd ? row.burnedUsd : row.burnedRune),
-          backgroundColor: rows.map((row) => row.partial ? 'rgba(242, 140, 40, 0.16)' : 'rgba(242, 140, 40, 0.34)'),
-          borderColor: BURN_BAR_COLOR,
-          borderWidth: 1,
-          borderRadius: 0,
-          maxBarThickness: 22,
-          yAxisID: 'daily'
-        },
-        {
-          type: 'line',
-          label: 'CUMULATIVE BURN',
-          data: rows.map((row) => showUsd ? row.cumulativeBurnedUsd : row.cumulativeBurnedRune),
-          borderColor: TERMINAL_CHART_PALETTE.amber,
-          backgroundColor: 'rgba(212, 160, 23, 0.05)',
-          borderWidth: 2,
-          pointRadius: 0,
-          tension: 0.08,
-          spanGaps: false,
-          yAxisID: 'cumulative'
-        },
-        {
-          type: 'line',
-          label: 'RUNE / USD',
-          data: rows.map((row) => row.runePriceUsd),
-          borderColor: TERMINAL_CHART_PALETTE.info,
-          borderWidth: 1.5,
-          borderDash: [5, 4],
-          pointRadius: 0,
-          tension: 0.12,
-          spanGaps: false,
-          hidden: !showPrice,
-          yAxisID: 'price'
-        }
-      ]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: {
-          ...INTERACTIVE_CHART_LEGEND,
-          position: 'top',
-          align: 'end',
-          labels: {
-            color: TERMINAL_CHART_PALETTE.muted,
-            font: terminalChartFont(11),
-            boxWidth: 9,
-            boxHeight: 9,
-            padding: 14
-          }
-        },
-        tooltip: {
-          backgroundColor: TERMINAL_CHART_PALETTE.surface,
-          borderColor: TERMINAL_CHART_PALETTE.borderStrong,
-          borderWidth: 1,
-          titleColor: TERMINAL_CHART_PALETTE.accent,
-          bodyColor: TERMINAL_CHART_PALETTE.text,
-          titleFont: terminalChartFont(12),
-          bodyFont: terminalChartFont(12),
-          padding: 10,
-          callbacks: {
-            title(items) {
-              return dateLabel(rows[items[0]?.dataIndex]?.day || '');
-            },
-            label(context) {
-              if (context.raw === null) return `${context.dataset.label}: unavailable`;
-              return context.dataset.yAxisID === 'price'
-                ? `${context.dataset.label}: ${usdPrice.format(Number(context.raw))}`
-                : showUsd
-                  ? `${context.dataset.label}: ${usdBurn.format(Number(context.raw))}`
-                  : `${context.dataset.label}: ${rune.format(Number(context.raw))} ᚱ`;
-            },
-            afterBody(items) {
-              return rows[items[0]?.dataIndex]?.partial ? ['LIVE PARTIAL UTC DAY'] : [];
-            }
-          }
-        },
-        zoom: {
-          limits: { x: { min: 'original', max: 'original', minRange: 1 } },
-          zoom: {
-            mode: 'x',
-            wheel: { enabled: false },
-            pinch: { enabled: true },
-            drag: {
-              enabled: true,
-              backgroundColor: 'rgba(0, 204, 102, 0.08)',
-              borderColor: TERMINAL_CHART_PALETTE.accent,
-              borderWidth: 1
-            },
-            onZoomComplete({ chart: zoomedChart }) {
-              options.onZoom?.(zoomRange(zoomedChart, rows));
-            }
-          }
-        }
-      },
-      scales: {
-        x: {
-          grid: { color: TERMINAL_CHART_PALETTE.grid },
-          border: { color: TERMINAL_CHART_PALETTE.border },
-          ticks: {
-            color: TERMINAL_CHART_PALETTE.muted,
-            font: terminalChartFont(11),
-            callback(value) {
-              const index = Number(value);
-              return dateLabel(labels[index] || this.getLabelForValue(index));
-            },
-            maxTicksLimit: 8,
-            maxRotation: 0
-          }
-        },
-        daily: {
-          beginAtZero: true,
-          position: 'left',
-          grid: { color: TERMINAL_CHART_PALETTE.grid },
-          border: { color: TERMINAL_CHART_PALETTE.border },
-          title: { display: true, text: showUsd ? 'DAILY $' : 'DAILY ᚱ', color: BURN_BAR_COLOR, font: terminalChartFont(11) },
-          ticks: { color: BURN_BAR_COLOR, font: terminalChartFont(11), callback: (value) => compact(value, showUsd ? '$' : '') }
-        },
-        cumulative: {
-          beginAtZero: false,
-          position: 'right',
-          grid: { drawOnChartArea: false },
-          border: { color: TERMINAL_CHART_PALETTE.border },
-          title: { display: true, text: showUsd ? 'CUMULATIVE $' : 'CUMULATIVE ᚱ', color: TERMINAL_CHART_PALETTE.amber, font: terminalChartFont(11) },
-          ticks: { color: TERMINAL_CHART_PALETTE.amber, font: terminalChartFont(11), callback: (value) => compact(value, showUsd ? '$' : '') }
-        },
-        price: {
-          display: showPrice,
-          beginAtZero: false,
-          position: 'right',
-          offset: true,
-          grid: { drawOnChartArea: false },
-          border: { color: TERMINAL_CHART_PALETTE.border },
-          title: { display: true, text: 'RUNE / USD', color: TERMINAL_CHART_PALETTE.info, font: terminalChartFont(11) },
-          ticks: { color: TERMINAL_CHART_PALETTE.info, font: terminalChartFont(11), callback: (value) => compact(value, '$') }
-        }
-      }
-    }
+export function buildBurnTrackerOption(rows, { unit = 'rune', hidden = ['price'], ...viewport } = {}) {
+  const showUsd = unit === 'usd';
+  const units = showUsd ? '$' : 'ᚱ';
+  return buildTimeSeriesOption(rows, {
+    ...viewport, hidden,
+    axes: BURN_SERIES.map((series, index) => ({
+      ...series, position: index === 0 ? 'left' : 'right', baseline: index === 0 ? 'zero' : 'auto',
+      label: index === 2 ? 'RUNE / USD' : `${index === 0 ? 'DAILY' : 'CUMULATIVE'} ${units}`,
+      format: (value) => compact(value, index === 2 || showUsd ? '$' : '')
+    })),
+    series: [
+      { ...BURN_SERIES[0], aggregate: 'sum', axis: 'daily', barMaxWidth: 22, fill: (item) => burnFill(rows[item.dataIndex]),
+        data: rows.map((row) => showUsd ? row.burnedUsd : row.burnedRune) },
+      // Values are normalized before range selection; never sum the viewport.
+      { ...BURN_SERIES[1], aggregate: 'last', axis: 'cumulative', smooth: 0.08,
+        data: rows.map((row) => showUsd ? row.cumulativeBurnedUsd : row.cumulativeBurnedRune) },
+      { ...BURN_SERIES[2], aggregate: 'last', axis: 'price', dashed: true, lineWidth: 1.5, smooth: 0.12,
+        data: rows.map((row) => row.runePriceUsd) }
+    ],
+    tooltip: (row) => burnTrackerTooltip(row, { unit, hidden })
   });
-  return chart;
-}
-
-export function setBurnTrackerPriceVisible(chart, visible) {
-  if (!chart) return;
-  chart.setDatasetVisibility(2, Boolean(visible));
-  chart.options.scales.price.display = Boolean(visible);
-  chart.update('none');
 }

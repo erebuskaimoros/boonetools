@@ -1,6 +1,9 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
+  import RangeSummary from './charts/RangeSummary.svelte';
+  import TimeSeriesChart from './charts/TimeSeriesChart.svelte';
+  import { buildSystemIncomePolDepositOption, POL_DEPOSIT_SERIES } from './system-income-pol/charts.js';
   import DailyFeeChart from './system-income-pol/DailyFeeChart.svelte';
   import { subscribeChainHeads } from './api/chain-stream.js';
   import { getAssetLogo } from './constants/assets.js';
@@ -15,7 +18,6 @@
     formatE8Usd,
     formatPercent,
     normalizeSystemIncomePolPayload,
-    projectSystemIncomePolChartSelection,
     selectSystemIncomePolRange
   } from './system-income-pol/model.js';
 
@@ -28,12 +30,8 @@
   let rangeId = '30d';
   let chartUnit = 'rune';
   let feesExpanded = false;
-  let hoverIndex = -1;
-  let zoomStartDay = '';
-  let zoomEndDay = '';
-  let selecting = false;
-  let selectionStartX = null;
-  let selectionEndX = null;
+  let depositChart;
+  let zoomWindow = null;
   let refreshTimer;
   let chainSubscription;
   let deploymentPulseTimer;
@@ -41,18 +39,15 @@
   let deploymentPulse = null;
 
   $: dashboard = normalizeSystemIncomePolPayload(payload || {});
-  $: rangeRows = selectSystemIncomePolRange(dashboard.daily, rangeId);
-  $: rows = zoomStartDay && zoomEndDay
-    ? rangeRows.filter((row) => row.day >= zoomStartDay && row.day <= zoomEndDay)
+  $: chart = buildSystemIncomePolChart(dashboard.daily, { unit: chartUnit });
+  $: rangeRows = selectSystemIncomePolRange(chart.points, rangeId);
+  $: rows = zoomWindow
+    ? rangeRows.filter((row) => row.day >= zoomWindow.startDay && row.day <= zoomWindow.endDay)
     : rangeRows;
-  $: isChartZoomed = Boolean(zoomStartDay && zoomEndDay && rows.length > 1) && (
-    rows[0]?.day !== rangeRows[0]?.day || rows.at(-1)?.day !== rangeRows.at(-1)?.day
-  );
+  $: isChartZoomed = Boolean(zoomWindow);
   $: usdChartAvailable = dashboard.daily.some(row => Number.isFinite(row.deployedUsd));
   $: if (chartUnit === 'usd' && !usdChartAvailable) chartUnit = 'rune';
   $: chartUnitLabel = chartUnit === 'usd' ? 'USD' : 'RUNE';
-  $: chart = buildSystemIncomePolChart(rows, { unit: chartUnit });
-  $: hoveredChartPoint = hoverIndex >= 0 ? chart.points[hoverIndex] || null : null;
   $: coverage = dashboard.coverage;
   $: feeApr24h = dashboard.summary.feeAprWindows['24h'];
   $: feeApr7d = dashboard.summary.feeAprWindows['7d'];
@@ -149,23 +144,6 @@
     return `https://thorchain.net/pool/${encodeURIComponent(asset)}`;
   }
 
-  function compactChartValue(value) {
-    if (!Number.isFinite(value)) return '—';
-    const formatted = new Intl.NumberFormat('en-US', {
-      notation: 'compact', maximumFractionDigits: 2
-    }).format(value);
-    return chartUnit === 'usd' ? `$${formatted}` : formatted;
-  }
-
-  function displayChartValue(value) {
-    if (!Number.isFinite(value)) return '—';
-    const formatted = new Intl.NumberFormat('en-US', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(value);
-    return chartUnit === 'usd' ? `$${formatted}` : formatted;
-  }
-
   function feeEstimateLabel(summary) {
     if (summary.feeEstimateComplete) return 'HOURLY · COMPLETE';
     if (summary.feeHoursTotal <= 0) return 'HOURLY SEED · WARMING';
@@ -186,7 +164,6 @@
   function setChartUnit(nextUnit) {
     if (nextUnit === 'usd' && !usdChartAvailable) return;
     chartUnit = nextUnit === 'usd' ? 'usd' : 'rune';
-    hoverIndex = -1;
   }
 
   function setChartRange(nextRange) {
@@ -195,90 +172,8 @@
   }
 
   function resetChartZoom() {
-    zoomStartDay = '';
-    zoomEndDay = '';
-    hoverIndex = -1;
-    selecting = false;
-    selectionStartX = null;
-    selectionEndX = null;
-  }
-
-  function updateChartHover(event) {
-    if (selecting || !rows.length) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const relative = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-    hoverIndex = Math.round(relative * Math.max(0, rows.length - 1));
-  }
-
-  function pointerChartX(event) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const relative = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-    return chart.plot.left + relative * (chart.plot.right - chart.plot.left);
-  }
-
-  function startZoomSelection(event) {
-    if (event.button !== undefined && event.button !== 0) return;
-    event.preventDefault();
-    hoverIndex = -1;
-    selecting = true;
-    selectionStartX = pointerChartX(event);
-    selectionEndX = selectionStartX;
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    } catch {
-      // Pointer capture is optional; selection still works inside the chart.
-    }
-  }
-
-  function updateChartPointer(event) {
-    if (!selecting) {
-      updateChartHover(event);
-      return;
-    }
-    selectionEndX = pointerChartX(event);
-  }
-
-  function finishZoomSelection(event) {
-    if (!selecting) return;
-    selectionEndX = pointerChartX(event);
-    selecting = false;
-    try {
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
-    } catch {
-      // The browser may already have released this pointer.
-    }
-
-    const selection = projectSystemIncomePolChartSelection({
-      rowCount: rows.length,
-      plotLeft: chart.plot.left,
-      plotRight: chart.plot.right,
-      startX: selectionStartX,
-      endX: selectionEndX
-    });
-    selectionStartX = null;
-    selectionEndX = null;
-    if (!selection) return;
-
-    const selectedRows = rows.slice(selection.startIndex, selection.endIndex + 1);
-    if (selectedRows.length < 2) return;
-    if (selectedRows.length === rangeRows.length) {
-      resetChartZoom();
-      return;
-    }
-    zoomStartDay = selectedRows[0].day;
-    zoomEndDay = selectedRows.at(-1).day;
-    hoverIndex = -1;
-  }
-
-  function cancelZoomSelection(event) {
-    selecting = false;
-    selectionStartX = null;
-    selectionEndX = null;
-    try {
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
-    } catch {
-      // The browser may already have released this pointer.
-    }
+    zoomWindow = null;
+    depositChart?.resetZoom();
   }
 
   function coverageValue(source, ...keys) {
@@ -507,103 +402,30 @@
         </div>
         <div class="range-group" aria-label="History range">
           {#each SYSTEM_INCOME_POL_RANGES as range}
-            <button class:active={rangeId === range.id} on:click={() => setChartRange(range.id)}>[{range.label}]</button>
+            <button class:active={rangeId === range.id} aria-pressed={rangeId === range.id} on:click={() => setChartRange(range.id)}>[{range.label}]</button>
           {/each}
+          <button aria-label="Zoom in on POL deposits" on:click={() => depositChart?.zoomBy(0.5)}>[+]</button>
+          <button aria-label="Zoom out on POL deposits" disabled={!isChartZoomed} on:click={() => depositChart?.zoomBy(2)}>[−]</button>
           <button class="zoom-reset" disabled={!isChartZoomed} on:click={resetChartZoom}>[RESET]</button>
         </div>
       </div>
     </div>
 
-    {#if rows.length}
+    {#if rangeRows.length}
+      <RangeSummary rows={rangeRows} window={zoomWindow} metrics={[{ field: 'depositedPlotValue', label: 'Deposits', kind: 'flow', unit: chartUnit === 'usd' ? 'usd' : 'RUNE', statistics: ['total', 'average'] }]} />
       <div class="chart-wrap">
-        <svg
-          viewBox={`0 0 ${chart.width} ${chart.height}`}
-          role="img"
-          aria-label={`Daily and cumulative POL deposits denominated in ${chartUnitLabel} by UTC day. Drag horizontally to zoom; double-click to reset.`}
-          on:dblclick={resetChartZoom}
-        >
-          {#each chart.yTicks as tick}
-            <line class="grid" x1={chart.plot.left} x2={chart.plot.right} y1={tick.y} y2={tick.y}></line>
-            <text class="y-label" x={chart.plot.left - 10} y={tick.y + 3}>{compactChartValue(tick.value)}</text>
-          {/each}
-          {#each chart.xTicks as tick}
-            <text class="x-label" x={tick.x} y={chart.height - 9}>{displayDay(tick.day)}</text>
-          {/each}
-          {#each chart.cumulativeYTicks as tick}
-            <text class="y-label cumulative-label" x={chart.plot.right + 10} y={tick.y + 3}>{compactChartValue(tick.value)}</text>
-          {/each}
-          {#each chart.depositBars as bar}
-            <rect class="bar deposited" x={bar.x} y={bar.y} width={bar.width} height={bar.height}>
-              <title>{displayDay(bar.day)} · {displayChartValue(bar.value)} {chartUnitLabel} deposited by POL</title>
-            </rect>
-          {/each}
-          {#if chart.cumulativeDepositedPath}
-            <path class="series cumulative" d={chart.cumulativeDepositedPath}></path>
-            {#each chart.points.filter(point => Number.isFinite(point.cumulativeDepositedValue)) as point}
-              <circle class="cumulative-point" cx={point.x} cy={chart.cumulativeYTicks.length ? chart.plot.bottom - (point.cumulativeDepositedValue / chart.cumulativeYMax) * (chart.plot.bottom - chart.plot.top) : chart.plot.bottom} r="3">
-                <title>{displayDay(point.day)} · {displayChartValue(point.cumulativeDepositedValue)} {chartUnitLabel} cumulative deposited</title>
-              </circle>
-            {/each}
-          {/if}
-          {#if hoverIndex >= 0 && chart.points[hoverIndex]}
-            <line
-              class="cursor-line"
-              x1={chart.points[hoverIndex].x}
-              x2={chart.points[hoverIndex].x}
-              y1={chart.plot.top}
-              y2={chart.plot.bottom}
-            ></line>
-          {/if}
-          {#if selecting && selectionStartX !== null && selectionEndX !== null}
-            <rect
-              class="zoom-selection"
-              x={Math.min(selectionStartX, selectionEndX)}
-              y={chart.plot.top}
-              width={Math.abs(selectionEndX - selectionStartX)}
-              height={chart.plot.bottom - chart.plot.top}
-            ></rect>
-          {/if}
-          <rect
-            role="presentation"
-            class="zoom-capture"
-            x={chart.plot.left}
-            y={chart.plot.top}
-            width={chart.plot.right - chart.plot.left}
-            height={chart.plot.bottom - chart.plot.top}
-            fill="transparent"
-            on:pointerdown={startZoomSelection}
-            on:pointermove={updateChartPointer}
-            on:pointerup={finishZoomSelection}
-            on:pointercancel={cancelZoomSelection}
-            on:mouseleave={() => { if (!selecting) hoverIndex = -1; }}
-          ></rect>
-        </svg>
-        {#if hoveredChartPoint}
-          <div
-            class="chart-tooltip"
-            class:align-right={hoveredChartPoint.x > chart.width * 0.7}
-            style={`--tooltip-x:${(hoveredChartPoint.x / chart.width) * 100}%`}
-            role="tooltip"
-          >
-            <strong>{displayDay(hoveredChartPoint.day)}{hoveredChartPoint.partial ? ' · PARTIAL' : ''}</strong>
-            <span class="tooltip-row daily">
-              <i></i><span>DAILY DEPOSIT</span><b>{displayChartValue(hoveredChartPoint.depositedPlotValue)} {chartUnitLabel}</b>
-            </span>
-            <span class="tooltip-row cumulative">
-              <i></i><span>CUMULATIVE</span><b>{displayChartValue(hoveredChartPoint.cumulativeDepositedValue)} {chartUnitLabel}</b>
-            </span>
-            {#if chartUnit === 'usd'}
-              <span>{hoveredChartPoint.priceProvisional ? 'LATEST PRICE' : 'DAY-END PRICE'}: {hoveredChartPoint.runePriceUsd === null ? 'UNAVAILABLE' : `$${hoveredChartPoint.runePriceUsd.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })} / RUNE`}{hoveredChartPoint.priceProvisional ? ' · PROVISIONAL' : ''}</span>
-            {/if}
-          </div>
-        {/if}
+        <TimeSeriesChart bind:this={depositChart} points={rangeRows} historyPoints={chart.points}
+          options={{ unit: chartUnit }} buildOption={buildSystemIncomePolDepositOption}
+          {zoomWindow} onZoom={(window) => zoomWindow = window}
+          hasData={rangeRows.length > 0} loading={refreshing}
+          ariaLabel={`Daily and cumulative POL deposits in ${chartUnitLabel} by UTC day. Drag to zoom; double-click to reset.`}
+          height="280px" narrowHeight="240px" />
       </div>
       <div class="legend">
-        <span><i class="deposited"></i> DAILY POL DEPOSITED · {chartUnitLabel}</span>
-        <span><i class="cumulative"></i> CUMULATIVE POL DEPOSITED · {chartUnitLabel}</span>
+
         <small>{displayDay(rows[0]?.day)} → {displayDay(rows.at(-1)?.day)} · {chartUnitLabel}{chartUnit === 'usd' ? ' · HISTORICAL DAILY PRICE' : ''}</small>
       </div>
-      {#if chartUnit === 'usd' && chart.points.some(point => point.cumulativeDepositedValue === null)}
+      {#if chartUnit === 'usd' && rows.some(point => point.cumulativeDepositedValue === null)}
         <p class="chart-price-note">Missing daily prices are shown as unavailable. The cumulative USD line stops where historical pricing is incomplete.</p>
       {/if}
     {:else}
@@ -821,52 +643,13 @@
   .empty { padding: 28px; color: var(--term-text-3); text-align: center !important; font-size: 12px; }
   .chart-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
   .unit-group, .range-group { display: flex; gap: 5px; }
+  .range-group { flex-wrap: wrap; }
   .unit-group { padding-right: 10px; border-right: 1px solid var(--term-border); }
   .unit-group button, .range-group button { padding: 6px 8px; }
   .range-group .zoom-reset { color: var(--term-accent); border-color: var(--term-accent-edge); }
   .unit-group button:disabled, .range-group button:disabled { color: var(--term-text-5); border-color: var(--term-border); opacity: .45; cursor: default; }
-  .chart-wrap { position: relative; height: 280px; padding: 8px 14px 0; }
-  svg { display: block; width: 100%; height: 100%; overflow: visible; }
-  .grid { stroke: var(--term-border-faint); stroke-width: 1; }
-  .y-label, .x-label { fill: var(--term-text-3); font: 12px 'JetBrains Mono', monospace; }
-  .y-label { text-anchor: end; }
-  .y-label.cumulative-label { fill: var(--term-amber); text-anchor: start; }
-  .x-label { text-anchor: middle; }
-  .bar.deposited { fill: var(--term-accent); opacity: .82; }
-  .bar.deposited:hover { opacity: 1; }
-  .series { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }
-  .series.cumulative { stroke: var(--term-amber); }
-  .cumulative-point { fill: var(--term-amber); stroke: var(--term-surface-deep); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-  .cursor-line { stroke: var(--term-text-4); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; pointer-events: none; }
-  .zoom-selection { fill: var(--term-accent-soft); stroke: var(--term-accent); stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
-  .zoom-capture { cursor: crosshair; touch-action: none; }
-  .chart-tooltip {
-    position: absolute;
-    z-index: 2;
-    top: 16px;
-    left: var(--tooltip-x);
-    min-width: 245px;
-    padding: 10px;
-    border: 1px solid var(--term-border-strong);
-    background: rgba(5, 5, 5, .96);
-    color: var(--term-text-2);
-    transform: translateX(10px);
-    pointer-events: none;
-    font: 12px/1.4 'JetBrains Mono', monospace;
-  }
-  .chart-tooltip.align-right { transform: translateX(calc(-100% - 10px)); }
-  .chart-tooltip > strong { display: block; margin-bottom: 7px; color: var(--term-text); font-size: 12px; }
-  .tooltip-row { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 7px; padding: 3px 0; }
-  .tooltip-row i { width: 7px; height: 7px; }
-  .tooltip-row.daily i { background: var(--term-accent); }
-  .tooltip-row.cumulative i { height: 2px; background: var(--term-amber); }
-  .tooltip-row span { color: var(--term-text-3); }
-  .tooltip-row b { color: var(--term-text); font-weight: 600; white-space: nowrap; }
+  .chart-wrap { padding: 8px 14px 0; }
   .legend { display: flex; align-items: center; gap: 18px; padding: 11px 18px; border-top: 1px solid var(--term-border-faint); color: var(--term-text-2); font-size: 12px; }
-  .legend span { display: flex; align-items: center; gap: 6px; }
-  .legend i { width: 14px; height: 8px; }
-  .legend i.deposited { background: var(--term-accent); }
-  .legend i.cumulative { height: 2px; background: var(--term-amber); }
   .legend small { margin-left: auto; color: var(--term-text-3); }
   .chart-price-note { margin: 0; padding: 12px 18px; color: var(--term-text-2); font-size: 13px; }
   .empty-chart { padding: 60px 20px; color: var(--term-text-3); text-align: center; font-size: 12px; }
@@ -892,7 +675,7 @@
     .asset-grid article { border-right: 0; border-bottom: 1px solid var(--term-border-faint); }
     .asset-grid article:last-child { border-bottom: 0; }
     .coverage-grid { grid-template-columns: 1fr; }
-    .chart-wrap { height: 220px; }
+    .chart-wrap { padding: 8px 0 0; }
   }
   @media (max-width: 560px) {
     h1 { font-size: 24px; }

@@ -107,7 +107,7 @@ export function getSeriesAxisBounds(values, options = {}) {
 
 export function computeDailyData(swaps, midgardHistory, allSwaps = swaps, options = {}) {
   if (!swaps.length) {
-    return { labels: [], volume: [], cumVolume: [], count: [], cumCount: [], efficiency: [], pctFaster: [], volumePct: [], countPct: [] };
+    return { days: [], calendar: 'local', labels: [], volume: [], cumVolume: [], count: [], cumCount: [], efficiency: [], pctFaster: [], volumePct: [], countPct: [] };
   }
 
   const byDay = {};
@@ -192,7 +192,7 @@ export function computeDailyData(swaps, midgardHistory, allSwaps = swaps, option
     countPct.push(midgard && midgard.count > 0 ? +((rows.length / midgard.count) * 100).toFixed(2) : null);
   }
 
-  return { labels, volume, cumVolume, count, cumCount, efficiency, pctFaster, volumePct, countPct };
+  return { days: sortedKeys, calendar: 'local', labels, volume, cumVolume, count, cumCount, efficiency, pctFaster, volumePct, countPct };
 }
 
 export function computeDailyBucketData(buckets, midgardHistory, options = {}) {
@@ -206,7 +206,7 @@ export function computeDailyBucketData(buckets, midgardHistory, options = {}) {
 
   if (!rows.length) {
     return {
-      labels: [], volume: [], cumVolume: [], count: [], cumCount: [],
+      days: [], calendar: 'UTC', labels: [], volume: [], cumVolume: [], count: [], cumCount: [],
       efficiency: [], pctFaster: [], volumePct: [], countPct: []
     };
   }
@@ -224,7 +224,7 @@ export function computeDailyBucketData(buckets, midgardHistory, options = {}) {
   let cumulativeVolume = Number(options.cumulativeVolumeBefore) || 0;
   let cumulativeCount = Number(options.cumulativeCountBefore) || 0;
   const output = {
-    labels: [], volume: [], cumVolume: [], count: [], cumCount: [],
+    days: [], calendar: 'UTC', labels: [], volume: [], cumVolume: [], count: [], cumCount: [],
     efficiency: [], pctFaster: [], volumePct: [], countPct: []
   };
 
@@ -237,6 +237,7 @@ export function computeDailyBucketData(buckets, midgardHistory, options = {}) {
     cumulativeVolume += volume;
     cumulativeCount += count;
 
+    output.days.push(bucket.key);
     output.labels.push(formatChartLabel(bucket.key));
     output.volume.push(volume);
     output.cumVolume.push(cumulativeVolume);

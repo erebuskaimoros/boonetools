@@ -1,12 +1,15 @@
 <script>
-  import { onDestroy, onMount, tick } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
+  import RangeSummary from './charts/RangeSummary.svelte';
+  import TimeSeriesChart from './charts/TimeSeriesChart.svelte';
+  import { toggleHiddenChartTrend } from './charts/terminal.js';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
   import { getAssetLogo } from './constants/assets.js';
   import { fetchPoolAnalysis, fetchPoolAnalysisSeries } from './pool-analysis/api.js';
-  import { renderPoolAnalysisCharts } from './pool-analysis/charts.js';
+  import { buildPoolAnalysisOption, poolAnalysisChartSeries } from './pool-analysis/charts.js';
+
   import {
     POOL_ANALYSIS_RANGES,
-    POOL_ANALYSIS_LINE_METRICS,
     POOL_ANALYSIS_TABLE_PERIODS,
     baseToNumber,
     filterPoolAnalysisRows,
@@ -30,6 +33,14 @@
   let selectedSeries = null;
   let rangeId = '30d';
   let lineMetricId = 'cumulativeFees';
+  let hidden = [];
+  let rollingAverages = [];
+  let rollingHistory = null;
+  let rollingLoading = false;
+  let rollingError = '';
+  let rollingAsset = '';
+  let rollingController;
+  let rollingSequence = 0;
   let tablePeriodId = '30d';
   let search = '';
   let statusFilter = 'available';
@@ -40,8 +51,6 @@
   let seriesLoading = false;
   let seriesError = '';
   let zoomWindow = null;
-  let chartCanvas;
-  let chartController;
   let refreshTimer;
   let seriesController;
   let seriesSequence = 0;
@@ -61,6 +70,10 @@
   );
   $: displayedPoints = selectedSeries?.asset === selectedAsset ? selectedSeries.points : [];
   $: lineMetric = poolAnalysisLineMetric(lineMetricId);
+  $: rollingPoints = rollingHistory?.asset === selectedAsset ? rollingHistory.points : [];
+  $: if (rollingAverages.length && selectedSeries?.asset === selectedAsset) {
+    loadRollingHistory(selectedAsset, selectedSeries);
+  }
 
   onMount(() => {
     loadSummary();
@@ -72,7 +85,7 @@
   onDestroy(() => {
     window.clearInterval(refreshTimer);
     seriesController?.abort();
-    chartController?.destroy?.();
+    cancelRollingHistory();
   });
 
   async function loadSummary(forceRefresh = false, silent = false) {
@@ -100,8 +113,6 @@
     if (cached) {
       selectedSeries = cached;
       seriesError = '';
-      zoomWindow = null;
-      await drawCharts();
       return;
     }
     const sequence = ++seriesSequence;
@@ -117,8 +128,6 @@
       if (sequence !== seriesSequence || asset !== selectedAsset || range !== rangeId) return;
       seriesCache.set(key, result);
       selectedSeries = result;
-      zoomWindow = null;
-      await drawCharts();
     } catch (error) {
       if (error?.name !== 'AbortError' && sequence === seriesSequence) {
         seriesError = error?.message || 'Pool daily history could not be loaded';
@@ -129,18 +138,16 @@
   }
 
   async function togglePool(asset) {
+    cancelRollingHistory();
+    rollingHistory = null;
     if (selectedAsset === asset) {
       seriesController?.abort();
       selectedAsset = '';
       selectedSeries = null;
       seriesError = '';
       zoomWindow = null;
-      chartController?.destroy?.();
-      chartController = null;
       return;
     }
-    chartController?.destroy?.();
-    chartController = null;
     selectedAsset = asset;
     selectedSeries = null;
     rangeId = '30d';
@@ -155,24 +162,56 @@
     await loadSelectedSeries(selectedAsset, nextRange);
   }
 
-  async function drawCharts() {
-    await tick();
-    chartController?.destroy?.();
-    chartController = null;
-    if (!displayedPoints.length || !chartCanvas) return;
-    chartController = renderPoolAnalysisCharts(chartCanvas, null, displayedPoints, {
-      lineMetric: lineMetricId,
-      onZoom(window) { zoomWindow = window; }
-    });
-  }
-
   function selectLineMetric(id) {
     lineMetricId = id;
-    chartController?.setLineMetric?.(id);
+  }
+
+  function toggleSeries(id) {
+    hidden = toggleHiddenChartTrend(hidden, id);
+  }
+
+  function toggleRollingAverage(id) {
+    rollingAverages = toggleHiddenChartTrend(rollingAverages, id);
+  }
+
+  function cancelRollingHistory() {
+    rollingSequence += 1;
+    rollingController?.abort();
+    rollingLoading = false;
+    rollingAsset = '';
+    rollingError = '';
+  }
+
+  async function loadRollingHistory(asset, currentSeries, forceRefresh = false) {
+    const cached = currentSeries?.range === 'all' ? currentSeries : !forceRefresh ? seriesCache.get(cacheKey(asset, 'all')) : null;
+    if (cached) {
+      cancelRollingHistory();
+      rollingHistory = cached;
+      return;
+    }
+    if (!forceRefresh && rollingLoading && rollingAsset === asset) return;
+    cancelRollingHistory();
+    const sequence = rollingSequence;
+    rollingAsset = asset;
+    rollingController = new AbortController();
+    rollingLoading = true;
+    try {
+      const result = normalizePoolAnalysisSeries(await fetchPoolAnalysisSeries(asset, 'all', {
+        forceRefresh, signal: rollingController.signal
+      }));
+      if (sequence !== rollingSequence || asset !== selectedAsset) return;
+      seriesCache.set(cacheKey(asset, 'all'), result);
+      rollingHistory = result;
+    } catch (error) {
+      if (error?.name !== 'AbortError' && sequence === rollingSequence) {
+        rollingError = error?.message || 'Rolling-average history could not be loaded';
+      }
+    } finally {
+      if (sequence === rollingSequence) rollingLoading = false;
+    }
   }
 
   function resetZoom() {
-    chartController?.resetZoom?.();
     zoomWindow = null;
   }
 
@@ -389,6 +428,10 @@
                         </div>
                       </div>
 
+                      <RangeSummary rows={displayedPoints} window={zoomWindow} metrics={[
+                        { field: 'volumeUsd', label: 'Volume', kind: 'flow', unit: 'usd' },
+                        { field: 'feesUsd', label: 'Fees', kind: 'flow', unit: 'usd' }
+                      ]} />
                       <div class="chart-controls" aria-label="Pool chart controls">
                         <div class="range-buttons">
                           {#each POOL_ANALYSIS_RANGES as range}
@@ -399,18 +442,17 @@
                             >[{range.label}]</button>
                           {/each}
                         </div>
-                        <div class="range-buttons" role="group" aria-label="Pool chart line metric">
-                          {#each POOL_ANALYSIS_LINE_METRICS as metric}
-                            <button
-                              class:active={lineMetricId === metric.id}
-                              aria-pressed={lineMetricId === metric.id}
-                              on:click={() => selectLineMetric(metric.id)}
-                            >[{metric.label}]</button>
-                          {/each}
+                        <div role="group" aria-label="Pool chart line metric">
+                          <button class="line-metric-switch" role="switch"
+                            aria-label="Cumulative fees instead of depth"
+                            aria-checked={lineMetricId === 'cumulativeFees'}
+                            on:click={() => selectLineMetric(lineMetricId === 'depth' ? 'cumulativeFees' : 'depth')}>
+                            <span class:active={lineMetricId === 'depth'}>DEPTH</span>
+                            <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                            <span class:active={lineMetricId === 'cumulativeFees'}>CUMULATIVE FEES</span>
+                          </button>
                         </div>
-                        <div class="zoom-buttons" role="group" aria-label="Keyboard zoom controls">
-                          <button aria-label="Zoom in" disabled={!displayedPoints.length} on:click={() => chartController?.zoomBy?.(0.6)}>[+]</button>
-                          <button aria-label="Zoom out" disabled={!displayedPoints.length} on:click={() => chartController?.zoomBy?.(1.6)}>[-]</button>
+                        <div class="zoom-buttons" role="group" aria-label="Chart zoom controls">
                           <button class="reset" disabled={!zoomWindow} on:click={resetZoom}>[RESET ZOOM]</button>
                         </div>
                         <span class="zoom-hint">DRAG TO ZOOM · PINCH ON TOUCH · DOUBLE-CLICK TO RESET</span>
@@ -421,19 +463,28 @@
                           ERR · {seriesError}
                           <button on:click={() => loadSelectedSeries(pool.asset, rangeId, true)}>[R] RETRY</button>
                         </div>
-                      {:else if seriesLoading && !displayedPoints.length}
-                        <div class="chart-state" aria-live="polite">LOADING {pool.asset} DAILY HISTORY<span>_</span></div>
-                      {:else if displayedPoints.length}
-                        {#if seriesLoading}<div class="history-sync">SYNCING EARLIER HISTORY…</div>{/if}
-                        <div class="chart-frame" role="group" aria-label={`${pool.asset} combined daily chart`} on:dblclick={resetZoom}>
-                          <canvas
-                            bind:this={chartCanvas}
-                            aria-label={`${pool.asset} daily volume, daily pool-generated liquidity fees, and ${lineMetricId === 'depth' ? 'two-sided pool depth' : 'cumulative pool-generated liquidity fees'} in US dollars`}
-                          ></canvas>
-                        </div>
-                      {:else}
-                        <div class="chart-state">NO DAILY HISTORY AVAILABLE</div>
                       {/if}
+                      {#if seriesLoading && displayedPoints.length}<div class="history-sync">SYNCING EARLIER HISTORY…</div>{/if}
+
+                      {#if rollingAverages.length}
+                        <div class="rolling-note" role="status">
+                          {#if rollingLoading}LOADING EARLIER HISTORY FOR ROLLING AVERAGES…
+                          {:else if rollingError}
+                            WRN · {rollingError} · Averages use available history only.
+                            <button class="inline-action" on:click={() => loadRollingHistory(selectedAsset, selectedSeries, true)}>[R] RETRY</button>
+                          {:else}ROLLING AVGS · 7D SOLID / 30D DASHED / 90D DOTTED · FULL UTC WINDOWS · PARTIAL DAYS NOT EXTRAPOLATED{/if}
+                        </div>
+                      {/if}
+                      <div class="chart-frame">
+                        <TimeSeriesChart points={displayedPoints}
+                          options={{ lineMetric: lineMetricId, hidden }} historyPoints={rollingPoints}
+                          onRollingChange={(ids) => rollingAverages = ids} onHiddenChange={(ids) => hidden = ids} buildOption={buildPoolAnalysisOption}
+                          {zoomWindow} onZoom={(window) => zoomWindow = window}
+                          loading={seriesLoading} hasData={displayedPoints.length > 0}
+                          height="490px" narrowHeight="460px"
+                          loadingText={`LOADING ${pool.asset} DAILY HISTORY`} emptyText="NO DAILY HISTORY AVAILABLE"
+                          ariaLabel={`${pool.asset} daily volume, daily pool-generated liquidity fees, and ${lineMetricId === 'depth' ? 'two-sided pool depth' : 'cumulative pool-generated liquidity fees'} in US dollars${rollingAverages.length ? ', with selected rolling averages' : ''}`} />
+                      </div>
 
                       {#if selectedSeries?.asset === pool.asset}
                         {#if lineMetricId === 'depth' && selectedSeries.coverage.depthMissingDays.length}
@@ -516,7 +567,7 @@
   button:focus-visible, input:focus-visible { outline: 1px solid var(--term-accent, #00cc66); outline-offset: 2px; }
   button:disabled { opacity: .32; cursor: default; }
   .loading-state, .chart-state { min-height: 180px; display: grid; place-items: center; color: var(--term-info, #5588cc); font: 11px var(--term-font-mono, 'JetBrains Mono', monospace); letter-spacing: .08em; }
-  .loading-state span, .chart-state span { animation: pulse .9s steps(2) infinite; }
+  .loading-state span { animation: pulse .9s steps(2) infinite; }
 
   .table-scroll { max-width: 100%; overflow-x: auto; container-type: inline-size; scrollbar-color: var(--term-border-strong, #252525) var(--term-surface-deep, #050505); }
   table { width: 100%; min-width: 1000px; table-layout: fixed; border-collapse: collapse; }
@@ -555,6 +606,7 @@
 
   .detail-row > td { height: auto; padding: 0; background: var(--term-surface-deep, #050505); text-align: left; white-space: normal; }
   .detail-panel { position: sticky; left: 0; width: 100cqw; max-width: 100cqw; box-sizing: border-box; padding: 16px 18px 13px; }
+  .rolling-note { padding: 4px 0 10px; color: var(--term-text-3); font: 11px var(--term-font-mono); line-height: 1.5; }
   .detail-heading { justify-content: space-between; gap: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--term-border-faint, #111); }
   .detail-kicker { color: var(--term-accent, #00cc66); font-size: 10px; letter-spacing: .12em; }
   h3 { margin: 6px 0 0; color: var(--term-text, #e8e8e8); font-size: 12px; letter-spacing: .08em; }
@@ -562,14 +614,19 @@
   .range-copy b { display: block; margin-top: 4px; color: var(--term-info, #5588cc); font-size: 10px; }
   .chart-controls { flex-wrap: wrap; gap: 6px 12px; min-height: 48px; }
   .range-buttons, .zoom-buttons { gap: 3px; }
+  .line-metric-switch { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px; border: 0; background: transparent; color: var(--term-text-3); font: 11px var(--term-font-mono); cursor: pointer; }
+  .line-metric-switch .active { color: var(--term-accent); }
+  .switch-track { position: relative; flex: 0 0 36px; height: 18px; box-sizing: border-box; border: 1px solid var(--term-accent-edge); border-radius: 2px; background: var(--term-accent-soft); }
+  .switch-thumb { position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; background: var(--term-accent); transition: transform .15s ease; }
+  .line-metric-switch[aria-checked="true"] .switch-thumb { transform: translateX(18px); }
+  @media (prefers-reduced-motion: reduce) { .switch-thumb { transition: none; } }
   .zoom-buttons .reset { color: var(--term-info, #5588cc); }
   .zoom-hint { margin-left: auto; color: var(--term-text-6, #333); font: 10px var(--term-font-mono, 'JetBrains Mono', monospace); }
   .chart-state { min-height: 450px; border: 1px solid var(--term-border-faint, #111); }
   .chart-state.error { color: var(--term-error, #dc3545); }
   .chart-state button { margin-left: 9px; border: 0; background: none; color: inherit; cursor: pointer; }
   .history-sync { padding: 6px 9px; border-left: 2px solid var(--term-info, #5588cc); background: rgba(85, 136, 204, .06); color: var(--term-info, #5588cc); font: 10px var(--term-font-mono, 'JetBrains Mono', monospace); }
-  .chart-frame { width: 100%; max-width: 100%; height: 500px; box-sizing: border-box; padding: 5px 4px 0; overflow: hidden; border: 1px solid var(--term-border-faint, #111); touch-action: pan-y; }
-  .chart-frame canvas { width: 100% !important; height: 100% !important; }
+  .chart-frame { width: 100%; max-width: 100%; box-sizing: border-box; padding: 5px 4px 0; overflow: hidden; border: 1px solid var(--term-border-faint, #111); }
   .coverage-warning-line { margin-top: 7px; padding: 6px 8px; border-left: 2px solid var(--term-amber, #d4a017); color: var(--term-amber, #d4a017); font: 10px var(--term-font-mono, 'JetBrains Mono', monospace); }
   .detail-foot { flex-wrap: wrap; gap: 7px 18px; padding-top: 10px; color: var(--term-text-6, #333); font-size: 10px; letter-spacing: .05em; }
   .detail-foot span:nth-child(1) { color: var(--term-info, #5588cc); }
@@ -620,6 +677,5 @@
     .pool-toggle img { width: 20px; height: 20px; }
     .detail-heading { align-items: flex-start; flex-direction: column; }
     .range-copy { text-align: left; }
-    .chart-frame { height: 470px; }
   }
 </style>

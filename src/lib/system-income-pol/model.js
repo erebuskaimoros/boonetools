@@ -342,50 +342,10 @@ export function selectSystemIncomePolRange(rows = [], rangeId = '30d') {
   return rows.slice(-range.days);
 }
 
-export function projectSystemIncomePolChartSelection(options = {}) {
-  const count = Math.max(0, Math.trunc(Number(options.rowCount)) || 0);
-  const left = Number(options.plotLeft);
-  const right = Number(options.plotRight);
-  const first = Number(options.startX);
-  const last = Number(options.endX);
-  if (count < 2 || ![left, right, first, last].every(Number.isFinite) || right <= left) return null;
-
-  const clamp = (value) => Math.max(left, Math.min(right, value));
-  const selectionLeft = Math.min(clamp(first), clamp(last));
-  const selectionRight = Math.max(clamp(first), clamp(last));
-  if (selectionRight - selectionLeft < Math.max(0, Number(options.minDrag ?? 12) || 0)) return null;
-
-  const span = right - left;
-  const startIndex = Math.round(((selectionLeft - left) / span) * (count - 1));
-  const endIndex = Math.round(((selectionRight - left) / span) * (count - 1));
-  if (endIndex <= startIndex) return null;
-  return { startIndex, endIndex };
-}
-
-function niceCeiling(value) {
-  if (!Number.isFinite(value) || value <= 0) return 1;
-  const magnitude = 10 ** Math.floor(Math.log10(value));
-  const normalized = value / magnitude;
-  return (normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10) * magnitude;
-}
-
-export function positionSystemIncomePolFeeTooltip(pointX, chartWidth, containerWidth) {
-  const inset = 8;
-  const width = Math.min(280, Math.max(0, containerWidth - inset * 2));
-  const anchor = pointX / chartWidth * containerWidth;
-  const preferredLeft = anchor + 12 + width <= containerWidth - inset
-    ? anchor + 12 : anchor - width - 12;
-  return { width, left: Math.max(inset, Math.min(preferredLeft, containerWidth - width - inset)) };
-}
-
+// Feature-owned values and provenance. No renderer coordinates or viewport math.
 export function buildSystemIncomePolFeeChart(rows = [], options = {}) {
-  const width = Math.max(300, finite(options.width, 1000));
-  const height = 240;
   const unit = options.unit === 'rune' ? 'rune' : 'usd';
-  const plot = { left: 64, right: width - 24, top: 20, bottom: height - 34 };
-  const slotWidth = (plot.right - plot.left) / Math.max(1, rows.length);
-  const barWidth = Math.min(32, slotWidth * 0.72);
-  const points = rows.map((row, index) => {
+  const points = rows.map((row) => {
     const rawValue = unit === 'usd' ? row.estimatedFeesUsd : row.estimatedFeesRune;
     const value = Number.isFinite(rawValue) && rawValue >= 0 ? rawValue : null;
     return {
@@ -394,49 +354,19 @@ export function buildSystemIncomePolFeeChart(rows = [], options = {}) {
       missingReason: value !== null ? '' : row.estimatedFeesRune == null
         ? 'Fee estimate unavailable' : 'Daily USD price unavailable',
       provisional: Boolean(row.partial || row.feeCoverage?.provisionalHours > 0
-        || (unit === 'usd' && row.priceProvisional)),
-      x: plot.left + slotWidth * (index + 0.5)
+        || (unit === 'usd' && row.priceProvisional))
     };
   });
-  const yMax = niceCeiling(Math.max(0, ...points.map(point => point.value ?? 0)));
-  const y = value => plot.bottom - (value / yMax) * (plot.bottom - plot.top);
-  const tickCount = Math.min(5, rows.length);
-  const tickIndexes = [...new Set(Array.from({ length: tickCount }, (_, index) =>
-    Math.round(index / Math.max(1, tickCount - 1) * Math.max(0, rows.length - 1))
-  ))];
-  return {
-    width, height, unit, plot, points, slotWidth, barWidth, yMax,
-    bars: points.filter(point => point.value !== null).map(point => ({
-      ...point, left: point.x - barWidth / 2, y: y(point.value),
-      height: plot.bottom - y(point.value)
-    })),
-    missingDays: points.filter(point => point.value === null).length,
-    yTicks: Array.from({ length: 5 }, (_, index) => {
-      const value = yMax * index / 4;
-      return { value, y: y(value) };
-    }),
-    xTicks: tickIndexes.map(index => ({ x: points[index].x, day: points[index].day }))
-  };
+  return { unit, points, missingDays: points.filter(point => point.value === null).length };
 }
 
-function linePath(points, key, y) {
-  return points.reduce((path, point) => {
-    const value = point[key];
-    if (!Number.isFinite(value)) return path;
-    return `${path}${path ? ' L' : 'M'}${point.x.toFixed(2)},${y(value).toFixed(2)}`;
-  }, '');
-}
-
+// Run over the full history before range slicing so the RUNE fallback, like
+// normalized cumulative historical dollars, stays anchored across range changes.
 export function buildSystemIncomePolChart(rows = [], options = {}) {
-  const width = options.width || 1000;
-  const height = options.height || 260;
   const unit = options.unit === 'usd' ? 'usd' : 'rune';
   const unitAvailable = unit === 'rune' || rows.some(row => Number.isFinite(row.deployedUsd));
-  const plot = { left: 72, right: width - 72, top: 18, bottom: height - 34 };
-  const slotWidth = (plot.right - plot.left) / Math.max(1, rows.length);
-  const barWidth = Math.max(1, Math.min(28, slotWidth * 0.72));
   let cumulativeRunning = 0;
-  const points = rows.map((row, index) => {
+  const points = rows.map((row) => {
     const depositedPlotRune = Number.isFinite(row.deployedRune) ? Math.max(0, row.deployedRune) : 0;
     const cumulativeDepositedRune = Number.isFinite(row.cumulativeDeployedRune)
       ? Math.max(0, row.cumulativeDeployedRune)
@@ -447,49 +377,12 @@ export function buildSystemIncomePolChart(rows = [], options = {}) {
       depositedPlotRune,
       cumulativeDepositedRune,
       depositedPlotValue: unit === 'usd' ? finite(row.deployedUsd) : depositedPlotRune,
-      cumulativeDepositedValue: unit === 'usd' ? finite(row.cumulativeDeployedUsd) : cumulativeDepositedRune,
-      x: plot.left + slotWidth * (index + 0.5)
+      cumulativeDepositedValue: unit === 'usd' ? finite(row.cumulativeDeployedUsd) : cumulativeDepositedRune
     };
   });
-  const yMax = niceCeiling(Math.max(1, ...points.map((point) => point.depositedPlotValue || 0)));
-  const y = (value) => plot.bottom - (Math.max(0, value) / yMax) * (plot.bottom - plot.top);
-  const cumulativeYMax = niceCeiling(Math.max(1, ...points.map((point) => point.cumulativeDepositedValue || 0)));
-  const cumulativeY = (value) => plot.bottom - (Math.max(0, value) / cumulativeYMax) * (plot.bottom - plot.top);
-  const depositBars = points.filter(point => Number.isFinite(point.depositedPlotValue)).map((point) => {
-    const top = y(point.depositedPlotValue);
-    return {
-      day: point.day,
-      value: point.depositedPlotValue,
-      x: point.x - barWidth / 2,
-      y: top,
-      width: barWidth,
-      height: Math.max(0, plot.bottom - top)
-    };
-  });
-  const tickIndexes = [...new Set(Array.from({ length: Math.min(5, rows.length) }, (_, index) =>
-    Math.round((index / Math.max(1, Math.min(5, rows.length) - 1)) * Math.max(0, rows.length - 1))
-  ))];
   return {
-    width,
-    height,
-    unit,
-    unitAvailable,
-    missingPriceDays: unit === 'usd' ? points.filter(point => point.depositedPlotValue === null).length : 0,
-    plot,
-    points,
-    depositBars,
-    yMax,
-    cumulativeYMax,
-    cumulativeDepositedPath: linePath(points, 'cumulativeDepositedValue', cumulativeY),
-    yTicks: Array.from({ length: 5 }, (_, index) => {
-      const value = yMax * (index / 4);
-      return { value, y: y(value) };
-    }),
-    cumulativeYTicks: Array.from({ length: 5 }, (_, index) => {
-      const value = cumulativeYMax * (index / 4);
-      return { value, y: cumulativeY(value) };
-    }),
-    xTicks: tickIndexes.map((index) => ({ x: points[index]?.x || plot.left, day: rows[index]?.day || '' }))
+    unit, unitAvailable, points,
+    missingPriceDays: unit === 'usd' ? points.filter(point => point.depositedPlotValue === null).length : 0
   };
 }
 

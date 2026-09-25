@@ -1,15 +1,10 @@
-import Chart from 'chart.js/auto';
 import { appLayerChartRange } from './chart-range.js';
-import zoomPlugin from 'chartjs-plugin-zoom';
-import { INTERACTIVE_CHART_LEGEND, TERMINAL_CHART_PALETTE } from '../charts/terminal.js';
+import { TERMINAL_CHART_PALETTE } from '../charts/terminal.js';
 import { denomLabel, fillBucketGaps, formatWeekLabel } from './model.js';
 
-export {
-  buildAccruedValueTooltipDetails,
-  buildPolAccrualTooltipDetails
-} from './chart-tooltips.js';
-
-Chart.register(zoomPlugin);
+import { buildAccruedValueTooltipDetails, buildPolAccrualTooltipDetails } from './chart-tooltips.js';
+import { buildTimeSeriesOption, timeSeriesTooltip } from '../charts/time-series.js';
+import { utcDayWindow } from '../charts/viewport.js';
 
 const usd0 = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -86,132 +81,112 @@ export function collectedFlowTooltip(row, grain, limit = 4) {
   return lines;
 }
 
-export function renderAppLayerSeriesChart(canvas, previousChart, config) {
-  previousChart?.destroy();
-  const {
-    grain,
-    view,
-    colors,
-    valueField,
-    cumulativeField,
-    barLabel,
-    barSeries,
-    cumulativeLabel,
-    afterBody,
-    onZoomComplete
-  } = config;
-  const rows = fillBucketGaps(config.rows, valueField, cumulativeField, grain === 'weekly' ? 7 : 1);
-  const cumulative = view === 'cumulative';
-  const stackedBars = !cumulative && barSeries?.length > 1;
-  const datasets = cumulative
-    ? [{
-        type: 'line',
-        label: cumulativeLabel,
-        data: rows.map((row) => row[cumulativeField] || 0),
-        borderColor: colors.mark,
-        backgroundColor: colors.faint,
-        pointBackgroundColor: colors.mark,
-        pointBorderColor: '#080808',
-        pointRadius: rows.length > 45 ? 0 : 3,
-        borderWidth: 2,
-        tension: 0.2,
-        fill: true
-      }]
-    : barSeries?.length
-      ? barSeries.map((series) => ({
-          type: 'bar',
-          label: series.label,
-          data: rows.map((row) => row[series.valueField] || 0),
-          backgroundColor: series.colors.fill,
-          borderColor: series.colors.mark,
-          borderWidth: rows.length > 90 ? 0 : 1,
-          borderRadius: 0,
-          stack: 'combined'
-        }))
-      : [{
-        type: 'bar',
-        label: barLabel,
-        data: rows.map((row) => row[valueField] || 0),
-        backgroundColor: colors.fill,
-        borderColor: colors.mark,
-        borderWidth: rows.length > 90 ? 0 : 1,
-        borderRadius: 0
-      }];
+const number4 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
 
-  return new Chart(canvas.getContext('2d'), /** @type {any} */ ({
-    type: 'bar',
-    data: {
-      labels: rows.map((row) => formatWeekLabel(row.bucket_start)),
-      datasets
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: {
-        legend: {
-          ...INTERACTIVE_CHART_LEGEND,
-          display: stackedBars,
-          labels: {
-            color: '#e8e8e8',
-            boxWidth: 8,
-            boxHeight: 8,
-            padding: 14,
-            font: { family: "'JetBrains Mono', monospace", size: 11, weight: 600 }
-          }
-        },
-        tooltip: {
-          backgroundColor: '#0a0a0a',
-          borderColor: '#1a1a1a',
-          borderWidth: 1,
-          titleColor: '#ffffff',
-          bodyColor: '#f5f5f5',
-          titleFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 700 },
-          bodyFont: { family: "'JetBrains Mono', monospace", size: 12, weight: 500 },
-          callbacks: {
-            afterBody(items) {
-              return afterBody ? afterBody(rows[items[0].dataIndex]) : [];
-            },
-            label(context) {
-              return `${context.dataset.label}: ${usd2.format(context.raw)}`;
-            }
-          }
-        },
-        zoom: {
-          limits: { x: { minRange: 1 } },
-          zoom: {
-            mode: 'x',
-            wheel: { enabled: false },
-            pinch: { enabled: true },
-            drag: {
-              enabled: true,
-              backgroundColor: colors.faint,
-              borderColor: colors.mark,
-              borderWidth: 1
-            },
-            onZoomComplete
-          }
-        }
-      },
-      scales: {
-        x: {
-          ...appLayerChartRange(rows, config.rangeDays === undefined ? 30 : config.rangeDays, grain),
-          stacked: stackedBars,
-          grid: { color: '#111', drawBorder: false },
-          border: { color: '#1a1a1a' },
-          ticks: { color: '#c8c8c8', font: { family: "'JetBrains Mono', monospace", size: 11 } }
-        },
-        y: {
-          stacked: stackedBars,
-          grid: { color: '#111', drawBorder: false },
-          border: { color: '#1a1a1a' },
-          ticks: {
-            color: colors.chrome,
-            font: { family: "'JetBrains Mono', monospace", size: 11 },
-            callback: (value) => value >= 1000 ? usd0.format(value) : usd2.format(value)
-          }
-        }
-      }
-    }
-  }));
+export const APP_LAYER_CHARTS = Object.freeze({
+  accrued: {
+    valueField: 'accrued_value_usd', cumulativeField: 'cumulative_usd',
+    barLabel: 'TC-retained accrued value (01 + 03)',
+    cumulativeLabel: 'Cumulative TC-retained value (01 + 03)',
+    parts: [
+      { id: 'retained', label: '01 · Base Layer earnings (TC-retained share)', valueField: 'inflow_usd', colors: APP_LAYER_SERIES.collected },
+      { id: 'liquidity', label: '03 · TC liquidity fees generated', valueField: 'liquidity_fee_usd', colors: APP_LAYER_SERIES.generated }
+    ],
+    details: buildAccruedValueTooltipDetails
+  },
+  collected: {
+    valueField: 'inflow_usd', cumulativeField: 'cumulative_usd',
+    barLabel: 'App-layer earnings retained for TC (2/3 since cutover)',
+    cumulativeLabel: 'Cumulative app-layer earnings retained for TC',
+    details: collectedFlowTooltip
+  },
+  paid: {
+    valueField: 'payment_usd', cumulativeField: 'cumulative_usd',
+    barLabel: 'TC Reserve settlement USD', cumulativeLabel: 'Cumulative TC Reserve settlement USD',
+    details: row => [
+      `${number2.format(row.payments || 0)} Reserve deposit${row.payments === 1 ? '' : 's'}`,
+      `${number2.format(row.payment_rune || 0)} RUNE to Reserve`,
+      `${number4.format(row.rune_price_usd || row.settlement_rune_price_usd || 0)} avg historical RUNE/USD`,
+      `${number2.format(row.cumulative_rune || 0)} cumulative Reserve RUNE`
+    ]
+  },
+  pol: {
+    valueField: 'pol_accrued_usd', cumulativeField: 'cumulative_pol_accrued_usd',
+    barLabel: 'THORChain POL accrual USD', cumulativeLabel: 'Cumulative THORChain POL accrual USD',
+    details: buildPolAccrualTooltipDetails
+  },
+  generated: {
+    valueField: 'liquidity_fee_usd', cumulativeField: 'cumulative_usd',
+    barLabel: 'Generated fees USD', cumulativeLabel: 'Cumulative generated fees USD',
+    details: row => [
+      `${number4.format(row.liquidity_fee_rune || 0)} RUNE fees`,
+      `${number4.format(row.rune_price_usd || 0)} RUNE/USD`,
+      `${number4.format(row.cumulative_rune || 0)} cumulative RUNE`
+    ]
+  }
+});
+
+// App Layer's existing activity-bucket policy belongs here, not in the host:
+// absent activity buckets are zero, and their all-history totals carry forward.
+export function prepareAppLayerChart(pick, key) {
+  const config = APP_LAYER_CHARTS[key];
+  const observed = new Set(pick.rows.map(row => row.bucket_start));
+  return fillBucketGaps(pick.rows, config.valueField, config.cumulativeField, pick.grain === 'weekly' ? 7 : 1)
+    .map(row => ({ ...row, day: row.bucket_start, filledBucket: !observed.has(row.bucket_start) }));
+}
+
+export function appLayerSummaryMetrics(key) {
+  const labels = { accrued: 'Accrued value', collected: 'Retained earnings', paid: 'Payments', pol: 'POL accrued', generated: 'Liquidity fees' };
+  const fields = key === 'accrued'
+    ? [{ field: 'inflow_usd', label: 'Retained earnings' }, { field: 'liquidity_fee_usd', label: 'Liquidity fees' }]
+    : [{ field: APP_LAYER_CHARTS[key].valueField, label: labels[key] }];
+  // This feature explicitly fills empty activity buckets with zero, as in its bars.
+  return fields.map(item => ({ ...item, value: row => row[item.field] || 0, kind: 'flow', unit: 'usd' }));
+}
+
+export function appLayerPresetWindow(rows, range = '30d', grain = 'daily') {
+  const bounds = appLayerChartRange(rows, range === 'all' ? null : 30, grain);
+  return bounds.min == null ? null : utcDayWindow(rows, bounds.min, bounds.max);
+}
+
+export function appLayerSeries(key, view = 'bars') {
+  const config = APP_LAYER_CHARTS[key];
+  const colors = APP_LAYER_SERIES[key];
+  return view === 'cumulative'
+    ? [{ id: key, label: config.cumulativeLabel, valueField: config.cumulativeField, colors, mark: 'line' }]
+    : (config.parts || [{ id: key, label: config.barLabel, valueField: config.valueField, colors }])
+      .map(item => ({ ...item, mark: 'bar' }));
+}
+
+export function appLayerTooltip(row, { key, view = 'bars', grain = 'daily', hidden = [] }) {
+  const config = APP_LAYER_CHARTS[key];
+  return timeSeriesTooltip([
+    `${row.day} · ${grain === 'weekly' ? 'WEEK START' : 'DAY'} (UTC)`,
+    ...appLayerSeries(key, view).filter(item => !hidden.includes(item.id)).map(item => ({
+      id: item.id, color: item.colors.mark, fill: view === 'bars' ? item.colors.fill : item.colors.faint,
+      text: `${item.label}: ${usd2.format(row[item.valueField] || 0)}`
+    })),
+    ...(config.details?.(row, grain) || []),
+    ...(row.filledBucket ? ['Empty activity bucket · cumulative carried forward'] : [])
+  ]);
+}
+
+export function buildAppLayerOption(rows, { key = 'accrued', view = 'bars', grain = 'daily', hidden = [], window = null, width = 1000, analysis = null } = {}) {
+  const colors = APP_LAYER_SERIES[key];
+  const descriptors = appLayerSeries(key, view);
+  return buildTimeSeriesOption(rows, {
+    window, width, hidden, analysis, sourceGrain: grain === 'weekly' ? 'week' : 'day', xLabel: formatWeekLabel,
+    axes: [{ id: 'value', label: 'USD', position: 'left', color: colors.chrome,
+      baseline: view === 'cumulative' ? 'auto' : 'signed',
+      format: value => Math.abs(value) >= 1000 ? usd0.format(value) : usd2.format(value) }],
+    series: descriptors.map(item => ({
+      id: item.id, label: item.label, aggregate: view === 'cumulative' ? 'last' : 'sum', mark: item.mark, axis: 'value',
+      color: item.colors.mark, fill: item.colors.fill,
+      stack: view === 'bars' && descriptors.length > 1 ? 'app-value' : undefined,
+      areaFill: view === 'cumulative' ? item.colors.faint : undefined,
+      symbolSize: view === 'cumulative' && rows.length <= 45 ? 5 : 0,
+      data: rows.map(row => row[item.valueField] || 0)
+    })),
+    tooltip: row => appLayerTooltip(row, { key, view, grain, hidden })
+  });
 }

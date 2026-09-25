@@ -15,6 +15,15 @@ public API fields. Provider-owned RUNEPool value is stored only as a private
 reconciliation input. The dashboard combines the four tracked values into one
 stacked area chart. Its hover total is their arithmetic sum.
 
+The local September 22 ECharts migration uses the shared time-series host;
+see [implementation status](shared-echarts-time-series.md) for deployment state.
+The four stack values remain feature-owned. A missing/invalid lower valuation
+suppresses layers above it; a zero contributes nothing and breaks only its own
+fill/outline, allowing valid positive upper holdings. Range/zoom and refresh do
+not rebase these stock values. Hover updates the HTML legend, and a native UTC
+day selector offers keyboard inspection and an unavailable total for incomplete
+days. Keyboard-operable zoom buttons supplement marquee/double-click reset.
+
 The chart and its total remain completed-day, same-height accounting. The
 System Income POL headline additionally reads the current provider-free
 `system-income-pol:v1` model and reconstructs the live position from both

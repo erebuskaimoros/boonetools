@@ -1,5 +1,10 @@
 # Financials: ECharts comparison
 
+Historical prototype notes below. ECharts was subsequently selected and shipped
+for Financials on September 18; the renderer-selection query parameters are no
+longer needed. For the September 22 shared-foundation follow-up, see
+[shared ECharts time series](shared-echarts-time-series.md).
+
 Development-only prototype, September 10, 2026. This is not a decision to migrate the site.
 
 ## Open the comparison

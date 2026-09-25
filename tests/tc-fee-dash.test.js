@@ -27,9 +27,12 @@ test('system income distribution resolves active Mimirs over protocol defaults',
       DevFundSystemIncomeBps: 500,
       TCYStakeSystemIncomeBps: 1000,
       MarketingFundSystemIncomeBps: 500,
-      POLReserveSystemIncomeBps: 0
+      POLReserveSystemIncomeBps: 0,
+      PendulumAssetsBasisPoints: 10000,
+      PendulumUseEffectiveSecurity: 0,
+      PendulumUseVaultAssets: 0
     }
-  });
+  }, { available_pools_rune: '100' }, [{ status: 'Active', total_bond: '50' }]);
 
   assert.equal(distribution.complete, true);
   assert.equal(distribution.explicitBps, 4500);
@@ -42,7 +45,8 @@ test('system income distribution resolves active Mimirs over protocol defaults',
       { id: 'dev', bps: 500, source: 'constant' },
       { id: 'tcy', bps: 1000, source: 'constant' },
       { id: 'marketing', bps: 500, source: 'constant' },
-      { id: 'ip', bps: 5500, source: 'derived' },
+      { id: 'bond', bps: 5500, source: 'pendulum' },
+      { id: 'lp', bps: 0, source: 'pendulum' },
       { id: 'pol', bps: 2000, source: 'mimir' }
     ]
   );
@@ -54,16 +58,21 @@ test('system income distribution accepts zero overrides and builds chart flows',
     devfundsystemincomebps: 500,
     tcystakesystemincomebps: 1000,
     marketingfundsystemincomebps: 500,
-    polreservesystemincomebps: 0
-  });
+    polreservesystemincomebps: 0,
+    pendulumassetsbasispoints: 10000,
+    pendulumuseeffectivesecurity: 0,
+    pendulumusevaultassets: 0
+  }, {}, { available_pools_rune: '25' }, [{ status: 'Active', total_bond: '50' }]);
 
   assert.equal(distribution.allocations.find(({ id }) => id === 'burn').source, 'mimir');
-  assert.equal(distribution.allocations.find(({ id }) => id === 'ip').bps, 8000);
+  assert.equal(distribution.allocations.find(({ id }) => id === 'bond').bps, 4000);
+  assert.equal(distribution.allocations.find(({ id }) => id === 'lp').bps, 4000);
   assert.deepEqual(systemIncomeDistributionFlows(distribution).map(({ to, flow }) => ({ to, flow })), [
     { to: 'DEV', flow: 5 },
     { to: 'TCY', flow: 10 },
     { to: 'MKT', flow: 5 },
-    { to: 'BOND PROVIDERS', flow: 80 }
+    { to: 'BOND PROVIDERS', flow: 40 },
+    { to: 'LPs', flow: 40 }
   ]);
   assert.equal(formatSystemIncomePercent(5), '5%');
   assert.equal(formatSystemIncomePercent(5.125), '5.13%');

@@ -1,4 +1,6 @@
 <script>
+  import EventTimeSeriesChart from './charts/EventTimeSeriesChart.svelte';
+  import RangeSummary from './charts/RangeSummary.svelte';
   import { onDestroy, onMount } from 'svelte';
   import {
     isChartTrendVisible,
@@ -54,6 +56,7 @@
   let preferredSourceMode = DEFAULT_POOL_DISLOCATION_SOURCE_MODE;
   let sourceMode = DEFAULT_POOL_DISLOCATION_SOURCE_MODE;
   let chartWindow = '7d';
+  let calendarGrain = 'native';
   let selectedRollingAverageIds = [];
   let hiddenChartTrendIds = [];
   let chartZoom = null;
@@ -102,6 +105,11 @@
     zoomStartMs: chartZoom?.startMs,
     zoomEndMs: chartZoom?.endMs
   });
+  $: calendarEvents = buildPoolDislocationChartViewport(selectedPoints, { endAt: summary?.as_of, durationMs: chartWindowConfig.durationMs }).points.map(row => ({ ...row, time: row.observedAt }));
+  $: calendarMetrics = [
+    ...(selectedPool?.oracleSymbol && sourceMode !== 'binance' ? [{ id: 'oracle', label: 'TC / ORACLE', color: '#00cc66', value: row => row.oracleDislocation, format: formatBasisPoints, baseline: 'signed' }] : []),
+    ...(selectedPool?.binanceSymbol && sourceMode !== 'oracle' ? [{ id: 'binance', label: 'TC / BINANCE', color: '#5588cc', value: row => row.binanceDislocation, format: formatBasisPoints, baseline: 'signed' }] : [])
+  ];
   $: chartPoints = chartViewport.points;
   $: chartStartMs = chartViewport.startMs;
   $: chartEndMs = chartViewport.endMs;
@@ -630,6 +638,7 @@
             <span class="source-unavailable">[—] NO EXTERNAL REFERENCE</span>
           {/if}
         </div>
+        {#if calendarGrain === 'native'}
         <div class="control-row">
           <span class="control-label">AVG</span>
           {#each POOL_DISLOCATION_ROLLING_WINDOWS as window}
@@ -641,35 +650,22 @@
             ><i>[{window.label}]</i></button>
           {/each}
         </div>
+        {/if}
       </div>
     </div>
 
     <div class="focus-grid">
       <div class="chart-wrap">
+        <RangeSummary rows={chartPoints} bucket="sample" metrics={[
+          ...(selectedPool?.oracleSymbol && sourceMode !== 'binance' ? [{ field: 'oracleDislocation', label: 'Vs oracle', kind: 'rate', format: formatBasisPoints }] : []),
+          ...(selectedPool?.binanceSymbol && sourceMode !== 'oracle' ? [{ field: 'binanceDislocation', label: 'Vs Binance', kind: 'rate', format: formatBasisPoints }] : [])
+        ]} note="Signed sample averages; missing samples are excluded, not filled." />
+        <EventTimeSeriesChart events={calendarEvents} metrics={calendarMetrics} bind:hidden={hiddenChartTrendIds} bind:grain={calendarGrain}
+          zoomWindow={chartZoom ? { startDay: new Date(chartZoom.startMs).toISOString().slice(0, 10), endDay: new Date(chartZoom.endMs).toISOString().slice(0, 10) } : null}
+          onZoom={window => chartZoom = window ? { startMs: Date.parse(window.startDay), endMs: Date.parse(window.endDay) + 86400000 - 1 } : null}
+          ariaLabel="Pool price deviation calendar sample averages">
         <div class="chart-legend">
           <span class="zoom-hint">{chartViewport.zoomed ? 'ZOOM ACTIVE · DRAG AGAIN OR RESET' : 'DRAG TO HIGHLIGHT + ZOOM'}</span>
-          {#if selectedPool?.oracleSymbol && sourceMode !== 'binance'}
-            <button
-              type="button"
-              class="trend-key oracle-key"
-              class:is-hidden={!oracleTrendVisible}
-              aria-pressed={oracleTrendVisible}
-              aria-label={`${oracleTrendVisible ? 'Hide' : 'Show'} TC / Oracle trends`}
-              title={`${oracleTrendVisible ? 'Hide' : 'Show'} TC / Oracle trends`}
-              on:click={() => toggleChartTrend('oracle')}
-            ><i aria-hidden="true"></i>TC / ORACLE</button>
-          {/if}
-          {#if selectedPool?.binanceSymbol && sourceMode !== 'oracle'}
-            <button
-              type="button"
-              class="trend-key binance-key"
-              class:is-hidden={!binanceTrendVisible}
-              aria-pressed={binanceTrendVisible}
-              aria-label={`${binanceTrendVisible ? 'Hide' : 'Show'} TC / Binance trends`}
-              title={`${binanceTrendVisible ? 'Hide' : 'Show'} TC / Binance trends`}
-              on:click={() => toggleChartTrend('binance')}
-            ><i aria-hidden="true"></i>TC / BINANCE</button>
-          {/if}
           {#each POOL_DISLOCATION_ROLLING_WINDOWS.filter((window) => selectedRollingAverageIds.includes(window.id)) as window}
             {@const averageTrendVisible = isChartTrendVisible(hiddenChartTrendIds, `average:${window.id}`)}
             <button
@@ -801,6 +797,7 @@
             {/each}
           </div>
         {/if}
+        </EventTimeSeriesChart>
         {#if seriesLoading}
           <div class="chart-status">SYNCING EXACT FIVE-MINUTE POINTS…</div>
         {:else if seriesError}

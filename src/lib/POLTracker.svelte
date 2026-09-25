@@ -1,16 +1,16 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
+  import TimeSeriesChart from './charts/TimeSeriesChart.svelte';
+  import { buildPolTrackerOption } from './pol-tracker/charts.js';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
   import { fetchPolTracker } from './pol-tracker/api.js';
   import {
     POL_TRACKER_GROUPS,
     POL_TRACKER_RANGES,
     POL_TRACKER_SERIES,
-    buildPolTrackerChart,
     formatPolTrackerRune,
     formatPolTrackerUsd,
     normalizePolTrackerPayload,
-    projectPolTrackerChartSelection,
     relevantPolTrackerPools,
     selectPolTrackerRange,
     totalPolTrackerValue
@@ -22,27 +22,23 @@
   let refreshing = false;
   let loadError = '';
   let rangeId = 'all';
-  let hoverIndex = -1;
-  let zoomStartDay = '';
-  let zoomEndDay = '';
-  let selecting = false;
-  let selectionStartX = null;
-  let selectionEndX = null;
+  let chartHost;
+  let hiddenSeries = [];
+  let hoveredDay = null;
+  let inspectedDay = '';
+  let zoomWindow = null;
   let refreshTimer;
 
   $: dashboard = normalizePolTrackerPayload(payload || {});
   $: rangeRows = selectPolTrackerRange(dashboard.daily, rangeId);
-  $: rows = zoomStartDay && zoomEndDay
-    ? rangeRows.filter((row) => row.day >= zoomStartDay && row.day <= zoomEndDay)
+  $: rows = zoomWindow
+    ? rangeRows.filter(row => row.day >= zoomWindow.startDay && row.day <= zoomWindow.endDay)
     : rangeRows;
-  $: isZoomed = Boolean(zoomStartDay && zoomEndDay && rows.length > 1) && (
-    rows[0]?.day !== rangeRows[0]?.day || rows.at(-1)?.day !== rangeRows.at(-1)?.day
-  );
+  $: isZoomed = Boolean(zoomWindow);
   $: chartGroup = POL_TRACKER_GROUPS[0];
-  $: chart = buildPolTrackerChart(rows, chartGroup.id);
-  $: hovered = hoverIndex >= 0 ? rows[hoverIndex] || null : null;
-  $: selected = hovered || rows.at(-1) || null;
-  $: displayedTotal = totalPolTrackerValue(hovered);
+  $: selected = rows.find(row => row.day === hoveredDay)
+    || rows.find(row => row.day === inspectedDay) || rows.at(-1) || null;
+  $: displayedTotal = totalPolTrackerValue(selected);
   $: relevantPools = relevantPolTrackerPools(dashboard.latestPools);
   $: latest = dashboard.latest;
   $: currentSystemIncomePol = dashboard.currentSystemIncomePol;
@@ -79,95 +75,14 @@
 
   function setRange(nextRange) {
     rangeId = nextRange;
-    resetZoom();
+    zoomChanged(null);
   }
-
-  function resetZoom() {
-    zoomStartDay = '';
-    zoomEndDay = '';
-    hoverIndex = -1;
-    selecting = false;
-    selectionStartX = null;
-    selectionEndX = null;
+  function zoomChanged(window) {
+    zoomWindow = window;
+    hoveredDay = null;
+    inspectedDay = '';
   }
-
-  function updateHover(event) {
-    if (selecting || !rows.length) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const relative = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-    hoverIndex = Math.round(relative * Math.max(0, rows.length - 1));
-  }
-
-  function pointerChartX(event) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const relative = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
-    return chart.plot.left + (relative * (chart.plot.right - chart.plot.left));
-  }
-
-  function startZoomSelection(event) {
-    if (event.button !== undefined && event.button !== 0) return;
-    event.preventDefault();
-    hoverIndex = -1;
-    selecting = true;
-    selectionStartX = pointerChartX(event);
-    selectionEndX = selectionStartX;
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    } catch {
-      // Pointer capture is optional; the selection still works inside the chart.
-    }
-  }
-
-  function updateChartPointer(event) {
-    if (!selecting) {
-      updateHover(event);
-      return;
-    }
-    selectionEndX = pointerChartX(event);
-  }
-
-  function finishZoomSelection(event) {
-    if (!selecting) return;
-    selectionEndX = pointerChartX(event);
-    selecting = false;
-    try {
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
-    } catch {
-      // The browser may already have released this pointer.
-    }
-
-    const selection = projectPolTrackerChartSelection({
-      rowCount: rows.length,
-      plotLeft: chart.plot.left,
-      plotRight: chart.plot.right,
-      startX: selectionStartX,
-      endX: selectionEndX
-    });
-    selectionStartX = null;
-    selectionEndX = null;
-    if (!selection) return;
-
-    const selectedRows = rows.slice(selection.startIndex, selection.endIndex + 1);
-    if (selectedRows.length < 2) return;
-    if (selectedRows.length === rangeRows.length) {
-      resetZoom();
-      return;
-    }
-    zoomStartDay = selectedRows[0].day;
-    zoomEndDay = selectedRows.at(-1).day;
-    hoverIndex = -1;
-  }
-
-  function cancelZoomSelection(event) {
-    selecting = false;
-    selectionStartX = null;
-    selectionEndX = null;
-    try {
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
-    } catch {
-      // The browser may already have released this pointer.
-    }
-  }
+  function resetZoom() { chartHost?.resetZoom(); }
 
   function axisDate(value) {
     if (!value) return '';
@@ -268,8 +183,10 @@
     <div class="range-bar">
       <span>WINDOW</span>
       {#each POL_TRACKER_RANGES as range}
-        <button class:active={rangeId === range.id} on:click={() => setRange(range.id)}>{range.label}</button>
+        <button class:active={rangeId === range.id} aria-pressed={rangeId === range.id} on:click={() => setRange(range.id)}>{range.label}</button>
       {/each}
+      <button aria-label="Zoom in" on:click={() => chartHost?.zoomBy(0.65)}>[+]</button>
+      <button aria-label="Zoom out" on:click={() => chartHost?.zoomBy(1.5)}>[−]</button>
       <span class="zoom-hint">DRAG TO ZOOM · DOUBLE-CLICK RESET</span>
       {#if isZoomed}
         <span class="zoom-window">{axisDate(rows[0]?.day)} — {axisDate(rows.at(-1)?.day)}</span>
@@ -285,92 +202,34 @@
           <h2>{chartGroup.title}</h2>
           <p>{chartGroup.description}</p>
         </div>
-        <div class="legend" aria-label={`${chartGroup.title} series`}>
+        <div class="legend" aria-label={`${chartGroup.title} cursor values`}>
           {#each POL_TRACKER_SERIES as series}
-            <span class="legend-item">
+            <button class="legend-item" aria-pressed={!hiddenSeries.includes(series.id)} on:click={() => hiddenSeries = hiddenSeries.includes(series.id) ? hiddenSeries.filter(id => id !== series.id) : [...hiddenSeries, series.id]}>
               <span class="swatch" style={`--series-color:${series.color}`}></span>
               {series.label}
               <b>{formatPolTrackerUsd(series.value(selected), true)}</b>
-            </span>
+            </button>
           {/each}
         </div>
       </div>
 
-      <div class="chart-scroll">
-        <div class="chart-canvas">
-          <svg
-            viewBox={`0 0 ${chart.width} ${chart.height}`}
-            role="img"
-            aria-label={`${chartGroup.title} daily stacked USD area chart. Drag horizontally to zoom; double-click to reset.`}
-            on:dblclick={resetZoom}
-          >
-            {#each chart.yTicks as tick}
-              <line x1={chart.plot.left} x2={chart.plot.right} y1={tick.y} y2={tick.y} class="grid-line" />
-              <text x={chart.plot.left - 10} y={tick.y + 4} text-anchor="end" class="axis-label">
-                {formatPolTrackerUsd(tick.value, true)}
-              </text>
-            {/each}
-            {#each chart.xTicks as tick}
-              <text x={tick.x} y={chart.height - 9} text-anchor="middle" class="axis-label">{axisDate(tick.day)}</text>
-            {/each}
-            {#each chart.paths as series}
-              <path d={series.areaPath} fill={series.color} class="area-fill" />
-              <path d={series.path} fill="none" stroke={series.color} stroke-width="1.4" vector-effect="non-scaling-stroke" />
-            {/each}
-            {#if hoverIndex >= 0 && rows[hoverIndex]}
-              <line
-                x1={chart.x(hoverIndex)}
-                x2={chart.x(hoverIndex)}
-                y1={chart.plot.top}
-                y2={chart.plot.bottom}
-                class="cursor-line"
-              />
-            {/if}
-            {#if selecting && selectionStartX !== null && selectionEndX !== null}
-              <rect
-                x={Math.min(selectionStartX, selectionEndX)}
-                y={chart.plot.top}
-                width={Math.abs(selectionEndX - selectionStartX)}
-                height={chart.plot.bottom - chart.plot.top}
-                class="zoom-selection"
-              />
-            {/if}
-            <rect
-              role="presentation"
-              class="zoom-capture"
-              x={chart.plot.left}
-              y={chart.plot.top}
-              width={chart.plot.right - chart.plot.left}
-              height={chart.plot.bottom - chart.plot.top}
-              fill="transparent"
-              on:pointerdown={startZoomSelection}
-              on:pointermove={updateChartPointer}
-              on:pointerup={finishZoomSelection}
-              on:pointercancel={cancelZoomSelection}
-              on:mouseleave={() => { if (!selecting) hoverIndex = -1; }}
-            />
-          </svg>
-          {#if hovered}
-            <div
-              class="chart-tooltip"
-              class:align-right={chart.x(hoverIndex) > chart.width * 0.7}
-              style={`--tooltip-x:${(chart.x(hoverIndex) / chart.width) * 100}%`}
-            >
-              <strong>{fullDate(hovered.day)}</strong>
-              {#each POL_TRACKER_SERIES as series}
-                <span class="tooltip-row">
-                  <i style={`--series-color:${series.color}`}></i>
-                  <span>{series.label}</span>
-                  <b>{formatPolTrackerUsd(series.value(hovered), true)}</b>
-                </span>
-              {/each}
-              <span class="tooltip-total">
-                <span>TOTAL</span>
-                <b>{formatPolTrackerUsd(displayedTotal, true)}</b>
-              </span>
-            </div>
-          {/if}
-        </div>
+      <div class="chart-canvas">
+        <TimeSeriesChart bind:this={chartHost} points={rangeRows} historyPoints={dashboard.daily} options={{ hidden: hiddenSeries }} onHiddenChange={ids => hiddenSeries = ids} buildOption={buildPolTrackerOption}
+          {zoomWindow} onZoom={zoomChanged} onHover={(day) => hoveredDay = day}
+          hasData={rangeRows.length > 0} {loading} height="320px" narrowHeight="300px"
+          ariaLabel={chartGroup.title + ' daily stacked USD area chart. Drag horizontally to zoom; double-click to reset.'} />
+      </div>
+      <div class="inspect-day">
+        <label for="pol-tvl-day">INSPECT UTC DAY</label>
+        <select id="pol-tvl-day" bind:value={inspectedDay} on:change={() => hoveredDay = null}>
+          <option value="">Latest visible day</option>
+          {#each rows as row}
+            <option value={row.day}>{row.day}</option>
+          {/each}
+        </select>
+        <span>{fullDate(selected?.day)}</span>
+        <span>TOTAL</span>
+        <strong>{formatPolTrackerUsd(displayedTotal, true)}</strong>
       </div>
     </section>
 
@@ -456,7 +315,7 @@
   .eyebrow, .subtitle, .panel-heading p, .metric small, .source-line { margin: 0; font-size: 11px; }
   h1 { margin: 5px 0; font-size: clamp(26px, 4vw, 42px); letter-spacing: .08em; }
   h2 { margin: 4px 0; font-size: 15px; text-transform: uppercase; letter-spacing: .05em; }
-  .subtitle, .panel-heading p, .metric small, .axis-label, .source-line { color: #888; }
+  .subtitle, .panel-heading p, .metric small, .source-line { color: #888; }
 
   .header-state { gap: 8px; font-size: 11px; letter-spacing: .08em; }
   .state-dot { width: 7px; height: 7px; background: #00cc66; box-shadow: 0 0 8px rgba(0, 204, 102, .5); }
@@ -502,39 +361,16 @@
   .chart-panel, .table-panel, .method-panel { border: 1px solid #1a1a1a; background: #080808; margin-top: 12px; }
   .panel-heading { justify-content: space-between; gap: 18px; padding: 13px 15px; border-bottom: 1px solid #1a1a1a; }
   .legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-  .legend-item { gap: 7px; padding: 6px 8px; border: 1px solid #262626; color: #aaa; font-size: 9px; }
+  .legend-item { gap: 7px; padding: 6px 8px; border: 1px solid #262626; color: #aaa; font-size: 11px; }
+  .legend-item { cursor: pointer; background: transparent; font-family: var(--term-font-mono); }
+  .legend-item[aria-pressed=false] { opacity: .5; text-decoration: line-through; }
+  .legend-item:focus-visible { outline: 1px solid var(--term-accent); outline-offset: 2px; }
   .legend-item b { color: #e8e8e8; font-weight: 500; }
   .swatch { width: 14px; height: 7px; background: var(--series-color); opacity: .72; }
-  .chart-scroll { padding: 4px 8px 0; overflow-x: auto; }
-  .chart-canvas { position: relative; min-width: 680px; }
-  svg { display: block; width: 100%; }
-  .area-fill { opacity: .34; }
-  .grid-line { stroke: #171717; stroke-width: 1; vector-effect: non-scaling-stroke; }
-  .axis-label { fill: #777; font: 10px 'JetBrains Mono', monospace; }
-  .cursor-line { stroke: #555; stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
-  .zoom-selection { fill: rgba(0, 204, 102, .12); stroke: #00cc66; stroke-width: 1; vector-effect: non-scaling-stroke; pointer-events: none; }
-  .zoom-capture { cursor: crosshair; touch-action: none; }
-  .chart-tooltip {
-    position: absolute;
-    z-index: 2;
-    top: 16px;
-    left: var(--tooltip-x);
-    min-width: 238px;
-    padding: 10px;
-    border: 1px solid #3a3a3a;
-    background: rgba(5, 5, 5, .96);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
-    transform: translateX(10px);
-    pointer-events: none;
-    font-size: 9px;
-  }
-  .chart-tooltip.align-right { transform: translateX(calc(-100% - 10px)); }
-  .chart-tooltip > strong { display: block; margin-bottom: 7px; color: #fff; font-size: 10px; font-weight: 500; }
-  .tooltip-row, .tooltip-total { display: grid; grid-template-columns: 8px 1fr auto; align-items: center; gap: 7px; padding: 3px 0; }
-  .tooltip-row i { width: 7px; height: 7px; background: var(--series-color); }
-  .tooltip-row span { color: #aaa; }
-  .tooltip-row b, .tooltip-total b { color: #fff; font-weight: 500; }
-  .tooltip-total { grid-template-columns: 1fr auto; margin-top: 6px; padding-top: 7px; border-top: 1px solid #333; color: #00cc66; }
+  .chart-canvas { min-width: 0; padding: 4px 8px 0; }
+  .inspect-day { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px 15px; font-size: 11px; color: var(--term-text-3); }
+  .inspect-day select { max-width: 100%; border: 1px solid var(--term-border); background: var(--term-surface); color: var(--term-text-body); font: inherit; padding: 5px; }
+  .inspect-day strong { color: var(--term-accent); }
 
   .table-scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 11px; }

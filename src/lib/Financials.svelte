@@ -23,6 +23,16 @@
   let destroyed = false;
   let ChartComponent = null;
   let chartError = '';
+  let historyPoints = [], historyRequest, historyLoading = false, historyError = '';
+  async function loadRollingHistory(ids) {
+    if (!ids.length || historyLoading || historyPoints.length) return;
+    historyLoading = true; historyError = ''; historyRequest = new AbortController();
+    try {
+      const result = await fetchFinancials('all', { signal: historyRequest.signal });
+      if (!destroyed) historyPoints = result.points || [];
+    } catch (failure) { if (failure.name !== 'AbortError') historyError = 'Rolling lookback unavailable; only the loaded range is used.'; }
+    finally { historyLoading = false; }
+  }
 
   $: points = payload?.range === range ? payload.points : [];
   $: selectedPoints = zoomWindow ? points.filter((row) => row.day >= zoomWindow.startDay && row.day <= zoomWindow.endDay) : points;
@@ -43,6 +53,7 @@
   });
   onDestroy(() => {
     destroyed = true;
+    historyRequest?.abort();
     sequence++;
     clearTimeout(timer);
     request?.abort();
@@ -69,7 +80,7 @@
     try {
       const data = await fetchFinancials(range, { signal: request.signal });
       if (id !== sequence || destroyed) return;
-      const sameWindow = payload?.range === data.range && payload?.throughDay === data.throughDay;
+      const sameWindow = payload?.range === data.range;
       payload = data;
       loading = false;
       if (!sameWindow) zoomWindow = null;
@@ -189,20 +200,15 @@
       </div>
     </div>
     <div class="chart-toolbar">
-      <div class="legend" aria-label="Chart series">
-        {#each FINANCIALS_SERIES as series}
-          <button class:muted={hidden.includes(series.id)} aria-pressed={!hidden.includes(series.id)} on:click={() => toggleSeries(series.id)}>
-            <span class:line-swatch={series.id === 'bondingApr'} style={`--series-color: ${series.color}`}></span>{series.label}
-          </button>
-        {/each}
-      </div>
+
       {#if zoomWindow}<button class="bracket-button" on:click={() => zoomWindow = null}><span>[↺]</span> reset zoom</button>{/if}
     </div>
 
     {#if chartError}
       <TerminalAlert tone="err" tag="ERR">{chartError} <button class="inline-action" on:click={loadChart}>retry chart</button></TerminalAlert>
     {:else if ChartComponent}
-      <svelte:component this={ChartComponent} {points} {currency} {hidden} {zoomWindow} {loading} {hasData} onZoom={(window) => zoomWindow = window} />
+      {#if historyLoading || historyError}<p class="muted-text">{historyError || 'Loading rolling-average lookback…'}</p>{/if}
+      <svelte:component this={ChartComponent} {points} {historyPoints} onRollingChange={loadRollingHistory} {currency} {hidden} {zoomWindow} {loading} {hasData} onZoom={(window) => zoomWindow = window} />
     {:else}
       <div class="chart-loading" role="status">Loading chart renderer…</div>
     {/if}
@@ -255,7 +261,7 @@
 <style>
   .financials { max-width: 1440px; margin: 0 auto; padding: 24px 24px 56px; color: var(--term-text-body); font-family: var(--term-font-mono); }
   .financials :global(*) { font-family: inherit; }
-  .command-line, .command-actions, .chart-controls, .panel-heading, .chart-toolbar, .legend, .chart-footer { display: flex; align-items: center; gap: 12px; }
+  .command-line, .command-actions, .chart-controls, .panel-heading, .chart-toolbar, .chart-footer { display: flex; align-items: center; gap: 12px; }
   .command-line { justify-content: space-between; border-bottom: 1px solid var(--term-border); padding-bottom: 14px; font-family: var(--term-font-mono); font-size: 12px; }
   .prompt, .cursor, .panel-heading h2 > span, .metric-index, .bracket-button > span { color: var(--term-accent); }
   .argument, .muted-text { color: var(--term-text-4); }
@@ -296,12 +302,6 @@
   .button-group button { padding: 7px 11px; border: 1px solid var(--term-border); font-size: 11px; font-weight: 600; margin-left: -1px; }
   .button-group button.active { border-color: var(--term-accent); color: var(--term-accent); background: var(--term-accent-soft); z-index: 1; }
   .chart-toolbar { justify-content: space-between; min-height: 52px; margin: 6px 0; }
-  .legend { flex-wrap: wrap; gap: 8px 20px; }
-  .legend button { display: flex; align-items: center; gap: 8px; padding: 6px 0; border: 0; font-size: 11px; }
-  .legend button.muted { color: var(--term-text-4); text-decoration: line-through; }
-  .legend button > span { width: 11px; height: 11px; background: var(--series-color); }
-  .legend button > span.line-swatch { height: 2px; width: 18px; }
-  .legend button.muted > span { background: var(--term-text-4); }
   .chart-loading { display: grid; place-items: center; height: 430px; color: var(--term-text-3); font-size: 12px; }
   .chart-footer { justify-content: space-between; flex-wrap: wrap; border-top: 1px solid var(--term-border); padding-top: 14px; margin-top: 16px; font-size: 11px; color: var(--term-text-3); }
   .coverage-note { margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--term-border); color: var(--term-text-3); font-size: 11px; line-height: 1.6; }
@@ -346,7 +346,6 @@
     .chart-controls { gap: 12px; flex-wrap: wrap; }
     .button-group button { padding: 7px 10px; }
     .chart-toolbar { align-items: flex-start; flex-direction: column; gap: 2px; margin: 14px 0; }
-    .legend { gap: 3px 14px; }
     .chart-loading { height: 360px; }
     .chart-footer { gap: 10px; line-height: 1.6; }
     .methodology { grid-template-columns: 1fr; gap: 20px; }

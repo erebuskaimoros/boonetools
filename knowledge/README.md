@@ -17,6 +17,7 @@ This directory contains website/backend-specific protocol notes and session hist
 - [burn-tracker.md](./burn-tracker.md) — route-specific system-income RUNE burn metrics, daily ingestion, cumulative accounting, and source semantics.
 - [pool-analysis.md](./pool-analysis.md) — pool-generated liquidity fees, two-sided historical depth, and the chart line toggle.
 - [financials.md](./financials.md) — protocol volume, system income, live/daily bonding APR, and the production collector/read-model contract.
+- [shared-echarts-time-series.md](./shared-echarts-time-series.md) — shared daily mixed/overview toolkit, adapter recipe, 11 chart configurations across five dashboards, verification and remaining profiles.
 - [bond-tracker-apy-investigation-2026-09-20.md](./bond-tracker-apy-investigation-2026-09-20.md) — current-churn annualization correction, verified historical samples, and RPC height safeguards.
 - [protocol-fee-comparison.md](./protocol-fee-comparison.md) — monthly THORChain / NEAR Intents / Chainflip subsidy-adjusted swap income, historical FLIP issuance verification, and scheduled acquisition.
 - [tc-fee-dash.md](./tc-fee-dash.md) — `/tc-fee-dash` historical fee-capture metrics plus its live Mimir/default system-income allocation and Sankey flow contract.

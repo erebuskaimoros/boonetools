@@ -91,7 +91,7 @@ export function buildComparisonPayload(cache, { now = Date.now(), startDay = com
     throughDay: throughDay || null, currency: 'USD', interval: 'month',
     stale: errors.length > 0 || !throughDay || nextDay(throughDay) < endDay
       || months.some((month) => PROTOCOLS.some(({ id }) => !month.protocols[id].complete)),
-    errors, months, methodology: COMPARISON_METHODOLOGY,
+    errors, months, daily: daily.filter(row => throughDay && row.day <= throughDay), methodology: COMPARISON_METHODOLOGY,
     chainflipIssuance: 'Historical on-chain emission amounts × finalized block counts; not net supply or a reported monthly pace.',
     nearAllocation: '100% of whole-chain NEAR issuance; retained Intents wallet-receipt income including its own frontend, excluding third-party payouts.',
     nearIssuanceMethod: daysSourceMethod(cache, startDay, endDay, 'nearIssuanceMethod', 'nearIssuance', 'dashboard-model'),

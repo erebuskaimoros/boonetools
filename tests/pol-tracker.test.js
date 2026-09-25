@@ -6,9 +6,8 @@ import {
   POL_TRACKER_GROUPS,
   POL_TRACKER_RANGES,
   POL_TRACKER_SERIES,
-  buildPolTrackerChart,
+  polTrackerStackValues,
   normalizePolTrackerPayload,
-  projectPolTrackerChartSelection,
   relevantPolTrackerPools,
   selectPolTrackerRange,
   totalPolTrackerValue
@@ -38,9 +37,9 @@ test('legacy POL dashboard is directly routable as POL TVL and appears in naviga
   assert.match(trackerSource, /pool\.reservePolUsd/);
   assert.match(trackerSource, /pool\.systemIncomePolUsd/);
   assert.match(trackerSource, /DRAG TO ZOOM · DOUBLE-CLICK RESET/);
-  assert.match(trackerSource, /on:pointerdown=\{startZoomSelection\}/);
-  assert.match(trackerSource, /on:dblclick=\{resetZoom\}/);
-  assert.match(trackerSource, /class="zoom-selection"/);
+  assert.match(trackerSource, /<TimeSeriesChart/);
+  assert.match(trackerSource, /onHover=\{/);
+  assert.match(trackerSource, /id="pol-tvl-day"/);
 });
 
 test('POL Tracker exposes the four consolidated public chart values', () => {
@@ -138,94 +137,44 @@ test('the latest-pool table keeps pools whose only tracked value is either form 
   assert.deepEqual(pools.map(({ asset }) => asset), ['BTC.BTC', 'ETH.ETH']);
 });
 
-test('the consolidated chart stacks four shaded areas and totals their values', () => {
+test('the consolidated chart stacks four same-height values and totals their values', () => {
   const rows = Array.from({ length: 40 }, (_, index) => ({
-    day: `2025-03-${String(index + 1).padStart(2, '0')}`,
-    synthBackingUsd: index === 20 ? null : 10,
-    treasuryTotalUsd: 20,
-    reservePolUsd: 30,
-    systemIncomePolUsd: 40,
-    runepoolReserveUsd: 50
+    day: new Date(Date.UTC(2025, 2, index + 1)).toISOString().slice(0, 10),
+    synthBackingUsd: index === 20 ? null : 10, treasuryTotalUsd: 20, reservePolUsd: 30, systemIncomePolUsd: 40
   }));
   const selected = selectPolTrackerRange(rows, '30d');
   assert.equal(selected.length, 30);
-  const chart = buildPolTrackerChart(selected, 'overview');
-  assert.equal(chart.yMax, 100);
-  assert.equal(chart.paths.length, 4);
-  assert.ok(chart.paths.every(({ areaPath }) => areaPath.includes('Z')));
-  const synthPath = chart.paths.find(({ id }) => id === 'synth').path;
-  assert.ok((synthPath.match(/M/g) || []).length >= 2);
+  const values = polTrackerStackValues(selected);
+  assert.equal(values.length, 4);
+  assert.ok(values.every(series => series[10] === null));
+  assert.deepEqual(values.map(series => series[0]), [10, 20, 30, 40]);
   assert.equal(totalPolTrackerValue(rows[0]), 100);
   assert.equal(totalPolTrackerValue(rows[20]), null);
-});
-
-test('POL Tracker drag selection projects either direction into a bounded chart zoom', () => {
-  const forward = projectPolTrackerChartSelection({
-    rowCount: 101,
-    plotLeft: 82,
-    plotRight: 984,
-    startX: 307.5,
-    endX: 758.5
-  });
-  const reverse = projectPolTrackerChartSelection({
-    rowCount: 101,
-    plotLeft: 82,
-    plotRight: 984,
-    startX: 758.5,
-    endX: 307.5
-  });
-
-  assert.deepEqual(forward, { startIndex: 25, endIndex: 75 });
-  assert.deepEqual(reverse, forward);
-  assert.equal(projectPolTrackerChartSelection({
-    rowCount: 101,
-    plotLeft: 82,
-    plotRight: 984,
-    startX: 400,
-    endX: 405
-  }), null);
-  assert.deepEqual(projectPolTrackerChartSelection({
-    rowCount: 11,
-    plotLeft: 82,
-    plotRight: 984,
-    startX: -100,
-    endX: 2_000
-  }), { startIndex: 0, endIndex: 10 });
 });
 
 test('zero System Income POL does not draw an orange outline over other holdings', () => {
   const rows = [0, 0, 0].map((value, index) => ({ day: `2026-08-0${index + 1}`,
     synthBackingUsd: 100, treasuryTotalUsd: 20, reservePolUsd: 10, systemIncomePolUsd: value }));
-  const chart = buildPolTrackerChart(rows, 'overview');
-  const pol = chart.paths.find((series) => series.id === 'system_income_pol');
-  assert.equal(pol.path, '');
-  assert.equal(pol.areaPath, '');
+  assert.deepEqual(polTrackerStackValues(rows)[3], [null, null, null]);
+  assert.equal(totalPolTrackerValue(rows[0]), 130);
 });
 
-test('System Income POL paths begin at positive holdings and break across zero or missing days', () => {
-  const rows = [0, 0, 5, 10, 0, 8, 9, null, 3, 4, 0].map((value, index) => ({
+test('System Income POL series begins at positive holdings and breaks across zero or missing days', () => {
+  const values = [0, 0, 5, 10, 0, 8, 9, null, 3, 4, 0];
+  const rows = values.map((value, index) => ({
     day: `2026-08-${String(index + 1).padStart(2, '0')}`,
     synthBackingUsd: 100, treasuryTotalUsd: 20, reservePolUsd: 10, systemIncomePolUsd: value
   }));
-  const chart = buildPolTrackerChart(rows, 'overview');
-  const pol = chart.paths.find((series) => series.id === 'system_income_pol');
-  const segments = pol.path.match(/M[^M]+/g);
-  assert.equal(segments.length, 3);
-  assert.equal((pol.areaPath.match(/Z/g) || []).length, 3);
-  for (const [segment, indexes] of segments.map((value, index) => [value, [[2, 3], [5, 6], [8, 9]][index]])) {
-    assert.ok(segment.startsWith(`M${chart.x(indexes[0]).toFixed(2)},`));
-    assert.ok(segment.includes(`L${chart.x(indexes[1]).toFixed(2)},`));
-    assert.equal((segment.match(/L/g) || []).length, 1);
-  }
-  assert.equal(totalPolTrackerValue(rows[0]), 130);
+  assert.deepEqual(polTrackerStackValues(rows)[3], values.map(value => value || null));
   assert.equal(totalPolTrackerValue(rows[2]), 135);
   assert.equal(totalPolTrackerValue(rows[7]), null);
 });
 
-test('a zero lower holding leaves positive upper stack layers available', () => {
-  const chart = buildPolTrackerChart([1, 2].map((day) => ({ day: `2026-08-0${day}`,
-    synthBackingUsd: 0, treasuryTotalUsd: 20, reservePolUsd: 10, systemIncomePolUsd: 5
-  })), 'overview');
-  assert.equal(chart.paths[0].path, '');
-  assert.ok(chart.paths.slice(1).every((series) => series.path.includes('L') && series.areaPath.includes('Z')));
+test('a zero lower holding leaves positive upper stack layers available; missing or invalid lower values do not', () => {
+  const rows = [0, null, -1].map((value, index) => Object.freeze({ day: `2026-08-0${index + 1}`,
+    synthBackingUsd: value, treasuryTotalUsd: 20, reservePolUsd: 10, systemIncomePolUsd: 5
+  }));
+  assert.deepEqual(polTrackerStackValues(Object.freeze(rows)), [
+    [null, null, null], [20, null, null], [10, null, null], [5, null, null]
+  ]);
 });

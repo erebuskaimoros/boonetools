@@ -4,15 +4,11 @@
   export let windowEnd = '—';
   export let customDuration = '';
   export let rangeOptions = [];
-  export let bucketOptions = [];
   export let selectedRange = 'all';
-  export let selectedBucket = '1h';
   export let zoomed = false;
   export let hasCoarserSourceBuckets = false;
   /** @type {(key: string) => void} */
   export let onRange = () => {};
-  /** @type {(key: string) => void} */
-  export let onBucket = () => {};
   export let onReset = () => {};
 </script>
 
@@ -32,19 +28,6 @@
             class:active={!zoomed && selectedRange === option.key}
             aria-pressed={!zoomed && selectedRange === option.key}
             on:click={() => onRange(option.key)}
-          ><span>[</span>{option.label}<span>]</span></button>
-        {/each}
-      </div>
-    </div>
-
-    <div class="control-group">
-      <span class="control-label">BUCKET</span>
-      <div class="button-row">
-        {#each bucketOptions as option}
-          <button
-            class:active={selectedBucket === option.key}
-            aria-pressed={selectedBucket === option.key}
-            on:click={() => onBucket(option.key)}
           ><span>[</span>{option.label}<span>]</span></button>
         {/each}
       </div>

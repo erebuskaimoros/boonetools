@@ -409,6 +409,13 @@ Production configuration is server-owned at
 `root:deploy`. Deploys never place secrets in SSH arguments or copy a local
 `.env` over that file.
 
+The protocol comparison payload also includes derived daily rows through the
+same verified cutoff as its monthly series. This is an additive read-model
+field, with no schema migration or new provider calls. After deploying it,
+the next scheduled publication enables daily/weekly chart views; a cache-only
+`runProtocolFeeComparison({ rebuildOnly: true })` may publish existing saved
+observations immediately without starting historical acquisition.
+
 ## Deploy
 
 ```bash

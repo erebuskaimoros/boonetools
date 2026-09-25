@@ -91,13 +91,18 @@ historically priced USD bars need not match it. Partial/open-hour estimates
 and provisional prices are labeled and visually distinguished, without
 extrapolating a full day. Seeded ownership is disclosed in the selected-day
 tooltip. Null estimates and missing nonzero-day prices remain visible gaps;
-known zero-fee days remain zero even without a price. Hover, keyboard focus,
-or tapping a day exposes a styled in-chart tooltip with its UTC date, fee value,
-coverage pool-hours (summed across positions), USD pricing reference, and provisional/seeded status. Tooltips
-flip and clamp to the chart edges on narrow screens. Click/tap (or Enter/Space)
-pins a day; repeat activation, Escape, an outside tap, or a control change
-dismisses it. Unpinned tooltips dismiss on chart exit or focus loss. The headline
-keeps its original appearance, without a view/hide hint.
+known zero-fee days remain zero even without a price.
+
+The September 22 shared-ECharts branch replaces the SVG rendering locally
+(not yet deployed). Hover, a native keyboard-accessible day selector, or
+tapping a day exposes its UTC date, fee value, coverage pool-hours (summed
+across positions), USD pricing reference, and provisional/seeded status.
+Pointer tooltips are confined to the chart; pinned/keyboard details use a
+width-clamped in-chart box. Click/tap or choosing a day pins it; repeat tap,
+Escape, an outside tap, Dismiss, or a unit/range change clears it. Missing
+days carry × markers and known zeros carry — markers without fabricated
+bar heights. The headline keeps its original appearance, without a view/hide
+hint. See [the toolkit contract](shared-echarts-time-series.md).
 
 This chart uses the existing payload and refresh lifecycle; opening it makes
 no additional API or provider requests.
@@ -118,5 +123,11 @@ stay unavailable and interrupt the cumulative USD total; they never fall back
 to today's price. Live deposits retain the current day's supplied reference,
 while a new UTC day waits for its own price. Headline LP TVL and current
 holdings continue to use the latest RUNE price.
+
+The shared-ECharts deposit renderer uses the same values on independent
+zero-based axes. Full-history RUNE fallback totals are also prepared before
+range slicing. Live refreshes and denomination changes preserve the selected
+date window. Presets reset it; marquee, double-click reset and keyboard
+zoom/reset buttons share the toolkit's viewport contract.
 
 Source contract: [Midgard earnings schema](https://gitlab.com/thorchain/midgard/-/blob/develop/openapi/openapi.yaml).

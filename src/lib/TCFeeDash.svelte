@@ -1,4 +1,6 @@
 <script>
+  import LegacyChartTools from './charts/LegacyChartTools.svelte';
+  import RangeSummary from './charts/RangeSummary.svelte';
   import { onDestroy, onMount, tick } from 'svelte';
   import { fetchTcFeeDash } from './tc-fee-dash/api.js';
   import { clearCoreSnapshotCache } from '$lib/api/core-snapshot.js';
@@ -49,6 +51,9 @@
   let distributionLoading = true;
   let distributionRefreshing = false;
   let distributionError = '';
+  let distributionRequestActive = false;
+  let distributionRefreshTimer;
+  let distributionCheckedAt = '';
   let distributionCanvas;
   let distributionChartInstance;
   let chartCanvas;
@@ -80,6 +85,8 @@
   $: selectedRows = rows.slice(normalizedStartIndex, normalizedEndIndex + 1);
   $: displayRows = aggregateTcFeeRows(selectedRows, granularity);
   $: series = buildTcFeeChartSeries(displayRows);
+  $: calendarRows = displayRows.map(row => ({ ...row, day: row.windowStart.slice(0, 10), throughDay: new Date(Date.parse(row.windowEnd || row.windowStart) - 1).toISOString().slice(0, 10) }));
+  $: calendarHistory = rows.map(row => ({ ...row, day: row.windowStart.slice(0, 10) }));
   $: hasIncomeVolumeData = displayRows.some((row) => row.thorchainVolumeUsd != null);
   $: activeRollingAverages = ROLLING_AVERAGES.filter((option) => rollingAverageState[option.days]);
   $: rollingSeries = activeRollingAverages.map((option) => ({
@@ -112,6 +119,9 @@
     window.addEventListener('resize', handleResize);
     loadDashboard();
     loadSystemIncomeDistribution();
+    distributionRefreshTimer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') loadSystemIncomeDistribution();
+    }, 60_000);
   });
 
   onDestroy(() => {
@@ -120,6 +130,7 @@
     window.removeEventListener('mouseup', chartBrushUp);
     clearTimeout(resizeTimer);
     clearTimeout(renderTimer);
+    clearInterval(distributionRefreshTimer);
     destroyCharts();
   });
 
@@ -143,27 +154,35 @@
   }
 
   async function loadSystemIncomeDistribution(options = {}) {
+    if (distributionRequestActive) return;
+    distributionRequestActive = true;
     distributionLoading = !systemIncomeDistribution.complete;
     distributionRefreshing = systemIncomeDistribution.complete;
     distributionError = '';
 
     try {
       if (options.forceRefresh) clearCoreSnapshotCache();
-      const [mimir, constants] = await Promise.all([
+      const [mimir, constants, network, nodes] = await Promise.all([
         fetchJSONWithFallback('/thorchain/mimir'),
-        fetchJSONWithFallback('/thorchain/constants')
+        fetchJSONWithFallback('/thorchain/constants'),
+        fetchJSONWithFallback('/thorchain/network'),
+        fetchJSONWithFallback('/thorchain/nodes')
       ]);
-      systemIncomeDistribution = buildSystemIncomeDistribution(mimir, constants);
-      if (!systemIncomeDistribution.complete) {
-        throw new Error('one or more allocation levers are unavailable');
-      }
+      systemIncomeDistribution = buildSystemIncomeDistribution(mimir, constants, network, nodes);
       await tick();
       renderSystemIncomeDistributionChart();
+      if (!systemIncomeDistribution.complete) {
+        throw new Error(!systemIncomeDistribution.explicitComplete ? 'one or more allocation levers are unavailable'
+          : systemIncomeDistribution.overflowBps > 0 ? 'explicit allocations exceed 100%'
+          : systemIncomeDistribution.pendulum.error);
+      }
+      distributionCheckedAt = new Date().toISOString().slice(11, 19);
     } catch (loadError) {
       distributionError = loadError.message || String(loadError);
     } finally {
       distributionLoading = false;
       distributionRefreshing = false;
+      distributionRequestActive = false;
     }
   }
 
@@ -550,12 +569,15 @@
             <span class="card-index">05A</span>
             <span>ACTIVE ALLOCATION</span>
           </div>
-          <div class="meta-strip"><span>[MIMIR + DEFAULTS]</span></div>
+          <div class="meta-strip"><span>[MIMIR + DEFAULTS + PENDULUM]</span></div>
         </div>
 
         <p class="distribution-note">
           Active Mimirs override compiled protocol defaults. Burn, Dev, TCY, Marketing, and POL
-          are explicit deductions; Bond Providers receive the remainder.
+          are explicit deductions; the incentive pendulum splits the remainder between
+          Bond Providers and Liquidity Providers.
+          Current-state estimate from cached network liquidity and active-node bonds, not a historical payout.
+          {#if distributionCheckedAt}Checked {distributionCheckedAt} UTC · refreshes every minute.{/if}
         </p>
 
         {#if distributionLoading && !systemIncomeDistribution.complete}
@@ -563,7 +585,7 @@
             <div class="loader-bar"><span></span></div>
             <span>RESOLVING ACTIVE MIMIRS</span>
           </div>
-        {:else if systemIncomeDistribution.complete}
+        {:else if systemIncomeDistribution.explicitComplete}
           <div class="allocation-list" role="list" aria-label="Current system income allocations">
             {#each systemIncomeDistribution.allocations as allocation}
               <div
@@ -580,7 +602,7 @@
                 </div>
                 <strong class="allocation-value">{formatSystemIncomePercent(allocation.percent)}</strong>
                 <span class="allocation-key">
-                  {allocation.mimirKey || '10,000 BPS − EXPLICIT LANES'}
+                  {allocation.mimirKey || allocation.detail}
                 </span>
                 <div class="allocation-track" aria-hidden="true"><span></span></div>
               </div>
@@ -591,6 +613,10 @@
               WRN · EXPLICIT ALLOCATIONS EXCEED 10,000 BPS BY {systemIncomeDistribution.overflowBps} BPS
             </p>
           {/if}
+          <p class="distribution-note">
+            LP rewards include all pool owners, including protocol-owned positions.
+            This is separate from the explicit POL funding lane.
+          </p>
         {:else}
           <div class="distribution-state distribution-state--error">ALLOCATION DATA UNAVAILABLE</div>
         {/if}
@@ -618,7 +644,7 @@
             ></canvas>
           </div>
           <p class="distribution-chart-foot">
-            SYSTEM INCOME 100% → EXPLICIT ALLOCATIONS + BOND PROVIDER REMAINDER
+            POST-REVSHARE INCOME 100% → EXPLICIT ALLOCATIONS + BOND PROVIDERS + LPs
           </p>
         {:else}
           <div class="distribution-state distribution-state--error">FLOW DATA UNAVAILABLE</div>
@@ -651,46 +677,6 @@
       <div class="state error-state">SERIES UNAVAILABLE</div>
     {:else if rows.length}
       <div class="chart-controls">
-        <div class="control-group control-group--granularity">
-          <span class="control-label">granularity</span>
-          <div class="segmented-control" role="group" aria-label="Chart granularity">
-            {#each GRANULARITIES as option}
-              <button
-                type="button"
-                class:active={granularity === option.value}
-                on:click={() => setGranularity(option.value)}
-              >
-                {option.label}
-              </button>
-            {/each}
-          </div>
-        </div>
-
-        <div class="control-group control-group--rolling">
-          <span class="control-label">rolling avg</span>
-          <div class="toggle-row" role="group" aria-label="Rolling averages">
-            {#each ROLLING_AVERAGES as option}
-              <label
-                class="rolling-toggle"
-                class:active={rollingAverageState[option.days]}
-                style="--ind-color: {option.color};"
-              >
-                <input
-                  type="checkbox"
-                  checked={rollingAverageState[option.days]}
-                  aria-label={`${option.label} rolling average`}
-                  on:change={() => toggleRollingAverage(option.days)}
-                />
-                <span class="tog-bracket tog-bracket--l">[</span>
-                <span class="tog-mark">{rollingAverageState[option.days] ? '×' : ' '}</span>
-                <span class="tog-bracket tog-bracket--r">]</span>
-                <span class="tog-dash" aria-hidden="true"></span>
-                <span class="tog-label">{option.label}</span>
-              </label>
-            {/each}
-          </div>
-        </div>
-
         <div class="control-group control-group--window">
           <div class="window-row">
             <span class="control-label">window</span>
@@ -703,6 +689,12 @@
         </div>
       </div>
 
+      <RangeSummary rows={displayRows} bucket={granularity} metrics={[
+        { field: 'globalExchangeVolumeUsd', label: 'Exchange volume', kind: 'flow', unit: 'usd' },
+        { field: 'tcFeesUsd', label: 'TC fees', kind: 'flow', unit: 'usd' }
+      ]} />
+<LegacyChartTools chart={chartInstance} rows={calendarRows} historyRows={calendarHistory} grain={granularity} onGrain={setGranularity}
+        metrics={[{ value: row => row.feesPerBillionUsd, rollingReduce: sample => summarizeTcFeeRows(sample.filter(row => !row.rollingAverageExcluded)).weightedFeesPerBillionUsd }]} />
       <div
         class="chart-shell"
         bind:this={chartShell}
@@ -758,6 +750,12 @@
           Liquidity fee income divided by THORChain swap volume for the same selected window.
           Values are weighted by volume when grouped by week or month.
         </p>
+        <RangeSummary rows={displayRows} bucket={granularity} metrics={[
+          { field: 'thorchainVolumeUsd', label: 'TC volume', kind: 'flow', unit: 'usd' },
+          { field: 'tcFeesUsd', label: 'TC fees', kind: 'flow', unit: 'usd' }
+        ]} />
+<LegacyChartTools chart={incomeVolumeChartInstance} rows={calendarRows} historyRows={calendarHistory} grain={granularity} onGrain={setGranularity}
+          metrics={[{ value: row => row.incomeVolumeBps, rollingReduce: sample => summarizeTcFeeRows(sample.filter(row => !row.rollingAverageExcluded)).weightedIncomeVolumeBps }]} />
         {#if hasIncomeVolumeData}
           <div
             class="income-volume-chart-shell"
@@ -1270,7 +1268,7 @@
     border-bottom: 1px solid #111111;
     display: grid;
     gap: 16px;
-    grid-template-columns: minmax(180px, 220px) minmax(210px, 260px) 1fr;
+    grid-template-columns: 1fr;
     padding: 14px 16px;
   }
 
@@ -1278,41 +1276,14 @@
     min-width: 0;
   }
 
-  .control-group--granularity {
-    align-items: center;
-    display: flex;
-    gap: 10px;
-  }
-
-  .control-group--rolling {
-    align-items: center;
-    display: grid;
-    gap: 8px;
-    grid-template-columns: auto 1fr;
-  }
-
-  .control-label,
-  .window-label,
-  .reset-button,
-  .segmented-control button {
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .control-label {
+  .control-label, .window-label, .reset-button {
     color: var(--term-text-3, #a3a3a3);
     font-size: 11px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
 
-  .segmented-control {
-    border: 1px solid #1a1a1a;
-    display: inline-grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    min-width: 138px;
-  }
 
-  .segmented-control button,
   .reset-button {
     background: transparent;
     border: 0;
@@ -1322,106 +1293,6 @@
     min-height: 30px;
     padding: 0 10px;
     text-transform: lowercase;
-  }
-
-  .segmented-control button + button {
-    border-left: 1px solid #1a1a1a;
-  }
-
-  .segmented-control button:hover,
-  .reset-button:hover:not(:disabled),
-  .segmented-control button.active {
-    color: #00cc66;
-  }
-
-  .segmented-control button.active {
-    background: rgba(0, 204, 102, 0.1);
-  }
-
-  .toggle-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 14px;
-  }
-
-  .rolling-toggle {
-    align-items: center;
-    background: transparent;
-    border: 0;
-    color: var(--term-text-4, #949494);
-    cursor: pointer;
-    display: inline-flex;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    gap: 6px;
-    padding: 4px 2px;
-    text-transform: lowercase;
-    transition: color 0.12s ease;
-  }
-
-  .rolling-toggle input {
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
-    width: 0;
-    height: 0;
-  }
-
-  .tog-bracket {
-    color: var(--term-text-7, #787878);
-    font-weight: 700;
-    transition: color 0.12s ease;
-  }
-
-  .tog-mark {
-    color: #00cc66;
-    font-weight: 700;
-    min-width: 7px;
-    text-align: center;
-    line-height: 1;
-  }
-
-  .tog-dash {
-    background: var(--ind-color, #00cc66);
-    display: inline-block;
-    height: 2px;
-    opacity: 0.35;
-    transition: opacity 0.12s ease;
-    width: 16px;
-  }
-
-  .tog-label {
-    color: inherit;
-    letter-spacing: 0.04em;
-  }
-
-  .rolling-toggle:hover {
-    color: var(--term-text-body, #d2d2d2);
-  }
-
-  .rolling-toggle:hover .tog-bracket {
-    color: #00cc66;
-  }
-
-  .rolling-toggle:hover .tog-dash {
-    opacity: 0.7;
-  }
-
-  .rolling-toggle.active {
-    color: var(--term-text, #f5f5f5);
-  }
-
-  .rolling-toggle.active .tog-bracket {
-    color: #00cc66;
-  }
-
-  .rolling-toggle.active .tog-dash {
-    opacity: 1;
-  }
-
-  .rolling-toggle:focus-visible {
-    outline: 1px solid #00cc66;
-    outline-offset: 2px;
   }
 
   .control-group--window {

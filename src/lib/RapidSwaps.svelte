@@ -11,7 +11,6 @@
   import {
     computeDailyBucketData,
     computeDailyData,
-    getSeriesAxisBounds,
     getChartDateRangeUnixSeconds,
     toChartDateKey
   } from './rapid-swaps/charts.js';
@@ -28,6 +27,8 @@
     swapPathDataFromPreaggregates
   } from './rapid-swaps/presentation.js';
   import { createRapidSwapChartRenderer } from './rapid-swaps/chart-renderer.js';
+  import OverviewChart from './rapid-swaps/OverviewChart.svelte';
+  import { rapidSwapOverviewPoints } from './rapid-swaps/overview-charts.js';
 
   const REFRESH_INTERVAL_MS = 120000;
   const TABLE_RELOAD_DEBOUNCE_MS = 350;
@@ -123,15 +124,7 @@
           ?? dashboard?.chart?.cumulative_volume_usd_before
           ?? 0
       });
-  $: cumulativeVolumeAxisBounds = getSeriesAxisBounds(dailyData.cumVolume, {
-    clampMin: 0,
-    minSpan: 1
-  });
-  $: cumulativeCountAxisBounds = getSeriesAxisBounds(dailyData.cumCount, {
-    clampMin: 0,
-    minSpan: 1,
-    roundToInteger: true
-  });
+  $: overviewPoints = rapidSwapOverviewPoints(dailyData);
   $: hasAdoptionData =
     dailyData.volumePct.some(value => Number.isFinite(value)) ||
     dailyData.countPct.some(value => Number.isFinite(value));
@@ -274,14 +267,7 @@
 
   async function renderChartsForTab(tab) {
     await tick();
-    if (tab === 'overview') {
-      chartRenderer.renderOverview({
-        dailyData,
-        cumulativeVolumeAxisBounds,
-        cumulativeCountAxisBounds,
-        hasAdoptionData
-      });
-    } else if (tab === 'distributions') {
+    if (tab === 'distributions') {
       chartRenderer.renderDistributions(distributions);
     } else if (tab === 'paths') {
       chartRenderer.renderPaths(swapPathData);
@@ -583,7 +569,7 @@
     <section class="data-section">
       <div class="section-head">
         <h3>DAILY TRENDS</h3>
-        <span class="section-sub">Grouped by UTC day</span>
+        <span class="section-sub">Grouped by {dailyData.calendar === 'UTC' ? 'UTC' : 'local'} day</span>
       </div>
       {#if loading && !dashboard}
         <div class="empty">Loading...</div>
@@ -593,11 +579,11 @@
         <div class="chart-grid">
           <div class="chart-card">
             <div class="chart-title">Rapid Swap Volume</div>
-            <div class="chart-container"><canvas id="chart-daily-volume"></canvas></div>
+            <OverviewChart points={overviewPoints} metric="volume" label="Daily and cumulative rapid swap volume" />
           </div>
           <div class="chart-card">
             <div class="chart-title">Rapid Swap Count</div>
-            <div class="chart-container"><canvas id="chart-daily-count"></canvas></div>
+            <OverviewChart points={overviewPoints} metric="count" label="Daily and cumulative rapid swap count" />
           </div>
         </div>
       {/if}
@@ -608,17 +594,17 @@
       <section class="data-section">
         <div class="section-head">
           <h3>ADOPTION</h3>
-          <span class="section-sub">Rapid swaps as percentage of total THORChain activity, grouped by UTC day</span>
+          <span class="section-sub">Rapid swaps as percentage of total THORChain activity, grouped by {dailyData.calendar === 'UTC' ? 'UTC' : 'local'} day</span>
         </div>
         {#if hasAdoptionData}
           <div class="chart-grid">
             <div class="chart-card">
               <div class="chart-title">% of TC Volume</div>
-              <div class="chart-container"><canvas id="chart-market-share-volume"></canvas></div>
+              <OverviewChart points={overviewPoints} metric="volumePct" label="Rapid swaps as a percentage of THORChain volume" />
             </div>
             <div class="chart-card">
               <div class="chart-title">% of TC Swap Count</div>
-              <div class="chart-container"><canvas id="chart-market-share-count"></canvas></div>
+              <OverviewChart points={overviewPoints} metric="countPct" label="Rapid swaps as a percentage of THORChain swap count" />
             </div>
           </div>
         {:else}
@@ -637,11 +623,11 @@
         <div class="chart-grid">
           <div class="chart-card">
             <div class="chart-title">Efficiency Ratio</div>
-            <div class="chart-container"><canvas id="chart-efficiency"></canvas></div>
+            <OverviewChart points={overviewPoints} metric="efficiency" label="Daily rapid swap execution efficiency" />
           </div>
           <div class="chart-card">
             <div class="chart-title">Average % Faster</div>
-            <div class="chart-container"><canvas id="chart-pct-faster"></canvas></div>
+            <OverviewChart points={overviewPoints} metric="pctFaster" label="Daily rapid swap percentage faster" />
           </div>
         </div>
       {/if}

@@ -35,4 +35,10 @@ test('TC fee dashboard renders two current system-income distribution cards', as
   assert.match(source, /05B[\s\S]*DISTRIBUTION FLOW/);
   assert.match(source, /buildSystemIncomeDistribution/);
   assert.match(source, /createSystemIncomeDistributionChart/);
+  assert.match(source, /fetchJSONWithFallback\('\/thorchain\/network'\)/);
+  assert.match(source, /fetchJSONWithFallback\('\/thorchain\/nodes'\)/);
+  assert.match(source, /buildSystemIncomeDistribution\(mimir, constants, network, nodes\)/);
+  assert.match(source, /Bond Providers and Liquidity Providers/);
+  assert.match(source, /clearInterval\(distributionRefreshTimer\)/);
+  assert.doesNotMatch(source, /Bond Providers receive the remainder/);
 });

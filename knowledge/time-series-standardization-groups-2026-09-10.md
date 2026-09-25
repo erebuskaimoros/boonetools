@@ -2,11 +2,18 @@
 
 ## Decision and scope
 
-ECharts is the chosen library for the shared time-series system. This records the user's choice after the Financials comparison; it does not mean the production charts have been migrated. Financials currently has a development-only ECharts comparison, including series-colored tooltip swatches.
+ECharts is the chosen library for the shared time-series system. Financials and
+its monthly protocol comparison shipped with ECharts on September 18. The
+September 22 `feat/shared-echarts-time-series` worktree extracts the shared
+daily mixed-series foundation and migrates Financials, Burn Tracker, Pool
+Analysis, Rapid's six overviews, both System Income POL charts, App Layer's
+five charts and POL TVL onto it;
+that follow-up is not deployed. See
+[implementation status and contract](shared-echarts-time-series.md).
 
 This grouping derives from the [chart survey](chart-formatting-survey-2026-09-10.md). It classifies existing features, not a newly tested implementation. The survey remains the source inventory; this document supersedes its provisional Chart.js time-series adapter recommendation.
 
-There are **28 primary time/event-series chart configurations**: 24 currently implemented with Chart.js and 4 with SVG. These include the five Wasm Arb Economics charts on a public direct route that is hidden from navigation. The Financials comparison is an alternative renderer for the same configuration, not another chart in the count.
+The September 10 survey recorded **28 primary time/event-series chart configurations**: then 24 with Chart.js and 4 with SVG. These include the five Wasm Arb Economics charts on a public direct route that is hidden from navigation. Its Financials renderer comparison was an alternative for the same configuration, not another chart in that count. The subsequently added monthly protocol-income comparison remains outside the shared-foundation pass. System Income POL's newer expandable daily-fee chart also falls outside the original count; it now uses the overview profile, bringing shared adoption to 17 configurations (16 original plus this newer one).
 
 Excluded from this pass: two Sankeys, seven Rapid Swaps categorical/ranking/distribution plots, development-only market candles, watchlist sparklines, static briefing plots, and HTML progress/flow diagrams. TC Fee Dash's navigator is an accessory to the time-series system, not another primary chart.
 
@@ -71,9 +78,13 @@ Keep these out of the shared renderer:
 - Stock-versus-flow semantics and cumulative baselines, including Burn's all-time anchor.
 - Which summary cards follow a viewport, source-resolution constraints, and transaction drill-down queries.
 
-The four existing SVG time-series plots are in scope by function, not excluded because of their current renderer. Migrate them only after their particular behavior is represented: block-stream timing for Status, signed corridor/coverage for Pool Dislocation, stacked missing snapshots for POL TVL, and provisional currency/cumulative gaps for System Income POL. Their small watchlist sparklines remain outside this pass.
+The four SVG time-series plots in the original survey are in scope by function, not excluded because of their renderer. Migrate them only after their particular behavior is represented: block-stream timing for Status, signed corridor/coverage for Pool Dislocation, stacked missing snapshots for POL TVL, and provisional currency/cumulative gaps for System Income POL. Their small watchlist sparklines remain outside this pass.
 
 ## Suggested implementation sequence
+
+Steps 1–3 are implemented and locally verified in the September 22 worktree;
+steps 4–5 remain. This sequence is a migration plan, not a production status
+claim; see the linked implementation note for current verification.
 
 1. **Extract the foundation from Financials, then prove it on Burn and Pool Analysis.** Cover mixed marks, independent axes, currency/metric controls, swatch tooltips, visibility, zoom, partial days, and cumulative baselines. The accepted Financials colors and drawing order are fixtures, not a new palette decision.
 2. **Apply the basics to Rapid's six overview charts and System Income POL.** Exercise compact panels and a simpler two-axis consumer without introducing advanced analytical extensions.
@@ -81,4 +92,14 @@ The four existing SVG time-series plots are in scope by function, not excluded b
 4. **Add linked navigation with TC Fee Dash, then Wasm.** This is the main proving ground for the expected ECharts interaction benefit. Add rolling/annotation support as explicit capabilities.
 5. **Complete specialized interaction/domain cases:** Pool Dislocation's signed corridor and coverage, ADR26 affiliate/pair drill-downs, Bond's churn styling, and Status's live per-block behavior. Do not force these into the daily-accounting data contract.
 
-Before each migration, retain domain tests and capture fixtures for default/hover/hidden/zoomed/partial/missing states. Verify desktop and narrow layouts, keyboard controls, touch interactions where supported, refresh preservation, and click-versus-drag behavior. No production renderer migration or application code changes were performed while making this grouping.
+Before each migration, retain domain tests and capture fixtures for default/hover/hidden/zoomed/partial/missing states. Verify desktop and narrow layouts, keyboard controls, touch interactions where supported, refresh preservation, and click-versus-drag behavior. The original September 10 grouping was planning only; the implementation status above records subsequent local work.
+
+## September 23 control rollout
+
+All 30 primary time-series configurations now share the clickable legend and
+7/30/90D rolling-menu contract with D/W/M source-aware bucket controls. ADR26
+pair epochs are an explicit user-approved native-domain exception. Event charts
+retain Native views; old monthly/weekly-only snapshots disable unsupported finer
+or incompatible buckets. This does not complete renderer migrations in steps 4–5:
+legacy analytical charts adopt a shared compatibility toolbar. See
+[implementation details](shared-echarts-time-series.md#sitewide-controls--september-23-2026).

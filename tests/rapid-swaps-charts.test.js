@@ -75,6 +75,8 @@ test('computeDailyData groups rapid swaps and Midgard history by the same local 
   );
 
   assert.deepEqual(result.labels, ['Mar 28']);
+  assert.deepEqual(result.days, ['2026-03-28']);
+  assert.equal(result.calendar, 'local');
   assert.deepEqual(result.volumePct, [100]);
   assert.deepEqual(result.countPct, [10]);
 });

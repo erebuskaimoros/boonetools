@@ -1,4 +1,6 @@
 <script>
+  import LegacyChartTools from './charts/LegacyChartTools.svelte';
+  import RangeSummary from './charts/RangeSummary.svelte';
   import { onDestroy, onMount, tick } from 'svelte';
 
   import { TerminalAlert } from '$lib/components/terminal';
@@ -28,7 +30,8 @@
   const BUCKET_OPTIONS = [
     { key: '1h', label: '1h', seconds: 60 * 60 },
     { key: '1d', label: '1d', seconds: 24 * 60 * 60 },
-    { key: '1w', label: '1w', seconds: 7 * 24 * 60 * 60 }
+    { key: '1w', label: '1w', seconds: 7 * 24 * 60 * 60 },
+    { key: '1mo', label: '1mo', seconds: 'month' }
   ];
 
   const usd2 = new Intl.NumberFormat('en-US', {
@@ -43,7 +46,7 @@
   let refreshing = false;
   let error = '';
   let selectedRange = 'all';
-  let selectedBucket = '1h';
+  let selectedBucket = '1d';
   let zoomRange = null;
   let valueCanvas;
   let activityCanvas;
@@ -92,9 +95,13 @@
   $: visibleSeconds = Math.max(0, visibleEnd - visibleStart);
   $: chartGrainSeconds = selectedBucketOption.seconds;
   $: chartSeries = aggregateWasmArbEconomicsBuckets(visibleRows, chartGrainSeconds);
+  $: calendarRows = chartSeries.map(row => ({ ...row, day: row.bucketStart.slice(0, 10), throughDay: new Date((row.startSeconds + row.bucketSeconds) * 1000 - 1).toISOString().slice(0, 10) }));
+  $: calendarHistory = aggregateWasmArbEconomicsBuckets(postChangeRows, 86400).map(row => ({ ...row, day: row.bucketStart.slice(0, 10) }));
+  $: calendarGrain = selectedBucket === '1mo' ? 'month' : selectedBucket === '1w' ? 'week' : selectedBucket === '1h' ? 'native' : 'day';
+  function setCalendarGrain(value) { setBucket(value === 'month' ? '1mo' : value === 'week' ? '1w' : value === 'native' ? '1h' : '1d'); }
   $: trailingBucketPartial = Boolean(chartSeries.at(-1)?.partial);
   $: hasCoarserSourceBuckets = chartSeries.some(
-    (row) => row.bucketSeconds > chartGrainSeconds
+    (row) => typeof chartGrainSeconds === 'number' && row.bucketSeconds > chartGrainSeconds
   );
   $: summary = summarizeWasmArbWindow(visibleRows);
   $: chartControlProps = {
@@ -102,13 +109,10 @@
     windowEnd: formatDateTime(summary.endTime),
     customDuration: formatDuration(visibleSeconds),
     rangeOptions: RANGE_OPTIONS,
-    bucketOptions: BUCKET_OPTIONS,
     selectedRange,
-    selectedBucket,
     zoomed: Boolean(zoomRange),
     hasCoarserSourceBuckets,
     onRange: setRange,
-    onBucket: setBucket,
     onReset: resetZoom
   };
   $: interventions = dashboard?.meta?.interventions || dashboard?.regimes || [];
@@ -202,6 +206,7 @@
   }
 
   function formatGrain(seconds) {
+    if (seconds === 'month') return 'MONTH';
     if (seconds >= 7 * 24 * 60 * 60) return '1W';
     if (seconds >= 24 * 60 * 60) return '1D';
     if (seconds >= 60 * 60) return `${seconds / 3600}H`;
@@ -398,6 +403,12 @@
       </div>
       <p class="block-lede">Each column is split into the two attributable sources: Wasm THOR pool fees and THORChain’s configured share of Wasm-linked FIN + AMM fees.</p>
       <ChartControls {...chartControlProps} chartLabel="Accrued TC value" />
+      <RangeSummary rows={chartSeries} bucket="bucket" metrics={[
+        { field: 'wasmLiquidityFeeUsd', label: 'Liquidity fees', kind: 'flow', unit: 'usd' },
+        { field: 'linkedTcReserveUsd', label: 'TC reserve value', kind: 'flow', unit: 'usd' }
+      ]} />
+<LegacyChartTools chart={valueChart} rows={calendarRows} historyRows={calendarHistory} grain={calendarGrain} allowNative onGrain={setCalendarGrain}
+        metrics={[{ value: row => row.wasmLiquidityFeeUsd }, { value: row => row.linkedTcReserveUsd }]} />
       <div class="chart-shell primary"><canvas bind:this={valueCanvas} on:dblclick={resetZoom} aria-label="Accrued THORChain value time series; drag to zoom"></canvas></div>
     </section>
 
@@ -409,6 +420,12 @@
         </div>
         <p class="block-lede">Executed-leg volume through the Wasm arb path and its share of total THORChain executed-leg volume.</p>
         <ChartControls {...chartControlProps} chartLabel="Wasm activity" />
+        <RangeSummary rows={chartSeries} bucket="bucket" metrics={[
+          { field: 'wasmLegVolumeUsd', label: 'Wasm volume', kind: 'flow', unit: 'usd' },
+          { value: row => Number.isFinite(row.wasmNetworkVolumeShare) ? row.wasmNetworkVolumeShare * 100 : null, label: 'Network share', kind: 'rate', unit: '%' }
+        ]} />
+<LegacyChartTools chart={activityChart} rows={calendarRows} historyRows={calendarHistory} grain={calendarGrain} allowNative onGrain={setCalendarGrain}
+          metrics={[{ value: row => row.wasmLegVolumeUsd }, { value: row => row.wasmNetworkVolumeShare * 100 }]} />
         <div class="chart-shell"><canvas bind:this={activityCanvas} on:dblclick={resetZoom} aria-label="Wasm activity time series; drag to zoom"></canvas></div>
       </section>
 
@@ -419,6 +436,12 @@
         </div>
         <p class="block-lede">Value accrued to THORChain per unit of both Wasm volume and total network volume.</p>
         <ChartControls {...chartControlProps} chartLabel="Value density" />
+        <RangeSummary rows={chartSeries} bucket="bucket" metrics={[
+          { field: 'tcPerMillionWasmVolumeUsd', label: 'TC / $1M Wasm volume', kind: 'rate', unit: 'usd' },
+          { field: 'tcPerMillionNetworkVolumeUsd', label: 'TC / $1M network volume', kind: 'rate', unit: 'usd' }
+        ]} note="Arithmetic means of bucket rates, not volume-weighted period rates." />
+<LegacyChartTools chart={efficiencyChart} rows={calendarRows} historyRows={calendarHistory} grain={calendarGrain} allowNative onGrain={setCalendarGrain}
+          metrics={[{ value: row => row.tcPerMillionWasmVolumeUsd }, { value: row => row.tcPerMillionNetworkVolumeUsd }]} />
         <div class="chart-shell"><canvas bind:this={efficiencyCanvas} on:dblclick={resetZoom} aria-label="THORChain value density time series; drag to zoom"></canvas></div>
       </section>
 
@@ -429,6 +452,13 @@
         </div>
         <p class="block-lede">Effective THOR pool-fee yield alongside the median and p90 action slip paid by Wasm swaps.</p>
         <ChartControls {...chartControlProps} chartLabel="Fee and execution behavior" />
+        <RangeSummary rows={chartSeries} bucket="bucket" metrics={[
+          { field: 'wasmLegFeeBps', label: 'Fee rate', kind: 'rate', unit: 'bps' },
+          { field: 'medianSlipBps', label: 'Bucket median slip', kind: 'rate', unit: 'bps' },
+          { field: 'p90SlipBps', label: 'Bucket P90 slip', kind: 'rate', unit: 'bps' }
+        ]} note="Means of bucket rates/quantiles, not a whole-range median or P90." />
+<LegacyChartTools chart={feeChart} rows={calendarRows} historyRows={calendarHistory} grain={calendarGrain} allowNative onGrain={setCalendarGrain}
+          metrics={[{ value: row => row.wasmLegFeeBps }, { value: row => row.medianSlipBps }, { value: row => row.p90SlipBps }]} />
         <div class="chart-shell"><canvas bind:this={feeCanvas} on:dblclick={resetZoom} aria-label="Fee and execution behavior time series; drag to zoom"></canvas></div>
       </section>
 
@@ -439,7 +469,14 @@
         </div>
         <p class="block-lede">Depth-weighted absolute pool-price deviation from THORChain’s oracle, with an LTC-excluded line and the share within 10 bps.</p>
         <ChartControls {...chartControlProps} chartLabel="Pool and oracle alignment" />
+        <RangeSummary rows={chartSeries} bucket="bucket" metrics={[
+          { value: row => row.priceTracking?.depthWeightedAbsoluteDeviationBps, label: 'Oracle deviation', kind: 'rate', unit: 'bps' },
+          { value: row => row.priceTrackingExcludingLtc?.depthWeightedAbsoluteDeviationBps, label: 'Deviation ex. LTC', kind: 'rate', unit: 'bps' },
+          { value: row => Number.isFinite(row.priceTracking?.within10Share) ? row.priceTracking.within10Share * 100 : null, label: 'Within 10 bps', kind: 'rate', unit: '%' }
+        ]} note="Arithmetic means of bucket observations; depth weighting remains within each bucket." />
         {#if !oracleComplete}<div class="inline-warning">WRN · selected range has incomplete oracle coverage</div>{/if}
+<LegacyChartTools chart={oracleChart} rows={calendarRows} historyRows={calendarHistory} grain={calendarGrain} allowNative onGrain={setCalendarGrain}
+          metrics={[{ value: row => row.priceTracking.depthWeightedAbsoluteDeviationBps }, { value: row => row.priceTrackingExcludingLtc.depthWeightedAbsoluteDeviationBps }, { value: row => row.priceTracking.within10Share * 100 }]} />
         <div class="chart-shell"><canvas bind:this={oracleCanvas} on:dblclick={resetZoom} aria-label="Pool and oracle alignment time series; drag to zoom"></canvas></div>
       </section>
     </div>

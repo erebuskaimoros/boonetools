@@ -358,9 +358,48 @@ to new terminal screens — write the small bit of mono markup directly.
 
 Reusable terminal primitives live under `src/lib/components/terminal/`.
 `TerminalAlert.svelte` is the canonical `ERR` / `WRN` / `INF` row and preserves
-the alert treatment described above. Shared Chart.js palette/font primitives
-live in `src/lib/charts/terminal.js`; feature-specific datasets, plugins, and
-interaction controllers stay beside each feature's model.
+the alert treatment described above. Chart palette/font primitives live in
+`src/lib/charts/terminal.js` (including compatibility helpers for unmigrated
+Chart.js consumers). New calendar-bucket mixed, overview and composition time series use the ECharts foundation in
+`src/lib/charts/`: `TimeSeriesChart.svelte` owns mounting, responsive sizing,
+states and cleanup; `SeriesLegend.svelte` provides HTML toggles or a static key;
+`time-series.js` supplies explicit series/axis descriptors and escaped tooltip
+swatches; `viewport.js` and `controller.js` preserve inclusive UTC-day zoom.
+Compact overviews opt out of zoom; stack IDs, area fills, signed/automatic axes,
+explicit bounds and zero/missing-day annotations are supported. Overview point selection can
+notify the feature, which must also provide a keyboard-accessible detail path.
+Hover callbacks may drive HTML values; preset-aware reset uses `resetWindow`.
+Primary time-series charts use `RangeSummary.svelte`: four square,
+flush cards above the plot, responsive to container width. Rapid Swaps, POL
+TVL and the main Financials plot are explicit exceptions: they omit per-chart summaries and retain
+their dashboards' top-level stats. POL Tracker deposits retain only total and
+average in a two-column summary. Pool Analysis places
+its controls and legend below these cards, immediately before the plot.
+Its Depth/Cumulative Fees switch uses a sliding indicator with reduced-motion
+support. POL deposit rolling averages apply only to daily deposits, not the
+cumulative total.
+Features supply explicit periodic flow or stock/rate metrics and the current
+viewport. Sum flows, never cumulative samples or balances across time; label
+bucket averages and coverage. Custom weighted reductions remain feature-owned.
+Missing observations stay unavailable; provisional buckets are not extrapolated.
+Render summaries outside fixed-height plot containers so charts keep their space.
+All time-series toolbars use `ChartTools.svelte`: click-to-hide legends, a
+multi-select 7/30/90-day rolling menu and D/W/M calendar buttons. Disclose and
+disable source resolutions that cannot be reconstructed (including native epochs).
+Cross-chain Competitors instead hides unavailable calendar choices and the
+source-resolution note; its monthly source and coverage remain in the section copy.
+`analytics.js` performs shared calendar mechanics using explicit feature reducers:
+sum flows, last stocks/cumulative, mean or a feature-owned weighted rate. Weeks
+start Monday; partial edges remain labeled. Rolling overlays remain daily means
+on W/M views and require consecutive observed daily windows.
+`LegacyChartTools.svelte` bridges analytical Chart.js plots without replacing
+their interaction/accounting models. `EventTimeSeriesChart.svelte` preserves
+Native views and offers observed-calendar aggregation for timestamped events.
+Feature adapters own calculations, units, coverage, provisional segments and
+cumulative baselines. Do not move accounting or fetching into the renderer, or
+coerce event/epoch histories into daily buckets. Feature toolbars retain their
+range/unit/metric choices and reset policies. See
+`knowledge/shared-echarts-time-series.md` for the implemented profile and limits.
 
 ## Do's and Don'ts
 

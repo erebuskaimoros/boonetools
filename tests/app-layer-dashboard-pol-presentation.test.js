@@ -7,6 +7,15 @@ const dashboardSource = await readFile(
   'utf8'
 );
 
+test('reselecting an active App Layer control resets the mounted chart, not only its reset-button state', () => {
+  // Svelte does not re-send an unchanged primitive prop. A repeated preset,
+  // grain or mode command must therefore reset the host explicitly.
+  for (const name of ['setGranularity', 'setChartRange', 'setView']) {
+    const body = dashboardSource.split(`function ${name}(key, value) {`)[1]?.split('\n  }')[0];
+    assert.match(body, /resetZoom\(key\)/);
+  }
+});
+
 function sliceElementFrom(marker, closingTag) {
   const markerIndex = dashboardSource.indexOf(marker);
   assert.notEqual(markerIndex, -1, `missing dashboard marker: ${marker}`);

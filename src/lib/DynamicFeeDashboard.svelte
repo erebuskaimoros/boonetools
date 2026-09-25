@@ -1,4 +1,7 @@
 <script>
+  import LegacyChartTools from './charts/LegacyChartTools.svelte';
+  import RangeSummary from './charts/RangeSummary.svelte';
+  import { selectIndexSummaryRows } from './charts/summary.js';
   import { onMount, onDestroy, tick } from 'svelte';
   import Chart from 'chart.js/auto';
   import zoomPlugin from 'chartjs-plugin-zoom';
@@ -85,6 +88,7 @@
   let affiliateChartCanvas;
   let affiliateChartInstance = null;
   let affiliateChartZoomed = false;
+  let affiliateSummaryRange = null;
   let renderedAffiliateChartKey = '';
   let affiliateHistoryCache = {};
   let affiliateHistoryLoading = false;
@@ -141,6 +145,18 @@
         affiliateBucket
       )
     : null;
+  function affiliateRollingMean(sample, values) {
+    if (sample.at(-1)?.rollingAverageExcluded) return null;
+    const valid = values.filter((value, index) => !sample[index].rollingAverageExcluded && Number.isFinite(value));
+    return valid.length ? valid.reduce((sum, value) => sum + value, 0) / valid.length : null;
+  }
+  function affiliateRollingRate(sample) {
+    const eligible = sample.filter(row => !row.rollingAverageExcluded && row.rateFeesUsd != null && row.volumeUsd != null);
+    const volume = eligible.reduce((sum, row) => sum + row.volumeUsd, 0);
+    return volume > 0 && !sample.at(-1)?.rollingAverageExcluded ? eligible.reduce((sum, row) => sum + row.rateFeesUsd, 0) / volume * 10000 : null;
+  }
+  $: affiliateCalendarHistory = (affiliateHistorySource?.points || []).map(row => ({ ...row, day: new Date(Number(row.startTime) * 1000).toISOString().slice(0, 10) }));
+  $: affiliateCalendarRows = (affiliateHistory?.points || []).map(row => ({ ...row, day: new Date(Number(row.startTime) * 1000).toISOString().slice(0, 10), throughDay: new Date(Number(row.endTime) * 1000 - 1).toISOString().slice(0, 10) }));
   $: affiliateRollingLabel = [
     formatAffiliateRollingSelection('VOLUME', affiliateRollingAverages.volume),
     formatAffiliateRollingSelection('REVENUE', affiliateRollingAverages.fees)
@@ -151,6 +167,13 @@
     filteredRecords[0] ||
     records[0] ||
     null;
+  $: epochSummarySeries = selectedRecord?.history?.length
+    ? buildEpochChartSeries(selectedRecord, model?.config.currentEpoch) : null;
+  $: epochSummaryRows = epochSummarySeries?.labels.map((label, index) => ({
+    volumeUsd: epochSummarySeries.volume[index], feesUsd: epochSummarySeries.fees[index],
+    partial: index >= selectedRecord.history.length
+  })) || [];
+  $: affiliateSummaryRows = selectIndexSummaryRows(affiliateHistory?.points || [], affiliateSummaryRange);
   $: emptyState = model && records.length === 0 && currentEntries.length === 0;
   $: socketBlockHeight = rpcLastBlock || model?.config.blockHeight || 0;
   $: socketLabel = rpcConnected
@@ -667,6 +690,7 @@
     affiliateChartInstance?.destroy();
     affiliateChartInstance = null;
     affiliateChartZoomed = false;
+    affiliateSummaryRange = null;
 
     if (!affiliateChartCanvas || !affiliateHistory?.points?.length) return;
 
@@ -795,7 +819,8 @@
                 borderColor: 'rgba(0, 204, 102, 0.55)',
                 borderWidth: 1
               },
-              onZoomComplete: () => {
+              onZoomComplete: ({ chart }) => {
+                affiliateSummaryRange = { start: chart.scales.x.min, end: chart.scales.x.max };
                 affiliateChartZoomed = true;
               }
             }
@@ -849,6 +874,7 @@
   function resetAffiliateChartZoom() {
     affiliateChartInstance?.resetZoom();
     affiliateChartZoomed = false;
+    affiliateSummaryRange = null;
   }
 
   function closeAffiliateTransactions() {
@@ -1190,6 +1216,12 @@
         </div>
       {/if}
 
+      <RangeSummary rows={epochSummaryRows} bucket="epoch" metrics={[
+        { field: 'volumeUsd', label: 'Volume', kind: 'flow', unit: 'usd' },
+        { field: 'feesUsd', label: 'Fees', kind: 'flow', unit: 'usd' }
+      ]} />
+      <LegacyChartTools chart={chartInstance} sourceGrain="epoch" grain="epoch" />
+      <p class="chart-control-label">Epoch history has no verified UTC timestamps; calendar buckets and daily averages are unavailable.</p>
       <div class="chart-frame">
         {#if selectedRecord?.history?.length}
           <canvas
@@ -1479,53 +1511,11 @@
     <section class="block affiliate-trend-block">
       <div class="block-head">
         <div class="block-title"><span class="title-marker">|</span><h2>Affiliate Trend</h2></div>
-        <div class="block-meta">[{selectedAffiliate?.thorname || '--'} / {affiliateTimeframeOption.label} / {affiliateBucket} / {affiliateRollingLabel}]</div>
+        <div class="block-meta">[{selectedAffiliate?.thorname || '--'} / {affiliateTimeframeOption.label} / {affiliateBucket}]</div>
       </div>
 
       <div class="affiliate-chart-toolbar">
-        <div class="affiliate-rolling-controls">
-          {#each AFFILIATE_ROLLING_METRICS as metric}
-            <div class="affiliate-chart-control">
-              <span class="chart-control-label">{metric.controlLabel}</span>
-              <div class="timeframe-tabs rolling-average-tabs" role="group" aria-label={`${metric.controlLabel} windows`}>
-                {#each AFFILIATE_ROLLING_AVERAGES as option}
-                  <button
-                    type="button"
-                    aria-label={`Toggle ${option.days}-day ${metric.controlLabel}`}
-                    aria-pressed={affiliateRollingAverages[metric.id].includes(option.days)}
-                    class:active={affiliateRollingAverages[metric.id].includes(option.days)}
-                    style:color={affiliateRollingAverages[metric.id].includes(option.days) ? option.color : null}
-                    on:click={() => toggleAffiliateRollingAverage(metric.id, option.days)}
-                  >
-                    <span
-                      class="rolling-swatch"
-                      class:revenue={metric.id === 'fees'}
-                      style={`--swatch-color: ${option.color};`}
-                    ></span>
-                    {option.label}
-                  </button>
-                {/each}
-              </div>
-            </div>
-          {/each}
-        </div>
         <div class="affiliate-chart-view-controls">
-          <div class="affiliate-chart-control">
-            <span class="chart-control-label">bucket</span>
-            <div class="timeframe-tabs" role="tablist" aria-label="Affiliate chart bucket">
-              {#each AFFILIATE_BUCKETS as option}
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={affiliateBucket === option.id}
-                  class:active={affiliateBucket === option.id}
-                  on:click={() => setAffiliateBucket(option.id)}
-                >
-                  {option.label}
-                </button>
-              {/each}
-            </div>
-          </div>
           <div class="affiliate-chart-control timeframe-control">
             <span class="chart-control-label">range</span>
             <div class="timeframe-tabs" role="tablist" aria-label="Affiliate chart timeframe">
@@ -1574,6 +1564,12 @@
       </div>
 
       {#if affiliateHistoryWarning}<div class="block-meta">{affiliateHistoryWarning}</div>{/if}
+      <RangeSummary rows={affiliateSummaryRows} bucket={affiliateBucket} loading={affiliateHistoryLoading} metrics={[
+        { field: 'volumeUsd', label: 'Volume', kind: 'flow', unit: 'usd' },
+        { field: 'feesUsd', label: 'Fees', kind: 'flow', unit: 'usd' }
+      ]} note="Raw bucket volume and fees; rolling-average overlays are not summed. Source coverage is reported above." />
+      <LegacyChartTools chart={affiliateChartInstance} rows={affiliateCalendarRows} historyRows={affiliateCalendarHistory} grain={affiliateBucket} onGrain={setAffiliateBucket}
+        metrics={[{ value: row => row.volumeUsd, rollingReduce: affiliateRollingMean }, { value: row => row.feesUsd, rollingReduce: affiliateRollingMean }, { value: row => row.volumeUsd > 0 && row.rateFeesUsd != null ? row.rateFeesUsd / row.volumeUsd * 10000 : null, rollingReduce: affiliateRollingRate }]} />
       <div class="chart-frame affiliate-chart-frame">
         {#if affiliateHistoryLoading}
           <div class="loading-block"><span class="loading-marker">////</span><span>loading affiliate history</span></div>
@@ -2234,12 +2230,6 @@
     gap: 5px;
   }
 
-  .affiliate-rolling-controls {
-    align-items: flex-end;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
 
   .timeframe-control {
     align-items: flex-end;
@@ -2289,31 +2279,9 @@
     background: #0b0b0b;
   }
 
-  .rolling-average-tabs button {
-    align-items: center;
-    display: inline-flex;
-    gap: 6px;
-  }
 
-  .rolling-swatch {
-    background: var(--swatch-color);
-    display: inline-block;
-    height: 2px;
-    opacity: 0.55;
-    width: 12px;
-  }
 
-  .rolling-swatch.revenue {
-    background: repeating-linear-gradient(
-      90deg,
-      var(--swatch-color) 0 4px,
-      transparent 4px 6px
-    );
-  }
 
-  .rolling-average-tabs button.active .rolling-swatch {
-    opacity: 1;
-  }
 
   .affiliate-chart-frame {
     height: 372px;
@@ -2957,9 +2925,6 @@
       margin-left: 0;
     }
 
-    .affiliate-rolling-controls {
-      align-items: flex-start;
-    }
 
     .affiliate-chart-view-controls {
       align-items: flex-start;
