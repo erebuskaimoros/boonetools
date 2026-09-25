@@ -7,6 +7,7 @@
 
   import RangeSummary from '../charts/RangeSummary.svelte';
   import TimeSeriesChart from '../charts/TimeSeriesChart.svelte';
+  import CurrencySwitch from '../components/terminal/CurrencySwitch.svelte';
   import { buildSystemIncomePolFeeOption, polChartValue, polFeeDetails } from './charts.js';
 
   export let daily = [];
@@ -45,17 +46,6 @@
       <h2 id="daily-fees-title"><span aria-hidden="true">▌</span> DAILY ESTIMATED FEES</h2>
       <p>POL's estimated share of pool swap fees, per UTC day.</p>
     </div>
-    <div class="controls">
-      <div class="unit-controls" role="group" aria-label="Daily fee denomination">
-        <button type="button" class:active={unit === 'usd'} aria-pressed={unit === 'usd'} on:click={() => { unit = 'usd'; dismissTooltip(); }}>[USD]</button>
-        <button type="button" class:active={unit === 'rune'} aria-pressed={unit === 'rune'} on:click={() => { unit = 'rune'; dismissTooltip(); }}>[RUNE]</button>
-      </div>
-      <div class="range-controls" role="group" aria-label="Daily fee history range">
-        {#each SYSTEM_INCOME_POL_RANGES as range}
-          <button type="button" class:active={rangeId === range.id} aria-pressed={rangeId === range.id} on:click={() => { rangeId = range.id; dismissTooltip(); }}>[{range.label}]</button>
-        {/each}
-      </div>
-    </div>
   </header>
 
   {#if rows.length}
@@ -65,14 +55,29 @@
         <TimeSeriesChart points={chart.points} {historyPoints} onGrainChange={value => { grain = value; dismissTooltip(); }} options={{ unit, selectedDay }} buildOption={buildSystemIncomePolFeeOption}
           hasData={chart.points.length > 0} onSelect={pinDay}
           ariaLabel={`Daily estimated POL fees in ${unit.toUpperCase()}. Tap a day to pin details, or use the day selector below.`}
-          height="240px" narrowHeight="240px" />
-        {#if selected && grain === 'day'}
-          <div id="daily-fees-tooltip" class="fee-tooltip" role="tooltip">
-            <strong>{selected.day} <span>UTC</span></strong>
-            <div class="tooltip-value"><span><i aria-hidden="true"></i> EST. FEES</span><b>{polChartValue(selected.value, unit)}</b></div>
-            {#each polFeeDetails(selected, unit) as detail}<p>{detail}</p>{/each}
+          height="240px" narrowHeight="240px">
+          <div slot="controls" class="controls" role="group" aria-label="Daily fee plot controls">
+            <div class="unit-controls" role="group" aria-label="Daily fee denomination">
+              <CurrencySwitch {unit} ariaLabel="Daily POL fees in US dollars"
+                title="Use each UTC day’s closing RUNE/USD price"
+                onChange={value => { unit = value; dismissTooltip(); }} />
+            </div>
+            <div class="range-controls" role="group" aria-label="Daily fee history range">
+              {#each SYSTEM_INCOME_POL_RANGES as range}
+                <button type="button" class:active={rangeId === range.id} aria-pressed={rangeId === range.id} on:click={() => { rangeId = range.id; dismissTooltip(); }}>[{range.label}]</button>
+              {/each}
+            </div>
           </div>
-        {/if}
+          <svelte:fragment slot="overlay">
+            {#if selected && grain === 'day'}
+              <div id="daily-fees-tooltip" class="fee-tooltip" role="tooltip">
+                <strong>{selected.day} <span>UTC</span></strong>
+                <div class="tooltip-value"><span><i aria-hidden="true"></i> EST. FEES</span><b>{polChartValue(selected.value, unit)}</b></div>
+                {#each polFeeDetails(selected, unit) as detail}<p>{detail}</p>{/each}
+              </div>
+            {/if}
+          </svelte:fragment>
+        </TimeSeriesChart>
       </div>
       {#if grain === 'day'}
       <div class="day-controls">
@@ -112,9 +117,10 @@
   h2 span { color: var(--term-accent); }
   header p, .note { margin: 0; color: var(--term-text-2); font: 14px/1.55 'DM Sans', sans-serif; }
   .controls, .unit-controls, .range-controls { display: flex; gap: 5px; }
-  .controls { flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+  .controls { flex-wrap: wrap; align-items: center; gap: 6px 12px; justify-content: flex-end; padding-bottom: 8px; }
+  .range-controls { flex-wrap: wrap; }
   .unit-controls { padding-right: 10px; border-right: 1px solid var(--term-border); }
-  button { padding: 6px 8px; border: 1px solid var(--term-border); border-radius: 0; background: transparent; color: var(--term-text-2); font: 600 12px/1 'JetBrains Mono', monospace; cursor: pointer; }
+  button { min-height: 34px; padding: 6px 8px; border: 1px solid var(--term-border); border-radius: 0; background: transparent; color: var(--term-text-2); font: 600 12px/1 'JetBrains Mono', monospace; cursor: pointer; }
   button:hover, button.active { border-color: var(--term-accent); color: var(--term-accent); }
   button:focus-visible { outline: 2px solid var(--term-accent); outline-offset: 3px; }
   .chart-container { padding: 10px 18px 0; }
@@ -139,6 +145,6 @@
   i.provisional { background: transparent; border: 1px dashed var(--term-amber); }
   .note { padding: 0 18px 14px; font-size: 13px; }
   .empty { padding: 36px 18px; text-align: center; }
-  @media (max-width: 900px) { header { flex-direction: column; } .controls { justify-content: flex-start; } }
+  @media (max-width: 900px) { header { flex-direction: column; } }
   @media (max-width: 560px) { .chart-container { padding: 8px 8px 0; } .controls { width: 100%; } .unit-controls { padding: 0; border: 0; } }
 </style>

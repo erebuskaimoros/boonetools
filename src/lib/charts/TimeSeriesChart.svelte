@@ -88,8 +88,10 @@
   <ChartTools series={legend} {hidden} {rolling} {grain} {sourceGrain} {hideUnavailableGrains} {showSourceResolution} calendar={baseSpec.calendar || 'UTC'}
     onHidden={changeHidden} onRolling={changeRolling} onGrain={changeGrain} />
 {/if}
+<slot name="controls" />
 <div class="time-series-frame" aria-busy={loading} style={`--chart-height:${height};--chart-narrow-height:${narrowHeight}`}>
   <div class="echarts-host" bind:this={container} role="img" aria-label={ariaLabel}></div>
+  <slot name="overlay" />
   {#if renderError || error || !hasData}
     <div class="chart-message" role="status">{renderError || error || (loading ? loadingText : emptyText)}</div>
   {/if}

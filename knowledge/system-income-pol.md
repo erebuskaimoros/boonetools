@@ -4,6 +4,15 @@
 POL. It must not read `/thorchain/pol`, the legacy Reserve-module LP position,
 or the `pol_tracker_*` tables used by `/pol-tvl`.
 
+## Chart controls
+
+Both daily-fee and deposit chart controls are right-aligned immediately above
+the plot, below the summary and shared calendar/legend/rolling toolbar. The
+shared terminal currency switch reads RUNE on the left and dollars on the
+right, with a sliding indicator and native keyboard activation. Deposits still
+default to RUNE and fees to USD. Deposit USD availability, historical prices,
+range selection, zoom preservation, and fee-detail dismissal are unchanged.
+
 ## Exact flows
 
 - `rewards.pol_reserve_reward` is the exact RUNE transferred into the module.

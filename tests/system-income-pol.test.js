@@ -122,8 +122,8 @@ test('System Income POL owns /pol-tracker and appears in navigation', async () =
   assert.match(dashboardSource, /DAILY \+ CUMULATIVE POL DEPOSITS/);
   assert.match(dashboardSource, /let chartUnit = 'rune'/);
   assert.match(dashboardSource, /aria-label="Chart denomination"/);
-  assert.match(dashboardSource, />\[RUNE\]<\/button>/);
-  assert.match(dashboardSource, />\[\$\]<\/button>/);
+  assert.match(dashboardSource, /<CurrencySwitch unit=\{chartUnit\} usdAvailable=\{usdChartAvailable\}/);
+  assert.match(dashboardSource, /onChange=\{setChartUnit\}/);
   assert.match(dashboardSource, /daily\.some\(row => Number\.isFinite\(row\.deployedUsd\)\)/);
   assert.doesNotMatch(dashboardSource, /USD values use the current RUNE price/);
   assert.match(dashboardSource, /USD deposits use each UTC day's closing RUNE price/);

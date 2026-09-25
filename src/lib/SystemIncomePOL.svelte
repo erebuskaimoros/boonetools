@@ -1,6 +1,7 @@
 <script>
   import { onDestroy, onMount } from 'svelte';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
+  import CurrencySwitch from './components/terminal/CurrencySwitch.svelte';
   import RangeSummary from './charts/RangeSummary.svelte';
   import TimeSeriesChart from './charts/TimeSeriesChart.svelte';
   import { buildSystemIncomePolDepositOption, POL_DEPOSIT_SERIES } from './system-income-pol/charts.js';
@@ -406,20 +407,6 @@
           {#if chartUnit === 'usd'}USD deposits use each UTC day's closing RUNE price; the cumulative line sums those daily dollar values. Today's estimate is provisional.{/if}
         </p>
       </div>
-      <div class="chart-controls">
-        <div class="unit-group" aria-label="Chart denomination">
-          <button class:active={chartUnit === 'rune'} aria-pressed={chartUnit === 'rune'} on:click={() => setChartUnit('rune')}>[RUNE]</button>
-          <button class:active={chartUnit === 'usd'} aria-pressed={chartUnit === 'usd'} disabled={!usdChartAvailable} title={usdChartAvailable ? 'Show deposits at each UTC day’s closing RUNE/USD price' : 'Historical daily RUNE/USD prices unavailable'} on:click={() => setChartUnit('usd')}>[$]</button>
-        </div>
-        <div class="range-group" aria-label="History range">
-          {#each SYSTEM_INCOME_POL_RANGES as range}
-            <button class:active={rangeId === range.id} aria-pressed={rangeId === range.id} on:click={() => setChartRange(range.id)}>[{range.label}]</button>
-          {/each}
-          <button aria-label="Zoom in on POL deposits" on:click={() => depositChart?.zoomBy(0.5)}>[+]</button>
-          <button aria-label="Zoom out on POL deposits" disabled={!isChartZoomed} on:click={() => depositChart?.zoomBy(2)}>[−]</button>
-          <button class="zoom-reset" disabled={!isChartZoomed} on:click={resetChartZoom}>[RESET]</button>
-        </div>
-      </div>
     </div>
 
     {#if rangeRows.length}
@@ -430,7 +417,24 @@
           {zoomWindow} onZoom={(window) => zoomWindow = window}
           hasData={rangeRows.length > 0} loading={refreshing}
           ariaLabel={`Daily and cumulative POL deposits in ${chartUnitLabel} by UTC day. Drag to zoom; double-click to reset.`}
-          height="280px" narrowHeight="240px" />
+          height="280px" narrowHeight="240px">
+          <div slot="controls" class="chart-controls" role="group" aria-label="Deposit plot controls">
+            <div class="unit-group" role="group" aria-label="Chart denomination">
+              <CurrencySwitch unit={chartUnit} usdAvailable={usdChartAvailable}
+                ariaLabel="POL deposits in US dollars"
+                title={usdChartAvailable ? 'Use each UTC day’s closing RUNE/USD price' : 'Historical daily RUNE/USD prices unavailable'}
+                onChange={setChartUnit} />
+            </div>
+            <div class="range-group" role="group" aria-label="History range">
+              {#each SYSTEM_INCOME_POL_RANGES as range}
+                <button class:active={rangeId === range.id} aria-pressed={rangeId === range.id} on:click={() => setChartRange(range.id)}>[{range.label}]</button>
+              {/each}
+              <button aria-label="Zoom in on POL deposits" on:click={() => depositChart?.zoomBy(0.5)}>[+]</button>
+              <button aria-label="Zoom out on POL deposits" disabled={!isChartZoomed} on:click={() => depositChart?.zoomBy(2)}>[−]</button>
+              <button class="zoom-reset" disabled={!isChartZoomed} on:click={resetChartZoom}>[RESET]</button>
+            </div>
+          </div>
+        </TimeSeriesChart>
       </div>
       <div class="legend">
 
@@ -518,7 +522,7 @@
     color: var(--term-text-2);
     font: 14px/1.55 'DM Sans', sans-serif;
   }
-  .refresh, .unit-group button, .range-group button, .inline-action {
+  .refresh, .range-group button, .inline-action {
     border: 1px solid var(--term-border);
     border-radius: 0;
     color: var(--term-text-2);
@@ -528,7 +532,7 @@
   }
   .refresh { padding: 9px 12px; }
   .refresh span { color: var(--term-accent); }
-  .refresh:hover, .unit-group button:hover, .unit-group button.active, .range-group button:hover, .range-group button.active { border-color: var(--term-accent); color: var(--term-accent); }
+  .refresh:hover, .range-group button:hover, .range-group button.active { border-color: var(--term-accent); color: var(--term-accent); }
   .refresh:disabled { opacity: .55; cursor: wait; }
   .inline-action { margin-left: 8px; padding: 3px 6px; color: var(--term-accent); }
   :global(.sipol-shell > .terminal-alert) { max-width: 1440px; margin-left: auto; margin-right: auto; }
@@ -653,13 +657,13 @@
   td.fee { color: var(--term-amber); }
   tbody tr:hover { background: var(--term-surface-hover); }
   .empty { padding: 28px; color: var(--term-text-3); text-align: center !important; font-size: 12px; }
-  .chart-controls { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+  .chart-controls { display: flex; align-items: center; justify-content: flex-end; gap: 6px 12px; flex-wrap: wrap; padding: 0 0 8px; }
   .unit-group, .range-group { display: flex; gap: 5px; }
   .range-group { flex-wrap: wrap; }
   .unit-group { padding-right: 10px; border-right: 1px solid var(--term-border); }
-  .unit-group button, .range-group button { padding: 6px 8px; }
+  .range-group button { min-height: 34px; padding: 6px 8px; }
   .range-group .zoom-reset { color: var(--term-accent); border-color: var(--term-accent-edge); }
-  .unit-group button:disabled, .range-group button:disabled { color: var(--term-text-5); border-color: var(--term-border); opacity: .45; cursor: default; }
+  .range-group button:disabled { color: var(--term-text-5); border-color: var(--term-border); opacity: .45; cursor: default; }
   .chart-wrap { padding: 8px 14px 0; }
   .legend { display: flex; align-items: center; gap: 18px; padding: 11px 18px; border-top: 1px solid var(--term-border-faint); color: var(--term-text-2); font-size: 12px; }
   .legend small { margin-left: auto; color: var(--term-text-3); }
@@ -692,11 +696,9 @@
   @media (max-width: 560px) {
     h1 { font-size: 24px; }
     .terminal-header .refresh { width: 100%; }
-    .panel-heading .chart-controls, .panel-heading .range-group { width: 100%; }
-    .chart-controls { justify-content: flex-start; }
-    .unit-group { width: 100%; padding: 0 0 8px; border-right: 0; border-bottom: 1px solid var(--term-border); }
-    .unit-group button { flex: 1; }
-    .range-group button { flex: 1; }
+    .chart-controls { padding: 0 8px 8px; }
+    .range-group { width: 100%; justify-content: flex-end; }
+    .unit-group { padding: 0; border: 0; }
     .legend { flex-wrap: wrap; }
     .legend small { width: 100%; margin-left: 0; }
   }

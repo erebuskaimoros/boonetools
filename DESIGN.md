@@ -378,6 +378,11 @@ its controls and legend below these cards, immediately before the plot.
 Its Depth/Cumulative Fees switch uses a sliding indicator with reduced-motion
 support. POL deposit rolling averages apply only to daily deposits, not the
 cumulative total.
+Both POL Tracker plots place range/zoom controls below the summary and shared
+legend, right-aligned immediately above the plot. Their denomination control
+uses the shared terminal `CurrencySwitch.svelte` with a sliding indicator,
+keyboard support, and reduced-motion support. The optional `controls` slot in
+`TimeSeriesChart.svelte` keeps feature controls outside the fixed-height plot.
 Features supply explicit periodic flow or stock/rate metrics and the current
 viewport. Sum flows, never cumulative samples or balances across time; label
 bucket averages and coverage. Custom weighted reductions remain feature-owned.
