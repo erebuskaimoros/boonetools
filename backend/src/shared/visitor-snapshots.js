@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { collectVaultBalances } from '../vault-balances/index.js';
 import { acquireCached, loadAcquisition, saveAcquisition } from './acquisition-cache.js';
 import { getThorNodeCoreSnapshot, isThorNodeCoreSnapshotStale, THORNODE_CORE_FIELDS } from './thornode-core-snapshot.js';
 import { fetchThorchain } from './thornode.js';
@@ -82,7 +84,29 @@ export async function buildVisitorSnapshot(kind, params = {}, options = {}) {
     const vaults = await current('vaults', '/thorchain/vaults/asgard', Array.isArray);
     const tradeUnits = await current('trade_units', '/thorchain/trade/units', Array.isArray);
     const securedAssets = await current('secured_assets', '/thorchain/securedassets', Array.isArray);
-    return { vaults, tradeUnits, securedAssets, pools: payload.pools, network: payload.network,
+    // Amounts change every block. Key only the custody targets, then reattach the
+    // latest accounting below instead of storing a new large cache row per tick.
+    const targets = vaults.map(vault => ({ pub_key: vault.pub_key, addresses: vault.addresses,
+      routers: vault.routers, assets: (vault.coins || []).map(coin => coin.asset).sort() }));
+    const identity = createHash('sha256').update(JSON.stringify({ targets, assets: payload.pools.map(pool => pool.asset).sort() })).digest('hex');
+    const l1 = await acquire(client, { namespace: 'vault-l1-balances:v1', identity, ttlMs: 60_000,
+      source: 'independent-l1', validate: value => Array.isArray(value?.vaults),
+      load: () => (options.collectVaultBalances || collectVaultBalances)(vaults, payload.pools, options) });
+    fieldMeta.l1_balances = { fetched_at: l1.payload.observed_at, expires_at: l1.payload.expires_at };
+    const comparedVaults = vaults.map(vault => {
+      const observed = l1.payload.vaults.find(item => item.pub_key === vault.pub_key);
+      const expected = new Map((vault.coins || []).map(coin => [coin.asset, coin]));
+      const measured = new Map((observed?.coins || []).map(coin => [coin.asset, coin]));
+      const assets = new Set([...expected.keys(), ...measured.keys()]);
+      return { ...vault, coins: [...assets].map(asset => {
+        const observation = measured.get(asset);
+        const recorded = expected.get(asset);
+        return { balance_status: 'unsupported', ...observation, ...recorded, asset,
+          amount: observation?.balance_status === 'verified' ? observation.amount : recorded?.amount || '0',
+          thornode_amount: recorded?.amount ?? null };
+      }) };
+    });
+    return { vaults: comparedVaults, routerChecks: l1.payload.routerChecks, tradeUnits, securedAssets, pools: payload.pools, network: payload.network,
       nodes: payload.nodes, inboundAddresses: payload.inbound_addresses, field_meta: fieldMeta };
   }
   if (kind !== 'dynamic-fees') throw new Error('Invalid visitor snapshot kind');

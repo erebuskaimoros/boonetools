@@ -14,8 +14,6 @@ import {
   getPooledRuneAmount,
   summarizeCustodiedAssetRows
 } from './assets.js';
-import { hydrateEthOnChainBalances } from './eth-balances.js';
-import { hydrateUtxoOnChainBalances } from './utxo-balances.js';
 
 /**
  * Fetch and process all vault explorer data.
@@ -26,17 +24,7 @@ export async function fetchVaultExplorerData(options = {}) {
   const { vaults: rawVaults, pools: poolsData, network: networkData, nodes: nodesData,
     tradeUnits, securedAssets, inboundAddresses } = snapshot;
 
-  let vaults = sortVaultsByStatus(rawVaults);
-  try {
-    vaults = sortVaultsByStatus(await hydrateEthOnChainBalances(vaults, poolsData, inboundAddresses));
-  } catch (error) {
-    console.warn('Failed to hydrate Vault Explorer ETH balances from Ethereum RPC:', error);
-  }
-  try {
-    vaults = sortVaultsByStatus(await hydrateUtxoOnChainBalances(vaults));
-  } catch (error) {
-    console.warn('Failed to hydrate Vault Explorer UTXO balances from chain APIs:', error);
-  }
+  const vaults = sortVaultsByStatus(rawVaults);
   const activeVaults = vaults.filter(v => v.status === VAULT_STATUS.ACTIVE);
   const runePrice = fromBaseUnit(networkData.rune_price_in_tor);
 
@@ -280,6 +268,7 @@ export async function fetchVaultExplorerData(options = {}) {
       securedTotalUSD
     },
     rawVaults: vaults,
+    routerChecks: snapshot.routerChecks || [],
     routers: Object.fromEntries(inboundAddresses.filter(a => a.router).map(a => [a.chain, a.router])),
     prices,
     runePrice,

@@ -64,3 +64,44 @@ test('publishing a shared snapshot cannot extend its underlying live observation
   await refreshVisitorSnapshots(client, { build: async () => ({ field_meta: { current: { fetched_at: new Date(Date.now() - 15000).toISOString(), expires_at: new Date(sourceExpiry).toISOString() } } }) });
   assert.ok(Date.parse(storedExpiry) <= sourceExpiry);
 });
+
+test('vault snapshots share independent balances and preserve their real observation expiry', async () => {
+  let collections = 0;
+  const expiresAt = '2026-09-02T10:01:30Z';
+  const input = [{ pub_key: 'vault', coins: [{ asset: 'BTC.BTC', amount: '100' }] }];
+  const options = {
+    coreSnapshot: core, acquire: cachedAcquisition(),
+    fetchThorchain: async path => path.endsWith('/vaults/asgard') ? input : [],
+    collectVaultBalances: async vaults => {
+      collections++;
+      return { vaults: vaults.map(v => ({ ...v, coins: [{ asset: 'BTC.BTC', amount: '0', thornode_amount: '100', balance_status: 'verified' }] })), routerChecks: [], observed_at: observedAt, expires_at: expiresAt };
+    }
+  };
+  const first = await buildVisitorSnapshot('vault', {}, options);
+  const second = await buildVisitorSnapshot('vault', {}, options);
+  assert.equal(collections, 1);
+  assert.deepEqual(first, second);
+  assert.equal(first.vaults[0].coins[0].amount, '0');
+  assert.equal(first.field_meta.l1_balances.expires_at, expiresAt);
+  assert.equal(input[0].coins[0].amount, '100');
+});
+
+test('cached L1 observations compare against the latest THORNode amounts without duplicating acquisitions', async () => {
+  let amount = '100'; let collected = 0;
+  const acquire = cachedAcquisition();
+  const options = { coreSnapshot: core,
+    acquire: async (client, config) => config.namespace === 'vault-l1-balances:v1' ? acquire(client, config)
+      : { payload: await config.load(client), observedAt, stale: false },
+    fetchThorchain: async path => path.endsWith('/vaults/asgard') ? [{ pub_key: 'vault', coins: [{ asset: 'BTC.BTC', amount }] }] : [],
+    collectVaultBalances: async vaults => {
+      collected++;
+      return { vaults: [{ ...vaults[0], coins: [{ asset: 'BTC.BTC', amount: '80', thornode_amount: amount, balance_status: 'verified' }] }], routerChecks: [], observed_at: observedAt, expires_at: '2026-09-02T10:01:30Z' };
+    }
+  };
+  await buildVisitorSnapshot('vault', {}, options);
+  amount = '90';
+  const updated = await buildVisitorSnapshot('vault', {}, options);
+  assert.equal(collected, 1);
+  assert.equal(updated.vaults[0].coins[0].thornode_amount, '90');
+  assert.equal(updated.vaults[0].coins[0].amount, '80');
+});

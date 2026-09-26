@@ -10,11 +10,11 @@
     CHAIN_EXPLORERS,
     formatVaultName,
     calculateVaultBond,
-    calculateVaultAssetValue,
     VAULT_STATUS
   } from '$lib/utils/network';
   import { getAssetLogo, getAssetDisplayName } from '$lib/constants';
   import { Toast, LoadingBar, ChevronDownIcon } from '$lib/components';
+  import { describeBalance, getVisibleVaultCoins, summarizeVaultBalances, routerCheckStatus } from './vault-explorer/balances.js';
   import { fetchVaultExplorerData } from './vault-explorer/data.js';
 
   let loading = true;
@@ -32,7 +32,14 @@
   let hoveredCol = null;
 
   // Vault Details state
-  let showAssetBalances = false;
+  let showAssetBalances = true;
+  let balanceNow = Date.now();
+  $: vaultBalanceSummaries = (data?.rawVaults || []).map(vault => ({ vault, ...summarizeVaultBalances(vault, data?.prices || {}, balanceNow) }));
+  $: totalL1Checks = vaultBalanceSummaries.reduce((sum, vault) => sum + vault.total, 0);
+  $: freshL1Checks = vaultBalanceSummaries.reduce((sum, vault) => sum + vault.fresh, 0);
+  $: lowerBalanceVaults = vaultBalanceSummaries.filter(vault => vault.shortfalls > 0);
+  $: routerShortfalls = (data?.routerChecks || []).filter(check => routerCheckStatus(check, balanceNow) === 'shortfall');
+  $: routerUnavailable = (data?.routerChecks || []).filter(check => ['unavailable', 'stale'].includes(routerCheckStatus(check, balanceNow)));
   let expandedSignerVaultPubKeys = [];
   let toastMessage = '';
   let showToast = false;
@@ -84,10 +91,13 @@
   onMount(() => {
     requestController = new AbortController();
     loadVaultData(true);
+    // Age indicators must keep ticking even while a snapshot request is retrying.
+    const ageTimer = setInterval(() => { balanceNow = Date.now(); }, 5000);
     warmingPoll = createVisiblePoll(() => {
-      if (data?.stale && !refreshing && !loading) return loadVaultData(false, { requireFresh: true });
+      balanceNow = Date.now();
+      if (!refreshing && !loading) return loadVaultData(false);
     }, { intervalMs: 15_000, immediate: false });
-    return () => { warmingPoll?.stop(); requestController?.abort(); };
+    return () => { clearInterval(ageTimer); warmingPoll?.stop(); requestController?.abort(); };
   });
 
   function handleCellEnter(e, poolIdx, rowIdx, colIdx) {
@@ -128,10 +138,11 @@
     const chain = poolAsset.split('.')[0];
     const explorerUrl = chainExplorers[chain];
     if (!explorerUrl) return null;
-    // ERC-20 tokens (asset contains '-' contract address) are held in the router
-    const isToken = poolAsset.split('.')[1]?.includes('-');
-    if (isToken && data?.routers?.[chain]) {
-      return explorerUrl + data.routers[chain];
+    // Legacy router custody and direct vault custody have different explorer targets.
+    const rawVault = vault.coins ? vault : data?.rawVaults?.find(item => item.pub_key === vault.pubKey);
+    const coin = rawVault?.coins?.find(coin => coin.asset === poolAsset);
+    if (coin?.balance_scope === 'router_allowance' && coin.balance_router) {
+      return explorerUrl + coin.balance_router;
     }
     const addr = vault.addresses?.find(a => a.chain.split('.')[0] === chain);
     if (!addr) return null;
@@ -186,12 +197,6 @@
     image.src = FALLBACK_ICON;
   }
 
-  function getVisibleVaultCoins(vault) {
-    return [...(vault.coins || [])]
-      .filter(coin => data.prices[coin.asset] && Number(coin.amount) > 0)
-      .sort((a, b) => (fromBaseUnit(b.amount) * data.prices[b.asset]) - (fromBaseUnit(a.amount) * data.prices[a.asset]));
-  }
-
   function calculateVaultBondUSD(bondInRune) {
     if (!data?.runePrice) return 0;
     return bondInRune * data.runePrice;
@@ -205,13 +210,6 @@
     return formatNumber(amount, { maximumFractionDigits: 8 });
   }
 
-  function getBalanceSourceLabel(coin) {
-    const labels = {
-      eth_chain: 'ETH chain',
-      ltc_chain: 'LTC chain'
-    };
-    return labels[coin?.balance_source] || '';
-  }
 </script>
 
 <div class="ve">
@@ -228,7 +226,7 @@
     <div class="metrics">
       <div class="metric">
         <div class="metric-val accent">{formatUSDCompact(data.summary.totalVaultValueUSD)}</div>
-        <div class="metric-key">TOTAL VAULT VALUE</div>
+        <div class="metric-key">{activeTab === 'details' ? 'PROTOCOL VALUE' : 'TOTAL VAULT VALUE'}</div>
       </div>
       <div class="metric">
         <div class="metric-val">{data.summary.activeVaultCount}</div>
@@ -259,7 +257,7 @@
       <button class="tab-btn" role="tab" aria-selected={activeTab === 'details'} class:tab-active={activeTab === 'details'} on:click={() => activeTab = 'details'}>Vault Details</button>
       <div class="tab-spacer"></div>
       {#if lastUpdated}
-        <span class="last-updated">Updated {formatLastUpdated(lastUpdated)}{data?.stale ? ' · refreshing shared data' : ''}</span>
+        <span class="last-updated">THORNode {formatLastUpdated(lastUpdated)}{data?.stale ? ' · refreshing shared data' : ''}</span>
       {/if}
       <button class="refresh-btn" on:click={() => loadVaultData(false)} disabled={refreshing}>
         {refreshing ? 'Refreshing...' : 'Refresh'}
@@ -462,9 +460,36 @@
       </section>
 
     {:else if activeTab === 'details'}
-      <!-- Vault Details (ported from Vaults.svelte) -->
+      <div class="balance-note">
+        <strong>Independent L1 balances · {freshL1Checks}/{totalL1Checks} fresh checks</strong>
+        {#if lowerBalanceVaults.length}
+          <p class="balance-alert">Lower than THORNode: {lowerBalanceVaults.map(entry => `Vault ${formatVaultName(entry.vault.pub_key)} (${entry.shortfalls})`).join(' · ')}</p>
+        {/if}
+        <p>Compare what each chain holds with THORNode’s recorded inventory. Lower balances are highlighted, including zero. Pending transfers and different observation times can also cause differences.</p>
+        <p>Legacy router tokens show per-vault allowances; their shared token backing is checked below. Newer routers keep tokens at the vault address. Missing or stale checks do not establish that funds are present.</p>
+      </div>
+      {#if data.routerChecks.length}
+        <details class="router-checks" open={routerShortfalls.length > 0}>
+          <summary class:balance-alert={routerShortfalls.length > 0}>
+            Router custody · {routerShortfalls.length} shortfalls · {routerUnavailable.length} unavailable / stale · {data.routerChecks.length} checks
+          </summary>
+          <p>Actual router holdings versus the sum of allowances for the listed vaults, at the same L1 block. Shared holdings cannot be attributed to an individual vault.</p>
+          {#each data.routerChecks as check (`${check.chain}:${check.router}:${check.asset}`)}
+            {@const checkStatus = routerCheckStatus(check, balanceNow)}
+            <div class="router-check-row" class:balance-alert={checkStatus === 'shortfall'} title={check.error || `${check.provider} · block ${check.block} · ${check.observed_at}`}>
+              <span>{getAssetDisplayName(check.asset)} · {check.chain}</span>
+              <span>{checkStatus === 'covered' ? 'Covers listed allowances' : checkStatus}</span>
+              {#if check.actual_amount != null}
+                <span>Held {formatAssetAmount(fromBaseUnit(check.actual_amount))} / owed {formatAssetAmount(fromBaseUnit(check.allowance_amount))}</span>
+              {/if}
+              <a href={chainExplorers[check.chain] + check.router} target="_blank" rel="noopener noreferrer">Router ↗</a>
+            </div>
+          {/each}
+        </details>
+      {/if}
       <div class="vaults-grid">
         {#each data.rawVaults as vault (vault.pub_key)}
+          {@const balanceSummary = summarizeVaultBalances(vault, data.prices, balanceNow)}
           <div class="vault-card">
             <div class="vault-card-header" class:retiring={vault.status === 'RetiringVault'}>
               <div class="vault-name-row">
@@ -526,8 +551,8 @@
                   <span class="vault-stat-val">{formatUSDCompact(calculateVaultBondUSD(calculateVaultBond(vault, data.nodesData)))}</span>
                 </div>
                 <div class="vault-stat">
-                  <span class="vault-stat-label">ASSET VALUE</span>
-                  <span class="vault-stat-val accent">{formatUSDCompact(calculateVaultAssetValue(vault.coins, data.prices))}</span>
+                  <span class="vault-stat-label">L1 VALUE (PRICED)</span>
+                  <span class="vault-stat-val accent">{balanceSummary.fresh ? formatUSDCompact(balanceSummary.valueUSD) : '—'}</span>
                 </div>
                 <button
                   type="button"
@@ -563,6 +588,13 @@
 
               <div class="vault-divider"></div>
 
+              <div class="balance-coverage" class:balance-alert={balanceSummary.shortfalls > 0}>
+                {balanceSummary.fresh}/{balanceSummary.total} fresh L1 checks · {balanceSummary.shortfalls} lower than THORNode
+                {#if balanceSummary.unavailable || balanceSummary.stale}
+                  <span>{balanceSummary.unavailable} unchecked · {balanceSummary.stale} stale</span>
+                {/if}
+                {#if balanceSummary.unpriced}<span>{balanceSummary.unpriced} assets without a USD price</span>{/if}
+              </div>
               <button class="expand-toggle" class:expanded={showAssetBalances} on:click={() => showAssetBalances = !showAssetBalances}>
                 <span>Asset Balances</span>
                 <ChevronDownIcon size={16} />
@@ -570,23 +602,33 @@
 
               {#if showAssetBalances}
                 <div class="asset-list" transition:slide={{ duration: 200 }}>
-                  {#each getVisibleVaultCoins(vault) as coin (coin.asset)}
+                  {#each getVisibleVaultCoins(vault, data.prices) as coin (coin.asset)}
                     {@const logo = getAssetLogo(coin.asset)}
                     {@const name = getAssetDisplayName(coin.asset)}
-                    {@const sourceLabel = getBalanceSourceLabel(coin)}
-                    <div class="asset-row">
+                    {@const balance = describeBalance(coin, balanceNow)}
+                    <div class="asset-row" class:balance-alert={balance.fresh && balance.shortfall}>
                       <div class="asset-id">
                         {#if logo}
                           <img src={logo} alt={name} class="asset-logo" on:error={handleIconError} loading="eager" decoding="async" />
                         {/if}
-                        <span>{name}</span>
-                        {#if sourceLabel}
-                          <span class="asset-source">{sourceLabel}</span>
+                        <span title={coin.asset}>{name}</span>
+                        <span class="asset-source" class:unverified={!balance.fresh} title={balance.detail}>{balance.label}</span>
+                        {#if getVaultExplorerUrl(vault, coin.asset)}
+                          <a href={getVaultExplorerUrl(vault, coin.asset)} target="_blank" rel="noopener noreferrer" aria-label={`View ${name} custody address`}>↗</a>
                         {/if}
                       </div>
                       <div class="asset-vals">
-                        <span class="asset-amount">{formatAssetAmount(fromBaseUnit(coin.amount))}</span>
-                        <span class="asset-usd">{formatUSD(fromBaseUnit(coin.amount) * data.prices[coin.asset])}</span>
+                        <span><small>L1</small> {balance.amount == null ? '—' : formatAssetAmount(fromBaseUnit(balance.amount))}</span>
+                        <span><small>THOR</small> {balance.expected == null ? '—' : formatAssetAmount(fromBaseUnit(balance.expected))}</span>
+                        <span title="L1 minus THORNode"><small>Δ</small> {balance.delta == null ? '—' : `${BigInt(balance.delta) > 0n ? '+' : ''}${formatAssetAmount(fromBaseUnit(balance.delta))}`}</span>
+                      </div>
+                      <div class="balance-observation">
+                        {#if coin.balance_observed_at}
+                          {coin.balance_provider} · {formatLastUpdated(new Date(coin.balance_observed_at))}
+                          {#if data.prices[coin.asset]} · {formatUSD(fromBaseUnit(coin.amount) * data.prices[coin.asset])}{/if}
+                        {:else}
+                          {balance.detail}
+                        {/if}
                       </div>
                     </div>
                   {/each}
@@ -1489,65 +1531,29 @@
     margin-top: 8px;
   }
 
-  .asset-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 4px 0;
-    border-bottom: 1px solid #111;
+  .balance-note, .router-checks {
+    padding: 16px;
+    border-bottom: 1px solid var(--term-border, #1a1a1a);
+    color: var(--term-text-body, #e8e8e8);
+    font-size: 13px;
   }
-
+  .balance-note strong, .router-checks summary { font-family: 'JetBrains Mono', monospace; }
+  .balance-note p, .router-checks p { margin: 8px 0 0; line-height: 1.55; }
+  .router-checks summary { cursor: pointer; font-size: 12px; }
+  .router-check-row { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 0; border-bottom: 1px solid #1a1a1a; font: 11px 'JetBrains Mono', monospace; }
+  .router-check-row a, .asset-id a { color: var(--term-text-body, #e8e8e8); }
+  .balance-coverage { margin: 12px 0; font: 11px/1.6 'JetBrains Mono', monospace; }
+  .balance-coverage span { display: block; color: var(--term-text-3, #c8c8c8); }
+  .balance-alert { color: var(--term-error, #e05260); }
+  .asset-row { padding: 10px 0; border-bottom: 1px solid #1a1a1a; }
   .asset-row:last-child { border-bottom: none; }
-
-  .asset-id {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--term-text-2);
-  }
-
-  .asset-logo {
-    width: 16px;
-    height: 16px;
-    flex: 0 0 16px;
-    border-radius: 50%;
-    object-fit: contain;
-  }
-
-  .asset-source {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    color: #00cc66;
-    background: rgba(0, 204, 102, 0.1);
-    border: 1px solid rgba(0, 204, 102, 0.25);
-    border-radius: 3px;
-    padding: 1px 4px;
-    text-transform: uppercase;
-  }
-
-  .asset-vals {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-  }
-
-  .asset-amount {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: var(--term-text-3);
-  }
-
-  .asset-usd {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #00cc66;
-    min-width: 70px;
-    text-align: right;
-  }
+  .asset-id { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font: 12px 'JetBrains Mono', monospace; }
+  .asset-logo { width: 16px; height: 16px; flex: 0 0 16px; object-fit: contain; }
+  .asset-source { font: 11px 'JetBrains Mono', monospace; color: var(--term-accent, #00cc66); border: 1px solid #2a2a2a; padding: 2px 4px; }
+  .asset-source.unverified { color: var(--term-warning, #d4a017); }
+  .asset-vals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; font: 11px 'JetBrains Mono', monospace; overflow-wrap: anywhere; }
+  .asset-vals small { display: block; margin-bottom: 4px; color: var(--term-text-3, #c8c8c8); font-size: 11px; }
+  .balance-observation { margin-top: 6px; color: var(--term-text-3, #c8c8c8); font: 11px/1.5 'JetBrains Mono', monospace; overflow-wrap: anywhere; }
 
   /* ---- RESPONSIVE ---- */
   @media (max-width: 900px) {
