@@ -61,7 +61,7 @@ export function nearEpochMint(block, previous) {
     previousHash: p.hash, previousHeight: p.height, atomic: mint.toString(), burnedAtomic: burns.toString(), protocolVersion: h.latest_protocol_version };
 }
 
-function isUnknownBlockError(error) {
+export function isUnknownBlockError(error) {
   // Successful HTTP responses expose the JSON-RPC error through rpc() below.
   if (error?.status == null) return /UNKNOWN_BLOCK|unknown block|has never been observed/i.test(error?.message || '');
   // FastNear also returns missing heights as HTTP 422. The shared transport

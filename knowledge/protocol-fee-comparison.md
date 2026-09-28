@@ -21,10 +21,10 @@ or add frontend income again. The income boundary and price series are unchanged
 Whole-chain net issuance still supports applications beyond Intents; this is
 not Intents operating profit or a measurement of Intents' gas sponsorship.
 
-The public Nearblocks V3 timestamp cursor locates the first block at/after
-each UTC midnight. It supplies a **hint**, not a supply observation. FastNear's
-archival RPC reads the canonical block by height, checks the index hash, then
-reads its parent. The adjacent linked headers must straddle midnight exactly;
+DeFiLlama's public closest-block endpoint supplies a **height hint**, not a
+supply observation or an exact day boundary. FastNear's archival RPC reads the
+canonical block by height, then walks linked headers backward or forward to
+midnight. The adjacent linked headers must straddle midnight exactly;
 the parent's `total_supply` is the boundary value. A midnight block belongs
 to the new day. Both blocks must be no later than the finalized head. Skipped
 heights are allowed only when the parent hash and previous height agree.
@@ -41,8 +41,12 @@ continues to label legacy snapshots accurately during rollout.
 Old `nearEpochs` and gross issuance observations are retained for audit but are
 no longer acquired or used in the deduction. FastNear's public `burnt-tokens`
 feed did not reconcile with mint-minus-supply observations and is not used.
-Nearblocks and FastNear requests are independently paced; the usual runtime
-budget, checkpoint/resume behavior, common cutoff and missing-data rules remain.
+The first rollout used Nearblocks hints but its public rate limit stopped the
+initial backfill after ten boundaries. Those proofs remain valid and reusable;
+the reader now uses DeFiLlama's existing public provider instead. Its approximate
+second-resolution hints are corrected on-chain, including skipped heights, with
+bounded walks and a five-minute sanity window. FastNear requests remain paced;
+the usual runtime budget, checkpoint/resume, cutoff and missing-data rules remain.
 
 ## Tooltip simplification — September 20, 2026
 

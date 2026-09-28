@@ -15,15 +15,14 @@ function fixture(delta = 9007199254740993n) {
   const calls = [];
   const request = async (url, { body } = {}) => {
     calls.push({ url, body });
-    if (url.includes('nearblocks')) {
-      const cursor = JSON.parse(Buffer.from(new URL(url).searchParams.get('prev'), 'base64').toString());
-      const day = new Date(Number((BigInt(cursor.timestamp) + 1n) / 1_000_000n)).toISOString().slice(0, 10);
+    if (url.includes('coins.llama')) {
+      const day = new Date(Number(url.split('/').at(-1)) * 1000).toISOString().slice(0, 10);
       const after = pairs[day][1];
-      return { data: [{ block_height: String(after.height), block_hash: after.hash }] };
+      return { height: after.height + 1 };
     }
     if (body.params.finality) return { result: { header: { height: 1000, hash: 'final', total_supply: base.toString(), timestamp_nanosec: (ns(end) + 1000n).toString() } } };
     const h = Object.values(pairs).flat().find(h => h.height === body.params.block_id || h.hash === body.params.block_id);
-    return { result: { header: h } };
+    return h ? { result: { header: h } } : { error: { cause: { name: 'UNKNOWN_BLOCK' } } };
   };
   return { pairs, calls, request };
 }
@@ -56,19 +55,42 @@ test('wrong date, broken parent links and malformed supplies fail closed', () =>
 });
 
 test('bad index hints and unfinalized archive data are rejected before checkpointing', async () => {
-  for (const kind of ['hash', 'height', 'lag']) {
+  for (const kind of ['height', 'lag']) {
     const f = fixture(), boundaries = {};
     await assert.rejects(collectNearNetSupply({ startDay: date, endDay: end, boundaries, request: async (url, options) => {
       const result = await f.request(url, options);
-      if (url.includes('nearblocks')) {
-        if (kind === 'hash') result.data[0].block_hash = 'wrong';
-        if (kind === 'height') result.data[0].block_height = '1001';
-      }
+      if (url.includes('coins.llama') && kind === 'height') result.height = 1001;
       if (kind === 'lag' && options?.body.params.finality) result.result.header.timestamp_nanosec = (ns(end) - 1n).toString();
       return result;
-    } }), /mismatch|unfinalized|behind/);
+    } }), /unfinalized|behind/);
     assert.deepEqual(boundaries, {});
   }
+});
+
+test('closest-height hints before midnight walk forward over skipped heights', async () => {
+  const f = fixture();
+  const rows = await collectNearNetSupply({ startDay: date, endDay: end, request: async (url, options) => {
+    const result = await f.request(url, options);
+    if (url.includes('coins.llama')) result.height -= 2;
+    return result;
+  } });
+  assert.equal(rows[0].nearNetIssuanceAtomic, '9007199254740993');
+  assert.ok(f.calls.some(call => call.body?.params.block_id === 11));
+});
+
+test('late hints walk backwards and never accept an index timestamp as the boundary', async () => {
+  const f = fixture();
+  for (const day of [date, end]) {
+    const after = f.pairs[day][1];
+    f.pairs[day].push({ ...after, height: after.height + 1, hash: `h${after.height + 1}`, prev_height: after.height, prev_hash: after.hash,
+      timestamp_nanosec: (ns(day) + 1n).toString() });
+  }
+  const rows = await collectNearNetSupply({ startDay: date, endDay: end, request: async (url, options) => {
+    const result = await f.request(url, options);
+    if (url.includes('coins.llama')) result.height += 1;
+    return result;
+  } });
+  assert.equal(rows[0].nearNetIssuanceAtomic, '9007199254740993');
 });
 
 test('interrupted acquisition resumes verified boundaries without publishing partial daily history', async () => {

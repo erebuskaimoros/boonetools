@@ -47,7 +47,7 @@ export async function runProtocolFeeComparison(options = {}) {
       log: (message) => console.log(JSON.stringify({ type: 'protocol_fee_comparison', message })),
       save: async (current, payload) => {
         await saveAcquisition(client, { namespace: COMPARISON_MODEL_KEY, identity: 'collector',
-          payload: current, source: 'midgard+llama+fastnear+nearblocks+chainflip-archive',
+          payload: current, source: 'midgard+llama+fastnear+chainflip-archive',
           observedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + COMPARISON_REFRESH_MS).toISOString() });
         await publish(payload || checkpointPayload(current));
       } });

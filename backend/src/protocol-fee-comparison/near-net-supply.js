@@ -1,8 +1,8 @@
 import { calendarDays, dayTime, nextDay, NEAR_NET_SUPPLY_METHOD } from '../../../shared/protocol-fee-comparison/model.js';
-import { NEAR_RPC } from './near.js';
+import { NEAR_RPC, isUnknownBlockError } from './near.js';
 
 export { NEAR_NET_SUPPLY_METHOD };
-const INDEX = 'https://api.nearblocks.io/v3/blocks';
+const INDEX = 'https://coins.llama.fi/block/near';
 const atomic = value => typeof value === 'string' && /^\d+$/.test(value);
 const nanoseconds = day => BigInt(dayTime(day)) * 1_000_000n;
 
@@ -51,6 +51,16 @@ export async function collectNearNetSupply({ request, boundaries = {}, startDay,
   }
   const head = await block({ finality: 'final' });
   if (BigInt(head.timestamp_nanosec) < nanoseconds(endDay)) throw new Error('NEAR archive is behind the completed-day cutoff');
+  async function producedAtOrAfter(height) {
+    for (let skip = 0; skip < 100 && height + skip <= head.height; skip++) {
+      try {
+        const found = await block({ block_id: height + skip });
+        if (found.height !== height + skip) throw new Error('NEAR archive returned the wrong height');
+        return found;
+      } catch (error) { if (!isUnknownBlockError(error)) throw error; }
+    }
+    throw new Error('NEAR supply boundary has too many missing or unfinalized heights');
+  }
   const dates = [...calendarDays(startDay, endDay), endDay].reverse();
   for (const day of dates) {
     const cached = boundaries[day];
@@ -59,21 +69,37 @@ export async function collectNearNetSupply({ request, boundaries = {}, startDay,
       if (cached.after.height > head.height) throw new Error('NEAR cached supply boundary is ahead of finalized head');
       continue;
     }
-    // Nearblocks' public cursor is base64(JSON({timestamp})); prev uses >.
-    const cursor = Buffer.from(JSON.stringify({ timestamp: (nanoseconds(day) - 1n).toString() })).toString('base64');
-    const hint = await request(`${INDEX}?limit=1&prev=${encodeURIComponent(cursor)}`);
-    const candidate = hint?.data?.[0], height = Number(candidate?.block_height);
-    if (hint?.data?.length !== 1 || !Number.isSafeInteger(height) || height <= 0 || height > head.height) {
+    const hint = await request(`${INDEX}/${dayTime(day) / 1000}`);
+    const height = Number(hint?.height), target = nanoseconds(day);
+    if (!Number.isSafeInteger(height) || height <= 1 || height > head.height) {
       throw new Error(`NEAR supply boundary hint unavailable or unfinalized ${day}`);
     }
-    const after = await block({ block_id: height });
-    if (after.height !== height || after.hash !== candidate.block_hash) throw new Error(`NEAR supply index/archive mismatch ${day}`);
-    const before = await block({ block_id: after.prev_hash });
-    const proof = verifyNearSupplyBoundary(day, before, after);
+    // The public closest-block index has second precision, not an exact UTC
+    // boundary. Start one height earlier and walk canonical linked headers in
+    // either direction. Never take its timestamp or supply as accounting data.
+    let current = await producedAtOrAfter(height - 1), proof;
+    for (let step = 0; step < 100; step++) {
+      const timestamp = BigInt(current.timestamp_nanosec);
+      if (timestamp < target - 300_000_000_000n || timestamp > target + 300_000_000_000n) {
+        throw new Error(`NEAR supply boundary hint too far from midnight ${day}`);
+      }
+      if (timestamp >= target) {
+        const previous = await block({ block_id: current.prev_hash });
+        if (BigInt(previous.timestamp_nanosec) < target) { proof = verifyNearSupplyBoundary(day, previous, current); break; }
+        if (current.prev_hash !== previous.hash || current.prev_height !== previous.height || previous.height >= current.height) throw new Error('Unverified NEAR supply parent link');
+        current = previous;
+      } else {
+        const following = await producedAtOrAfter(current.height + 1);
+        if (BigInt(following.timestamp_nanosec) >= target) { proof = verifyNearSupplyBoundary(day, current, following); break; }
+        if (following.prev_hash !== current.hash || following.prev_height !== current.height) throw new Error('Unverified NEAR supply forward link');
+        current = following;
+      }
+    }
+    if (!proof) throw new Error(`NEAR supply boundary search exhausted ${day}`);
     // Only durable, fully verified boundaries are reused after interruption.
     boundaries[day] = proof;
     await save();
-    log(`NEAR net-supply boundary verified ${day} (${before.height} → ${after.height})`);
+    log(`NEAR net-supply boundary verified ${day} (${proof.before.height} → ${proof.after.height})`);
   }
   // Initial migration is all-or-nothing for derived days; checkpoints retain
   // boundary work without replacing a complete gross-method chart with gaps.
