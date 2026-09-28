@@ -32,12 +32,13 @@ export function utcDayLabel(day) {
  * aggregation, currency conversion, interpolation or baseline rebasing here.
  */
 export function buildTimeSeriesOption(rows, {
-  axes, series, tooltip, hidden = [], window = null, width = 1000,
+  axes, series, tooltip, groupedTooltip = null, hidden = [], window = null, width = 1000,
   zoomId = TIME_SERIES_ZOOM_ID, minSpan = 1, xLabel = utcDayLabel,
   zoom = true, compact = false, tooltipEnabled = true, sourceGrain = 'day', calendar = 'UTC', analysis = null
 }) {
   const spec = { rows, axes, series, sourceGrain, calendar };
   if (analysis) {
+    const sourceRows = rows;
     const view = analyzeTimeSeries(rows, analysis.baseSpec || spec, analysis);
     const originalTooltip = tooltip;
     rows = view.rows; axes = view.axes; series = view.series; hidden = view.hiddenAxes;
@@ -48,6 +49,16 @@ export function buildTimeSeriesOption(rows, {
       if (!view.grouped) return originalTooltip(row) + (averages.length ? '<br>' + timeSeriesTooltip(averages.map(item => ({
         ...item, text: `${item.label}: ${formatAnalysisValue(item, index)}${row.partial || row.provisional ? ' · PARTIAL' : ''}`
       }))) : '');
+      // Features can retain accounting/provenance detail after calendar grouping.
+      // The feature owns its reductions; shared rendering only supplies the source
+      // observations and appends the already-computed daily rolling overlays.
+      if (groupedTooltip) return groupedTooltip(row, {
+        rows: sourceRows.filter(point => point.day >= row.fromDay && point.day <= row.throughDay),
+        grain: view.grain, hidden: analysis.hidden || []
+      }) + (averages.length ? '<br>' + timeSeriesTooltip([
+        ...averages.map(item => ({ ...item, text: `${item.label}: ${formatAnalysisValue(item, index)}` })),
+        'Rolling overlays remain daily means; missing windows are unavailable.'
+      ]) : '');
       return timeSeriesTooltip([
         `${row.fromDay} → ${row.throughDay} · ${calendar} ${view.grain.toUpperCase()}${row.partial ? ' · PARTIAL BUCKET' : ''}`,
         ...view.visible.filter(item => item.legend !== false && !item.visibilityId).map(item => ({

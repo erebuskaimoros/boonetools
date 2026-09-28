@@ -5,13 +5,17 @@ const mono = "'JetBrains Mono', monospace";
 const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 export function comparisonTooltip(month, hidden = [], nearNetSupply = false) {
   if (!month) return '';
-  return `<div style="line-height:16px"><strong>${escape(formatComparisonMonth(month.month))}${month.partial ? ' · PARTIAL' : ''}</strong><br>${escape(month.fromDay)} → ${escape(month.throughDay)} UTC`
+  const title = month.month ? formatComparisonMonth(month.month) : month.title;
+  const dates = month.fromDay === month.throughDay ? month.fromDay : `${month.fromDay} → ${month.throughDay}`;
+  return `<div style="line-height:16px"><strong>${escape(title)}${month.partial ? ' · PARTIAL' : ''}</strong><br>${escape(dates)} UTC`
     + PROTOCOLS.filter(({ id }) => !hidden.includes(id)).map(({ id, label, color }) => {
-      const point = month.protocols[id];
+      const point = month.protocols?.[id];
+      const subsidyLabel = id === 'near' && nearNetSupply ? 'Net token supply change'
+        : id === 'thorchain' ? 'Token subsidy (Reserve rewards)' : 'Token subsidy (gross issuance)';
       const heading = `<div style="margin-top:8px"><span aria-hidden="true" data-series="${id}" style="display:inline-block;width:10px;height:10px;background:${color};border:1px solid ${color};border-radius:0"></span> <strong>${label}</strong>`;
-      return heading + (point.complete
-        ? `<br>Swap income: ${formatComparisonUsd(point.incomeUsd)}<br>${id === 'near' && nearNetSupply ? 'Net issuance' : 'Token subsidy'}: ${formatComparisonUsd(point.subsidyUsd)}<br><strong>After subsidy: ${formatComparisonUsd(point.netUsd)}</strong>`
-        : `<br>Unavailable · ${point.observedDays}/${point.expectedDays} days covered`) + '</div>';
+      return heading + (point?.complete
+        ? `<br>Fees collected: ${formatComparisonUsd(point.incomeUsd)}<br>${subsidyLabel}: ${formatComparisonUsd(point.subsidyUsd)}<br><strong>After subsidy: ${formatComparisonUsd(point.netUsd)}</strong>`
+        : `<br>Unavailable · ${escape(point?.observedDays ?? 0)}/${escape(point?.expectedDays ?? month.expectedDays ?? '?')} days covered`) + '</div>';
     }).join('') + `<div style="margin-top:8px">${nearNetSupply ? 'NEAR: whole-chain net supply change, including all protocol burns.' : 'NEAR: provisional income; 100% of chain issuance.'}<br>Not operating profit.</div></div>`;
 }
 

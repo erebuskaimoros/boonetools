@@ -76,6 +76,33 @@ test('monthly-only/weekly-only sources cannot be split into fictional daily buck
   }
 });
 
+test('grouped tooltip hook receives only its source bucket and visibility without changing generic or daily tooltips', () => {
+  const points = rows(14).map(Object.freeze);
+  Object.freeze(points);
+  let calls = 0;
+  const groupedTooltip = (bucket, context) => {
+    calls++;
+    assert.equal(bucket.fromDay, '2024-01-08');
+    assert.equal(context.grain, 'week');
+    assert.deepEqual(context.rows, points.slice(7));
+    assert.deepEqual(context.hidden, ['stock']);
+    return 'Feature-owned detail';
+  };
+  const grouped = builder(points, { groupedTooltip,
+    analysis: { grain: 'week', hidden: ['stock'], rolling: ['flow-7d'] } });
+  const html = grouped.tooltip.formatter([{ dataIndex: 1 }]);
+  assert.match(html, /^Feature-owned detail/);
+  assert.match(html, /7D AVG · FLOW: 10/);
+  assert.match(html, /Rolling overlays remain daily means/);
+  assert.equal(calls, 1);
+  const daily = builder(points, { groupedTooltip, analysis: { grain: 'day' } });
+  assert.equal(daily.tooltip.formatter([{ dataIndex: 1 }]), '2024-01-02');
+  assert.equal(calls, 1);
+  const generic = builder(points, { analysis: { grain: 'week' } }).tooltip.formatter([{ dataIndex: 1 }]);
+  assert.match(generic, /FLOW: 70/);
+  assert.match(generic, /Flows: sum/);
+});
+
 test('event calendar uses verified times, observed closing balances, and block-count weighting across days', () => {
   const metrics = [
     { id: 'seconds', label: 'INTERVAL', color: '#00cc66', value: row => row.seconds, weight: row => row.blocks },

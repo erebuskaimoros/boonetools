@@ -53,6 +53,24 @@ epoch/boundary checkpoints (genesis on a cold cache). Rate limits, cooldowns
 and cancellations are respected, not routed around. This fallback was added
 after the June 14, 2026 hint repeatedly returned HTTP 500 during rollout.
 
+## Tooltip restoration — September 28, 2026
+
+The shared calendar controls had replaced this feature's detailed tooltip
+with a net-only summary for weekly/monthly views. Restore the feature-owned
+breakdown in all D/W/M views: fees collected, the applicable token subsidy or
+supply-change deduction, and after-subsidy income for each visible protocol.
+NEAR v3 is labeled **Net token supply change**; THORChain retains **Token
+subsidy (Reserve rewards)** and Chainflip **Token subsidy (gross issuance)**.
+Legacy NEAR snapshots retain the gross-issuance label. All values are USD
+using the same historical valuation as the plotted net amounts.
+
+Calendar details sum the bucket's source observations, preserve signed net
+issuance and unavailable data, and retain partial-bucket and rolling-average
+context. The NEAR frontend/other-retained split remains omitted. This is a
+frontend-only restoration: accounting, source acquisition, existing history,
+and the six-hour collector are unchanged. Regression tests exercise the actual
+shared-chart analysis path, including its default monthly grouping.
+
 ## Tooltip simplification — September 20, 2026
 
 At the user's request, the monthly tooltip shows only swap income, token

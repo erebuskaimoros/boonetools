@@ -90,9 +90,9 @@ test('tooltip shows income, subsidy and net without the included NEAR breakdown'
   assert.match(tooltip, /PARTIAL/);
   assert.match(tooltip, /2026-09-17 UTC/);
   assert.equal((tooltip.match(/data-series=/g) || []).length, 3);
-  assert.match(tooltip, /Swap income:/); assert.match(tooltip, /Token subsidy:/);
+  assert.match(tooltip, /Fees collected:/); assert.match(tooltip, /Token subsidy \(Reserve rewards\):/);
   assert.doesNotMatch(tooltip, /Own frontend|Other retained income/);
-  assert.match(tooltip, /Swap income: \$340<br>Token subsidy: \$3,400<br><strong>After subsidy: -\$3,060/);
+  assert.match(tooltip, /Fees collected: \$340<br>Token subsidy \(gross issuance\): \$3,400<br><strong>After subsidy: -\$3,060/);
   assert.match(tooltip, /100% of chain issuance/);
   assert.doesNotMatch(comparisonTooltip(months[0], ['near']), /data-series="near"/);
   assert.equal(comparisonOption(months, ['near']).series.length, 2);
@@ -113,11 +113,21 @@ test('legacy or incomplete NEAR breakdowns do not affect the displayed total', (
 
 test('net-supply tooltips identify NEAR separately without relabeling TC, CF or old snapshots', () => {
   const monthly = comparisonTooltip(months[1], [], true);
-  assert.match(monthly, /Swap income: \$340<br>Net issuance: \$3,400/);
-  assert.equal((monthly.match(/Token subsidy:/g) || []).length, 2);
+  assert.match(monthly, /Fees collected: \$340<br>Net token supply change: \$3,400/);
+  assert.equal((monthly.match(/Token subsidy \(/g) || []).length, 2);
   assert.match(monthly, /including all protocol burns/);
   const daily = buildComparisonTimeSeries(days, { nearNetSupply: true }).tooltip.formatter([{ dataIndex: 0 }]);
-  assert.match(daily, /Net issuance: \$200/);
+  assert.match(daily, /Net token supply change: \$200/);
   assert.match(daily, /including all protocol burns/);
-  assert.doesNotMatch(comparisonTooltip(months[1]), /Net issuance:/);
+  assert.doesNotMatch(comparisonTooltip(months[1]), /Net token supply change:/);
+});
+
+test('tooltip bucket metadata is escaped and missing protocol coverage is never zero income', () => {
+  const html = comparisonTooltip({ title: '<img src=x>', fromDay: '<start>', throughDay: '<end>',
+    expectedDays: '3<script>', protocols: { near: { complete: false, observedDays: '<b>', expectedDays: '<i>' } } });
+  assert.doesNotMatch(html, /<img|<start>|<end>|<script>|<b>|<i>/);
+  assert.match(html, /&lt;img src=x&gt;/);
+  assert.match(html, /0\/3&lt;script&gt; days covered/);
+  assert.match(html, /&lt;b&gt;\/&lt;i&gt; days covered/);
+  assert.doesNotMatch(html, /Fees collected: \$0/);
 });
