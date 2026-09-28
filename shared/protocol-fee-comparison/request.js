@@ -2,7 +2,7 @@ import { requestFromProviders } from '../provider-client.js';
 
 const ORIGINS = new Set(['https://gateway.liquify.com', 'https://api.llama.fi', 'https://coins.llama.fi',
   'https://revenue.near.org', 'https://mainnet-archive.chainflip.io',
-  'https://archival-rpc.mainnet.fastnear.com', 'https://transfers.main.fastnear.com']);
+  'https://archival-rpc.mainnet.fastnear.com', 'https://transfers.main.fastnear.com', 'https://api.nearblocks.io']);
 
 function pacedWait(milliseconds, signal) {
   signal?.throwIfAborted();
@@ -17,7 +17,7 @@ function pacedWait(milliseconds, signal) {
 // Runtime-neutral transport: production injects metrics and DB cooldown hooks;
 // Vite must not load backend configuration, credentials or package dependencies.
 export function createComparisonRequest({ transport = requestFromProviders, hooks = {} } = {}) {
-  let nearQueue = Promise.resolve(), lastNearRequest = 0;
+  const queues = new Map();
   return (url, { method = 'GET', body, responseType = 'json', signal } = {}) => {
     const parsed = new URL(url);
     if (!ORIGINS.has(parsed.origin)) throw new Error('Comparison provider not allowlisted');
@@ -38,15 +38,18 @@ export function createComparisonRequest({ transport = requestFromProviders, hook
           ? undefined : hooks.onProviderError?.(error, context)
       });
     };
-    if (!parsed.hostname.endsWith('.fastnear.com')) return run();
-    const pending = nearQueue.then(async () => {
+    if (!parsed.hostname.endsWith('.fastnear.com') && parsed.hostname !== 'api.nearblocks.io') return run();
+    const key = parsed.hostname === 'api.nearblocks.io' ? 'nearblocks' : 'fastnear';
+    if (!queues.has(key)) queues.set(key, { pending: Promise.resolve(), lastRequest: 0 });
+    const queue = queues.get(key);
+    const pending = queue.pending.then(async () => {
       signal?.throwIfAborted();
-      const delay = Math.max(0, 1200 - (Date.now() - lastNearRequest));
+      const delay = Math.max(0, 1200 - (Date.now() - queue.lastRequest));
       if (delay) await pacedWait(delay, signal);
-      lastNearRequest = Date.now();
+      queue.lastRequest = Date.now();
       return run();
     });
-    nearQueue = pending.catch(() => {});
+    queue.pending = pending.catch(() => {});
     return pending;
   };
 }

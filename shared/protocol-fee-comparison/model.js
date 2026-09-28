@@ -4,7 +4,8 @@ export function comparisonStartDay(now = Date.now()) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 12, 1)).toISOString().slice(0, 10);
 }
 export const COMPARISON_MODEL_KEY = 'protocol-fee-comparison:v1';
-export const COMPARISON_METHODOLOGY = 'swap-income-less-gross-network-subsidy-v2';
+export const COMPARISON_METHODOLOGY = 'swap-income-less-network-subsidy-near-net-v3';
+export const NEAR_NET_SUPPLY_METHOD = 'onchain-utc-net-supply-v1';
 export const COMPARISON_REFRESH_MS = 6 * 60 * 60_000;
 export const DAY_MS = 86_400_000;
 export const PROTOCOLS = Object.freeze([

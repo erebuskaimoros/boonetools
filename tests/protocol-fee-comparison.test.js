@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ageComparisonPayload, comparisonStartDay, hasComparisonData, calendarDays, contribution, monthlyComparison, formatComparisonUsd } from '../shared/protocol-fee-comparison/model.js';
 import { comparisonOption, comparisonTooltip } from '../src/lib/protocol-fee-comparison/options.js';
+import { buildComparisonTimeSeries } from '../src/lib/protocol-fee-comparison/time-series.js';
 
 const now = Date.parse('2026-09-18T12:00:00Z');
 const days = calendarDays('2026-08-01', '2026-09-18').map((day) => ({ day,
@@ -108,4 +109,15 @@ test('legacy or incomplete NEAR breakdowns do not affect the displayed total', (
   const result = monthlyComparison(missing, { now, startDay: '2026-08-01', endDay: '2026-09-18' });
   assert.equal(result[0].protocols.near.frontendIncomeUsd, null);
   assert.equal(result[0].protocols.near.incomeUsd, 620);
+});
+
+test('net-supply tooltips identify NEAR separately without relabeling TC, CF or old snapshots', () => {
+  const monthly = comparisonTooltip(months[1], [], true);
+  assert.match(monthly, /Swap income: \$340<br>Net issuance: \$3,400/);
+  assert.equal((monthly.match(/Token subsidy:/g) || []).length, 2);
+  assert.match(monthly, /including all protocol burns/);
+  const daily = buildComparisonTimeSeries(days, { nearNetSupply: true }).tooltip.formatter([{ dataIndex: 0 }]);
+  assert.match(daily, /Net issuance: \$200/);
+  assert.match(daily, /including all protocol burns/);
+  assert.doesNotMatch(comparisonTooltip(months[1]), /Net issuance:/);
 });

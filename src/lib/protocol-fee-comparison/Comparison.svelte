@@ -2,11 +2,12 @@
   import { onMount, onDestroy } from 'svelte';
   import TerminalAlert from '../components/terminal/TerminalAlert.svelte';
   import { booneToolsApi } from '../api/boonetools.js';
-  import { PROTOCOLS, COMPARISON_METHODOLOGY, comparisonStartDay, formatComparisonMonth, formatComparisonUsd } from '../../../shared/protocol-fee-comparison/model.js';
+  import { PROTOCOLS, COMPARISON_METHODOLOGY, NEAR_NET_SUPPLY_METHOD, comparisonStartDay, formatComparisonMonth, formatComparisonUsd } from '../../../shared/protocol-fee-comparison/model.js';
   let payload, Chart, error = '', loading = true, hidden = [], timer, request, destroyed = false, generation = 0;
   $: incomplete = payload?.months?.some(month => PROTOCOLS.some(({ id }) => !month.protocols[id].complete));
   $: nearOnchain = payload?.nearIssuanceMethod === 'onchain-epoch-mints-v1';
-  $: includesFrontend = payload?.methodology === COMPARISON_METHODOLOGY;
+  $: nearNetSupply = payload?.nearIssuanceMethod === NEAR_NET_SUPPLY_METHOD;
+  $: includesFrontend = [COMPARISON_METHODOLOGY, 'swap-income-less-gross-network-subsidy-v2'].includes(payload?.methodology);
   async function load() {
     const current = ++generation;
     request?.abort(); request = new AbortController(); clearTimeout(timer);
@@ -41,14 +42,14 @@
   </div>
   {#if error}<TerminalAlert tone="warn" tag="DATA">{error}</TerminalAlert>{/if}
   {#if incomplete}<TerminalAlert tone="warn" tag="GAPS">Historical backfill is incomplete. Missing bars mean unavailable data, not zero; see monthly coverage below.</TerminalAlert>{/if}
-  {#if Chart && payload?.months?.length}<svelte:component this={Chart} months={payload.months} daily={payload.daily || []} {hidden} />
+  {#if Chart && payload?.months?.length}<svelte:component this={Chart} months={payload.months} daily={payload.daily || []} {hidden} {nearNetSupply} />
   {:else}<div class="empty" role="status">{loading ? 'Loading monthly comparison…' : 'Waiting for verified source coverage. No estimates are substituted for missing data.'}</div>{/if}
   <div class="footer"><span>{payload?.fromDay || comparisonStartDay()} → {payload?.throughDay || 'pending'} · UTC</span><span>{payload?.stale ? 'SOURCE DELAYED' : 'REFRESHES EVERY 6 HOURS'} · * partial month</span></div>
-  <p class="qualification"><strong>100% network-subsidy scenario, not operating profit.</strong> NEAR Intents uses provisional retained wallet receipts{includesFrontend ? ', including its own frontend,' : ', excluding its frontend in this older snapshot,'} and deducts {nearOnchain ? 'on-chain' : 'modeled'} issuance for the entire NEAR chain, which also secures other applications. THORChain includes reported Reserve block rewards; Chainflip uses historical on-chain issuance before burns.</p>
+  <p class="qualification"><strong>100% network-subsidy scenario, not operating profit.</strong> NEAR Intents uses provisional retained wallet receipts{includesFrontend ? ', including its own frontend,' : ', excluding its frontend in this older snapshot,'} and deducts {nearNetSupply ? 'exact net supply change (emissions minus all protocol burns, not just gas fees)' : nearOnchain ? 'gross on-chain issuance in this older snapshot' : 'modeled gross issuance in this older snapshot'} for the entire NEAR chain, which also secures other applications. THORChain includes reported Reserve block rewards; Chainflip uses historical on-chain issuance before burns.</p>
   <details><summary>METHODOLOGY &amp; MONTHLY DATA</summary>
     <p>THORChain: Midgard liquidity fees minus reported block rewards, valued using each day’s RUNE price. The signed block-reward field can contain accounting residuals; it is not an audited gross Reserve-release ledger.</p>
     <p>Chainflip: AMM Network Fee income only, minus historical FLIP emissions reconstructed from finalized blocks and their on-chain emission amounts. LP, broker, gas and lending income are excluded. Unverified runtime upgrades leave a data gap, never an assumed emission rate.</p>
-    <p>NEAR: {includesFrontend ? 'total retained Intents revenue across its proprietary frontend, 1Click fund and buyback wallets. The included frontend share is allocated using each day’s NEAR/wNEAR receipt split ' : 'this older snapshot excludes the proprietary frontend share from retained Intents revenue'}. Third-party payouts, internal transfers and contract-call deposits are excluded. Deducts {nearOnchain ? 'gross whole-chain issuance measured from epoch-boundary supply changes plus included chunk burns' : 'the official dashboard’s daily whole-chain issuance model (retained until the archive backfill is verified)'}. The receipt proxy does not reconcile with the dashboard’s other revenue streams. No verifier fee or frontend income is added a second time.</p>
+    <p>NEAR: {includesFrontend ? 'total retained Intents revenue across its proprietary frontend, 1Click fund and buyback wallets. The included frontend share is allocated using each day’s NEAR/wNEAR receipt split ' : 'this older snapshot excludes the proprietary frontend share from retained Intents revenue'}. Third-party payouts, internal transfers and contract-call deposits are excluded. Deducts {nearNetSupply ? 'the change in total NEAR supply between archive-verified UTC day boundaries, including gas-fee burns, slashing and any other protocol destruction. This is whole-chain net issuance, not gross gas fees paid or Intents-only costs. Negative issuance is retained, not floored to zero' : nearOnchain ? 'gross whole-chain issuance measured from epoch-boundary supply changes plus included chunk burns' : 'the official dashboard’s daily whole-chain issuance model'}. The receipt proxy does not reconcile with the dashboard’s other revenue streams. No verifier fee or frontend income is added a second time.</p>
     <p>Subsidies use historical daily USD prices before summing months. All series share the same cutoff, using completed UTC days. Missing days make that protocol’s month unavailable; the current month may be partial.</p>
     {#if payload?.errors?.length}<p class="diagnostic">{payload.errors.join(' · ')}</p>{/if}
     {#if payload?.months?.length}
@@ -63,7 +64,7 @@
       </div>
     {/if}
   </details>
-  <div class="sources">SOURCES <a href="https://gateway.liquify.com/chain/thorchain_midgard/v2/doc" target="_blank" rel="noreferrer">Midgard</a> · <a href="https://defillama.com/protocol/chainflip" target="_blank" rel="noreferrer">DeFiLlama</a> · <a href="https://docs.fastnear.com/" target="_blank" rel="noreferrer">FastNear</a> · <a href="https://revenue.near.org/" target="_blank" rel="noreferrer">NEAR dashboard</a> · <a href="https://scan.chainflip.io/" target="_blank" rel="noreferrer">Chainflip</a>{#if payload?.nearWalletMethod !== 'fastnear-transfers-v1'} · Powered by <a href="https://dune.com/queries/8767542" target="_blank" rel="noreferrer">Dune</a>{/if}</div>
+  <div class="sources">SOURCES <a href="https://gateway.liquify.com/chain/thorchain_midgard/v2/doc" target="_blank" rel="noreferrer">Midgard</a> · <a href="https://defillama.com/protocol/chainflip" target="_blank" rel="noreferrer">DeFiLlama</a> · <a href="https://docs.fastnear.com/" target="_blank" rel="noreferrer">FastNear</a> · <a href="https://nearblocks.io/" target="_blank" rel="noreferrer">Nearblocks boundary index</a> · <a href="https://scan.chainflip.io/" target="_blank" rel="noreferrer">Chainflip</a>{#if payload?.nearWalletMethod !== 'fastnear-transfers-v1'} · Powered by <a href="https://dune.com/queries/8767542" target="_blank" rel="noreferrer">Dune</a>{/if}</div>
 </section>
 
 <style>

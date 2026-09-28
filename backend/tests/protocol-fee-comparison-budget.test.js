@@ -90,6 +90,7 @@ function jobFixture() {
   cache.days['2026-09-01'] = {
     earnings: { liquidityFees: '200000000', blockRewards: '100000000', runePriceUSD: '1' },
     nearRevenue: 3, nearPrice: 1, nearIssuance: 1,
+    nearNetIssuanceAtomic: '1000000000000000000000000', nearNetIssuanceMethod: 'onchain-utc-net-supply-v1',
     wallets: { frontend_near: 0, other_near: 1 },
     chainflipRevenue: 4, flipPrice: 1, flipIssuance: { atomic: '1000000000000000000' }
   };

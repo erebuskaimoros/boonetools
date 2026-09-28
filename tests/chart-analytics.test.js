@@ -110,6 +110,7 @@ test('comparison daily read-model has identical accounting and the same verified
   const cache = emptyComparisonCache();
   const raw = { earnings: { liquidityFees: '10000000000', blockRewards: '-1000000', runePriceUSD: '2' },
     wallets: { frontend_near: 1, other_near: 3 }, nearRevenue: 100, nearPrice: 2, nearIssuance: 200,
+    nearNetIssuanceAtomic: '200000000000000000000000000', nearNetIssuanceMethod: 'onchain-utc-net-supply-v1',
     chainflipRevenue: 30, flipPrice: .5, flipIssuance: { atomic: '20000000000000000000' } };
   cache.days['2026-09-01'] = raw; cache.days['2026-09-02'] = raw;
   cache.days['2026-09-03'] = { ...raw, flipIssuance: null };

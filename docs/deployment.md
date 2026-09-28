@@ -82,6 +82,20 @@ data acquisition. Routine deployment does not populate a cold database or prove
 historical completeness; provision/bootstrap new features deliberately. See
 [backend operations](./boonetools-backend-hetzner.md) for feature-specific jobs.
 
+### NEAR net-supply methodology rollout
+
+Deploy the backend before the frontend. The comparison's existing raw cache is
+preserved; do not run the first-install seed script over it. Start the existing
+`boonetools-protocol-fee-comparison.service` deliberately to acquire the new
+UTC supply boundaries. If the 20-minute budget defers acquisition, a subsequent
+run resumes verified pairs. Do not interrupt an already-running collector.
+The old public snapshot remains intact until the full boundary window is ready.
+Verify `nearIssuanceMethod=onchain-utc-net-supply-v1`, methodology v3, all monthly
+coverage, and daily `incomeUsd - subsidyUsd = netUsd` before calling the
+methodology migration complete. The six-hour timer then maintains it normally.
+No database migration or cache reset is required. See
+[the accounting note](../knowledge/protocol-fee-comparison.md#near-net-supply-methodology--september-28-2026).
+
 ## Troubleshooting
 
 A refused deploy identifies missing CI, an unpublished commit, a wrong origin,

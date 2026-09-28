@@ -2,8 +2,47 @@
 
 Scope: a second ECharts panel below Financials, USD calendar months only,
 current month partial through a common completed UTC day. Metric is swap
-income minus gross token subsidy, following the September 18, 2026 report
-in the workspace's `artifacts/protocol-fee-comparison/2026-09-18/`.
+income minus network token subsidy, originally following the September 18,
+2026 report in `artifacts/protocol-fee-comparison/2026-09-18/`. NEAR now uses
+net issuance under the user-approved change below; TC and CF are unchanged.
+
+## NEAR net supply methodology — September 28, 2026
+
+Methodology v3 (`swap-income-less-network-subsidy-near-net-v3`) deducts the
+**exact whole-chain supply change**, not gross NEAR emissions. The user
+explicitly approved including all protocol burns, not only gas-fee burns.
+For each completed UTC day:
+
+`net USD = retained swap income USD − (closing supply − opening supply) / 1e24 × historical NEAR price`
+
+Subtract yoctoNEAR integer strings using BigInt before converting to NEAR.
+Preserve deflation as negative issuance. Never subtract another burn series
+or add frontend income again. The income boundary and price series are unchanged.
+Whole-chain net issuance still supports applications beyond Intents; this is
+not Intents operating profit or a measurement of Intents' gas sponsorship.
+
+The public Nearblocks V3 timestamp cursor locates the first block at/after
+each UTC midnight. It supplies a **hint**, not a supply observation. FastNear's
+archival RPC reads the canonical block by height, checks the index hash, then
+reads its parent. The adjacent linked headers must straddle midnight exactly;
+the parent's `total_supply` is the boundary value. A midnight block belongs
+to the new day. Both blocks must be no later than the finalized head. Skipped
+heights are allowed only when the parent hash and previous height agree.
+
+Verified pairs are stored in `cache.nearSupplyBoundaries`. Complete daily
+deltas are stored as `nearNetIssuanceAtomic` with method
+`onchain-utc-net-supply-v1`. Initial backfill checkpoints persist proofs without
+publishing incomplete derived history; the existing gross-method snapshot
+remains available until the complete required boundary window is verified.
+The storage key stays `protocol-fee-comparison:v1`, while the payload methodology
+and source-method fields distinguish the accounting version. The frontend
+continues to label legacy snapshots accurately during rollout.
+
+Old `nearEpochs` and gross issuance observations are retained for audit but are
+no longer acquired or used in the deduction. FastNear's public `burnt-tokens`
+feed did not reconcile with mint-minus-supply observations and is not used.
+Nearblocks and FastNear requests are independently paced; the usual runtime
+budget, checkpoint/resume behavior, common cutoff and missing-data rules remain.
 
 ## Tooltip simplification — September 20, 2026
 
@@ -106,9 +145,10 @@ See [the repair record](sessions/2026-09-18/session-3.md) for rollout verificati
   not add wallet receipts to it again. Daily receipt ratios retain the frontend
   and other shares separately in the API, not the tooltip. Third-party payouts remain
   outside retained income. Public FastNear transfers exclude
-  internal transfers and contract-call deposits. The official daily whole-chain
-  issuance model remains explicitly labeled until the complete archive mint
-  window is verified. Dune query **8767542** is a reconciliation reference only,
+  internal transfers and contract-call deposits. Deduct exact whole-chain net
+  supply change, including all protocol burns, using the v3 method above.
+  The earlier gross issuance/model observations are audit history only.
+  Dune query **8767542** is a reconciliation reference only,
   not a production dependency. This is a 100% network-subsidy scenario and
   provisional income, not Intents operating profit.
 - CF: DeFiLlama `chainflip-amm` dailyRevenue (swap Network Fee, not LP fees)

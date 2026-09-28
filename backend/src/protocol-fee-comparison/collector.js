@@ -1,6 +1,7 @@
 import { calendarDays, COMPARISON_METHODOLOGY, comparisonStartDay, contribution, DAY_MS, dayOf, dayTime, finite, monthlyComparison, nextDay, PROTOCOLS } from '../../../shared/protocol-fee-comparison/model.js';
 import { createChainflipReader } from './chainflip.js';
-import { collectNearIssuance, nearWalletDays } from './near.js';
+import { nearWalletDays } from './near.js';
+import { collectNearNetSupply, NEAR_NET_SUPPLY_METHOD } from './near-net-supply.js';
 
 export const WALLET_QUERY_ID = '8767542';
 // Leave time for final persistence/publication before the service's 30m limit.
@@ -62,7 +63,12 @@ export function deriveComparisonDay(day, raw = {}) {
   const validRunePrice = runePrice > 0;
   const wallets = raw.wallets;
   const front = finite(wallets?.frontend_near), other = finite(wallets?.other_near);
-  const nearRevenue = finite(raw.nearRevenue), nearPrice = finite(raw.nearPrice), nearIssuance = finite(raw.nearIssuance);
+  const nearRevenue = finite(raw.nearRevenue), nearPrice = finite(raw.nearPrice);
+  // Exact supply change already includes all protocol burns. Do not subtract
+  // a burn feed again, clamp deflation, or fall back to the old gross model.
+  const nearIssuance = raw.nearNetIssuanceMethod === NEAR_NET_SUPPLY_METHOD
+    && typeof raw.nearNetIssuanceAtomic === 'string' && /^-?\d+$/.test(raw.nearNetIssuanceAtomic)
+    ? finite(Number(BigInt(raw.nearNetIssuanceAtomic)) / 1e24) : null;
   // dailyRevenue already includes the proprietary frontend, not third-party
   // distribution fees. Keep the full retained amount; split it for disclosure,
   // never add frontend receipts to that total a second time.
@@ -93,8 +99,8 @@ export function buildComparisonPayload(cache, { now = Date.now(), startDay = com
       || months.some((month) => PROTOCOLS.some(({ id }) => !month.protocols[id].complete)),
     errors, months, daily: daily.filter(row => throughDay && row.day <= throughDay), methodology: COMPARISON_METHODOLOGY,
     chainflipIssuance: 'Historical on-chain emission amounts × finalized block counts; not net supply or a reported monthly pace.',
-    nearAllocation: '100% of whole-chain NEAR issuance; retained Intents wallet-receipt income including its own frontend, excluding third-party payouts.',
-    nearIssuanceMethod: daysSourceMethod(cache, startDay, endDay, 'nearIssuanceMethod', 'nearIssuance', 'dashboard-model'),
+    nearAllocation: '100% of whole-chain NEAR net supply change (emissions minus all protocol burns, not just gas); retained Intents wallet-receipt income including its own frontend, excluding third-party payouts.',
+    nearIssuanceMethod: NEAR_NET_SUPPLY_METHOD,
     nearWalletMethod: daysSourceMethod(cache, startDay, endDay, 'source', 'wallets', 'dune'),
     nearWalletSource: 'https://docs.fastnear.com/transfers/query' };
 }
@@ -108,7 +114,7 @@ function daysSourceMethod(cache, startDay, endDay, key, field, fallback) {
 /** Independent scheduler. Each source and finalized FLIP day is persisted before moving on. */
 export async function collectComparison({ cache = emptyComparisonCache(), request, walletQuery, save = async () => {},
   now = Date.now(), startDay = comparisonStartDay(now), log = () => {}, chainflipReader, maxFlipDays = 400,
-  nearIssuanceReader = collectNearIssuance, maxRunMs = COMPARISON_MAX_RUN_MS, clock = Date.now } = {}) {
+  nearNetSupplyReader = collectNearNetSupply, maxRunMs = COMPARISON_MAX_RUN_MS, clock = Date.now } = {}) {
   if (cache.version !== 1) throw new Error('Unsupported protocol comparison cache');
   if (!(Number.isFinite(maxRunMs) && maxRunMs > 0)) throw new Error('Comparison runtime budget must be positive and finite');
   const endDay = dayOf(now), days = calendarDays(startDay, endDay);
@@ -169,15 +175,6 @@ export async function collectComparison({ cache = emptyComparisonCache(), reques
         for (const [timestamp, value] of result.totalDataChart) if (finite(value) !== null && value >= 0) put(dayOf(timestamp * 1000), { [field]: Number(value) });
       });
     }
-    await source('NEAR issuance model', async () => {
-      // Preserve the report's explicitly modeled series while exact archive
-      // acquisition catches up; do not replace any already verified on-chain day.
-      if (Object.values(cache.days).some(row => row.nearIssuanceMethod === 'onchain-epoch-mints-v1')) return;
-      const html = await request('https://revenue.near.org/', { responseType: 'text' });
-      for (const row of parseNearEmissions(html)) if (cache.days[row.date]?.nearIssuanceMethod !== 'onchain-epoch-mints-v1') {
-        put(row.date, { nearIssuance: row.value, nearIssuanceMethod: 'dashboard-model' });
-      }
-    });
     await source('Historical prices', async () => {
       const fromDay = [firstMissing('nearPrice'), firstMissing('flipPrice')].sort()[0];
       for (let from = dayTime(fromDay); from < dayTime(endDay); from += 60 * DAY_MS) {
@@ -203,9 +200,9 @@ export async function collectComparison({ cache = emptyComparisonCache(), reques
         }
       }
     });
-    await source('NEAR on-chain issuance', async () => {
-      cache.nearEpochs ||= {};
-      const rows = await nearIssuanceReader({ request, epochs: cache.nearEpochs, startDay, endDay, log, save: checkpoint });
+    await source('NEAR on-chain net supply', async () => {
+      cache.nearSupplyBoundaries ||= {};
+      const rows = await nearNetSupplyReader({ request, boundaries: cache.nearSupplyBoundaries, startDay, endDay, log, save: checkpoint });
       for (const { day, ...row } of rows) put(day, row);
     });
     await source('Chainflip issuance', async () => {

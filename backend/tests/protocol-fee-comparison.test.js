@@ -11,10 +11,25 @@ import { requestFromProviders } from '../../shared/provider-client.js';
 import { readComparisonCache, saveComparisonCache } from '../../scripts/dev-protocol-fee-comparison.mjs';
 import { FEE_WALLETS, nearEpochMint, nearWalletDays } from '../src/protocol-fee-comparison/near.js';
 
+test('NEAR deducts net issuance once, retains deflation and never substitutes old gross data', () => {
+  const raw = { nearRevenue: 100, nearPrice: 2, nearIssuance: 200,
+    wallets: { frontend_near: 1, other_near: 3 }, nearNetIssuanceMethod: 'onchain-utc-net-supply-v1' };
+  assert.equal(deriveComparisonDay('2026-09-01', raw).near.netUsd, null);
+  for (const [atomic, subsidy, net] of [
+    ['150000000000000000000000000', 300, -200], ['-10000000000000000000000000', -20, 120], ['0', 0, 100]
+  ]) {
+    const row = deriveComparisonDay('2026-09-01', { ...raw, nearNetIssuanceAtomic: atomic }).near;
+    assert.ok(Math.abs(row.subsidyUsd - subsidy) < 1e-9); assert.ok(Math.abs(row.netUsd - net) < 1e-9);
+    assert.equal(row.incomeUsd, 100);
+  }
+  for (const atomic of ['', null, 'NaN', '1.2']) assert.equal(deriveComparisonDay('2026-09-01', { ...raw, nearNetIssuanceAtomic: atomic }).near.netUsd, null);
+});
+
 test('retained NEAR income includes its frontend exactly once; subsidies and signed reserve residuals survive', () => {
   const row = deriveComparisonDay('2026-09-17', {
     earnings: { liquidityFees: '10000000000', blockRewards: '-1000000', runePriceUSD: '2' },
-    wallets: { frontend_near: 1, other_near: 3 }, nearRevenue: 100, nearPrice: 2, nearIssuance: 200,
+    wallets: { frontend_near: 1, other_near: 3 }, nearRevenue: 100, nearPrice: 2, nearIssuance: 999,
+    nearNetIssuanceAtomic: '200000000000000000000000000', nearNetIssuanceMethod: 'onchain-utc-net-supply-v1',
     chainflipRevenue: 30, flipPrice: .5, flipIssuance: { atomic: '20000000000000000000' }
   });
   assert.equal(row.thorchain.netUsd, 200.02);
@@ -25,7 +40,8 @@ test('retained NEAR income includes its frontend exactly once; subsidies and sig
 });
 
 test('NEAR frontend allocation handles zero receipts and refuses missing or inconsistent observations', () => {
-  const raw = { nearRevenue: 100, nearPrice: 2, nearIssuance: 200 };
+  const raw = { nearRevenue: 100, nearPrice: 2,
+    nearNetIssuanceAtomic: '200000000000000000000000000', nearNetIssuanceMethod: 'onchain-utc-net-supply-v1' };
   const derive = wallets => deriveComparisonDay('2026-09-17', { ...raw, wallets }).near;
   assert.equal(derive({ frontend_near: 4, other_near: 0 }).incomeUsd, 100);
   assert.equal(derive({ frontend_near: 4, other_near: 0 }).frontendIncomeUsd, 100);
@@ -178,7 +194,7 @@ test('collector aligns independently refreshed daily sources and preserves verif
     throw new Error(`Unexpected URL ${url}`);
   };
   const result = await collectComparison({ cache, now: Date.parse('2026-08-03'), startDay: '2026-08-01', request,
-    nearIssuanceReader: async () => days.map(day => ({ day, nearIssuance: 200 })),
+    nearNetSupplyReader: async () => days.map(day => ({ day, nearNetIssuanceAtomic: '200000000000000000000000000', nearNetIssuanceMethod: 'onchain-utc-net-supply-v1' })),
     walletQuery: async (id, parameters) => {
       assert.equal(id, '8767542'); walletParameters = parameters;
       return { rows: days.map((day) => ({ day, frontend_near: 1, other_near: 3 })), executionId: 'verified-fixture' };
@@ -191,7 +207,7 @@ test('collector aligns independently refreshed daily sources and preserves verif
   assert.equal(points.near.netUsd, -200);
   assert.equal(points.near.frontendIncomeUsd, 50);
   assert.equal(points.near.otherIncomeUsd, 150);
-  assert.equal(result.payload.methodology, 'swap-income-less-gross-network-subsidy-v2');
+  assert.equal(result.payload.methodology, 'swap-income-less-network-subsidy-near-net-v3');
   assert.equal(points.chainflip.netUsd, 180);
   const failed = await collectComparison({ cache, now: Date.parse('2026-08-03'), startDay: '2026-08-01', request: async () => { throw new Error('offline'); } });
   assert.equal(failed.payload.stale, true);

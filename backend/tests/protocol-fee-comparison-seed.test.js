@@ -5,6 +5,7 @@ import { comparisonSeedSql, prepareComparisonSeed } from '../scripts/seed-protoc
 const saved = () => ({ cache: { version: 1, boundaries: { '2026-09-01': { height: 1 } }, nearEpochs: { epoch: { minted: '10' } }, days: {
   '2026-09-01': { earnings: { runePriceUSD: 1, liquidityFees: 200000000, blockRewards: 100000000 },
     nearRevenue: 3, nearPrice: 1, nearIssuance: 1, wallets: { frontend_near: 0, other_near: 1, source: 'fastnear' },
+    nearNetIssuanceAtomic: '1000000000000000000000000', nearNetIssuanceMethod: 'onchain-utc-net-supply-v1',
     chainflipRevenue: 4, flipPrice: 1, flipIssuance: { atomic: '1000000000000000000' } }
 } }, payload: { asOf: '2026-09-02T12:00:00Z', errors: ['Historical archive unavailable'] } });
 

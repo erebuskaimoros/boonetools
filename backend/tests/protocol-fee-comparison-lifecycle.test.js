@@ -7,6 +7,7 @@ const NOW = Date.parse('2026-09-03T12:00:00Z');
 const day = (withFlip = true) => ({
   earnings: { liquidityFees: '200000000', blockRewards: '100000000', runePriceUSD: '1' },
   nearRevenue: 3, nearPrice: 1, nearIssuance: 1, nearIssuanceMethod: 'dashboard-model',
+  nearNetIssuanceAtomic: '1000000000000000000000000', nearNetIssuanceMethod: 'onchain-utc-net-supply-v1',
   wallets: { frontend_near: 0, other_near: 1, source: 'fastnear-transfers-v1' },
   chainflipRevenue: 4, flipPrice: 1,
   ...(withFlip ? { flipIssuance: { atomic: '1000000000000000000' } } : {})
@@ -67,7 +68,7 @@ test('cache-only rebuild uses the collector lock, preserves warnings and freshne
   assert.equal(client.saved.length, 0);
   assert.equal(client.published.length, 1);
   const payload = client.published[0];
-  assert.equal(payload.methodology, 'swap-income-less-gross-network-subsidy-v2');
+  assert.equal(payload.methodology, 'swap-income-less-network-subsidy-near-net-v3');
   assert.equal(payload.months.at(-1).protocols.near.incomeUsd, 3);
   assert.equal(payload.months.at(-1).protocols.near.frontendIncomeUsd, 1);
   assert.equal(payload.asOf, '2026-09-02T12:00:00.000Z');
@@ -84,13 +85,31 @@ test('cache-only rebuild refuses to replace the public model without usable save
   assert.equal(client.saved.length, 0);
 });
 
+test('net-supply migration preserves the public gross snapshot until verified daily history is ready', async () => {
+  const cache = emptyComparisonCache();
+  cache.days['2026-09-01'] = day();
+  delete cache.days['2026-09-01'].nearNetIssuanceAtomic;
+  delete cache.days['2026-09-01'].nearNetIssuanceMethod;
+  const client = database(cache, { methodology: 'swap-income-less-gross-network-subsidy-v2' });
+  await assert.rejects(runProtocolFeeComparison({ now: NOW, lockRunner: async (_key, run) => run(client),
+    collector: async ({ cache: current, save }) => {
+      assert.equal(client.published.length, 0);
+      current.nearSupplyBoundaries = { '2026-09-02': { method: 'onchain-utc-net-supply-v1' } };
+      await save(current);
+      assert.equal(client.saved.length, 1, 'boundary work remains durable');
+      assert.equal(client.published.length, 0, 'no new-method chart with fabricated or incomplete net issuance');
+      throw new Error('bounded migration');
+    }
+  }), /bounded migration/);
+});
+
 test('collector stops starting days at its runtime budget and returns saved progress for publication', async () => {
   const cache = emptyComparisonCache();
   cache.days['2026-09-01'] = day(false); cache.days['2026-09-02'] = day(false);
   let elapsed = 0;
   const calls = [], saved = [];
   const result = await collectComparison({ cache, now: NOW, startDay: '2026-09-01', maxRunMs: 10, clock: () => elapsed,
-    request: async () => { throw new Error('upstream unavailable'); }, nearIssuanceReader: async () => [],
+    request: async () => { throw new Error('upstream unavailable'); }, nearNetSupplyReader: async () => [],
     chainflipReader: { boundaries: {}, issuance: async date => {
       calls.push(date); elapsed += 11;
       return { atomic: '1000000000000000000', start: { height: 1 }, end: { height: 2 } };
