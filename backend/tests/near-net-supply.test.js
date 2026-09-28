@@ -93,6 +93,29 @@ test('late hints walk backwards and never accept an index timestamp as the bound
   assert.equal(rows[0].nearNetIssuanceAtomic, '9007199254740993');
 });
 
+test('failed height index falls back to exact archive search using saved epoch hints', async () => {
+  const f = fixture(), boundaries = {}, logs = [];
+  const epochs = Object.fromEntries(Object.values(f.pairs).flat().map(h => [h.height, { height: h.height, timestamp: Number(BigInt(h.timestamp_nanosec) / 1_000_000n) }]));
+  const rows = await collectNearNetSupply({ boundaries, epochs, startDay: date, endDay: end, log: message => logs.push(message), request: async (url, options) => {
+    if (url.includes('coins.llama')) throw Object.assign(new Error('Index unavailable'), { status: 500 });
+    return f.request(url, options);
+  } });
+  assert.equal(rows[0].nearNetIssuanceAtomic, '9007199254740993');
+  assert.equal(Object.keys(boundaries).length, 2);
+  assert.equal(logs.filter(message => message.includes('searching archive')).length, 2);
+});
+
+test('index rate limits and cancellation are not retried or bypassed by archive fallback', async () => {
+  for (const error of [Object.assign(new Error('Rate limited'), { status: 429 }), Object.assign(new Error('Canceled'), { status: 500, skipProvider: true })]) {
+    const f = fixture();
+    await assert.rejects(collectNearNetSupply({ startDay: date, endDay: end, request: async (url, options) => {
+      if (url.includes('coins.llama')) throw error;
+      return f.request(url, options);
+    } }), e => e === error);
+    assert.equal(f.calls.length, 1, 'only finalized head was read');
+  }
+});
+
 test('interrupted acquisition resumes verified boundaries without publishing partial daily history', async () => {
   const f = fixture(), boundaries = {};
   await assert.rejects(collectNearNetSupply({ ...f, boundaries, startDay: date, endDay: end, save: async () => { throw new Error('interrupted'); } }), /interrupted/);

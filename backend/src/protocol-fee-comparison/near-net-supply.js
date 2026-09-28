@@ -42,7 +42,7 @@ export function nearNetSupplyDays(boundaries, startDay, endDay) {
 }
 
 /** Indexer provides height hints only. Canonical archive headers prove the accounting boundaries. */
-export async function collectNearNetSupply({ request, boundaries = {}, startDay, endDay, save = async () => {}, log = () => {} }) {
+export async function collectNearNetSupply({ request, boundaries = {}, epochs = {}, startDay, endDay, save = async () => {}, log = () => {} }) {
   let sequence = 0;
   async function block(params) {
     const response = await request(NEAR_RPC, { method: 'POST', body: { jsonrpc: '2.0', id: ++sequence, method: 'block', params } });
@@ -61,6 +61,28 @@ export async function collectNearNetSupply({ request, boundaries = {}, startDay,
     }
     throw new Error('NEAR supply boundary has too many missing or unfinalized heights');
   }
+  async function archiveHint(day) {
+    const target = nanoseconds(day);
+    const anchors = [...Object.values(epochs).map(row => ({ height: row.height, timestamp: row.timestamp })),
+      ...Object.values(boundaries).flatMap(row => [row.before, row.after]).filter(Boolean)
+        .map(row => ({ height: row.height, timestamp: Number(BigInt(row.timestamp_nanosec) / 1_000_000n) }))]
+      .filter(row => Number.isSafeInteger(row.height) && Number.isFinite(row.timestamp));
+    const below = anchors.filter(row => row.timestamp < dayTime(day)).sort((a, b) => b.height - a.height)[0];
+    const above = anchors.filter(row => row.timestamp >= dayTime(day) && row.height <= head.height).sort((a, b) => a.height - b.height)[0];
+    // Mainnet genesis is used only on a cold cache with no earlier checkpoint.
+    const lower = await producedAtOrAfter(below?.height ?? 9820210);
+    const upper = above ? await producedAtOrAfter(above.height) : head;
+    if (BigInt(lower.timestamp_nanosec) >= target || BigInt(upper.timestamp_nanosec) < target || lower.height >= upper.height) throw new Error('NEAR supply archive search is not bracketed');
+    let low = lower.height + 1, high = upper.height;
+    for (let step = 0; low < high && step < 64; step++) {
+      const middle = Math.floor((low + high) / 2);
+      const found = await producedAtOrAfter(middle);
+      if (BigInt(found.timestamp_nanosec) < target) low = found.height + 1;
+      else high = middle; // include skipped heights before the first produced block
+    }
+    if (low !== high) throw new Error('NEAR supply archive search exhausted');
+    return { height: (await producedAtOrAfter(low)).height };
+  }
   const dates = [...calendarDays(startDay, endDay), endDay].reverse();
   for (const day of dates) {
     const cached = boundaries[day];
@@ -69,7 +91,16 @@ export async function collectNearNetSupply({ request, boundaries = {}, startDay,
       if (cached.after.height > head.height) throw new Error('NEAR cached supply boundary is ahead of finalized head');
       continue;
     }
-    const hint = await request(`${INDEX}/${dayTime(day) / 1000}`);
+    let hint;
+    try { hint = await request(`${INDEX}/${dayTime(day) / 1000}`); }
+    catch (error) {
+      // Respect rate limits, cooldowns and cancellation. A missing index/server
+      // error may use the independently paced canonical archive instead.
+      if (error.skipProvider || error.name === 'AbortError' || error.code === 'COMPARISON_RUN_BUDGET'
+        || !(error.status >= 500 || error.status === 404 || error.status === 408)) throw error;
+      log(`NEAR height index unavailable ${day}; searching archive checkpoints`);
+      hint = await archiveHint(day);
+    }
     const height = Number(hint?.height), target = nanoseconds(day);
     if (!Number.isSafeInteger(height) || height <= 1 || height > head.height) {
       throw new Error(`NEAR supply boundary hint unavailable or unfinalized ${day}`);

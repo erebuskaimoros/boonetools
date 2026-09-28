@@ -47,6 +47,11 @@ the reader now uses DeFiLlama's existing public provider instead. Its approximat
 second-resolution hints are corrected on-chain, including skipped heights, with
 bounded walks and a five-minute sanity window. FastNear requests remain paced;
 the usual runtime budget, checkpoint/resume, cutoff and missing-data rules remain.
+If a historical closest-block lookup returns a server error or missing record,
+the reader instead binary-searches the canonical archive, bracketed by saved
+epoch/boundary checkpoints (genesis on a cold cache). Rate limits, cooldowns
+and cancellations are respected, not routed around. This fallback was added
+after the June 14, 2026 hint repeatedly returned HTTP 500 during rollout.
 
 ## Tooltip simplification — September 20, 2026
 

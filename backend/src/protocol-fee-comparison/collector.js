@@ -202,7 +202,7 @@ export async function collectComparison({ cache = emptyComparisonCache(), reques
     });
     await source('NEAR on-chain net supply', async () => {
       cache.nearSupplyBoundaries ||= {};
-      const rows = await nearNetSupplyReader({ request, boundaries: cache.nearSupplyBoundaries, startDay, endDay, log, save: checkpoint });
+      const rows = await nearNetSupplyReader({ request, boundaries: cache.nearSupplyBoundaries, epochs: cache.nearEpochs || {}, startDay, endDay, log, save: checkpoint });
       for (const { day, ...row } of rows) put(day, row);
     });
     await source('Chainflip issuance', async () => {
