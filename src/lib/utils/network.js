@@ -30,6 +30,7 @@
 
 import { fetchJSONWithFallback } from './api.js';
 import { fromBaseUnit } from './blockchain.js';
+import { CHAIN_LOGOS } from '../constants/assets.js';
 
 // ============================================
 // Constants
@@ -79,21 +80,7 @@ export const CHAIN_NATIVE_TOKENS = {
  * Chain icon paths (relative to /assets/chains/)
  * @type {Object.<string, string>}
  */
-export const CHAIN_ICONS = {
-  BTC: '/assets/chains/BTC.svg',
-  ETH: '/assets/chains/ETH.svg',
-  BCH: '/assets/chains/BCH.svg',
-  LTC: '/assets/chains/LTC.svg',
-  DOGE: '/assets/chains/DOGE.svg',
-  AVAX: '/assets/chains/AVAX.svg',
-  BSC: '/assets/chains/BSC.svg',
-  GAIA: '/assets/chains/GAIA.svg',
-  THOR: '/assets/chains/THOR.svg',
-  BASE: '/assets/chains/BASE.svg',
-  XRP: '/assets/chains/XRP.svg',
-  TRON: '/assets/chains/TRON.svg',
-  SOL: '/assets/chains/SOL.svg'
-};
+export const CHAIN_ICONS = CHAIN_LOGOS;
 
 // ============================================
 // Cache for inbound addresses

@@ -22,6 +22,8 @@ export const ASSET_LOGOS = {
   'TRON.TRX': '/assets/coins/TRON.svg',
   'XRP.XRP': '/assets/chains/XRP.svg',
   'SOL.SOL': '/assets/coins/solana-sol-logo.svg',
+  // Official Zcash yellow brandmark: https://z.cash/press/
+  'ZEC.ZEC': '/assets/chains/ZEC.svg',
 
   // Stablecoins - Ethereum
   'ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48': '/assets/coins/usd-coin-usdc-logo.svg',
@@ -66,10 +68,12 @@ export const ASSET_LOGOS = {
   // Other tokens
   'BSC.TWT-0X4B0F1812E5DF2A09796481FF14017E6005508003': '/assets/coins/twt-logo.png',
   'AVAX.SOL-0XFE6B19286885A4F7F55ADAD09C3CD1F906D2478F': '/assets/coins/solana-sol-logo.svg',
+  // Official Venice off-white keys: https://venice.ai/brand
+  'BASE.VVV-0XACFE6019ED1A7DC6F7B508C02D1B04EC88CC21BF': '/assets/coins/VVV.svg',
 
   // THORChain native
   'THOR.TCY': '/assets/coins/TCY.svg',
-  'THOR.RUJI': '/assets/coins/ruji-logo.svg'
+  'THOR.RUJI': '/assets/coins/RUJI.svg'
 };
 
 /**
@@ -85,14 +89,15 @@ export function getAssetLogo(asset) {
     return ASSET_LOGOS[asset];
   }
 
-  // Try uppercase version (some components pass lowercase)
-  const upperAsset = asset.toUpperCase();
+  // Native, trade (~), secured (-), and synth (/) assets share artwork.
+  // Replace only the chain separator, leaving token contract suffixes intact.
+  const upperAsset = asset.toUpperCase().replace(/^([A-Z0-9]+)[~/-]/, '$1.');
   if (ASSET_LOGOS[upperAsset]) {
     return ASSET_LOGOS[upperAsset];
   }
 
   // Fallback: try to match by symbol
-  const symbol = asset.split('.')[1]?.split('-')[0];
+  const symbol = upperAsset.split('.')[1]?.split('-')[0];
   if (symbol) {
     const symbolMatch = Object.entries(ASSET_LOGOS).find(([key]) => {
       const keySymbol = key.split('.')[1]?.split('-')[0];
@@ -122,7 +127,8 @@ export const CHAIN_LOGOS = {
   'BASE': '/assets/chains/BASE.svg',
   'TRON': '/assets/chains/TRON.svg',
   'XRP': '/assets/chains/XRP.svg',
-  'SOL': '/assets/chains/SOL.svg'
+  'SOL': '/assets/chains/SOL.svg',
+  'ZEC': '/assets/chains/ZEC.svg'
 };
 
 /**

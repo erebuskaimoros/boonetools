@@ -5,6 +5,7 @@
         import { onMount } from 'svelte';
         import { slide } from 'svelte/transition';
         import { SettingsIcon } from '$lib/components';
+        import { ASSET_LOGOS } from '$lib/constants/assets.js';
         import AssetDropdown from './SwapEstimator/AssetDropdown.svelte';
   
           
@@ -226,6 +227,7 @@
     
       // Asset svg logos for display
       const assetLogos = {
+      ...ASSET_LOGOS,
       'BTC.BTC': 'assets/coins/bitcoin-btc-logo.svg',
       'ETH.ETH': 'assets/coins/ethereum-eth-logo.svg',
       'BSC.BNB': 'assets/coins/binance-coin-bnb-logo.svg',

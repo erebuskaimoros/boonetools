@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
+  import { ASSET_LOGOS as SHARED_ASSET_LOGOS } from '$lib/constants/assets.js';
 
   let assets = [];
   let fromAsset = 'BTC.BTC';
@@ -13,6 +14,7 @@
 
   // Add the logo mapping
   const ASSET_LOGOS = {
+    ...SHARED_ASSET_LOGOS,
     'BTC.BTC': 'assets/coins/bitcoin-btc-logo.svg',
     'ETH.ETH': 'assets/coins/ethereum-eth-logo.svg',
     'BSC.BNB': 'assets/coins/binance-coin-bnb-logo.svg',

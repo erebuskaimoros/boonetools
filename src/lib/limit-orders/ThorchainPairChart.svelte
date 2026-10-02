@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { CHART_RANGE_OPTIONS, thorchainChartDataProvider } from './chart-data.js';
   import { normalizeAsset, getChainFromAsset } from '$lib/utils/blockchain.js';
+  import { getAssetLogo, CHAIN_LOGOS } from '$lib/constants/assets.js';
 
   /** @type {{ sourceAsset: string, targetAsset: string } | null} */
   export let pair = null;
@@ -69,6 +70,7 @@
   };
 
   const chainIconMap = {
+    ...CHAIN_LOGOS,
     AVAX: '/assets/chains/AVAX.svg',
     BASE: '/assets/chains/BASE.svg',
     BCH: '/assets/chains/BCH.svg',
@@ -86,6 +88,8 @@
   function getAssetIcon(asset) {
     const symbol = shortAsset(asset).toUpperCase();
     if (assetIconMap[symbol]) return assetIconMap[symbol];
+    const sharedLogo = getAssetLogo(asset);
+    if (sharedLogo) return sharedLogo;
 
     const chain = getChainFromAsset(asset).toUpperCase();
     if (chainIconMap[chain]) return chainIconMap[chain];

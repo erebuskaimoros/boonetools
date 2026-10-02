@@ -25,6 +25,7 @@
   } from './limit-orders/model.js';
   import { fromBaseUnit, normalizeAsset, getChainFromAsset, normalizeAddress } from '$lib/utils/blockchain.js';
   import { copyToClipboard } from '$lib/utils/formatting.js';
+  import { getAssetLogo, CHAIN_LOGOS } from '$lib/constants/assets.js';
   import ConnectWallet from './components/ConnectWallet.svelte';
   import ThorchainPairChart from './limit-orders/ThorchainPairChart.svelte';
   import { thorchainChartDataProvider } from './limit-orders/chart-data.js';
@@ -441,6 +442,7 @@
   };
 
   const chainIconMap = {
+    ...CHAIN_LOGOS,
     AVAX: '/assets/chains/AVAX.svg',
     BASE: '/assets/chains/BASE.svg',
     BCH: '/assets/chains/BCH.svg',
@@ -458,6 +460,8 @@
   function getAssetIcon(asset) {
     const symbol = shortAsset(asset).toUpperCase();
     if (assetIconMap[symbol]) return assetIconMap[symbol];
+    const sharedLogo = getAssetLogo(asset);
+    if (sharedLogo) return sharedLogo;
 
     const chain = getChainFromAsset(asset).toUpperCase();
     if (chainIconMap[chain]) return chainIconMap[chain];

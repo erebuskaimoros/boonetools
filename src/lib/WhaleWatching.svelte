@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { LinkOutIcon, ChevronDownIcon } from '$lib/components';
+  import { CHAIN_LOGOS, getAssetLogo } from '$lib/constants/assets.js';
 
   let whales = [];
   let loading = true;
@@ -15,6 +16,7 @@
   };
 
   const chainIcons = {
+    ...CHAIN_LOGOS,
     BTC: '/assets/coins/bitcoin-btc-logo.svg',
     ETH: '/assets/coins/ethereum-eth-logo.svg',
     BCH: '/assets/coins/bitcoin-cash-bch-logo.svg',
@@ -80,13 +82,15 @@
     // For contract assets (e.g. ETH.USDC-1233), use the token icon
     if (cleanedAsset.includes('.') && /.*-\d+.*/.test(asset)) {
       const token = cleanedAsset.split('.')[1];
-      return assetIcons[`${cleanedAsset.split('.')[0]}.${token}`] || '/assets/coins/fallback-logo.svg';
+      return assetIcons[`${cleanedAsset.split('.')[0]}.${token}`] || getAssetLogo(asset) || '/assets/coins/fallback-logo.svg';
     }
     
     // Check if we have a specific asset icon for the cleaned name
     if (assetIcons[cleanedAsset]) {
       return assetIcons[cleanedAsset];
     }
+    const sharedLogo = getAssetLogo(asset);
+    if (sharedLogo) return sharedLogo;
     
     // Fall back to chain icon
     const chain = cleanedAsset.split('.')[0];
@@ -364,7 +368,7 @@
               <div class="asset-container">
                 <div class="asset-icon-container">
                   <img 
-                    src={getAssetIcon(whale.from.asset)} 
+                    src={getAssetIcon(whale.from.originalAsset)}
                     alt={whale.from.asset}
                     class="asset-icon"
                     on:error={(e) => {
@@ -398,7 +402,7 @@
               <div class="asset-container">
                 <div class="asset-icon-container">
                   <img 
-                    src={getAssetIcon(whale.to.asset)} 
+                    src={getAssetIcon(whale.to.originalAsset)}
                     alt={whale.to.asset}
                     class="asset-icon"
                     on:error={(e) => {

@@ -6,6 +6,7 @@
   import { getAllPools } from '$lib/utils/liquidity';
   import { fromBaseUnit } from '$lib/utils/blockchain';
   import { RefreshIcon } from '$lib/components';
+  import { ASSET_LOGOS, CHAIN_LOGOS, getAssetLogo as getSharedAssetLogo } from '$lib/constants/assets.js';
 
   const oraclePrices = writable({});
   const poolPrices = writable({});
@@ -100,6 +101,7 @@
     
     // First try exact asset match
     const exactLogos = {
+      ...ASSET_LOGOS,
       'BTC.BTC': 'assets/coins/bitcoin-btc-logo.svg',
       'ETH.ETH': 'assets/coins/ethereum-eth-logo.svg',
       'BSC.BNB': 'assets/coins/binance-coin-bnb-logo.svg',
@@ -136,11 +138,12 @@
       'TRX': 'assets/coins/fallback-logo.svg'
     };
     
-    return symbolLogos[oracleSymbol] || 'assets/coins/fallback-logo.svg';
+    return symbolLogos[oracleSymbol] || getSharedAssetLogo(asset) || 'assets/coins/fallback-logo.svg';
   }
 
   // Chain logos mapping
   const chainLogos = {
+    ...CHAIN_LOGOS,
     'BTC': 'assets/chains/BTC.svg',
     'ETH': 'assets/chains/ETH.svg',
     'BSC': 'assets/chains/BSC.svg',

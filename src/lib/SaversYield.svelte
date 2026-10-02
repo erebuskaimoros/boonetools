@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import Chart from "chart.js/auto";
+  import { ASSET_LOGOS } from '$lib/constants/assets.js';
 
   let MAXSYNTHSFORSAVERSYIELD;
   let SYNTHYIELDBASISPOINTS;
@@ -13,6 +14,7 @@
 
   // Add this near the top of your script section
   const assetLogos = {
+    ...ASSET_LOGOS,
     'BTC.BTC': 'assets/coins/bitcoin-btc-logo.svg',
     'ETH.ETH': 'assets/coins/ethereum-eth-logo.svg',
     'BSC.BNB': 'assets/coins/binance-coin-bnb-logo.svg',

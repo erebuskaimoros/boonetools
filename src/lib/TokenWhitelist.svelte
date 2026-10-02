@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { slide } from 'svelte/transition';
   import { copyToClipboard as copyToClipboardUtil } from '$lib/utils/formatting';
+  import { getAssetLogo } from '$lib/constants/assets.js';
 
   interface Pool {
     asset: string;
@@ -68,6 +69,11 @@
   // Add token metadata mapping
   const TOKEN_METADATA: Record<string, { name: string; symbol: string; logoURI: string }> = {
     // BASE tokens
+    '0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf': {
+      name: 'Venice Token',
+      symbol: 'VVV',
+      logoURI: getAssetLogo('BASE.VVV-0XACFE6019ED1A7DC6F7B508C02D1B04EC88CC21BF')
+    },
     '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': {
       name: 'USD Coin',
       symbol: 'USDC',

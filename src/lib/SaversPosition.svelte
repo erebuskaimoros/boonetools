@@ -1,6 +1,7 @@
 <script>
   import { onMount } from "svelte";
   import { copyToClipboard as copyToClipboardUtil } from '$lib/utils/formatting';
+  import { getAssetLogo as getSharedAssetLogo } from '$lib/constants/assets.js';
 
   export let asset = "";
   export let address = "";
@@ -97,7 +98,9 @@
     const [chain, baseAsset] = assetName.split('.');
     const lookupKey = `${chain}.${baseAsset}`.toUpperCase();
     
-    return `/assets/coins/${logoMap[lookupKey] || 'fallback-logo.svg'}`;
+    return logoMap[lookupKey]
+      ? `/assets/coins/${logoMap[lookupKey]}`
+      : getSharedAssetLogo(assetName) || '/assets/coins/fallback-logo.svg';
   }
 
   async function fetchWithdrawQuote() {

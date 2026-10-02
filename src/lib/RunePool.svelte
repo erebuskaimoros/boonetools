@@ -5,6 +5,7 @@
   import { PageHeader } from '$lib/components';
   import { formatDuration } from '$lib/utils/formatting';
   import { blocksToSeconds } from '$lib/utils/blockchain';
+  import { CHAIN_LOGOS, getAssetLogo } from '$lib/constants/assets.js';
 
   let value, currentDeposit, pnl, depositorCount;
   let runeAddress = "";
@@ -18,6 +19,7 @@
   let filteredPositions = [];
 
   const chainIcons = {
+    ...CHAIN_LOGOS,
     BTC: '/assets/coins/bitcoin-btc-logo.svg',
     ETH: '/assets/coins/ethereum-eth-logo.svg',
     BCH: '/assets/coins/bitcoin-cash-bch-logo.svg',
@@ -28,6 +30,11 @@
     GAIA: '/assets/coins/cosmos-atom-logo.svg',
     THOR: '/assets/coins/RUNE-ICON.svg'
   };
+
+  function getPoolLogo(pool) {
+    const chain = pool.pool.includes('(') ? pool.pool.split(' ')[1].slice(1, -1) : pool.pool;
+    return getAssetLogo(pool.asset) || chainIcons[chain] || '/assets/coins/fallback-logo.svg';
+  }
 
   const updateAddressFromURL = () => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -168,6 +175,7 @@
         poolBreakdown = lpPositions
             .map(pos => ({
                 pool: formatCryptoName(pos.pool),
+                asset: pos.pool,
                 weight: ((pos.runeValue / totalRuneValue) * 100).toFixed(2),
                 runeValue: pos.runeValue,
                 ownershipPercent: pos.ownershipPercent
@@ -542,7 +550,7 @@
                     <td class="pool-cell">
                       <div class="pool-name-with-icon">
                         <img 
-                          src={chainIcons[pool.pool.includes('(') ? pool.pool.split(' ')[1].slice(1, -1) : pool.pool]} 
+                          src={getPoolLogo(pool)}
                           alt={pool.pool}
                           class="chain-icon"
                           on:error={(e) => {
@@ -1106,4 +1114,3 @@
     overflow: hidden;
   }
 </style>
-  
