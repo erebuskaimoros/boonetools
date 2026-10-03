@@ -98,6 +98,16 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### POL share of total pool depth
+
+The headline card needs schema-7 `system-income-pol:v1`. Deploy backend before
+frontend and allow the normal two-minute reconciliation to capture total
+two-sided core pool depth in the existing state JSON. Verify
+`summary.total_pool_depth_rune_e8` is positive and that the displayed percentage
+is `total_position_value_rune_e8 / total_pool_depth_rune_e8 * 100`, rounded to
+one decimal. No migration, cache reset, or backfill is required; older snapshots
+show an unavailable value rather than an invented percentage.
+
 ### POL recipient breakdown rollout
 
 The October 3 recipient-pool chart requires the schema-6 `system-income-pol:v1`

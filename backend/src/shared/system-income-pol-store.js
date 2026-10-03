@@ -170,6 +170,7 @@ export async function saveSystemIncomePolPositions(client, positions = [], meta 
   const rows = Array.isArray(positions) ? positions : [];
   const positionStats = (count) => ({
     positions: count,
+    total_pool_depth_rune_e8: meta.totalPoolDepthRuneE8 ?? null,
     pol_reserve_system_income_bps: Math.max(
       0,
       Math.trunc(Number(meta.polReserveSystemIncomeBps)) || 0

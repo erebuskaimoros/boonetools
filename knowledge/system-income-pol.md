@@ -96,12 +96,25 @@ hours so the frontend can distinguish warming, partial, seeded, and complete
 windows. Funding/deployment history still compacts from the durable block
 ledger, not the retention-pruned header overlay.
 
-The five headlines are current POL TVL in USD, total RUNE deposited, estimated
+The six headlines are current POL TVL in USD, POL as a percentage of total
+two-sided THORChain pool depth (one decimal place), total RUNE deposited, estimated
 fees in USD with its 24-hour estimated fee APR, the current
 `POLRESERVESYSTEMINCOMEBPS` allocation, and current RUNE
 held (the dashboard's quoted “burned” measure) as a share of all system income
 since activation. The
 asset inventory lists the reconciled RUNE and external asset legs separately.
+
+Read-model schema 7 adds `total_pool_depth_rune_e8` and
+`total_pool_depth_usd_e8` to the summary. The denominator is twice the sum of
+`balance_rune` across the complete core pool snapshot (including staged pools),
+not just POL recipients. Pool exchange rates value both sides consistently
+with current POL TVL. It is saved in reconciliation state alongside positions
+and their RUNE/USD price; the percentage is calculated in RUNE so missing USD
+pricing cannot distort it. Undeployed module RUNE and cumulative deposits are
+not part of current position value. Missing/invalid/zero depth remains unavailable.
+The existing two-minute reconciliation refreshes it with no extra provider calls,
+database migration, or backfill. Older snapshots render an unavailable card
+until the backend publishes the new fields.
 
 The public handler is provider-free: it reads `system-income-pol:v1` and
 overlays committed blocks newer than the model watermark. The frontend applies

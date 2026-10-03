@@ -99,6 +99,10 @@ function normalizeSummary(summary = {}) {
     summary.pol_reserve_system_income_bps ?? summary.system_income_pol_share_bps
   );
   const runeHeldSystemIncomeShareBps = finite(summary.rune_held_system_income_share_bps);
+  const poolDepthShareBps = ratioBps(
+    summary.total_position_value_rune_e8 ?? summary.position_rune_e8,
+    summary.total_pool_depth_rune_e8
+  );
   return {
     totalFundedE8: base(summary.total_funded_e8 ?? summary.funded_rune_e8),
     totalSystemIncomeE8: optionalBase(summary.total_system_income_e8),
@@ -113,6 +117,9 @@ function normalizeSummary(summary = {}) {
     undeployedRuneE8: optionalBase(summary.undeployed_rune_e8),
     totalPositionValueRuneE8: optionalBase(summary.total_position_value_rune_e8 ?? summary.position_rune_e8),
     totalPositionValueUsdE8: optionalBase(summary.total_position_value_usd_e8),
+    totalPoolDepthRuneE8: optionalBase(summary.total_pool_depth_rune_e8),
+    totalPoolDepthUsdE8: optionalBase(summary.total_pool_depth_usd_e8),
+    poolDepthSharePercent: poolDepthShareBps === null ? null : poolDepthShareBps / 100,
     totalRuneHeldE8: optionalBase(summary.total_rune_held_e8),
     totalRuneHeldUsdE8: optionalBase(summary.total_rune_held_usd_e8),
     runeHeldSystemIncomeShareBps,

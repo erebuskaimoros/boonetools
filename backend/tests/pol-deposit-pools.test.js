@@ -17,7 +17,7 @@ test('read model publishes exact daily pool flows including recipients without c
     ],
     loadPoolHourly: async () => [], loadPositions: async () => [], loadState: async () => ({})
   });
-  assert.equal(payload.schema_version, 6);
+  assert.equal(payload.schema_version, 7);
   assert.deepEqual(payload.daily[0].pool_deposits, [
     { asset: 'TRON.USDT', deployed_e8: '9007199254740993' }, { asset: 'XRP.XRP', deployed_e8: '7' }
   ]);

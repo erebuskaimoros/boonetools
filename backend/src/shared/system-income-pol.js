@@ -9,7 +9,7 @@ import {
 } from './system-income-pol-store.js';
 
 export const SYSTEM_INCOME_POL_MODEL_KEY = 'system-income-pol:v1';
-export const SYSTEM_INCOME_POL_SCHEMA_VERSION = 6;
+export const SYSTEM_INCOME_POL_SCHEMA_VERSION = 7;
 export const SYSTEM_INCOME_POL_TTL_MS = 5 * 60 * 1000;
 
 const FEE_APR_WINDOWS = Object.freeze([
@@ -211,6 +211,7 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
   const positionRows = await (options.loadPositions || loadSystemIncomePolPositions)(client);
   const state = await (options.loadState || getSystemIncomePolState)(client);
   const runePriceUsdE8 = state?.rune_price_usd_e8 == null ? null : integer(state.rune_price_usd_e8);
+  const totalPoolDepthRuneE8 = integer(state?.stats_json?.total_pool_depth_rune_e8, null);
   const feeAprWindows = buildSystemIncomePolAprWindows(poolHourlyRows, now);
   const poolFees = new Map();
   const poolDeployments = new Map();
@@ -405,6 +406,8 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
         rune_price_usd_e8: runePriceUsdE8,
         total_position_value_rune_e8: totalPositionValueRuneE8,
         total_position_value_usd_e8: multiplyE8(totalPositionValueRuneE8, runePriceUsdE8),
+        total_pool_depth_rune_e8: totalPoolDepthRuneE8,
+        total_pool_depth_usd_e8: multiplyE8(totalPoolDepthRuneE8, runePriceUsdE8),
         total_rune_held_e8: totalRuneHeldE8,
         total_rune_held_usd_e8: multiplyE8(totalRuneHeldE8, runePriceUsdE8),
         rune_held_system_income_share_bps: ratioBps(totalRuneHeldE8, totalSystemIncome),

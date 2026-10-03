@@ -237,6 +237,12 @@
     </article>
     <article class="metric">
       <span class="metric-index">02</span>
+      <span class="metric-label">POL / POOL DEPTH</span>
+      <strong class="metric-value--green">{formatPercent(dashboard.summary.poolDepthSharePercent, 1)}</strong>
+      <small title="Current POL LP position value divided by total two-sided THORChain pool depth, including staged pools.">OF TOTAL TC POOL DEPTH</small>
+    </article>
+    <article class="metric">
+      <span class="metric-index">03</span>
       <span class="metric-label">RUNE DEPOSITED</span>
       {#if dashboard.moduleAddress}
         <a
@@ -274,7 +280,7 @@
       aria-label="Estimated fees earned daily chart"
       on:click={() => feesExpanded = !feesExpanded}
     >
-      <span class="metric-index">03</span>
+      <span class="metric-index">04</span>
       <span class="metric-label">EST. FEES EARNED</span>
       <span class="metric-pair fee-metric-pair">
         <span>
@@ -290,13 +296,13 @@
       <small class="metric-foot">{feeAprCoverageLabel(feeApr24h)}</small>
     </button>
     <article class="metric">
-      <span class="metric-index">04</span>
+      <span class="metric-index">05</span>
       <span class="metric-label">SYSTEM INCOME → POL</span>
       <strong>{formatPercent(dashboard.summary.polReserveSystemIncomePercent, 1)}</strong>
       <small>POLRESERVESYSTEMINCOMEBPS</small>
     </article>
     <article class="metric metric--position">
-      <span class="metric-index">05</span>
+      <span class="metric-index">06</span>
       <span class="metric-label">RUNE “BURNED”</span>
       <div class="metric-pair">
         <span>
@@ -474,6 +480,7 @@
       </div>
       <p><b>Exact flows:</b> system income funding and deployments are read from finalized block events and replayed after stream gaps.</p>
       <p><b>Current holdings:</b> LP units, pool ownership, RUNE held, and external assets held reconcile against THORNode pool state.</p>
+      <p><b>Pool-depth share:</b> current POL LP position value divided by total two-sided THORChain pool depth, including staged pools. Both use pool exchange rates from the position reconciliation; undeployed RUNE is excluded.</p>
       <p><b>Fee estimate:</b> pool liquidity fees are multiplied by SIPOL’s time-weighted pool share. This is not position P&amp;L.</p>
       <p><b>Estimated APR:</b> completed hourly fee estimates are divided by matching average SIPOL position-value hours and annualized without compounding. Seeded hours are labeled until measured values replace them.</p>
       <span class="source-line">SOURCE · THORNODE BLOCK EVENTS + CORE POOL SNAPSHOT + POOL ANALYSIS READ MODEL</span>
@@ -542,7 +549,7 @@
   :global(.sipol-shell > .terminal-alert) { max-width: 1440px; margin-left: auto; margin-right: auto; }
   .metric-grid {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     max-width: 1440px;
     margin: 0 auto 14px;
     border: 1px solid var(--term-border);
@@ -554,7 +561,8 @@
     padding: 17px 18px;
     border-right: 1px solid var(--term-border);
   }
-  .metric:last-child { border-right: 0; }
+  .metric:nth-child(3n) { border-right: 0; }
+  .metric:nth-child(-n+3) { border-bottom: 1px solid var(--term-border); }
   .metric:hover { background: var(--term-surface-hover); }
   .metric-index { position: absolute; top: 10px; right: 11px; color: var(--term-accent); font-size: 9px; }
   .metric-label { display: block; margin-bottom: 12px; color: var(--term-text-3); }

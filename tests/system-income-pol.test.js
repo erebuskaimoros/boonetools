@@ -17,6 +17,34 @@ import {
   selectSystemIncomePolRange
 } from '../src/lib/system-income-pol/model.js';
 
+test('POL pool-depth share uses current two-sided position value and renders one decimal', async () => {
+  const summary = normalizeSystemIncomePolPayload({ summary: {
+    total_position_value_rune_e8: '110000000000000',
+    total_pool_depth_rune_e8: '10000000000000000',
+    total_pool_depth_usd_e8: '7500000000000000',
+    total_deployed_e8: '500000000000000', undeployed_rune_e8: '100000000000000'
+  } }).summary;
+  assert.equal(summary.poolDepthSharePercent, 1.1);
+  assert.equal(summary.totalPoolDepthRuneE8, '10000000000000000');
+  assert.equal(summary.totalPoolDepthUsdE8, '7500000000000000');
+  assert.equal(formatPercent(summary.poolDepthSharePercent, 1), '1.1%');
+  assert.equal(formatPercent(1, 1), '1.0%');
+  for (const depth of [undefined, null, '', '0', '-100', 'garbage']) {
+    assert.equal(normalizeSystemIncomePolPayload({ summary: {
+      total_position_value_rune_e8: '110', total_pool_depth_rune_e8: depth
+    } }).summary.poolDepthSharePercent, null);
+  }
+  assert.equal(normalizeSystemIncomePolPayload({ summary: {
+    total_position_value_rune_e8: '0', total_pool_depth_rune_e8: '100'
+  } }).summary.poolDepthSharePercent, 0);
+  assert.equal(normalizeSystemIncomePolPayload({ summary: {
+    total_pool_depth_rune_e8: '100'
+  } }).summary.poolDepthSharePercent, null);
+  const source = await readFile(new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url), 'utf8');
+  assert.match(source, /POL \/ POOL DEPTH/);
+  assert.match(source, /formatPercent\(dashboard.summary.poolDepthSharePercent, 1\)/);
+});
+
 test('daily fee details remain dismissible and keyboard/touch accessible after migration', async () => {
   const source = await readFile(new URL('../src/lib/system-income-pol/DailyFeeChart.svelte', import.meta.url), 'utf8');
   assert.match(source, /id="daily-fees-tooltip"[^>]*role="tooltip"/);

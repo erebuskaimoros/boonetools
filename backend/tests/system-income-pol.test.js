@@ -10,6 +10,7 @@ const {
 } = await import('../src/shared/system-income-pol-blocks.js');
 const {
   buildSystemIncomePolPositionRows,
+  totalPoolDepthRuneE8,
   reconcileSystemIncomePolState
 } = await import('../src/shared/system-income-pol-reconciliation.js');
 const {
@@ -20,6 +21,7 @@ const {
 const {
   compactSystemIncomePolEvents,
   loadSystemIncomePolDaily,
+  saveSystemIncomePolPositions,
   refreshSystemIncomePolFeeEstimates
 } = await import('../src/shared/system-income-pol-store.js');
 const { runSystemIncomePolScheduler } = await import('../src/jobs/system-income-pol.js');
@@ -58,7 +60,7 @@ test('SIPOL deposit history exposes each UTC day price without substituting the 
   assert.equal(payload.daily[1].price_provisional, false);
   assert.equal(payload.daily[2].price_provisional, true);
   assert.equal(payload.summary.rune_price_usd_e8, '900000000');
-  assert.equal(payload.schema_version, 6);
+  assert.equal(payload.schema_version, 7);
 });
 
 test('SIPOL daily history loader joins only matching stored UTC-day prices and retains unpriced days', async () => {
@@ -288,6 +290,31 @@ test('SIPOL position builder values both pool sides without floating-point base-
   });
 });
 
+test('pool depth sums both sides of every pool exactly and rejects incomplete snapshots', () => {
+  assert.equal(totalPoolDepthRuneE8([
+    { balance_rune: '9007199254740993', status: 'Available' },
+    { balance_rune: '7', status: 'Staged' }
+  ]), '18014398509482000');
+  assert.equal(totalPoolDepthRuneE8([{ balance_rune: '0' }]), '0');
+  for (const pools of [null, [], [{}], [{ balance_rune: '-1' }], [{ balance_rune: '1' }, {}]]) {
+    assert.equal(totalPoolDepthRuneE8(pools), null);
+  }
+});
+
+test('pool depth persists alongside position metadata, including unknown and no-POL cases', async () => {
+  for (const depth of ['18014398509482000', null]) {
+    for (const positions of [[], [{ asset: 'BTC.BTC' }]]) {
+      const calls = [];
+      await saveSystemIncomePolPositions({ query: async (sql, params) => {
+        calls.push({ sql, params });
+        return { rowCount: positions.length };
+      } }, positions, { totalPoolDepthRuneE8: depth });
+      const state = calls.find(call => call.sql.includes('insert into system_income_pol_state'));
+      assert.equal(JSON.parse(state.params[10]).total_pool_depth_rune_e8, depth);
+    }
+  }
+});
+
 test('SIPOL reconciliation reuses thornode-core pools and makes only narrow module/LP calls', async () => {
   const calls = [];
   const saved = [];
@@ -300,7 +327,7 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
       pools: [{
         asset: 'BTC.BTC', status: 'Available', balance_rune: '1000', balance_asset: '100',
         pool_units: '100', pol_reserve_rune_deposited: '25'
-      }]
+      }, { asset: 'ETH.ETH', status: 'Staged', balance_rune: '9000', pol_reserve_rune_deposited: '0' }]
     } }),
     fetchThorchain: async (path, requestOptions) => {
       calls.push({ path, requestOptions });
@@ -327,6 +354,7 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
   assert.equal(result.pol_reserve_system_income_bps, 2000);
   assert.equal(saved[0].meta.runePriceUsdE8, '200000000');
   assert.equal(saved[0].meta.polReserveSystemIncomeBps, '2000');
+  assert.equal(saved[0].meta.totalPoolDepthRuneE8, '20000');
 });
 
 test('SIPOL APR annualizes complete capital-weighted hours and reports seeded coverage', () => {
@@ -424,7 +452,7 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and hou
       module_address: 'thor1pol', undeployed_rune_e8: '40', rune_price_usd_e8: '200000000', last_event_height: '20',
       events_updated_at: '2026-08-31T12:04:30Z', positions_updated_at: '2026-08-31T12:04:00Z',
       fees_updated_at: '2026-08-31T12:03:00Z', last_error: '',
-      stats_json: { pol_reserve_system_income_bps: 2000 }
+      stats_json: { pol_reserve_system_income_bps: 2000, total_pool_depth_rune_e8: '6000' }
     })
   });
 
@@ -438,6 +466,8 @@ test('SIPOL read model combines exact daily flows, reconciled positions, and hou
     rune_price_usd_e8: '200000000',
     total_position_value_rune_e8: '60',
     total_position_value_usd_e8: '120',
+    total_pool_depth_rune_e8: '6000',
+    total_pool_depth_usd_e8: '12000',
     total_rune_held_e8: '30',
     total_rune_held_usd_e8: '60',
     rune_held_system_income_share_bps: 300,

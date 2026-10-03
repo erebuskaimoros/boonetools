@@ -48,6 +48,19 @@ async function mapWithConcurrency(items, limit, worker) {
   return results;
 }
 
+// Both sides at the pool exchange rate: asset-side value equals RUNE depth.
+// Include all core pools (including staged), not just SIPOL recipient pools.
+export function totalPoolDepthRuneE8(pools) {
+  if (!Array.isArray(pools) || !pools.length) return null;
+  let depth = 0n;
+  for (const pool of pools) {
+    const rune = String(pool?.balance_rune ?? '').trim();
+    if (!/^\d+$/.test(rune)) return null;
+    depth += BigInt(rune) * 2n;
+  }
+  return depth.toString();
+}
+
 export function buildSystemIncomePolPositionRows(input = {}) {
   const moduleAddress = String(input.module?.address || '');
   const observedAt = timestamp(input.observedAt);
@@ -156,6 +169,7 @@ export async function reconcileSystemIncomePolState(client, options = {}) {
     moduleAddress: built.moduleAddress,
     undeployedRuneE8: built.undeployedRuneE8,
     runePriceUsdE8: runePriceUsdE8.toString(),
+    totalPoolDepthRuneE8: totalPoolDepthRuneE8(pools),
     polReserveSystemIncomeBps,
     observedAt: timestamp(observedAt),
     observedHeight: height
