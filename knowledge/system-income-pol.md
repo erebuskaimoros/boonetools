@@ -18,8 +18,9 @@ range selection, zoom preservation, and fee-detail dismissal are unchanged.
 ### Recipient-pool deposit chart (October 3, 2026)
 
 Deposit bars stack exact recipient-pool flows, with stable per-asset colors and
-click-to-hide legend entries. The summary cards and amber cumulative line remain
-all-pool totals; hiding a pool changes only its plotted segment. Hover/tap details
+click-to-hide legend entries. Recipient colors follow the local token logos:
+TRX red, USDT teal, XRP light monochrome, and ZEC gold. The summary cards and blue
+cumulative line remain all-pool totals; hiding a pool changes only its plotted segment. Hover/tap details
 show amounts and percentages of the entire bucket. A native UTC bucket selector
 provides the same breakdown and token logos without requiring canvas interaction.
 

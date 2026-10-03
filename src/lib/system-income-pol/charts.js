@@ -5,7 +5,7 @@ import { TERMINAL_CHART_PALETTE as palette } from '../charts/terminal.js';
 
 export const POL_DEPOSIT_SERIES = Object.freeze([
   { id: 'daily', label: 'DAILY POL DEPOSITED', mark: 'bar', color: palette.accent },
-  { id: 'cumulative', label: 'CUMULATIVE POL DEPOSITED', mark: 'line', color: palette.amber, rolling: false }
+  { id: 'cumulative', label: 'CUMULATIVE POL DEPOSITED', mark: 'line', color: palette.info, rolling: false }
 ]);
 
 export function polChartValue(value, unit, compact = false) {
@@ -24,14 +24,20 @@ function priceDetail(row) {
 }
 
 // Fixed per-asset colors remain stable across range, unit and live pool changes.
+// Match the local token logos; XRP uses its light symbol for dark-chart contrast.
+// Token-brand colors apply to recipient series only, not status/error semantics.
+const POOL_BRAND_COLORS = Object.freeze({
+  'TRON.TRX': '#ff060a',
+  'XRP.XRP': palette.text,
+  'ZEC.ZEC': '#f4b728'
+});
 const POOL_COLORS = [palette.accent, palette.info, '#bcbcbc', '#66bbaa', '#88aacc', '#aabb77'];
 export function polPoolSeries(asset) {
   const [chain, token = chain] = asset.split('.');
   const ticker = token.split('-')[0];
   let hash = 0;
   for (const character of asset) hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
-  const color = ticker === 'USDT' ? palette.accent : asset === 'XRP.XRP' ? palette.info
-    : asset === 'TRON.TRX' ? '#bcbcbc' : asset === 'ZEC.ZEC' ? '#aabb77' : POOL_COLORS[hash % POOL_COLORS.length];
+  const color = ticker === 'USDT' ? '#50af95' : POOL_BRAND_COLORS[asset] ?? POOL_COLORS[hash % POOL_COLORS.length];
   return { id: `pool:${asset}`, asset, label: `${ticker} · ${chain}`, color, mark: 'bar' };
 }
 

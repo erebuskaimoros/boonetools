@@ -34,8 +34,29 @@ test('real ECharts renderer stacks pool bars to the daily total, independently o
 });
 
 test('current recipient pools have distinct colors that do not depend on their position in the legend', () => {
-  const assets = ['ZEC.ZEC', 'XRP.XRP', 'TRON.TRX', 'TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T'];
-  assert.equal(new Set(assets.map(asset => polPoolSeries(asset).color)).size, assets.length);
+  const expected = {
+    'ZEC.ZEC': '#f4b728',
+    'XRP.XRP': '#e8e8e8',
+    'TRON.TRX': '#ff060a',
+    'TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T': '#50af95'
+  };
+  for (const [asset, color] of Object.entries(expected)) assert.equal(polPoolSeries(asset).color, color);
+  assert.equal(new Set(Object.values(expected)).size, Object.keys(expected).length);
+  assert.equal(polPoolSeries('TRON.USDT').color, '#50af95');
+});
+
+test('token colors carry through bars, tooltips and rolling overlays; cumulative stays distinct', () => {
+  const rows = Array.from({ length: 7 }, (_, index) => ({ ...points()[0], day: `2026-09-0${index + 1}` }));
+  const option = buildSystemIncomePolDepositOption(rows, { analysis: { rolling: ['pool:TRON.USDT-7d'] } });
+  for (const asset of ['TRON.USDT', 'XRP.XRP']) {
+    const color = polPoolSeries(asset).color;
+    assert.equal(option.series.find(item => item.id === `pool:${asset}`).itemStyle.color, color);
+    assert.ok(polDepositTooltip(rows[0]).includes(color));
+  }
+  assert.equal(option.series.at(-1).lineStyle.color, '#50af95');
+  assert.equal(option.series.find(item => item.id === 'cumulative').lineStyle.color, '#5588cc');
+  assert.equal(option.yAxis[1].axisLine.lineStyle.color, '#5588cc');
+  assert.ok(polDepositTooltip(rows[0]).includes('#5588cc'));
 });
 
 test('exact pool sums preserve large base-unit integers and reject malformed entries', () => {
