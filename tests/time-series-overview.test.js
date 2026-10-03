@@ -85,7 +85,7 @@ test('POL deposits keep separate zero-based axes, exact all-time RUNE and incomp
   assert.ok(usd.yAxis.every(axis => axis.min === 0));
   assert.equal(usd.series[1].connectNulls, false);
   assert.match(polDepositTooltip(usdPoints[3], 'usd'), /PROVISIONAL/);
-  assert.match(polDepositTooltip(usdPoints[3], 'usd'), /CUMULATIVE POL DEPOSITED: Unavailable/);
+  assert.match(polDepositTooltip(usdPoints[3], 'usd'), /CUMULATIVE · ALL POOLS: Unavailable/);
   assert.equal(buildSystemIncomePolDepositOption(runePoints.slice(3)).series[1].data[0], 108);
 });
 
@@ -178,11 +178,11 @@ test('live POL head and currency switch preserve a date-based viewport and cumul
     let points = buildPoints(next);
     controller.update({ points, options: { unit } });
     assert.deepEqual(utcDayZoomWindow(points, chart.getOption().dataZoom[0]), window);
-    assert.equal(chart.getOption().series[1].data[0], 100);
+    assert.equal(chart.getOption().series.find(item => item.id === 'cumulative').data[0], 100);
     unit = 'usd'; points = buildPoints(next);
     controller.update({ points, options: { unit } });
     assert.deepEqual(utcDayZoomWindow(points, chart.getOption().dataZoom[0]), window);
-    assert.equal(chart.getOption().series[0].data.at(-1), null);
+    assert.equal(chart.getOption().series.find(item => item.id === 'pool:TRON.USDT').data.at(-1), null);
     controller.resetZoom();
     assert.equal(reported, null);
   } finally { controller.destroy(); }

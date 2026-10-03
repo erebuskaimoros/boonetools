@@ -15,6 +15,27 @@ range selection, zoom preservation, and fee-detail dismissal are unchanged.
 
 ## Exact flows
 
+### Recipient-pool deposit chart (October 3, 2026)
+
+Deposit bars stack exact recipient-pool flows, with stable per-asset colors and
+click-to-hide legend entries. The summary cards and amber cumulative line remain
+all-pool totals; hiding a pool changes only its plotted segment. Hover/tap details
+show amounts and percentages of the entire bucket. A native UTC bucket selector
+provides the same breakdown and token logos without requiring canvas interaction.
+
+Read-model schema 6 adds `daily[].pool_deposits` (`asset`, `deployed_e8`) from the
+existing `system_income_pol_pool_daily` table. No migration, provider query or
+new backfill is needed. Historical recipients remain included even if they no
+longer have a current LP position. The API tail groups events by UTC day before
+overlaying them; browser SSE replay merges the same exact per-pool values once.
+
+Weekly/monthly bars sum daily flows. USD segments use each day's historical
+price before aggregation, and the cumulative line retains its full-history
+baseline. Missing prices stay gaps; absent or inconsistent attribution is shown
+as an explicit gray Unattributed segment, never inferred from current holdings.
+The rolling menu offers daily per-pool means, not cumulative averages; overlays
+are not stacked. Existing zoom, denomination and range controls are preserved.
+
 - `rewards.pol_reserve_reward` is the exact RUNE transferred into the module.
 - Total distributable system income is reconstructed from the same finalized
   `rewards` event by summing bond, pool, development, burn, TCY, marketing,

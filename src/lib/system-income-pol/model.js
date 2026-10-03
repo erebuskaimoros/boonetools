@@ -1,3 +1,5 @@
+import { mergePoolDeposits } from '../../../shared/system-income-pol/deposits.js';
+
 const E8 = 100_000_000;
 
 export const SYSTEM_INCOME_POL_RANGES = Object.freeze([
@@ -191,6 +193,7 @@ function normalizeDaily(row = {}) {
     fundedE8,
     systemIncomeE8,
     deployedE8,
+    poolDeposits: mergePoolDeposits(row.pool_deposits),
     estimatedFeesE8,
     cumulativeFundedE8,
     cumulativeSystemIncomeE8,
@@ -337,6 +340,7 @@ export function applySystemIncomePolHead(payload = {}, head = {}) {
       ? null
       : addBase(row.system_income_e8, systemIncomeE8);
     row.deployed_e8 = addBase(row.deployed_e8 ?? row.deployed_rune_e8, deployedE8);
+    row.pool_deposits = mergePoolDeposits(row.pool_deposits, deployments);
     if (row.cumulative_funded_e8 !== undefined && row.cumulative_funded_e8 !== null) {
       row.cumulative_funded_e8 = addBase(row.cumulative_funded_e8, rewardE8);
     }
@@ -395,6 +399,17 @@ export function buildSystemIncomePolChart(rows = [], options = {}) {
   let cumulativeRunning = 0;
   const points = rows.map((row) => {
     const depositedPlotRune = Number.isFinite(row.deployedRune) ? Math.max(0, row.deployedRune) : 0;
+    const deposits = mergePoolDeposits(row.poolDeposits);
+    const attributedE8 = deposits.reduce((sum, item) => sum + BigInt(item.deployed_e8), 0n);
+    const totalE8 = row.deployedE8 == null ? null : BigInt(row.deployedE8);
+    // Never overstate a bar if a stale/inconsistent breakdown exceeds its total.
+    const valid = totalE8 !== null && attributedE8 <= totalE8;
+    const plotValue = rune => rune === 0 ? 0 : unit === 'rune' ? rune
+      : row.runePriceUsd > 0 ? rune * row.runePriceUsd : null;
+    const poolDeposits = (valid ? deposits : []).map(item => ({
+      ...item, rune: e8ToNumber(item.deployed_e8), value: plotValue(e8ToNumber(item.deployed_e8))
+    }));
+    const unattributedRune = valid ? e8ToNumber((totalE8 - attributedE8).toString()) : depositedPlotRune;
     const cumulativeDepositedRune = Number.isFinite(row.cumulativeDeployedRune)
       ? Math.max(0, row.cumulativeDeployedRune)
       : cumulativeRunning + depositedPlotRune;
@@ -402,6 +417,9 @@ export function buildSystemIncomePolChart(rows = [], options = {}) {
     return {
       ...row,
       depositedPlotRune,
+      poolDeposits,
+      unattributedRune,
+      unattributedValue: plotValue(unattributedRune),
       cumulativeDepositedRune,
       depositedPlotValue: unit === 'usd' ? finite(row.deployedUsd) : depositedPlotRune,
       cumulativeDepositedValue: unit === 'usd' ? finite(row.cumulativeDeployedUsd) : cumulativeDepositedRune

@@ -1,4 +1,5 @@
 import { getReadModel } from './read-models.js';
+import { mergePoolDeposits } from '../../../shared/system-income-pol/deposits.js';
 import {
   getSystemIncomePolState,
   loadSystemIncomePolDaily,
@@ -8,7 +9,7 @@ import {
 } from './system-income-pol-store.js';
 
 export const SYSTEM_INCOME_POL_MODEL_KEY = 'system-income-pol:v1';
-export const SYSTEM_INCOME_POL_SCHEMA_VERSION = 5;
+export const SYSTEM_INCOME_POL_SCHEMA_VERSION = 6;
 export const SYSTEM_INCOME_POL_TTL_MS = 5 * 60 * 1000;
 
 const FEE_APR_WINDOWS = Object.freeze([
@@ -213,8 +214,12 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
   const feeAprWindows = buildSystemIncomePolAprWindows(poolHourlyRows, now);
   const poolFees = new Map();
   const poolDeployments = new Map();
+  const depositsByDay = new Map();
   for (const row of poolDailyRows) {
     poolDeployments.set(row.asset, add(poolDeployments.get(row.asset), row.deployed_e8));
+    const key = day(row.day);
+    if (!depositsByDay.has(key)) depositsByDay.set(key, []);
+    depositsByDay.get(key).push(row);
   }
   for (const row of poolHourlyRows) {
     const current = poolFees.get(row.asset) || {
@@ -313,6 +318,7 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
       funded_e8: integer(row.funded_e8),
       system_income_e8: row.system_income_e8 == null ? null : integer(row.system_income_e8),
       deployed_e8: integer(row.deployed_e8),
+      pool_deposits: mergePoolDeposits(depositsByDay.get(key)),
       rune_price_usd: dailyRunePriceUsd,
       price_source: dailyRunePriceUsd === null ? null : String(row.price_source || '') || null,
       price_provisional: Boolean(row.price_provisional) || key >= now.toISOString().slice(0, 10),
@@ -442,6 +448,10 @@ export async function buildSystemIncomePolReadModel(client, options = {}) {
 }
 
 export function applySystemIncomePolLiveOverlay(payload = {}, overlay = {}) {
+  // Preserve UTC attribution when the snapshot tail straddles midnight.
+  if (Array.isArray(overlay.daily)) {
+    return overlay.daily.reduce((current, delta) => applySystemIncomePolLiveOverlay(current, delta), payload);
+  }
   const reward = integer(overlay.reward_e8);
   const systemIncome = overlay.system_income_e8 == null ? null : integer(overlay.system_income_e8);
   const deployments = Array.isArray(overlay.deployments) ? overlay.deployments : [];
@@ -495,6 +505,7 @@ export function applySystemIncomePolLiveOverlay(payload = {}, overlay = {}) {
         ? null
         : add(row.system_income_e8, systemIncome),
       deployed_e8: add(row.deployed_e8, deployed),
+      pool_deposits: mergePoolDeposits(row.pool_deposits, deployments),
       cumulative_funded_e8: add(row.cumulative_funded_e8, reward),
       cumulative_system_income_e8: row.cumulative_system_income_e8 == null || systemIncome == null
         ? null
@@ -510,6 +521,7 @@ export function applySystemIncomePolLiveOverlay(payload = {}, overlay = {}) {
       funded_e8: reward,
       system_income_e8: systemIncome,
       deployed_e8: deployed,
+      pool_deposits: mergePoolDeposits(deployments),
       rune_price_usd: null,
       price_source: null,
       price_provisional: true,

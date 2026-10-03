@@ -4,7 +4,8 @@
   import CurrencySwitch from './components/terminal/CurrencySwitch.svelte';
   import RangeSummary from './charts/RangeSummary.svelte';
   import TimeSeriesChart from './charts/TimeSeriesChart.svelte';
-  import { buildSystemIncomePolDepositOption, POL_DEPOSIT_SERIES } from './system-income-pol/charts.js';
+  import { buildSystemIncomePolDepositOption } from './system-income-pol/charts.js';
+  import DepositInspector from './system-income-pol/DepositInspector.svelte';
   import DailyFeeChart from './system-income-pol/DailyFeeChart.svelte';
   import { subscribeChainHeads } from './api/chain-stream.js';
   import { getAssetLogo } from './constants/assets.js';
@@ -35,6 +36,7 @@
   let loadError = '';
   let rangeId = '30d';
   let chartUnit = 'rune';
+  let depositGrain = 'day';
   let feesExpanded = false;
   let depositChart;
   let zoomWindow = null;
@@ -403,7 +405,7 @@
         <span class="section-index">[02]</span>
         <h2 id="history-title">DAILY + CUMULATIVE POL DEPOSITS</h2>
         <p>
-          Daily gross POL deployments shown as bars with the all-time total overlaid. Hover for values; drag to zoom.
+          Daily gross POL deployments stacked by recipient pool, with the all-time total overlaid. Hover or tap for each pool’s amount and share; drag to zoom. Total cards and the cumulative line include all pools, even when a pool is hidden.
           {#if chartUnit === 'usd'}USD deposits use each UTC day's closing RUNE price; the cumulative line sums those daily dollar values. Today's estimate is provisional.{/if}
         </p>
       </div>
@@ -415,8 +417,9 @@
         <TimeSeriesChart bind:this={depositChart} points={rangeRows} historyPoints={chart.points}
           options={{ unit: chartUnit }} buildOption={buildSystemIncomePolDepositOption}
           {zoomWindow} onZoom={(window) => zoomWindow = window}
+          onGrainChange={value => depositGrain = value}
           hasData={rangeRows.length > 0} loading={refreshing}
-          ariaLabel={`Daily and cumulative POL deposits in ${chartUnitLabel} by UTC day. Drag to zoom; double-click to reset.`}
+          ariaLabel={`POL deposits stacked by recipient pool in ${chartUnitLabel}, with cumulative total. Hover or tap for amounts; use the bucket selector below for keyboard details. Drag to zoom; double-click to reset.`}
           height="280px" narrowHeight="240px">
           <div slot="controls" class="chart-controls" role="group" aria-label="Deposit plot controls">
             <div class="unit-group" role="group" aria-label="Chart denomination">
@@ -435,6 +438,7 @@
             </div>
           </div>
         </TimeSeriesChart>
+        <DepositInspector {rows} unit={chartUnit} grain={depositGrain} />
       </div>
       <div class="legend">
 

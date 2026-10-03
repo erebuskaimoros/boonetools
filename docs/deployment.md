@@ -98,6 +98,15 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### POL recipient breakdown rollout
+
+The October 3 recipient-pool chart requires the schema-6 `system-income-pol:v1`
+snapshot. Deploy the backend first, then let the existing two-minute SIPOL job
+publish it from stored pool/day history. Verify `daily[].pool_deposits` sums to
+each day's `deployed_e8` (including the live tail) before deploying the frontend.
+No migration, reseeding, cache reset or new backfill is required. Old snapshots
+remain compatible and render as Unattributed until the upgraded snapshot arrives.
+
 A refused deploy identifies missing CI, an unpublished commit, a wrong origin,
 or an already-active/conflicting release. A fully staged release can be retried;
 an incomplete staging directory requires inspecting the failure before removing

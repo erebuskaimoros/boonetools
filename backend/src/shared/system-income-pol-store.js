@@ -512,6 +512,19 @@ export async function loadSystemIncomePolLiveOverlay(client, afterHeight) {
      order by height`,
     [baselineHeight]
   );
+  const byDay = new Map();
+  for (const row of rows) {
+    const key = new Date(row.block_time).toISOString().slice(0, 10);
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key).push(row);
+  }
+  return {
+    ...summarizeSystemIncomePolOverlay(rows, baselineHeight),
+    daily: [...byDay.values()].map(group => summarizeSystemIncomePolOverlay(group, baselineHeight))
+  };
+}
+
+function summarizeSystemIncomePolOverlay(rows, baselineHeight) {
   let reward = 0n;
   let systemIncome = 0n;
   let systemIncomeComplete = true;

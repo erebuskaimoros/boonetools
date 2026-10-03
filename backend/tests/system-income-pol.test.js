@@ -58,7 +58,7 @@ test('SIPOL deposit history exposes each UTC day price without substituting the 
   assert.equal(payload.daily[1].price_provisional, false);
   assert.equal(payload.daily[2].price_provisional, true);
   assert.equal(payload.summary.rune_price_usd_e8, '900000000');
-  assert.equal(payload.schema_version, 5);
+  assert.equal(payload.schema_version, 6);
 });
 
 test('SIPOL daily history loader joins only matching stored UTC-day prices and retains unpriced days', async () => {
@@ -625,6 +625,7 @@ test('SIPOL live overlay starts a new UTC day without waiting for reconciliation
     funded_e8: '9',
     system_income_e8: '90',
     deployed_e8: '0',
+    pool_deposits: [],
     rune_price_usd: null,
     price_source: null,
     price_provisional: true,
