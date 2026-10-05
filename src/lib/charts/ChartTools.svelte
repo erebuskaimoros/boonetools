@@ -10,6 +10,7 @@
   export let calendar = 'UTC';
   export let hideUnavailableGrains = false;
   export let showSourceResolution = true;
+  export let inlineControls = false;
   export let onHidden = (value) => {};
   export let onRolling = (value) => {};
   export let onGrain = (value) => {};
@@ -24,7 +25,7 @@
 </script>
 
 <svelte:window on:click={dismiss} on:keydown={escape} />
-<div class="chart-tools">
+<div class="chart-tools" class:with-controls={inlineControls}>
   <div class="buckets" role="group" aria-label="Chart buckets">
     {#if allowNative}<button aria-pressed={grain === 'native'} on:click={() => onGrain('native')}>[NATIVE]</button>{/if}
     {#each grains as value}
@@ -49,6 +50,7 @@
       <p>{sourceGrain === 'day' ? 'Trailing daily averages (feature-weighted for rates where applicable), even on W/M views. Full observed windows required. Partial days are not extrapolated. 7D solid · 30D dashed · 90D dotted.' : `Only ${sourceGrain} source data is available; daily rolling averages cannot be reconstructed.`}</p>
     </div>
   </details>
+  <slot name="controls" />
 </div>
 {#if calendar !== 'UTC'}<p class="resolution">{calendar} buckets · source calendar retained</p>{/if}
 {#if showSourceResolution && sourceGrain !== 'day'}<p class="resolution">SOURCE: {sourceGrain.toUpperCase()} · other calendar buckets unavailable</p>{/if}
@@ -62,6 +64,8 @@
   button:disabled, input:disabled { opacity: .45; cursor: not-allowed; }
   button:focus-visible, summary:focus-visible, input:focus-visible { outline: 1px solid var(--term-accent); outline-offset: 2px; }
   details { position: relative; flex: 0 1 300px; min-width: 0; max-width: 100%; }
+  .with-controls details { flex: 0 1 auto; }
+  .with-controls .options { width: 300px; max-width: calc(100vw - 64px); }
   summary { display: inline-flex; align-items: center; box-sizing: border-box; list-style: none; }
   summary::-webkit-details-marker { display: none; }
   summary::after { content: '▾'; margin-left: 8px; }

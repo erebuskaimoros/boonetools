@@ -17,4 +17,7 @@
 </script>
 
 <ChartTools {series} {hidden} {rolling} {grain} {sourceGrain} {onGrain} {allowNative}
-  onHidden={(ids) => hidden = ids} onRolling={(ids) => rolling = ids} />
+  inlineControls={Boolean($$slots.controls)}
+  onHidden={(ids) => hidden = ids} onRolling={(ids) => rolling = ids}>
+  <svelte:fragment slot="controls"><slot name="controls" /></svelte:fragment>
+</ChartTools>

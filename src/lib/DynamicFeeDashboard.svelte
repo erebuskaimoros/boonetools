@@ -1514,27 +1514,6 @@
         <div class="block-meta">[{selectedAffiliate?.thorname || '--'} / {affiliateTimeframeOption.label} / {affiliateBucket}]</div>
       </div>
 
-      <div class="affiliate-chart-toolbar">
-        <div class="affiliate-chart-view-controls">
-          <div class="affiliate-chart-control timeframe-control">
-            <span class="chart-control-label">range</span>
-            <div class="timeframe-tabs" role="tablist" aria-label="Affiliate chart timeframe">
-              {#each AFFILIATE_TIMEFRAMES as option}
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={affiliateTimeframe === option.id}
-                  class:active={affiliateTimeframe === option.id}
-                  on:click={() => setAffiliateTimeframe(option.id)}
-                >
-                  {option.label}
-                </button>
-              {/each}
-            </div>
-          </div>
-        </div>
-      </div>
-
       <div class="selected-strip affiliate-selected-strip">
         <div>
           <span>affiliate</span>
@@ -1569,7 +1548,24 @@
         { field: 'feesUsd', label: 'Fees', kind: 'flow', unit: 'usd' }
       ]} note="Raw bucket volume and fees; rolling-average overlays are not summed. Source coverage is reported above." />
       <LegacyChartTools chart={affiliateChartInstance} rows={affiliateCalendarRows} historyRows={affiliateCalendarHistory} grain={affiliateBucket} onGrain={setAffiliateBucket}
-        metrics={[{ value: row => row.volumeUsd, rollingReduce: affiliateRollingMean }, { value: row => row.feesUsd, rollingReduce: affiliateRollingMean }, { value: row => row.volumeUsd > 0 && row.rateFeesUsd != null ? row.rateFeesUsd / row.volumeUsd * 10000 : null, rollingReduce: affiliateRollingRate }]} />
+        metrics={[{ value: row => row.volumeUsd, rollingReduce: affiliateRollingMean }, { value: row => row.feesUsd, rollingReduce: affiliateRollingMean }, { value: row => row.volumeUsd > 0 && row.rateFeesUsd != null ? row.rateFeesUsd / row.volumeUsd * 10000 : null, rollingReduce: affiliateRollingRate }]}>
+        <div slot="controls" class="affiliate-chart-control timeframe-control">
+          <span class="chart-control-label">range</span>
+          <div class="timeframe-tabs" role="tablist" aria-label="Affiliate chart timeframe">
+            {#each AFFILIATE_TIMEFRAMES as option}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={affiliateTimeframe === option.id}
+                class:active={affiliateTimeframe === option.id}
+                on:click={() => setAffiliateTimeframe(option.id)}
+              >
+                {option.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+      </LegacyChartTools>
       <div class="chart-frame affiliate-chart-frame">
         {#if affiliateHistoryLoading}
           <div class="loading-block"><span class="loading-marker">////</span><span>loading affiliate history</span></div>
@@ -2214,31 +2210,15 @@
     letter-spacing: 0.08em;
   }
 
-  .affiliate-chart-toolbar {
-    align-items: flex-end;
-    display: flex;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
-
   .affiliate-chart-control {
-    align-items: flex-start;
+    align-items: center;
     display: flex;
-    flex-direction: column;
-    gap: 5px;
+    flex-wrap: wrap;
+    gap: 8px;
   }
 
 
   .timeframe-control {
-    align-items: flex-end;
-  }
-
-  .affiliate-chart-view-controls {
-    align-items: flex-end;
-    display: flex;
-    gap: 12px;
     margin-left: auto;
   }
 
@@ -2257,6 +2237,7 @@
   }
 
   .timeframe-tabs button {
+    min-height: 30px;
     background: transparent;
     border: none;
     border-right: 1px solid #1a1a1a;
@@ -2902,11 +2883,6 @@
       grid-template-columns: 1fr;
     }
 
-    .affiliate-chart-toolbar {
-      align-items: stretch;
-      flex-direction: column;
-    }
-
     .affiliate-trend-block .block-head {
       align-items: flex-start;
       flex-direction: column;
@@ -2921,14 +2897,6 @@
 
     .affiliate-chart-control,
     .timeframe-control {
-      align-items: flex-start;
-      margin-left: 0;
-    }
-
-
-    .affiliate-chart-view-controls {
-      align-items: flex-start;
-      flex-wrap: wrap;
       margin-left: 0;
     }
 
