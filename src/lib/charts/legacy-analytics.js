@@ -23,6 +23,7 @@ export function createLegacyChartAnalytics() {
       return ROLLING_DAYS.filter(days => item.rolling && rollingIds.includes(`${item.id}-${days}d`)).map(days => {
         const averaged = rollingDailyValues(source, values, days, metric?.rollingReduce || 'mean');
         return { type: 'line', label: `${days}D AVG · ${item.label}`, _dailyMean: true,
+          _valueFormat: metric?.format,
           data: points.map(row => {
             const last = source.findLast(point => point.day >= row.day && point.day <= (row.throughDay || row.day));
             return averaged.get(last?.day) ?? null;
@@ -38,9 +39,15 @@ export function createLegacyChartAnalytics() {
     instance.options.plugins.legend.display = false;
     if (instance.options.plugins.tooltip) {
       instance.options.plugins.tooltip.displayColors = true;
-      instance.options.plugins.tooltip.callbacks.label = context => context.dataset._dailyMean
-        ? `${context.dataset.label}: ${context.formattedValue} · daily mean`
-        : saved.label?.(context) ?? `${context.dataset.label}: ${context.formattedValue}`;
+      instance.options.plugins.tooltip.callbacks.label = context => {
+        if (!context.dataset._dailyMean) return saved.label?.(context) ?? `${context.dataset.label}: ${context.formattedValue}`;
+        const value = numericValue(context.dataset.data[context.dataIndex]);
+        // Overlay values are daily means, but retain their feature-owned units.
+        // Missing windows must not be coerced to a formatted zero.
+        const formatted = value === null ? 'unavailable'
+          : context.dataset._valueFormat?.(value) ?? context.formattedValue;
+        return `${context.dataset.label}: ${formatted} · daily mean`;
+      };
     }
     for (const [axis, config] of Object.entries(instance.options.scales || {})) {
       if (axis === 'x') continue;

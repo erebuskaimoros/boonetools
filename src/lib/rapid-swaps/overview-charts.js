@@ -7,8 +7,10 @@ const countFormat = (value) => formatNumber(value, { maximumFractionDigits: 0 })
 const percentFormat = (value) => `${value}%`;
 const metrics = {
   volume: { label: 'VOLUME', color: colors.green, fill: colors.greenAlpha, cumulative: 'cumVolume', format: formatUSDCompact },
-  count: { label: 'COUNT', color: colors.blue, fill: colors.blueAlpha, cumulative: 'cumCount', format: countFormat },
-  efficiency: { label: 'EFFICIENCY', color: colors.green, fill: colors.greenAlpha, mark: 'line', format: (value) => formatNumber(value, { maximumFractionDigits: 2 }), baseline: 'auto' },
+  count: { label: 'COUNT', color: colors.blue, fill: colors.blueAlpha, cumulative: 'cumCount', format: countFormat,
+    tooltipFormat: (value) => `${formatNumber(value, { maximumFractionDigits: 3 })} swaps` },
+  efficiency: { label: 'EFFICIENCY', color: colors.green, fill: colors.greenAlpha, mark: 'line', format: (value) => formatNumber(value, { maximumFractionDigits: 2 }),
+    tooltipFormat: (value) => `${formatNumber(value, { maximumFractionDigits: 2 })}×`, baseline: 'auto' },
   pctFaster: { label: '% FASTER', color: colors.amber, fill: colors.amberAlpha, mark: 'line', format: percentFormat, baseline: 'auto' },
   volumePct: { label: '% OF TC VOLUME', color: colors.yellow, fill: colors.yellowAlpha, format: percentFormat },
   countPct: { label: '% OF TC SWAPS', color: colors.red, fill: colors.redAlpha, format: percentFormat }
@@ -37,7 +39,7 @@ export function rapidSwapOverviewTooltip(row, { metric = 'volume', hidden = [] }
   return timeSeriesTooltip([
     `${row.day} · ${row.calendar === 'UTC' ? 'UTC' : 'LOCAL DAY'}`,
     ...rapidSwapOverviewSeries(metric).filter((item) => !hidden.includes(item.id)).map((item) => ({
-      ...item, text: `${item.label}: ${Number.isFinite(row[item.id]) ? config.format(row[item.id]) : 'unavailable'}`
+      ...item, text: `${item.label}: ${Number.isFinite(row[item.id]) ? (config.tooltipFormat || config.format)(row[item.id]) : 'unavailable'}`
     }))
   ]);
 }
@@ -51,7 +53,7 @@ export function buildRapidSwapOverviewOption(rows, { metric = 'volume', hidden =
     tooltip: (row) => rapidSwapOverviewTooltip(row, { metric, hidden }),
     axes: descriptors.map((item, index) => ({
       id: item.id, label: item.label, color: item.color, position: index ? 'right' : 'left',
-      format: config.format, baseline: config.baseline,
+      format: config.format, tooltipFormat: config.tooltipFormat, baseline: config.baseline,
       integer: metric === 'count',
       ...(index ? getSeriesAxisBounds(rows.map((row) => row[item.id]), {
         clampMin: 0, minSpan: 1, roundToInteger: metric === 'count'

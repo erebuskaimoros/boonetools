@@ -45,7 +45,9 @@ export function buildBurnTrackerOption(rows, { unit = 'rune', hidden = ['price']
     axes: BURN_SERIES.map((series, index) => ({
       ...series, position: index === 0 ? 'left' : 'right', baseline: index === 0 ? 'zero' : 'auto',
       label: index === 2 ? 'RUNE / USD' : `${index === 0 ? 'DAILY' : 'CUMULATIVE'} ${units}`,
-      format: (value) => compact(value, index === 2 || showUsd ? '$' : '')
+      format: (value) => compact(value, index === 2 || showUsd ? '$' : ''),
+      tooltipFormat: (value) => index === 2 ? usdPrice.format(value)
+        : showUsd ? usdBurn.format(value) : `${rune.format(value)} ᚱ`
     })),
     series: [
       { ...BURN_SERIES[0], aggregate: 'sum', axis: 'daily', barMaxWidth: 22, fill: (item) => burnFill(rows[item.dataIndex]),

@@ -49,3 +49,33 @@ test('weighted feature reducers and gaps survive legacy monthly display', () => 
   render(chart, rows, rows.filter((_, i) => i !== 95), metrics, [], ['volume-7d']);
   assert.equal(chart.data.datasets[1].data.at(-1), null);
 });
+
+test('rolling tooltip values retain feature currency, bps, and percent denominations', () => {
+  for (const [format, expected] of [
+    [value => `$${value.toFixed(2)}`, '$96.00'],
+    [value => `${value.toFixed(2)} RUNE`, '96.00 RUNE'],
+    [value => `${value.toFixed(2)} bps`, '96.00 bps'],
+    [value => `${value.toFixed(2)}%`, '96.00%']
+  ]) {
+    const render = createLegacyChartAnalytics(), { rows, chart } = fixture();
+    render(chart, rows, rows, [{ id: 'volume', value: row => row.amount, format }], [], ['volume-7d']);
+    const dataset = chart.data.datasets[1];
+    const label = chart.options.plugins.tooltip.callbacks.label({
+      dataset, dataIndex: 99, parsed: { y: dataset.data[99] }, formattedValue: '96'
+    });
+    assert.equal(label, `7D AVG · VOLUME: ${expected} · daily mean`);
+    assert.equal(chart.options.plugins.tooltip.callbacks.label({ dataset: chart.data.datasets[0] }), 'original details');
+  }
+});
+
+test('rolling tooltip formatting is refreshed and missing windows are never formatted as zero', () => {
+  const render = createLegacyChartAnalytics(), { rows, chart } = fixture();
+  const metrics = [{ id: 'volume', value: row => row.amount, format: value => `$${value}` }];
+  render(chart, rows, rows, metrics, [], ['volume-7d']);
+  metrics[0].format = value => `${value} RUNE`;
+  render(chart, rows, rows, metrics, [], ['volume-7d']);
+  const label = chart.options.plugins.tooltip.callbacks.label;
+  const dataset = chart.data.datasets[1];
+  assert.equal(label({ dataset, dataIndex: 99, parsed: { y: 96 }, formattedValue: '96' }), '7D AVG · VOLUME: 96 RUNE · daily mean');
+  assert.equal(label({ dataset, dataIndex: 0, parsed: { y: null }, formattedValue: '0' }), '7D AVG · VOLUME: unavailable · daily mean');
+});

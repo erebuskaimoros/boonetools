@@ -1548,7 +1548,11 @@
         { field: 'feesUsd', label: 'Fees', kind: 'flow', unit: 'usd' }
       ]} note="Raw bucket volume and fees; rolling-average overlays are not summed. Source coverage is reported above." />
       <LegacyChartTools chart={affiliateChartInstance} rows={affiliateCalendarRows} historyRows={affiliateCalendarHistory} grain={affiliateBucket} onGrain={setAffiliateBucket}
-        metrics={[{ value: row => row.volumeUsd, rollingReduce: affiliateRollingMean }, { value: row => row.feesUsd, rollingReduce: affiliateRollingMean }, { value: row => row.volumeUsd > 0 && row.rateFeesUsd != null ? row.rateFeesUsd / row.volumeUsd * 10000 : null, rollingReduce: affiliateRollingRate }]}>
+        metrics={[
+          { value: row => row.volumeUsd, format: formatUsd, rollingReduce: affiliateRollingMean },
+          { value: row => row.feesUsd, format: formatUsd, rollingReduce: affiliateRollingMean },
+          { value: row => row.volumeUsd > 0 && row.rateFeesUsd != null ? row.rateFeesUsd / row.volumeUsd * 10000 : null, format: formatRateBps, rollingReduce: affiliateRollingRate }
+        ]}>
         <div slot="controls" class="affiliate-chart-control timeframe-control">
           <span class="chart-control-label">range</span>
           <div class="timeframe-tabs" role="tablist" aria-label="Affiliate chart timeframe">

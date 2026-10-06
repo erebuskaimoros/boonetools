@@ -71,7 +71,10 @@ export function buildTimeSeriesOption(rows, {
     function formatAnalysisValue(item, index) {
       const raw = item.data[index];
       const value = typeof raw === 'object' ? raw?.value : raw;
-      return value == null ? 'unavailable' : axes.find(axis => axis.id === item.axis)?.format?.(value) ?? String(value);
+      const axis = axes.find(axis => axis.id === item.axis);
+      // Hover values need explicit denominations and detail precision; compact
+      // tick labels may omit either. Preserve format as the legacy fallback.
+      return value == null ? 'unavailable' : (axis?.tooltipFormat || axis?.format)?.(value) ?? String(value);
     }
     if (window && view.grouped) {
       const first = rows.find(row => row.endDay >= window.startDay);

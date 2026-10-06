@@ -106,7 +106,8 @@ export function buildSystemIncomePolDepositOption(rows, { unit = 'rune', window 
     groupedTooltip: (_row, context) => polDepositTooltip(polDepositBuckets(context.rows, context.grain)[0], unit, context.hidden),
     axes: POL_DEPOSIT_SERIES.map((item, index) => ({
       ...item, label: `${index ? 'CUMULATIVE' : 'DAILY'} · ${unit.toUpperCase()}`,
-      position: index ? 'right' : 'left', format: (value) => polChartValue(value, unit, true)
+      position: index ? 'right' : 'left', format: (value) => polChartValue(value, unit, true),
+      tooltipFormat: (value) => polChartValue(value, unit)
     })),
     series: [
       ...pools.map(pool => ({ ...pool, aggregate: 'sum', axis: 'daily', stack: 'deposits', barMaxWidth: 28,
@@ -147,7 +148,8 @@ export function buildSystemIncomePolFeeOption(rows, { unit = 'usd', width = 1000
   return buildTimeSeriesOption(rows, {
     width, hidden, analysis, zoom: false, compact: true, tooltipEnabled: !selectedDay,
     tooltip: (row) => polFeeTooltip(row, unit, hidden),
-    axes: [{ id: 'fees', label: 'DAILY EST. FEES', position: 'left', color: palette.amber, format: (value) => polChartValue(value, unit, true) }],
+    axes: [{ id: 'fees', label: 'DAILY EST. FEES', position: 'left', color: palette.amber,
+      format: (value) => polChartValue(value, unit, true), tooltipFormat: (value) => polChartValue(value, unit) }],
     series: [{
       id: 'fees', label: 'DAILY EST. FEES', aggregate: 'sum', mark: 'bar', axis: 'fees', color: palette.amber, barMaxWidth: 32,
       data: rows.map((row) => row.value === null ? null : ({

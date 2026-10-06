@@ -694,7 +694,7 @@
         { field: 'tcFeesUsd', label: 'TC fees', kind: 'flow', unit: 'usd' }
       ]} />
 <LegacyChartTools chart={chartInstance} rows={calendarRows} historyRows={calendarHistory} grain={granularity} onGrain={setGranularity}
-        metrics={[{ value: row => row.feesPerBillionUsd, rollingReduce: sample => summarizeTcFeeRows(sample.filter(row => !row.rollingAverageExcluded)).weightedFeesPerBillionUsd }]} />
+        metrics={[{ value: row => row.feesPerBillionUsd, format: formatUSD, rollingReduce: sample => summarizeTcFeeRows(sample.filter(row => !row.rollingAverageExcluded)).weightedFeesPerBillionUsd }]} />
       <div
         class="chart-shell"
         bind:this={chartShell}
@@ -755,7 +755,7 @@
           { field: 'tcFeesUsd', label: 'TC fees', kind: 'flow', unit: 'usd' }
         ]} />
 <LegacyChartTools chart={incomeVolumeChartInstance} rows={calendarRows} historyRows={calendarHistory} grain={granularity} onGrain={setGranularity}
-          metrics={[{ value: row => row.incomeVolumeBps, rollingReduce: sample => summarizeTcFeeRows(sample.filter(row => !row.rollingAverageExcluded)).weightedIncomeVolumeBps }]} />
+          metrics={[{ value: row => row.incomeVolumeBps, format: formatBps, rollingReduce: sample => summarizeTcFeeRows(sample.filter(row => !row.rollingAverageExcluded)).weightedIncomeVolumeBps }]} />
         {#if hasIncomeVolumeData}
           <div
             class="income-volume-chart-shell"

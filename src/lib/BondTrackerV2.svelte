@@ -2,8 +2,15 @@
   import EventTimeSeriesChart from './charts/EventTimeSeriesChart.svelte';
   let historyHidden = [], historyGrain = 'native', historyWindow = null;
   $: calendarMetrics = [
-    { id: 'rune', label: 'RUNE STACK', color: '#00cc66', value: row => row.rune, reduce: 'last', aggregate: 'last' },
-    { id: 'value', label: `${historySummaryCurrency} VALUE`, color: '#d4a017', value: row => row.value, reduce: 'last', aggregate: 'last' }
+    { id: 'rune', label: 'RUNE STACK', color: '#00cc66', value: row => row.rune, reduce: 'last', aggregate: 'last',
+      tooltipFormat: value => `${formatNumber(value, { maximumFractionDigits: 2 })} RUNE` },
+    { id: 'value', label: `${historySummaryCurrency} VALUE`, color: '#d4a017', value: row => row.value, reduce: 'last', aggregate: 'last',
+      // History values are already converted at their historical rate. Only
+      // format here; currency formatters that convert from USD would double it.
+      tooltipFormat: value => getCurrencySymbol(historySummaryCurrency) + formatNumber(value, {
+        minimumFractionDigits: (currencyConfig[historySummaryCurrency] || currencyConfig.USD).preciseDecimals,
+        maximumFractionDigits: (currencyConfig[historySummaryCurrency] || currencyConfig.USD).preciseDecimals
+      }) }
   ];
   $: if (historyChartInstance) {
     historyChartInstance.setDatasetVisibility(0, !historyHidden.includes('rune'));

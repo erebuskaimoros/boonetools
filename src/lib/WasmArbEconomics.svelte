@@ -408,7 +408,7 @@
         { field: 'linkedTcReserveUsd', label: 'TC reserve value', kind: 'flow', unit: 'usd' }
       ]} />
 <LegacyChartTools chart={valueChart} rows={calendarRows} historyRows={calendarHistory} grain={calendarGrain} allowNative onGrain={setCalendarGrain}
-        metrics={[{ value: row => row.wasmLiquidityFeeUsd }, { value: row => row.linkedTcReserveUsd }]} />
+        metrics={[{ value: row => row.wasmLiquidityFeeUsd, format: formatUsd }, { value: row => row.linkedTcReserveUsd, format: formatUsd }]} />
       <div class="chart-shell primary"><canvas bind:this={valueCanvas} on:dblclick={resetZoom} aria-label="Accrued THORChain value time series; drag to zoom"></canvas></div>
     </section>
 
@@ -425,7 +425,7 @@
           { value: row => Number.isFinite(row.wasmNetworkVolumeShare) ? row.wasmNetworkVolumeShare * 100 : null, label: 'Network share', kind: 'rate', unit: '%' }
         ]} />
 <LegacyChartTools chart={activityChart} rows={calendarRows} historyRows={calendarHistory} grain={calendarGrain} allowNative onGrain={setCalendarGrain}
-          metrics={[{ value: row => row.wasmLegVolumeUsd }, { value: row => row.wasmNetworkVolumeShare * 100 }]} />
+          metrics={[{ value: row => row.wasmLegVolumeUsd, format: formatUsd }, { value: row => row.wasmNetworkVolumeShare * 100, format: value => formatPercent(value / 100) }]} />
         <div class="chart-shell"><canvas bind:this={activityCanvas} on:dblclick={resetZoom} aria-label="Wasm activity time series; drag to zoom"></canvas></div>
       </section>
 
@@ -441,7 +441,7 @@
           { field: 'tcPerMillionNetworkVolumeUsd', label: 'TC / $1M network volume', kind: 'rate', unit: 'usd' }
         ]} note="Arithmetic means of bucket rates, not volume-weighted period rates." />
 <LegacyChartTools chart={efficiencyChart} rows={calendarRows} historyRows={calendarHistory} grain={calendarGrain} allowNative onGrain={setCalendarGrain}
-          metrics={[{ value: row => row.tcPerMillionWasmVolumeUsd }, { value: row => row.tcPerMillionNetworkVolumeUsd }]} />
+          metrics={[{ value: row => row.tcPerMillionWasmVolumeUsd, format: formatUsd }, { value: row => row.tcPerMillionNetworkVolumeUsd, format: formatUsd }]} />
         <div class="chart-shell"><canvas bind:this={efficiencyCanvas} on:dblclick={resetZoom} aria-label="THORChain value density time series; drag to zoom"></canvas></div>
       </section>
 
@@ -458,7 +458,7 @@
           { field: 'p90SlipBps', label: 'Bucket P90 slip', kind: 'rate', unit: 'bps' }
         ]} note="Means of bucket rates/quantiles, not a whole-range median or P90." />
 <LegacyChartTools chart={feeChart} rows={calendarRows} historyRows={calendarHistory} grain={calendarGrain} allowNative onGrain={setCalendarGrain}
-          metrics={[{ value: row => row.wasmLegFeeBps }, { value: row => row.medianSlipBps }, { value: row => row.p90SlipBps }]} />
+          metrics={[{ value: row => row.wasmLegFeeBps, format: formatBps }, { value: row => row.medianSlipBps, format: formatBps }, { value: row => row.p90SlipBps, format: formatBps }]} />
         <div class="chart-shell"><canvas bind:this={feeCanvas} on:dblclick={resetZoom} aria-label="Fee and execution behavior time series; drag to zoom"></canvas></div>
       </section>
 
@@ -476,7 +476,7 @@
         ]} note="Arithmetic means of bucket observations; depth weighting remains within each bucket." />
         {#if !oracleComplete}<div class="inline-warning">WRN · selected range has incomplete oracle coverage</div>{/if}
 <LegacyChartTools chart={oracleChart} rows={calendarRows} historyRows={calendarHistory} grain={calendarGrain} allowNative onGrain={setCalendarGrain}
-          metrics={[{ value: row => row.priceTracking.depthWeightedAbsoluteDeviationBps }, { value: row => row.priceTrackingExcludingLtc.depthWeightedAbsoluteDeviationBps }, { value: row => row.priceTracking.within10Share * 100 }]} />
+          metrics={[{ value: row => row.priceTracking.depthWeightedAbsoluteDeviationBps, format: formatBps }, { value: row => row.priceTrackingExcludingLtc.depthWeightedAbsoluteDeviationBps, format: formatBps }, { value: row => row.priceTracking.within10Share * 100, format: value => formatPercent(value / 100) }]} />
         <div class="chart-shell"><canvas bind:this={oracleCanvas} on:dblclick={resetZoom} aria-label="Pool and oracle alignment time series; drag to zoom"></canvas></div>
       </section>
     </div>
