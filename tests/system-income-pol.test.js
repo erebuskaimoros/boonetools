@@ -206,7 +206,8 @@ test('System Income POL muted copy keeps a readable contrast and type floor', as
   assert.match(dashboardSource, /\.metric-label \{[^}]*color: var\(--term-text-3\)/);
   assert.match(dashboardSource, /\.metric small \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
   assert.match(dashboardSource, /\.panel-meta \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
-  assert.match(dashboardSource, /\.asset-grid span, \.asset-grid small \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
+  const allocationSource = await readFile(new URL('../src/lib/system-income-pol/AssetAllocation.svelte', import.meta.url), 'utf8');
+  assert.match(allocationSource, /\.asset-amount, \.asset-share span \{[^}]*color: var\(--term-text-3\);[^}]*font: 12px/);
   const option = buildSystemIncomePolDepositOption([]);
   assert.ok(option.yAxis.every(axis => axis.axisLabel.fontSize >= 11));
   assert.ok(option.tooltip.textStyle.fontSize >= 12);

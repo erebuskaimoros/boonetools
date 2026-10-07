@@ -378,6 +378,11 @@ its controls and legend below these cards, immediately before the plot.
 Its Depth/Cumulative Fees switch uses a sliding indicator with reduced-motion
 support. POL deposit rolling averages apply only to daily deposits, not the
 cumulative total.
+POL Tracker's current holdings use a USD-weighted ECharts pie with an always-visible
+asset/chain key, token amounts, dollar values, and allocation shares. Unpriced
+holdings remain listed but are excluded from the pie and its percentage denominator.
+The six headline cards use one row at 1320px of available content width, then
+reflow to three, two, or one column without shrinking away their labels.
 Both POL Tracker plots place range/zoom controls below the summary and shared
 legend, right-aligned immediately above the plot. Their denomination control
 uses the shared terminal `CurrencySwitch.svelte` with a sliding indicator,

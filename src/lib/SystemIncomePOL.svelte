@@ -7,6 +7,7 @@
   import { buildSystemIncomePolDepositOption } from './system-income-pol/charts.js';
   import DepositInspector from './system-income-pol/DepositInspector.svelte';
   import DailyFeeChart from './system-income-pol/DailyFeeChart.svelte';
+  import AssetAllocation from './system-income-pol/AssetAllocation.svelte';
   import { subscribeChainHeads } from './api/chain-stream.js';
   import { getAssetLogo } from './constants/assets.js';
   import { fetchSystemIncomePol } from './system-income-pol/api.js';
@@ -331,24 +332,11 @@
     <div class="panel-heading">
       <div>
         <h2 id="assets-title">CURRENT ASSETS HELD BY POL</h2>
-        <p>Redeemable LP inventory at the latest position reconciliation.</p>
+        <p>Redeemable LP inventory by USD value at the latest position reconciliation.</p>
       </div>
       <span class="panel-meta">{assetInventory.length} ASSETS · {displayTimestamp(dashboard.freshness.positions_as_of)}</span>
     </div>
-    <div class="asset-grid">
-      {#each assetInventory as asset}
-        <article>
-          <span>{asset.asset}</span>
-          <div class="asset-value">
-            <img src={getAssetLogo(asset.asset) || '/assets/coins/fallback-logo.svg'} alt="" aria-hidden="true" />
-            <strong>{asset.ticker === 'RUNE' ? formatE8Rune(asset.amountE8) : formatE8Asset(asset.amountE8)}</strong>
-          </div>
-          <small>{asset.ticker} · {formatE8Usd(asset.valueUsdE8)}</small>
-        </article>
-      {:else}
-        <p class="empty">NO CURRENT POL ASSETS OBSERVED</p>
-      {/each}
-    </div>
+    <AssetAllocation inventory={assetInventory} {loading} />
   </section>
 
   <section class="panel" aria-labelledby="positions-title">
@@ -490,6 +478,7 @@
 
 <style>
   .sipol-shell {
+    container: sipol / inline-size;
     min-height: 100%;
     padding: 26px 24px 70px;
     color: var(--term-text-body);
@@ -549,30 +538,30 @@
   :global(.sipol-shell > .terminal-alert) { max-width: 1440px; margin-left: auto; margin-right: auto; }
   .metric-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
+    gap: 1px;
     max-width: 1440px;
     margin: 0 auto 14px;
     border: 1px solid var(--term-border);
-    background: var(--term-surface);
+    background: var(--term-border);
   }
   .metric {
     position: relative;
+    min-width: 0;
     min-height: 112px;
     padding: 17px 18px;
-    border-right: 1px solid var(--term-border);
+    background: var(--term-surface);
   }
-  .metric:nth-child(3n) { border-right: 0; }
-  .metric:nth-child(-n+3) { border-bottom: 1px solid var(--term-border); }
   .metric:hover { background: var(--term-surface-hover); }
   .metric-index { position: absolute; top: 10px; right: 11px; color: var(--term-accent); font-size: 9px; }
-  .metric-label { display: block; margin-bottom: 12px; color: var(--term-text-3); }
+  .metric-label { display: block; margin-bottom: 12px; padding-right: 6px; color: var(--term-text-3); }
   .metric strong { display: block; color: var(--term-text); font-size: 25px; line-height: 1.1; }
-  .metric small { display: block; margin-top: 8px; color: var(--term-text-3); font-size: 12px; letter-spacing: .04em; }
+  .metric small { display: block; margin-top: 8px; color: var(--term-text-3); font-size: 12px; letter-spacing: .04em; overflow-wrap: anywhere; }
   .metric small.income-pending { color: var(--term-amber); }
   .metric .metric-value--green { color: var(--term-accent); }
   .metric .metric-value--orange { color: var(--term-amber); }
   .metric--fees strong { color: var(--term-amber); }
-  .metric-toggle { width: 100%; border: 0; border-right: 1px solid var(--term-border); border-radius: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .metric-toggle { width: 100%; border: 0; border-radius: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
   .metric-toggle:focus-visible { outline: 2px solid var(--term-accent); outline-offset: -2px; }
   .metric-pair { display: grid; grid-template-columns: auto auto auto; align-items: flex-start; justify-content: start; gap: 10px; }
   .metric-pair > span { min-width: 0; }
@@ -625,35 +614,6 @@
   h2 { margin: 0 0 5px; color: var(--term-text); font: 700 13px/1.2 'JetBrains Mono', monospace; letter-spacing: .07em; }
   .panel-heading:not(.compact) h2 { color: var(--term-text-strong); font-size: 16px; font-weight: 800; letter-spacing: .075em; }
   .panel-meta { color: var(--term-text-3); font-size: 12px; white-space: nowrap; }
-  .asset-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-  }
-  .asset-grid article {
-    min-height: 96px;
-    padding: 15px 18px;
-    border-right: 1px solid var(--term-border-faint);
-  }
-  .asset-grid article:last-child { border-right: 0; }
-  .asset-grid span, .asset-grid small {
-    display: block;
-    color: var(--term-text-3);
-    font-size: 12px;
-    letter-spacing: .08em;
-  }
-  .asset-grid span { overflow-wrap: anywhere; }
-  .asset-value {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    margin: 9px 0 6px;
-  }
-  .asset-value img { width: 22px; height: 22px; flex: 0 0 22px; object-fit: contain; }
-  .asset-grid strong {
-    display: block;
-    color: var(--term-accent);
-    font-size: 23px;
-  }
   .table-scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font: 13px/1.45 'JetBrains Mono', monospace; }
   th, td { padding: 11px 14px; border-bottom: 1px solid var(--term-border-faint); text-align: right; white-space: nowrap; }
@@ -693,15 +653,24 @@
   .method-panel > p { margin: 12px 16px; color: var(--term-text-2); font: 14px/1.55 'DM Sans', sans-serif; }
   .method-panel b { color: var(--term-text); font-family: 'JetBrains Mono', monospace; font-size: 12px; }
   .source-line { display: block; margin: 14px 16px; color: var(--term-text-3); font-size: 12px; line-height: 1.5; }
+  @container sipol (min-width: 640px) {
+    .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @container sipol (min-width: 960px) {
+    .metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @container sipol (min-width: 1320px) {
+    .metric-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+    .metric { padding: 17px 12px; }
+    .metric-label { font-size: 11px; letter-spacing: .06em; }
+    .metric strong { font-size: 22px; }
+    .metric-pair, .fee-metric-pair { gap: 6px; }
+    .metric-pair strong { font-size: 20px; }
+    .metric small { font-size: 11px; letter-spacing: 0; }
+  }
   @media (max-width: 900px) {
     .sipol-shell { padding: 18px 12px 56px; }
     .terminal-header, .panel-heading { align-items: flex-start; flex-direction: column; }
-    .metric-grid { grid-template-columns: 1fr; }
-    .metric { border-right: 0; border-bottom: 1px solid var(--term-border) !important; }
-    .metric:last-child { border-bottom: 0 !important; }
-    .asset-grid { grid-template-columns: 1fr; }
-    .asset-grid article { border-right: 0; border-bottom: 1px solid var(--term-border-faint); }
-    .asset-grid article:last-child { border-bottom: 0; }
     .coverage-grid { grid-template-columns: 1fr; }
     .chart-wrap { padding: 8px 0 0; }
   }
