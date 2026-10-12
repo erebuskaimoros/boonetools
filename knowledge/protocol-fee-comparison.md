@@ -286,6 +286,77 @@ server-owned collector resumes from this cache. Do not start concurrent writers.
 
 ## Chainflip investigation
 
+### September 30–October 12, 2026 runtime-review gap
+
+The six-hour collector kept running, but Chainflip upgraded beyond the reviewed
+runtime allowlist. September 30 onward failed with `CHAINFLIP_RUNTIME_REVIEW`
+for 20215, 20216 and 20218. The comparison deliberately aligns all protocols to
+the last shared complete UTC day, so its public `throughDay` stayed September
+29 and September's monthly result became incomplete. This was not a stopped
+timer or a frontend caching fault. Preserve this shared-period rule and never
+substitute zero or an extrapolated subsidy for missing issuance.
+
+Focused source review on October 12 compared official
+[`chainflip-io/chainflip-backend`](https://github.com/chainflip-io/chainflip-backend)
+commits:
+
+| Runtime | Immutable source commit |
+| --- | --- |
+| 20214 baseline | `ab665ca6c70ea7bfb5ffed5c5b23cb56565f94f4` (2.2.14) |
+| 20215 | `15f7e26c282f3a60e92bc07623439c7d42ac1a15` (2.2.15) |
+| 20216 | `c1cda063a51c5dfd541f1cf7d5a0b8ec76bd2e09` (2.2.16) |
+| 20216 alternate | `c89ea885320689f8ef7d475ee399718a354d9d80` (release/2.2 history) |
+| 20218 | `55a2d166db22a56045deacf575a9bcf4dbb0c462` (release/2.2; no 2.2.18 tag) |
+
+Each declares its corresponding `spec_version`. The entire emission pallet,
+delegation implementation, FLIP pallet, and runtime configs are byte-identical
+to 20214. Emissions still runs before Authorship, refreshes every 150 blocks,
+and distributes the stored budget with the operator receiving the rounding
+remainder. The changed Assethub block-time constant belongs to that external
+chain, not Chainflip's six-second blocks or emission compounding. See the
+immutable [emission hooks](https://github.com/chainflip-io/chainflip-backend/blob/55a2d166db22a56045deacf575a9bcf4dbb0c462/state-chain/pallets/cf-emissions/src/lib.rs#L173-L194),
+[execution order](https://github.com/chainflip-io/chainflip-backend/blob/55a2d166db22a56045deacf575a9bcf4dbb0c462/state-chain/runtime/src/lib.rs#L295-L341),
+and [distribution](https://github.com/chainflip-io/chainflip-backend/blob/55a2d166db22a56045deacf575a9bcf4dbb0c462/state-chain/pallets/cf-validator/src/delegation.rs#L218-L260).
+This is a focused source review plus deployed-state/event reconciliation, not
+a full runtime audit or a reproducible-build proof.
+
+Only these exact observed `state_getStorageHash(":code")` values are admitted:
+
+| Runtime | Deployed code hash | Sample compounding block |
+| --- | --- | --- |
+| 20215 | `0x9fb6db0053b59312bd56e4a0fa5a55f658f0d027ff168087cc95c102befa985d` | 15,051,000 |
+| 20216 | `0x869e4ddf6e4d7ae88b4dc92100a80ea9a32bd7763c640b9bf12b70a20f6aa073` | 15,079,800 |
+| 20218 | `0x7db87aa30a2c91bb9fc4148f9e70f79d00fd0dd549d5e5b19d819ca99eac79de` | 15,194,100 |
+
+Decoded all `flip.FlipMinted` events in the blocks immediately before, at, and
+after each sample compounding block (nine blocks total). All recipient sums
+equal the same-block `cf_authority_emission_per_block` exactly:
+
+| Runtime | Before boundary (atomic FLIP) | At and after boundary (atomic FLIP) |
+| --- | --- | --- |
+| 20215 | 659815904791519879 | 659816635107625591 |
+| 20216 | 659317160697470200 | 659317892023603350 |
+| 20218 | 657985934548863418 | 657986665492448519 |
+
+Also located the exact runtime-upgrade blocks and decoded the preceding,
+upgrade, and following block using execution-time metadata (nine more blocks).
+Every mint sum equals the same-block rate: 20215 at 15,042,630
+(`659984175740678415` atomic FLIP), 20216 at 15,060,867
+(`659864007299779663`), and 20218 at 15,157,928
+(`658498635245279914`). Each upgrade's deployed code hash matches the table.
+
+The old 20210 hash guard remains intact. Unobserved 20217, later runtimes, and
+different code under a reviewed version remain blocked. Regression tests first
+reproduced all three rejected versions, then verified exact totals, transitions
+within a UTC day, and rejection of mismatched intermediate runtime hashes.
+No emission arithmetic or accounting methodology changed.
+
+Recovery: deploy the backend, then deliberately start the existing comparison
+service only if it is idle. Its durable cache resumes the missing dates; do not
+reset or reseed it. Confirm the public endpoint's `throughDay`, `stale`, `errors`,
+and September coverage after acquisition. Future unknown runtimes still require
+the same source/event review and a new explicit code-hash entry.
+
 Public archive: `https://mainnet-archive.chainflip.io`.
 `cf_flip_supply([blockHash])` returns `[totalIssuance, offchainFunds]` in
 18-decimal atomic FLIP. Verified block 14,872,200 at 2026-09-18 13:53:42.001

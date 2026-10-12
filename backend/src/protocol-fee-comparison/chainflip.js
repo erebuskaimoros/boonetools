@@ -4,7 +4,7 @@ export const CHAINFLIP_RPC = 'https://mainnet-archive.chainflip.io';
 const TIMESTAMP_KEY = '0xf0c365c3cf59d671eb72da0e7a4113c49f1f0515f462cdcf84e0f1d6045dfcbb';
 // Reviewed historical emissions + delegation paths; source references and
 // boundary-block reconciliation are in knowledge/protocol-fee-comparison.md.
-// Untagged 2.2.10 is separately pinned to its reviewed deployed WASM.
+// Selected runtimes are pinned to the exact deployed WASM hashes in that review.
 // Delegated runtimes refresh every 150 blocks before authorship; all cuts,
 // including the operator's rounding remainder, sum exactly to the mint budget.
 // Legacy runtimes use the separately guarded one-block-delayed rate below.
@@ -16,9 +16,16 @@ export const AUDITED_CHAINFLIP_RUNTIMES = new Set([
   20000, 20002, 20003, 20004, 20005, 20006, 20007, 20008, 20009, 20010, 20011, 20012, 20013,
   20100, 20101, 20102, 20103, 20104, 20105, 20106, 20107, 20108, 20109, 20110, 20111,
   20112, 20113, 20114, 20115, 20116, 20117, 20118, 20119, 20120,
-  20200, 20201, 20202, 20203, 20204, 20205, 20206, 20207, 20208, 20209, 20210, 20211, 20212, 20213, 20214
+  20200, 20201, 20202, 20203, 20204, 20205, 20206, 20207, 20208, 20209, 20210, 20211, 20212, 20213, 20214,
+  20215, 20216, 20218
 ]);
 export const CHAINFLIP_20210_CODE_HASH = '0xc4a17f29d03d3d0bb084e48d356b049cd22a3f55cbe99578e565eb5e83254cbc';
+export const CHAINFLIP_REVIEWED_CODE_HASHES = Object.freeze({
+  20210: CHAINFLIP_20210_CODE_HASH,
+  20215: '0x9fb6db0053b59312bd56e4a0fa5a55f658f0d027ff168087cc95c102befa985d',
+  20216: '0x869e4ddf6e4d7ae88b4dc92100a80ea9a32bd7763c640b9bf12b70a20f6aa073',
+  20218: '0x7db87aa30a2c91bb9fc4148f9e70f79d00fd0dd549d5e5b19d819ca99eac79de'
+});
 export const COMPOUNDING_BLOCKS = 150;
 
 function runtimeReview(message) {
@@ -85,8 +92,9 @@ export function createChainflipReader({ request, boundaries = {} }) {
       if (version.specName !== 'chainflip-node' || (!AUDITED_CHAINFLIP_RUNTIMES.has(version.specVersion) && !LEGACY_CHAINFLIP_RUNTIMES.has(version.specVersion))) {
         throw runtimeReview(`Chainflip runtime ${version.specVersion} needs issuance review`);
       }
-      if (version.specVersion === 20210 && await rpc('state_getStorageHash', ['0x3a636f6465', entry.hash]) !== CHAINFLIP_20210_CODE_HASH) {
-        throw runtimeReview('Chainflip runtime 20210 code hash needs issuance review');
+      const reviewedCodeHash = CHAINFLIP_REVIEWED_CODE_HASHES[version.specVersion];
+      if (reviewedCodeHash && await rpc('state_getStorageHash', ['0x3a636f6465', entry.hash]) !== reviewedCodeHash) {
+        throw runtimeReview(`Chainflip runtime ${version.specVersion} code hash needs issuance review`);
       }
       versions.set(height, version.specVersion);
     }

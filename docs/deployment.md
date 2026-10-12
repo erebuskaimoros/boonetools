@@ -98,6 +98,20 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### Crosschain comparison stuck at a shared date
+
+Check the public `protocol-fee-comparison` endpoint's `errors` and the
+`boonetools-protocol-fee-comparison.service` journal before blaming the timer.
+An unknown Chainflip runtime or changed pinned code hash fails issuance closed,
+which holds all protocols at their last shared complete UTC day. Review the
+official source and deployed mint events before admitting a new runtime; see
+[the October 12 review](../knowledge/protocol-fee-comparison.md#september-30october-12-2026-runtime-review-gap).
+After deploying the reviewed backend, start the existing service if it is idle
+and let its saved acquisition cache fill the gaps. Do not reset the cache or
+run concurrent collectors. Verify `throughDay` advances, source errors clear,
+and affected monthly coverage becomes complete. No frontend release is needed
+for a runtime-allowlist-only fix.
+
 ### POL share of total pool depth
 
 The headline card needs schema-7 `system-income-pol:v1`. Deploy backend before

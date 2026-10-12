@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { deriveComparisonDay, parseNearEmissions, priceDays, buildComparisonPayload, collectComparison, emptyComparisonCache } from '../src/protocol-fee-comparison/collector.js';
-import { CHAINFLIP_20210_CODE_HASH, createChainflipReader, decodeLittleEndian, sumIssuanceSegments } from '../src/protocol-fee-comparison/chainflip.js';
+import { CHAINFLIP_REVIEWED_CODE_HASHES, createChainflipReader, decodeLittleEndian, sumIssuanceSegments } from '../src/protocol-fee-comparison/chainflip.js';
 import { handleProtocolFeeComparison } from '../src/handlers/protocol-fee-comparison.js';
 import { comparisonRequest } from '../src/jobs/protocol-fee-comparison.js';
 import { requestFromProviders } from '../../shared/provider-client.js';
@@ -85,9 +85,12 @@ test('issuance arithmetic is exact beyond JS safe integers, inclusive start and 
   assert.throws(() => sumIssuanceSegments(100, 200, []), /Incomplete/);
 });
 
-function rpcFixture(specVersion = 20213, codeHash = CHAINFLIP_20210_CODE_HASH, backupRate = '0x0') {
+function rpcFixture(specVersion = 20213, {
+  codeHash, backupRate = '0x0', authorityRate = height => 100n + BigInt(Math.floor(height / 150))
+} = {}) {
   const startTime = Date.parse('2026-09-17');
   const calls = [];
+  const runtimeAt = height => typeof specVersion === 'function' ? specVersion(height) : specVersion;
   const hash = (height) => `0x${height.toString(16).padStart(64, '0')}`;
   const request = async (_url, { body }) => body.map(({ id, method, params }) => {
     calls.push(method);
@@ -97,9 +100,9 @@ function rpcFixture(specVersion = 20213, codeHash = CHAINFLIP_20210_CODE_HASH, b
     else if (method === 'chain_getHeader') result = { number: `0x${height.toString(16)}` };
     else if (method === 'chain_getBlockHash') result = hash(params[0]);
     else if (method === 'state_getStorage') result = '0x' + BigInt(startTime + (height - 1000) * 6000).toString(16).padStart(16, '0').match(/../g).reverse().join('');
-    else if (method === 'state_getRuntimeVersion') result = { specName: 'chainflip-node', specVersion };
-    else if (method === 'state_getStorageHash') result = codeHash;
-    else if (method === 'cf_authority_emission_per_block') result = `0x${(100n + BigInt(Math.floor(height / 150))).toString(16)}`;
+    else if (method === 'state_getRuntimeVersion') result = { specName: 'chainflip-node', specVersion: runtimeAt(height) };
+    else if (method === 'state_getStorageHash') result = (typeof codeHash === 'function' ? codeHash(height) : codeHash) ?? CHAINFLIP_REVIEWED_CODE_HASHES[runtimeAt(height)] ?? '0xunreviewed';
+    else if (method === 'cf_authority_emission_per_block') result = `0x${authorityRate(height).toString(16)}`;
     else if (method === 'cf_backup_emission_per_block') result = backupRate;
     else throw new Error(method);
     return { id, result };
@@ -120,7 +123,61 @@ test('archive reader finds exact UTC boundaries and sums every historical emissi
 });
 
 test('unreviewed Chainflip runtime fails closed rather than assuming continued or zero issuance', async () => {
-  await assert.rejects(createChainflipReader(rpcFixture(20300)).issuance('2026-09-17'), /needs issuance review/);
+  for (const specVersion of [20217, 20219, 20300]) {
+    const fixture = rpcFixture(specVersion);
+    await assert.rejects(createChainflipReader(fixture).issuance('2026-09-17'), {
+      code: 'CHAINFLIP_RUNTIME_REVIEW', message: /needs issuance review; no subsidy estimate substituted/
+    });
+    assert.ok(!fixture.calls.includes('cf_authority_emission_per_block'));
+  }
+});
+
+for (const specVersion of [20215, 20216, 20218]) {
+  test(`post-September-29 Chainflip runtime ${specVersion} collects exact daily issuance`, async () => {
+    assert.match(CHAINFLIP_REVIEWED_CODE_HASHES[specVersion], /^0x[0-9a-f]{64}$/);
+    const fixture = rpcFixture(specVersion);
+    const row = await createChainflipReader(fixture).issuance('2026-09-17');
+    let expected = 0n;
+    for (let height = 1000; height < 15400; height++) expected += 100n + BigInt(Math.floor(height / 150));
+    assert.equal(row.atomic, expected.toString());
+    assert.deepEqual(row.runtimes, [specVersion]);
+    assert.ok(fixture.calls.includes('state_getStorageHash'));
+  });
+
+  test(`post-September-29 Chainflip runtime ${specVersion} rejects a different deployed WASM hash`, async () => {
+    const fixture = rpcFixture(specVersion, { codeHash: CHAINFLIP_REVIEWED_CODE_HASHES[20210] });
+    await assert.rejects(createChainflipReader(fixture).issuance('2026-09-17'), {
+      code: 'CHAINFLIP_RUNTIME_REVIEW', message: new RegExp(`runtime ${specVersion} code hash needs issuance review; no subsidy estimate substituted`)
+    });
+    assert.ok(!fixture.calls.includes('cf_authority_emission_per_block'));
+  });
+}
+
+test('reviewed Chainflip runtime upgrades preserve exact emission segments within a UTC day', async () => {
+  const runtimeAt = height => height < 4099 ? 20214 : height < 8199 ? 20215 : height < 12199 ? 20216 : 20218;
+  const authorityRate = height => 100n + BigInt(Math.floor(height / 150)) + BigInt(runtimeAt(height)) * 1000n;
+  const fixture = rpcFixture(runtimeAt, { authorityRate });
+  const row = await createChainflipReader(fixture).issuance('2026-09-17');
+  let expected = 0n;
+  for (let height = 1000; height < 15400; height++) expected += authorityRate(height);
+  assert.equal(row.atomic, expected.toString());
+  assert.deepEqual([...row.runtimes].sort(), [20214, 20215, 20216, 20218]);
+  for (const height of [4099, 4100, 8199, 8200, 12199, 12200]) {
+    assert.deepEqual(row.checkpoints.find(point => point.height === height), { height, amount: authorityRate(height).toString() });
+  }
+  assert.equal(row.method, 'historical-onchain-emission-segments-v1');
+  assert.ok(!fixture.calls.includes('cf_flip_supply'), 'gross issuance is not a net-supply proxy');
+});
+
+test('an unreviewed code hash on an intermediate Chainflip upgrade fails the whole day closed', async () => {
+  const runtimeAt = height => height < 4099 ? 20215 : height < 12199 ? 20216 : 20218;
+  const fixture = rpcFixture(runtimeAt, {
+    codeHash: height => runtimeAt(height) === 20216 ? '0xunknown' : CHAINFLIP_REVIEWED_CODE_HASHES[runtimeAt(height)]
+  });
+  await assert.rejects(createChainflipReader(fixture).issuance('2026-09-17'), {
+    code: 'CHAINFLIP_RUNTIME_REVIEW', message: /runtime 20216 code hash needs issuance review; no subsidy estimate substituted/
+  });
+  assert.ok(!fixture.calls.includes('cf_authority_emission_per_block'));
 });
 
 test('legacy Chainflip pays the preceding block rate and refuses nonzero unaccounted backup emissions', async () => {
@@ -129,7 +186,7 @@ test('legacy Chainflip pays the preceding block rate and refuses nonzero unaccou
   for (let height = 1000; height < 15400; height++) expected += 100n + BigInt(Math.floor((height - 1) / 150));
   assert.equal(row.atomic, expected.toString());
   assert.equal(row.method, 'historical-onchain-legacy-emission-segments-v1');
-  await assert.rejects(createChainflipReader(rpcFixture(11006, CHAINFLIP_20210_CODE_HASH, '0x1')).issuance('2026-09-17'), /backup rewards/);
+  await assert.rejects(createChainflipReader(rpcFixture(11006, { backupRate: '0x1' })).issuance('2026-09-17'), /backup rewards/);
 });
 
 test('indexed Chainflip date boundaries are verified against the archive before reuse', async () => {
@@ -140,7 +197,7 @@ test('indexed Chainflip date boundaries are verified against the archive before 
 test('untagged 20210 is accepted only with the reviewed deployed WASM hash', async () => {
   const result = await createChainflipReader(rpcFixture(20210)).issuance('2026-09-17');
   assert.deepEqual(result.runtimes, [20210]);
-  await assert.rejects(createChainflipReader(rpcFixture(20210, '0xunknown')).issuance('2026-09-17'),
+  await assert.rejects(createChainflipReader(rpcFixture(20210, { codeHash: '0xunknown' })).issuance('2026-09-17'),
     { code: 'CHAINFLIP_RUNTIME_REVIEW' });
 });
 
