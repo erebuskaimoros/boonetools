@@ -162,7 +162,7 @@ export function buildTimeSeriesOption(rows, {
       z: item.order ?? (item.mark === 'line' ? 3 : 2), emphasis: { disabled: true },
       ...(item.mark === 'bar' ? {
         ...(item.barMaxWidth == null ? {} : { barMaxWidth: item.barMaxWidth }),
-        itemStyle: { color: item.fill || item.color, borderColor: item.color, borderWidth: 1, borderRadius: 0 }
+        itemStyle: { color: item.fill || item.color, borderColor: item.color, borderWidth: item.barBorderWidth ?? 1, borderRadius: 0 }
       } : {
         connectNulls: false, smooth: item.smooth || false,
         symbol: 'circle', showSymbol: Boolean(item.symbolSize) || item.data.filter(value => value != null).length === 1, symbolSize: item.symbolSize || 4,

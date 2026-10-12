@@ -110,14 +110,15 @@ export function buildSystemIncomePolDepositOption(rows, { unit = 'rune', window 
       tooltipFormat: (value) => polChartValue(value, unit)
     })),
     series: [
-      ...pools.map(pool => ({ ...pool, aggregate: 'sum', axis: 'daily', stack: 'deposits', barMaxWidth: 28,
+      // Zero-height stack segments must not paint a different pool's outline.
+      ...pools.map(pool => ({ ...pool, aggregate: 'sum', axis: 'daily', stack: 'deposits', barMaxWidth: 28, barBorderWidth: 0,
         data: rows.map(row => {
           const deposit = row.poolDeposits?.find(item => item.asset === pool.asset);
           return deposit ? deposit.value : 0;
         })
       })),
       ...(needsUnattributed ? [{ ...POL_DEPOSIT_SERIES[0], label: 'UNATTRIBUTED', color: palette.muted,
-        aggregate: 'sum', axis: 'daily', stack: 'deposits', barMaxWidth: 28,
+        aggregate: 'sum', axis: 'daily', stack: 'deposits', barMaxWidth: 28, barBorderWidth: 0,
         data: rows.map(row => row.unattributedValue === undefined ? row.depositedPlotValue : row.unattributedValue)
       }] : []),
       { ...POL_DEPOSIT_SERIES[1], aggregate: 'last', axis: 'cumulative', symbolSize: 6,

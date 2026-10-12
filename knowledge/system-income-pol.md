@@ -24,6 +24,12 @@ cumulative line remain all-pool totals; hiding a pool changes only its plotted s
 show amounts and percentages of the entire bucket. A native UTC bucket selector
 provides the same breakdown and token logos without requiring canvas interaction.
 
+POL deposit stacks are borderless: ECharts draws a colored outline even for a
+zero-height bar, which otherwise puts colors from non-recipient pools across
+that day's real deposits. The feature sets `barBorderWidth: 0`; other charts
+retain the shared one-pixel default. Zeros remain numeric observations and tiny
+positive deposits remain proportional segments in all calendar/unit views.
+
 Read-model schema 6 adds `daily[].pool_deposits` (`asset`, `deployed_e8`) from the
 existing `system_income_pol_pool_daily` table. No migration, provider query or
 new backfill is needed. Historical recipients remain included even if they no

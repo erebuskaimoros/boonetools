@@ -33,6 +33,53 @@ test('real ECharts renderer stacks pool bars to the daily total, independently o
   } finally { chart.dispose(); }
 });
 
+test('zero-deposit pools do not paint colored outlines across another coin’s stacked bar', () => {
+  const source = { daily: [
+    { day: '2026-10-31', deployed_e8: '1500000000', cumulative_deployed_e8: '10000000000', rune_price_usd: '2',
+      pool_deposits: [deposit('TRON.TRX', 10), deposit('TRON.USDT', 5)] },
+    { day: '2026-11-01', deployed_e8: '2000000000', cumulative_deployed_e8: '12000000000', rune_price_usd: '3',
+      pool_deposits: [deposit('ZEC.ZEC', 20)] },
+    { day: '2026-11-02', deployed_e8: '1', cumulative_deployed_e8: '12000000001', rune_price_usd: '4',
+      pool_deposits: [deposit('XRP.XRP', 1e-8)] }
+  ] };
+  for (const unit of ['rune', 'usd']) for (const grain of ['day', 'week', 'month']) for (const hidden of [[], ['pool:TRON.USDT']]) {
+    const chart = init(null, null, { renderer: 'svg', ssr: true, width: 1000, height: 280 });
+    try {
+      const option = buildSystemIncomePolDepositOption(points(source, unit), { unit, analysis: { grain, hidden } });
+      chart.setOption(option);
+      let checkedZeros = 0, checkedDeposits = 0, checkedTinyDeposit = false;
+      for (const series of chart.getModel().getSeries().filter(item => item.subType === 'bar')) {
+        const data = series.getData();
+        if (hidden.includes(series.id)) assert.equal(data.count(), 0);
+        for (let index = 0; index < data.count(); index++) {
+          const element = data.getItemGraphicEl(index);
+          const value = data.getRawDataItem(index);
+          if (value === 0) {
+            checkedZeros++;
+            const noVisibleStroke = !element || element.ignore || element.invisible || element.style.opacity === 0
+              || !element.style.stroke || element.style.stroke === 'none' || element.style.lineWidth === 0;
+            assert.ok(noVisibleStroke, `${unit}/${grain}: ${series.id} has no deposit in bucket ${index}, but paints a colored stroke`);
+          } else {
+            checkedDeposits++;
+            assert.ok(value > 0 && Math.abs(element.shape.height) > 0, 'genuine deposits keep their positive geometry');
+            assert.equal(element.style.fill, polPoolSeries(series.id.slice('pool:'.length)).color);
+            assert.equal(element.style.lineWidth, 0);
+            if (series.id === 'pool:XRP.XRP') {
+              checkedTinyDeposit = true;
+              assert.equal(value, unit === 'usd' ? 4e-8 : 1e-8, 'one-base-unit deposits are not rounded away');
+            }
+          }
+        }
+      }
+      assert.equal(checkedZeros, (grain === 'day' ? 8 : 4) - (hidden.length ? grain === 'day' ? 2 : 1 : 0),
+        'zero deposits remain numeric observations, not missing values');
+      assert.equal(checkedDeposits, hidden.length ? 3 : 4);
+      assert.equal(checkedTinyDeposit, true);
+      assert.match(chart.renderToSVGString(), /<svg/);
+    } finally { chart.dispose(); }
+  }
+});
+
 test('current recipient pools have distinct colors that do not depend on their position in the legend', () => {
   const expected = {
     'ZEC.ZEC': '#f4b728',
@@ -108,6 +155,7 @@ test('older/incomplete/inconsistent snapshots show an explicit unattributed rema
     const rows = points({ daily: [{ ...payload.daily[0], pool_deposits }] });
     const option = buildSystemIncomePolDepositOption(rows);
     assert.equal(option.series.filter(item => item.type === 'bar').reduce((sum, item) => sum + item.data[0], 0), 100);
+    assert.ok(option.series.filter(item => item.type === 'bar').every(item => item.itemStyle.borderWidth === 0));
     assert.match(polDepositTooltip(rows[0]), /UNATTRIBUTED/);
   }
 });
