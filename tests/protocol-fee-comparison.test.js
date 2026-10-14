@@ -9,6 +9,19 @@ const days = calendarDays('2026-08-01', '2026-09-18').map((day) => ({ day,
   thorchain: contribution(100, 1), near: { ...contribution(20, 200), frontendIncomeUsd: 5, otherIncomeUsd: 15 }, chainflip: contribution(15, 10) }));
 const months = monthlyComparison(days, { now, startDay: '2026-08-01', endDay: '2026-09-18' });
 
+test('nonzero daily sub-dollar emissions remain visible in comparison details', () => {
+  assert.equal(formatComparisonUsd(0.4658597059627627), '$0.47');
+  assert.equal(formatComparisonUsd(-0.4658597059627627), '-$0.47');
+  assert.equal(formatComparisonUsd(0), '$0');
+  assert.notEqual(formatComparisonUsd(0.00004822), '$0');
+  assert.notEqual(formatComparisonUsd(0.00004822), '$0.00');
+  assert.equal(formatComparisonUsd(0.00004822), '<$0.01');
+  assert.equal(formatComparisonUsd(-0.00004822), '>-$0.01');
+  assert.equal(formatComparisonUsd(1234.56), '$1,235');
+  assert.equal(formatComparisonUsd(1234.56, true), '$1.2K');
+  assert.equal(formatComparisonUsd(0.4658597059627627, true), '$0.5');
+});
+
 test('rolling year starts at UTC month boundary and retains twelve full months plus current month', () => {
   assert.equal(comparisonStartDay(now), '2025-09-01');
   assert.equal(comparisonStartDay(Date.parse('2027-01-01T00:00:00Z')), '2026-01-01');

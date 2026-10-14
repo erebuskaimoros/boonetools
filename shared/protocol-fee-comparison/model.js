@@ -92,9 +92,16 @@ export function ageComparisonPayload(payload, now = Date.now()) {
 }
 
 export function formatComparisonUsd(value, compact = false) {
-  if (finite(value) === null) return 'Unavailable';
+  const amount = finite(value);
+  if (amount === null) return 'Unavailable';
+  const magnitude = Math.abs(amount);
+  // Exact daily Reserve emissions can be below one dollar. Never render a
+  // nonzero detail as zero; use a signed bound below the cent display precision.
+  if (!compact && magnitude > 0 && magnitude < 0.01) return amount < 0 ? '>-$0.01' : '<$0.01';
+  const cents = !compact && magnitude > 0 && magnitude < 1;
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD',
-    notation: compact ? 'compact' : 'standard', maximumFractionDigits: compact ? 1 : 0 }).format(value);
+    notation: compact ? 'compact' : 'standard', minimumFractionDigits: cents ? 2 : 0,
+    maximumFractionDigits: compact ? 1 : cents ? 2 : 0 }).format(amount);
 }
 
 export function formatComparisonMonth(month) {

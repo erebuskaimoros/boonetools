@@ -2,6 +2,38 @@ import { PROTOCOLS, DAY_MS, finite, formatComparisonUsd } from '../../../shared/
 import { buildTimeSeriesOption } from '../charts/time-series.js';
 import { comparisonTooltip } from './options.js';
 
+const observedContribution = point => ['incomeUsd', 'subsidyUsd', 'netUsd']
+  .every(key => finite(point?.[key]) !== null);
+const sharedMonth = row => PROTOCOLS.every(({ id }) => row.protocols?.[id]?.complete
+  && observedContribution(row.protocols[id]));
+
+// The latest continuous overlap is one common comparison window, not three
+// protocol-specific ranges. An observed zero is covered; a missing day is not.
+function latestVerifiedRun(rows, covered, consecutive) {
+  const last = rows.findLastIndex(covered);
+  if (last < 0) return [];
+  let first = last;
+  while (first > 0 && covered(rows[first - 1]) && consecutive(rows[first - 1], rows[first])) first -= 1;
+  return rows.slice(first, last + 1);
+}
+
+export function selectComparisonView(daily = [], months = [], { mode = null } = {}) {
+  const sourceGrain = daily.length ? 'day' : 'month';
+  const history = (daily.length ? [...daily] : months.map(row => ({ ...row, day: row.fromDay })))
+    .sort((a, b) => a.day.localeCompare(b.day));
+  const verified = sourceGrain === 'day'
+    ? latestVerifiedRun(history, row => PROTOCOLS.every(({ id }) => observedContribution(row[id])),
+      (previous, next) => Date.parse(next.day) - Date.parse(previous.day) === DAY_MS)
+    : latestVerifiedRun(history, sharedMonth, (previous, next) =>
+      Date.parse(next.fromDay) - Date.parse(previous.throughDay) === DAY_MS);
+  const selectedMode = mode === 'verified' || mode === 'full' ? mode
+    : (months.some(row => !row.partial && sharedMonth(row)) || !verified.length ? 'full' : 'verified');
+  const rows = selectedMode === 'verified' ? verified : history;
+  return { mode: selectedMode, sourceGrain, grain: selectedMode === 'full' ? 'month' : sourceGrain, rows,
+    fromDay: rows[0]?.fromDay || rows[0]?.day || null,
+    throughDay: rows.at(-1)?.throughDay || rows.at(-1)?.day || null };
+}
+
 // These are monetary flows, including the signed USD value of NEAR's net
 // issuance. Sum the same daily observations as the plotted net series; never
 // show a partial subtotal as a covered bucket when any interior day is missing.

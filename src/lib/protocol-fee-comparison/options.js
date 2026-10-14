@@ -3,6 +3,7 @@ import { TERMINAL_CHART_PALETTE as palette } from '../charts/terminal.js';
 
 const mono = "'JetBrains Mono', monospace";
 const escape = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+const detailUsd = value => escape(formatComparisonUsd(value));
 export function comparisonTooltip(month, hidden = [], nearNetSupply = false, thorchainRewardAccounting = false) {
   if (!month) return '';
   const title = month.month ? formatComparisonMonth(month.month) : month.title;
@@ -14,11 +15,11 @@ export function comparisonTooltip(month, hidden = [], nearNetSupply = false, tho
         : id === 'thorchain' ? (thorchainRewardAccounting ? 'Reserve emissions' : 'Midgard earnings residual (legacy)') : 'Token subsidy (gross issuance)';
       const heading = `<div style="margin-top:8px"><span aria-hidden="true" data-series="${id}" style="display:inline-block;width:10px;height:10px;background:${color};border:1px solid ${color};border-radius:0"></span> <strong>${label}</strong>`;
       const income = id === 'thorchain' && thorchainRewardAccounting
-        ? `Gross liquidity fees: ${formatComparisonUsd(point?.grossIncomeUsd)}<br>REVSHARE paid: ${formatComparisonUsd(point?.revshareUsd)}<br>Retained fees: ${formatComparisonUsd(point?.incomeUsd)}`
-        : `Fees collected: ${formatComparisonUsd(point?.incomeUsd)}`;
+        ? `Gross liquidity fees: ${detailUsd(point?.grossIncomeUsd)}<br>REVSHARE paid: ${detailUsd(point?.revshareUsd)}<br>Retained fees: ${detailUsd(point?.incomeUsd)}`
+        : `Fees collected: ${detailUsd(point?.incomeUsd)}`;
       const showBreakdown = point?.complete || id === 'thorchain' && thorchainRewardAccounting && finite(point?.grossIncomeUsd) !== null;
       return heading + (showBreakdown
-        ? `<br>${income}<br>${subsidyLabel}: ${formatComparisonUsd(point.subsidyUsd)}<br><strong>After subsidy: ${formatComparisonUsd(point.netUsd)}</strong>` : '')
+        ? `<br>${income}<br>${subsidyLabel}: ${detailUsd(point.subsidyUsd)}<br><strong>After subsidy: ${detailUsd(point.netUsd)}</strong>` : '')
         + (!point?.complete ? `<br>Unavailable · ${escape(point?.observedDays ?? 0)}/${escape(point?.expectedDays ?? month.expectedDays ?? '?')} days covered` : '') + '</div>';
     }).join('') + `<div style="margin-top:8px">${nearNetSupply ? 'NEAR: whole-chain net supply change, including all protocol burns.' : 'NEAR: provisional income; 100% of chain issuance.'}<br>Not operating profit.</div></div>`;
 }

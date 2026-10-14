@@ -8,7 +8,7 @@ const daily = calendarDays('2026-08-01', '2026-09-18').map(day => ({ day,
 }));
 
 // Exercise the same analysis path as TimeSeriesChart, not just the adapter's
-// ungrouped tooltip: the production chart opens on monthly buckets.
+// ungrouped tooltip: the production chart offers all available calendar grains.
 function chartWithTools(rows, grain, options = {}) {
   const settings = { nearNetSupply: true, ...options };
   const baseSpec = buildComparisonTimeSeries(rows, { ...settings, hidden: [] })._spec;
@@ -68,6 +68,20 @@ test('daily tooltips retain signed net supply changes and monthly missing data s
   assert.match(tooltip, /Unavailable/);
   assert.doesNotMatch(tooltip, /Net token supply change: \$0|After subsidy: \$0/);
   assert.match(tooltip, /Fees collected: \$3,100/);
+});
+
+test('daily reward details show sub-dollar emissions and escape signed sub-cent bounds', () => {
+  const rows = [{ ...daily[0],
+    thorchain: { ...contribution(100, 0.4658597059627627), grossIncomeUsd: 105, revshareUsd: 5 },
+    near: contribution(20, -0.00004822)
+  }];
+  let tooltip = chartWithTools(rows, 'day', { thorchainRewardAccounting: true }).tooltip.formatter([{ dataIndex: 0 }]);
+  assert.match(tooltip, /Reserve emissions: \$0\.47/);
+  assert.match(tooltip, /Net token supply change: &gt;-\$0\.01/);
+  rows[0].thorchain = { ...rows[0].thorchain, ...contribution(100, 0.00004822) };
+  tooltip = chartWithTools(rows, 'day', { thorchainRewardAccounting: true }).tooltip.formatter([{ dataIndex: 0 }]);
+  assert.match(tooltip, /Reserve emissions: &lt;\$0\.01/);
+  assert.doesNotMatch(tooltip, /Reserve emissions: \$0(?:<|\.)/);
 });
 
 test('legacy monthly snapshots keep the breakdown without calling gross NEAR issuance net supply', () => {

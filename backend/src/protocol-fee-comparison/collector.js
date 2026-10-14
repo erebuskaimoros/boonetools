@@ -1,4 +1,4 @@
-import { calendarDays, COMPARISON_METHODOLOGY, comparisonStartDay, contribution, DAY_MS, dayOf, dayTime, finite, monthlyComparison, nextDay, PROTOCOLS } from '../../../shared/protocol-fee-comparison/model.js';
+import { calendarDays, COMPARISON_METHODOLOGY, comparisonStartDay, contribution, DAY_MS, dayOf, dayTime, finite, monthlyComparison, nextDay } from '../../../shared/protocol-fee-comparison/model.js';
 import { createChainflipReader } from './chainflip.js';
 import { nearWalletDays } from './near.js';
 import { collectNearNetSupply, NEAR_NET_SUPPLY_METHOD } from './near-net-supply.js';
@@ -119,8 +119,9 @@ export function buildComparisonPayload(cache, { now = Date.now(), startDay = com
     observedDays, expectedDays: thorchainDays.length };
   return { schemaVersion: 1, asOf: new Date(now).toISOString(), fromDay: startDay,
     throughDay: throughDay || null, currency: 'USD', interval: 'month',
-    stale: errors.length > 0 || !throughDay || nextDay(throughDay) < endDay
-      || months.some((month) => PROTOCOLS.some(({ id }) => !month.protocols[id].complete)),
+    // Missing historical accounting is coverage, not a delayed current source.
+    // Retain the explicit monthly coverage flags and reward-accounting counts.
+    stale: errors.length > 0 || !throughDay || nextDay(throughDay) < endDay,
     errors, months, daily: daily.filter(row => throughDay && row.day <= throughDay), methodology: COMPARISON_METHODOLOGY,
     chainflipIssuance: 'Historical on-chain emission amounts × finalized block counts; not net supply or a reported monthly pace.',
     nearAllocation: '100% of whole-chain NEAR net supply change (emissions minus all protocol burns, not just gas); retained Intents wallet-receipt income including its own frontend, excluding third-party payouts.',

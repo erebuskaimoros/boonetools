@@ -10,7 +10,7 @@ test('Cross-chain Competitors hides unavailable buckets and the source-resolutio
   ]);
   assert.match(panel, /id="comparison-title"[^\n]*Cross-chain Competitors/);
   assert.match(chart, /hideUnavailableGrains showSourceResolution=\{false\}/);
-  assert.match(chart, /initialGrain="month"/);
+  assert.match(chart, /initialGrain=\{view.grain\}/);
   assert.match(host, /export let hideUnavailableGrains = false/);
   assert.match(host, /export let showSourceResolution = true/);
   assert.match(host, /<ChartTools[^>]*\{hideUnavailableGrains\} \{showSourceResolution\}/);

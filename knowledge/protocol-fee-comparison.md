@@ -1,11 +1,34 @@
 # Monthly protocol fee comparison
 
-Scope: a second ECharts panel below Financials, USD calendar months only,
+Scope: a second ECharts panel below Financials, USD daily/weekly/monthly buckets,
 current month partial through a common completed UTC day. Metric is swap
 income minus network token subsidy, originally following the September 18,
 2026 report in `artifacts/protocol-fee-comparison/2026-09-18/`. NEAR now uses
 net issuance under the user-approved change below. THORChain's v4 correction
 separates retained fee income from Reserve emissions; CF is unchanged.
+
+## Coverage-aware chart scope — October 14, 2026
+
+Exact THORChain accounting initially covers only October 7–13, so none of the
+historical monthly THORChain bars is complete. An unconditional monthly view
+hid all of those verified observations even though the daily data was correct.
+The initial view now selects the latest contiguous period where all three
+protocols have observed income, subsidy and net values (observed zero counts).
+If a complete shared historical month exists, the initial full-history monthly
+view is retained. Latest verified and Full history are explicit controls with
+their own date scope; every series and summary uses the same selected rows.
+Full history remains available, with missing months unavailable rather than
+invented zeroes or partial-month totals. Monthly-only snapshots remain supported.
+
+Automatic selection happens only once after data arrives. Refreshes retain the
+chosen scope, grain, hidden series and zoom; explicitly changing scope resets
+grain and zoom. Source freshness is separate from historical completeness:
+current common source dates without provider errors are not labeled delayed
+merely because older exact reward-accounting observations are unavailable.
+Accounting, exact-emissions guards and source acquisition are unchanged.
+Daily tooltip values below one dollar retain cents; nonzero sub-cent values
+show a signed bound instead of a misleading zero. Compact chart axes and
+larger-value formatting are unchanged.
 
 ## THORChain reward accounting — October 13, 2026
 

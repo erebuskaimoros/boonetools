@@ -397,7 +397,12 @@ All time-series toolbars use `ChartTools.svelte`: click-to-hide legends, a
 multi-select 7/30/90-day rolling menu and D/W/M calendar buttons. Disclose and
 disable source resolutions that cannot be reconstructed (including native epochs).
 Cross-chain Competitors instead hides unavailable calendar choices and the
-source-resolution note; its monthly source and coverage remain in the section copy.
+source-resolution note. Its Latest verified / Full history scope controls
+display exact UTC dates: default to the latest continuous shared daily coverage
+when no complete shared historical month exists, otherwise full monthly history.
+Background refreshes preserve the selected scope, grain, hidden series and zoom.
+Only an explicit scope change resets grain and zoom; historical missing buckets
+remain unavailable in Full history and the monthly coverage table.
 `analytics.js` performs shared calendar mechanics using explicit feature reducers:
 sum flows, last stocks/cumulative, mean or a feature-owned weighted rate. Weeks
 start Monday; partial edges remain labeled. Rolling overlays remain daily means

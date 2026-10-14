@@ -11,6 +11,23 @@ import { requestFromProviders } from '../../shared/provider-client.js';
 import { readComparisonCache, saveComparisonCache } from '../../scripts/dev-protocol-fee-comparison.mjs';
 import { FEE_WALLETS, nearEpochMint, nearWalletDays } from '../src/protocol-fee-comparison/near.js';
 
+test('historical reward coverage gaps do not mislabel fresh current source data as delayed', () => {
+  const cache = emptyComparisonCache();
+  cache.days['2026-10-13'] = {
+    earnings: { liquidityFees: '10000000000', blockRewards: '-1000000', runePriceUSD: '2' },
+    wallets: { frontend_near: 1, other_near: 3, source: 'fastnear-transfers-v1' },
+    nearRevenue: 100, nearPrice: 2, nearNetIssuanceAtomic: '200000000000000000000000000',
+    nearNetIssuanceMethod: 'onchain-utc-net-supply-v1', chainflipRevenue: 30,
+    flipPrice: .5, flipIssuance: { atomic: '20000000000000000000' }
+  };
+  const payload = buildComparisonPayload(cache, { now: Date.parse('2026-10-14T11:00:00Z'), startDay: '2026-10-01' });
+  assert.equal(payload.throughDay, '2026-10-13');
+  assert.equal(payload.thorchainRewardAccounting.complete, false);
+  assert.equal(payload.stale, false, 'historical coverage is not source freshness');
+  assert.equal(buildComparisonPayload(cache, { now: Date.parse('2026-10-15T11:00:00Z'), startDay: '2026-10-01' }).stale, true);
+  assert.equal(buildComparisonPayload(cache, { now: Date.parse('2026-10-14T11:00:00Z'), startDay: '2026-10-01', errors: ['Provider unavailable'] }).stale, true);
+});
+
 test('NEAR deducts net issuance once, retains deflation and never substitutes old gross data', () => {
   const raw = { nearRevenue: 100, nearPrice: 2, nearIssuance: 200,
     wallets: { frontend_near: 1, other_near: 3 }, nearNetIssuanceMethod: 'onchain-utc-net-supply-v1' };

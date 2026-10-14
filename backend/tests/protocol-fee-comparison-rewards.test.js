@@ -64,6 +64,6 @@ test('THORChain accounting gaps do not erase verified NEAR and Chainflip history
   assert.equal(payload.months[0].protocols.near.netUsd, -300);
   assert.equal(payload.months[0].protocols.chainflip.netUsd, 20);
   assert.deepEqual(payload.thorchainRewardAccounting, { complete: false, observedDays: 0, expectedDays: 1 });
-  assert.equal(payload.stale, true);
+  assert.equal(payload.stale, false, 'historical accounting gaps do not make current source observations stale');
   assert.deepEqual(cache, before);
 });
