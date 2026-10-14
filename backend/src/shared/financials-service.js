@@ -8,7 +8,8 @@ const REFRESH_MS = 5 * 60_000;
 const RETRY_MS = 60 * 60_000;
 const LIVE_REFRESH_MS = 30_000;
 
-export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJson, now = Date.now, requestSpacingMs = 650 } = {}) {
+export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJson, readRewardAccounting,
+  now = Date.now, requestSpacingMs = 650 } = {}) {
   let cache = { version: CACHE_VERSION, swaps: {}, earnings: {}, bonds: {} };
   let providerQueue = Promise.resolve();
   let lastRequestAt = 0;
@@ -24,6 +25,10 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
   let liveExpires = 0;
   let liveError = '';
   let liveBondError = '';
+  let rewardAccounting = {};
+  let accountingPromise = null;
+  let accountingError = '';
+  let accountingUpdatedAt = null;
   const activeBondDays = new Set();
   let stopped = false;
   let archiveFloor = null;
@@ -229,10 +234,11 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
       const historyPoints = buildFinancialsPoints({
         ...window,
         swaps: Object.values(cache.swaps).map((entry) => entry.row),
-        earnings: Object.values(cache.earnings).map((entry) => entry.row), bonds: cache.bonds
+        earnings: Object.values(cache.earnings).map((entry) => entry.row), bonds: cache.bonds, rewardAccounting
       });
       const currentLive = live?.from === window.to ? live : { from: window.to, through: window.to };
-      const points = appendFinancialsLivePoint(historyPoints, buildLiveFinancialsPoint(currentLive), range);
+      const points = appendFinancialsLivePoint(historyPoints, buildLiveFinancialsPoint({ ...currentLive,
+        rewardAccounting: rewardAccounting[utcDay(window.to)] }), range);
       const aprDays = points.filter((point) => point.bondingApr !== null).length;
       const pending = points.filter((point) => pendingDays.has(point.day)).length;
       return {
@@ -248,7 +254,12 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
           error: liveError, bondError: liveBondError, bondPending: Boolean(liveBondPromise)
         },
         bonding: { days: aprDays, pending: pending + points.filter((point) => activeBondDays.has(point.day)).length, error: bondError, archiveFloor },
-        sources: { volume: 'liquify-midgard:history/swaps', income: 'liquify-midgard:history/earnings', bond: 'liquify-rpc:types.Query/Nodes' }
+        rewardAccounting: { updatedAt: accountingUpdatedAt, error: accountingError,
+          completeDays: points.filter(point => point.rewardAccounting.complete).length,
+          observedDays: points.length },
+        sources: { volume: 'liquify-midgard:history/swaps', income: 'liquify-midgard:history/earnings',
+          bond: 'liquify-rpc:types.Query/Nodes', revshare: 'liquify-rpc:rev_share.payout',
+          emissions: 'historical-reserve-formula-v1' }
       };
   }
 
@@ -259,16 +270,40 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
     queueBonds(snapshot(range).points.filter((point) => !point.partial));
   }
 
+  async function refreshRewardAccounting() {
+    if (!readRewardAccounting || stopped) return;
+    if (accountingPromise) return accountingPromise;
+    const window = financialsWindow('all', now());
+    const through = live?.from === window.to && live.through > window.to ? live.through : window.to;
+    accountingPromise = (async () => {
+      try {
+        const observed = await readRewardAccounting({ from: window.from, through });
+        if (stopped) return;
+        rewardAccounting = observed;
+        accountingError = '';
+        accountingUpdatedAt = new Date(now()).toISOString();
+      } catch (error) {
+        accountingError = error.message;
+        // Last-good complete historical observations remain useful. Exact
+        // cutoff validation prevents an old live total from masquerading as
+        // the new interval while acquisition is unavailable.
+      }
+    })().finally(() => { accountingPromise = null; });
+    return accountingPromise;
+  }
+
   return {
     refreshHistory,
+    refreshRewardAccounting,
     async refreshLive() { await ready; await refreshLive(financialsWindow('30d', now()).to); },
     async getSnapshot(range = '30d') { await ready; return snapshot(range); },
     async getHistory(range = '30d') {
       await Promise.all([refreshHistory(range), this.refreshLive()]);
+      await refreshRewardAccounting();
       const result = snapshot(range);
       if (historyError && !result.points.some((point) => point.incomeRune !== null || point.volumeRune !== null)) throw new Error(historyError);
       return result;
     },
-    async stop() { stopped = true; await Promise.allSettled([bondPromise, historyPromise, livePromise, liveBondPromise]); await saveQueue; }
+    async stop() { stopped = true; await Promise.allSettled([bondPromise, historyPromise, livePromise, liveBondPromise, accountingPromise]); await saveQueue; }
   };
 }

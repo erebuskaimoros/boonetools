@@ -68,7 +68,7 @@ test('cache-only rebuild uses the collector lock, preserves warnings and freshne
   assert.equal(client.saved.length, 0);
   assert.equal(client.published.length, 1);
   const payload = client.published[0];
-  assert.equal(payload.methodology, 'swap-income-less-network-subsidy-near-net-v3');
+  assert.equal(payload.methodology, 'retained-swap-income-less-network-subsidy-v4');
   assert.equal(payload.months.at(-1).protocols.near.incomeUsd, 3);
   assert.equal(payload.months.at(-1).protocols.near.frontendIncomeUsd, 1);
   assert.equal(payload.asOf, '2026-09-02T12:00:00.000Z');
@@ -83,6 +83,30 @@ test('cache-only rebuild refuses to replace the public model without usable save
     lockRunner: async (_key, run) => run(client), collector: async () => { throw new Error('must not acquire'); } }), /no aligned/i);
   assert.equal(client.published.length, 0);
   assert.equal(client.saved.length, 0);
+});
+
+test('rebuild overlays finalized TC reward evidence without changing or saving the Midgard cache', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('Rebuild must not call providers'); });
+  const cache = emptyComparisonCache(); cache.days['2026-09-01'] = day();
+  const original = structuredClone(cache);
+  const client = database(cache, { errors: [] });
+  let evidenceReads = 0;
+  const source = { '2026-09-01': { complete: true, revshareE8: '50000000', reserveEmissionsE8: '25000000',
+    from: Date.parse('2026-09-01') / 1000, through: Date.parse('2026-09-02') / 1000,
+    method: 'finalized-revshare-payouts', emissionsMethod: 'historical-reserve-formula-v1', emissionsComplete: true } };
+  await runProtocolFeeComparison({ now: Date.parse('2026-09-02T12:00:00Z'), rebuildOnly: true,
+    lockRunner: async (_key, run) => run(client), rewardAccountingReader: async (databaseClient, window) => {
+      evidenceReads++;
+      assert.equal(databaseClient, client);
+      assert.deepEqual(window, { from: Date.parse('2025-09-01') / 1000, through: Date.parse('2026-09-02') / 1000 });
+      return source;
+    }, collector: async () => { throw new Error('Rebuild must not acquire'); } });
+  assert.equal(evidenceReads, 1);
+  assert.deepEqual(cache, original);
+  assert.equal(client.saved.length, 0);
+  const row = client.published[0].daily.find(row => row.day === '2026-09-01').thorchain;
+  assert.deepEqual(row, { grossIncomeUsd: 2, revshareUsd: .5, incomeUsd: 1.5, subsidyUsd: .25, netUsd: 1.25 });
+  assert.equal(client.published[0].months.at(-1).protocols.thorchain.netUsd, 1.25);
 });
 
 test('net-supply migration preserves the public gross snapshot until verified daily history is ready', async () => {

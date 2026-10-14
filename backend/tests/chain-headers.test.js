@@ -130,6 +130,22 @@ test('missing height detection produces provider-safe pages and skips known head
   ]);
 });
 
+test('consolidated stream captures finalized REVSHARE independently and isolates malformed payouts', async () => {
+  const { parseConsolidatedChainBlock } = await import('../src/shared/chain-stream.js');
+  const data = newBlockData(28204118, '2026-10-11T12:00:00Z', {
+    events: [{ type: 'rev_share', attributes: [{ key: 'payout', value: '12345' }] }]
+  });
+  const parsed = parseConsolidatedChainBlock({ data });
+  assert.equal(parsed.financialRewards.revshareE8, '12345');
+  assert.equal(parsed.financialRewards.height, 28204118);
+  assert.equal(parsed.financialRewardsError, '');
+  data.result_finalize_block.events[0].attributes[0].value = '-1';
+  const invalid = parseConsolidatedChainBlock({ data });
+  assert.equal(invalid.header.height, 28204118);
+  assert.equal(invalid.financialRewards, null);
+  assert.match(invalid.financialRewardsError, /Invalid REVSHARE payout/);
+});
+
 test('header upsert recalculates intervals around inserted ranges', async () => {
   const queries = [];
   const client = {

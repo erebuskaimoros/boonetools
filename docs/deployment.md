@@ -98,6 +98,22 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### Reserve emissions / REVSHARE accounting rollout
+
+Deploy backend before frontend. Migration 067 creates the independent reward
+ledger; the existing chain listener captures new finalized observations and the
+Financials collector repairs October 7 onward in bounded batches. Keep existing
+Financials and comparison caches intact. Verify a completed day publishes
+nonnegative `reserveEmissionsRune`, separate `revshareRune`, and
+`reconciliationAdjustmentRune`, with `rewardAccounting.complete=true`.
+The sum `fees + emissions - REVSHARE + adjustment` must equal reported income.
+Older unsupported periods remain unavailable rather than using Midgard's signed
+`blockRewards` residual as emissions. After repair, rebuild the comparison from
+its saved acquisition cache (`protocol-fee-comparison` with `rebuildOnly: true`)
+under its normal advisory lock, or allow its normal timer to refresh it.
+Check methodology v4 and retain NEAR/Chainflip coverage; missing THORChain
+monthly evidence is expected. See [accounting and archive limits](../knowledge/financials.md#reserve-emissions-and-revshare-october-13-2026).
+
 ### Crosschain comparison stuck at a shared date
 
 Check the public `protocol-fee-comparison` endpoint's `errors` and the

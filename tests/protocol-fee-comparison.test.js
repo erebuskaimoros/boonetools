@@ -90,7 +90,7 @@ test('tooltip shows income, subsidy and net without the included NEAR breakdown'
   assert.match(tooltip, /PARTIAL/);
   assert.match(tooltip, /2026-09-17 UTC/);
   assert.equal((tooltip.match(/data-series=/g) || []).length, 3);
-  assert.match(tooltip, /Fees collected:/); assert.match(tooltip, /Token subsidy \(Reserve rewards\):/);
+  assert.match(tooltip, /Fees collected:/); assert.match(tooltip, /Midgard earnings residual \(legacy\):/);
   assert.doesNotMatch(tooltip, /Own frontend|Other retained income/);
   assert.match(tooltip, /Fees collected: \$340<br>Token subsidy \(gross issuance\): \$3,400<br><strong>After subsidy: -\$3,060/);
   assert.match(tooltip, /100% of chain issuance/);
@@ -114,7 +114,7 @@ test('legacy or incomplete NEAR breakdowns do not affect the displayed total', (
 test('net-supply tooltips identify NEAR separately without relabeling TC, CF or old snapshots', () => {
   const monthly = comparisonTooltip(months[1], [], true);
   assert.match(monthly, /Fees collected: \$340<br>Net token supply change: \$3,400/);
-  assert.equal((monthly.match(/Token subsidy \(/g) || []).length, 2);
+  assert.equal((monthly.match(/Token subsidy \(/g) || []).length, 1);
   assert.match(monthly, /including all protocol burns/);
   const daily = buildComparisonTimeSeries(days, { nearNetSupply: true }).tooltip.formatter([{ dataIndex: 0 }]);
   assert.match(daily, /Net token supply change: \$200/);
@@ -130,4 +130,37 @@ test('tooltip bucket metadata is escaped and missing protocol coverage is never 
   assert.match(html, /0\/3&lt;script&gt; days covered/);
   assert.match(html, /&lt;b&gt;\/&lt;i&gt; days covered/);
   assert.doesNotMatch(html, /Fees collected: \$0/);
+});
+
+test('monthly TC accounting preserves gross fees and REVSHARE without changing other protocols', () => {
+  const rows = days.map(row => ({ ...row,
+    thorchain: { ...contribution(95, 1), grossIncomeUsd: 100, revshareUsd: 5 }
+  }));
+  const actual = monthlyComparison(rows, { now, startDay: '2026-08-01', endDay: '2026-09-18' });
+  for (let index = 0; index < actual.length; index++) {
+    const month = actual[index];
+    assert.equal(month.protocols.thorchain.grossIncomeUsd, month.expectedDays * 100);
+    assert.equal(month.protocols.thorchain.revshareUsd, month.expectedDays * 5);
+    assert.equal(month.protocols.thorchain.incomeUsd, month.expectedDays * 95);
+    assert.equal(month.protocols.thorchain.subsidyUsd, month.expectedDays);
+    assert.equal(month.protocols.thorchain.netUsd, month.expectedDays * 94);
+    assert.deepEqual(month.protocols.near, months[index].protocols.near);
+    assert.deepEqual(month.protocols.chainflip, months[index].protocols.chainflip);
+  }
+  const aged = ageComparisonPayload({ months: actual, throughDay: '2026-09-17' }, Date.parse('2026-10-01'));
+  assert.equal(aged.months[1].protocols.thorchain.grossIncomeUsd, null);
+  assert.equal(aged.months[1].protocols.thorchain.revshareUsd, null);
+});
+
+test('monthly TC known fee components remain available without pretending missing emissions are zero', () => {
+  const rows = days.map(row => ({ ...row,
+    thorchain: { ...contribution(95, null), grossIncomeUsd: 100, revshareUsd: 5 }
+  }));
+  const [month] = monthlyComparison(rows, { now, startDay: '2026-08-01', endDay: '2026-09-18' });
+  assert.equal(month.protocols.thorchain.grossIncomeUsd, 3100);
+  assert.equal(month.protocols.thorchain.revshareUsd, 155);
+  assert.equal(month.protocols.thorchain.incomeUsd, 2945);
+  assert.equal(month.protocols.thorchain.subsidyUsd, null);
+  assert.equal(month.protocols.thorchain.netUsd, null);
+  assert.equal(month.protocols.thorchain.complete, false);
 });

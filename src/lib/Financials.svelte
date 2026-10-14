@@ -168,7 +168,7 @@
       <small>{summary.volume.days} / {summary.days} days observed{livePoint ? ' · today partial' : ''}</small>
     </div>
     <div class="metric">
-      <span class="metric-index">02 <span>FEES + BLOCK REWARDS</span></span>
+      <span class="metric-index">02 <span>POST-REVSHARE</span></span>
       <h2>SYSTEM INCOME</h2><strong class="income-value">{amount(summary.income.value)}</strong>
       <small>{summary.income.days} / {summary.days} days observed{livePoint ? ' · today partial' : ''}</small>
     </div>
@@ -238,7 +238,7 @@
 
   <section class="methodology" aria-label="Metric definitions">
     <div><h2><span class="volume-value">01</span> VOLUME</h2><p>Executed swap volume across every pool, including trade, secured, and synth swaps. Cross-asset swaps contribute both pool legs.</p></div>
-    <div><h2><span class="income-value">02</span> SYSTEM INCOME</h2><p>Liquidity fees plus Reserve block rewards, before distribution. USD income uses each day’s closing RUNE price, or the latest covered five-minute price for today. Swap USD uses prices at execution.</p></div>
+    <div><h2><span class="income-value">02</span> SYSTEM INCOME</h2><p>Midgard’s retained earnings after REVSHARE. The hover breakdown is gross liquidity fees + Reserve emissions − REVSHARE + a separately disclosed reconciliation adjustment. Emissions use historical Reserve balances and the protocol formula; REVSHARE uses finalized payouts. Missing coverage stays unavailable. USD income uses each day’s closing RUNE price, or the latest covered five-minute price today. Swap USD uses prices at execution.</p></div>
     <div><h2><span class="apr-value">03</span> BONDING APR</h2><p>Daily node rewards ÷ closing active bond × 365. Today’s estimate scales rewards by the elapsed covered time, using a bond snapshot at the same cutoff. Snapshots reflect bonds, unbonds, and active-set changes; balances are not time-weighted. Excludes individual fees and performance adjustments.</p></div>
   </section>
 
@@ -255,7 +255,7 @@
     </details>
   {/if}
 
-  <footer class="data-source">SOURCES <a href="https://gateway.liquify.com/chain/thorchain_midgard/v2/doc" target="_blank" rel="noreferrer">Midgard</a> + historical THORNode state via Liquify <span>·</span> Mainnet history from 13 Apr 2021</footer>
+  <footer class="data-source">SOURCES <a href="https://gateway.liquify.com/chain/thorchain_midgard/v2/doc" target="_blank" rel="noreferrer">Midgard</a> + height-verified THORNode state and finalized events via Liquify <span>·</span> Mainnet history from 13 Apr 2021</footer>
 </main>
 
 <style>

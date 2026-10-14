@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { buildFinancialEChartsOption, financialEChartsTooltip, financialEChartsWindow } from '../src/lib/financials/echarts-options.js';
 import { financialChartIndices, financialChartWindow } from '../src/lib/financials/series.js';
 
@@ -95,7 +96,7 @@ test('tooltip renders square series-color swatches before the three metric label
     assert.ok(swatch.includes('aria-hidden="true"'));
   }
   assert.equal((html.match(/data-series=/g) ?? []).length, 3);
-  assert.match(html, /<br>Liquidity fees:/);
+  assert.match(html, /<br>Gross liquidity fees:/);
 });
 
 test('tooltip swatches follow series visibility, currency, and partial APR without duplicates', () => {
@@ -104,7 +105,7 @@ test('tooltip swatches follow series visibility, currency, and partial APR witho
     assert.equal((html.match(/data-series=/g) ?? []).length, 3 - hidden.length);
     for (const id of hidden) assert.ok(!html.includes(`data-series="${id}"`));
     assert.match(html, /Through 12:00:00 UTC/);
-    assert.match(html, /Liquidity fees:/);
+    assert.match(html, /Gross liquidity fees:/);
   }
   assert.match(financialEChartsTooltip(rows[5], 'rune'), /DAILY VOLUME: 25,000 ᚱ/);
   assert.equal(financialEChartsTooltip(null, 'usd'), '');
@@ -117,6 +118,95 @@ test('narrow layouts retain readable fonts and reduce axes/ticks without droppin
   assert.equal(options.animation, false);
   assert.equal(options.series.length, 4);
   assert.ok(options.grid.left + options.grid.right < 250);
+});
+
+const accountingRows = Array.from({ length: 3 }, (_, index) => ({
+  day: `2026-10-${12 + index}`, volumeUsd: 100, volumeRune: 200,
+  feesRune: 100 + index, reserveEmissionsRune: 2, revshareRune: 5,
+  grossIncomeRune: 102 + index, grossIncomeUsd: 51 + index / 2,
+  incomeRune: 97 + index, incomeUsd: 48.5 + index / 2,
+  midgardResidualRune: -3, blockRewardsRune: -3,
+  reconciliationAdjustmentRune: 0,
+  bondingEarningsRune: 40, activeBondRune: 1000 + index, bondingApr: index + 1
+}));
+
+test('reward tooltip separates gross income, real emissions, REVSHARE and retained income', () => {
+  const text = financialEChartsTooltip(accountingRows[0], 'rune');
+  assert.match(text, /Gross liquidity fees: 100 ᚱ/);
+  assert.match(text, /Reserve emissions: 2 ᚱ/);
+  assert.match(text, /Gross system income: 102 ᚱ/);
+  assert.match(text, /REVSHARE: −5 ᚱ/);
+  assert.match(text, /Retained system income: 97 ᚱ/);
+  assert.doesNotMatch(text, /Block rewards:|Reserve emissions: −/);
+});
+
+test('old payloads leave reward breakdown unavailable rather than treating the residual as emissions', () => {
+  const text = financialEChartsTooltip(rows[0], 'rune');
+  assert.match(text, /Reserve emissions: unavailable/);
+  assert.match(text, /REVSHARE: unavailable/);
+  assert.match(text, /Gross system income: unavailable/);
+  assert.doesNotMatch(text, /Block rewards:|Reserve emissions: 3/);
+  assert.match(financialEChartsTooltip({ ...accountingRows[0], reserveEmissionsRune: 0, revshareRune: 0 }, 'rune'), /REVSHARE: 0 ᚱ/);
+});
+
+test('reconciliation differences stay signed and separate from true emissions and payouts', () => {
+  const text = financialEChartsTooltip({ ...accountingRows[0], incomeRune: 96.9, reconciliationAdjustmentRune: -0.1 }, 'rune');
+  assert.match(text, /Reconciliation adjustment: −0.1 ᚱ/);
+  assert.match(text, /Reserve emissions: 2 ᚱ/);
+  assert.match(text, /REVSHARE: −5 ᚱ/);
+  assert.match(text, /Retained system income: 96.9 ᚱ/);
+  assert.match(financialEChartsTooltip(rows[0], 'rune'), /Reconciliation adjustment: unavailable/);
+  const positive = financialEChartsTooltip({ ...accountingRows[0], reconciliationAdjustmentRune: 0.1 }, 'rune');
+  assert.match(positive, /Reconciliation adjustment: \+0.1 ᚱ/);
+});
+
+test('tiny emissions and accounting adjustments retain base-unit precision, never a false zero', () => {
+  const text = financialEChartsTooltip({ ...accountingRows[0], reserveEmissionsRune: 0.00004822,
+    revshareRune: 0.00000001, reconciliationAdjustmentRune: -0.00000008 }, 'usd');
+  assert.match(text, /Reserve emissions: 0.00004822 ᚱ/);
+  assert.match(text, /REVSHARE: −0.00000001 ᚱ/);
+  assert.match(text, /Reconciliation adjustment: −0.00000008 ᚱ/);
+  const invalid = { ...accountingRows[0], reserveEmissionsRune: -0.00004822 };
+  assert.match(financialEChartsTooltip(invalid, 'rune'), /Reserve emissions: unavailable/);
+  const grouped = buildFinancialEChartsOption([invalid, ...accountingRows.slice(1)], { currency: 'rune', analysis: { grain: 'week' } });
+  assert.match(grouped.tooltip.formatter([{ dataIndex: 0 }]), /Reserve emissions: unavailable/);
+});
+
+test('calendar tooltip sums reward flows but uses mean APR and closing bond', () => {
+  for (const grain of ['week', 'month']) {
+    const option = buildFinancialEChartsOption(accountingRows, { currency: 'rune', analysis: { grain } });
+    const text = option.tooltip.formatter([{ dataIndex: 0 }]);
+    assert.match(text, /2026-10-12 → 2026-10-14/);
+    assert.match(text, /PARTIAL BUCKET/);
+    assert.match(text, /Gross liquidity fees: 303 ᚱ/);
+    assert.match(text, /Reserve emissions: 6 ᚱ/);
+    assert.match(text, /Gross system income: 309 ᚱ/);
+    assert.match(text, /REVSHARE: −15 ᚱ/);
+    assert.match(text, /Retained system income: 294 ᚱ/);
+    assert.match(text, /Reconciliation adjustment: 0 ᚱ/);
+    assert.match(text, /BONDING APR: 2%/);
+    assert.match(text, /Closing active bond: 1K ᚱ/);
+    assert.doesNotMatch(text, /IN PROGRESS|Invalid Date/);
+  }
+});
+
+test('calendar reward breakdown never sums through missing values or interior missing days', () => {
+  const missing = accountingRows.map((row, index) => index === 1 ? { ...row, reserveEmissionsRune: null, revshareRune: null, grossIncomeRune: null } : row);
+  for (const points of [missing, [accountingRows[0], accountingRows[2]]]) {
+    const option = buildFinancialEChartsOption(points, { currency: 'rune', analysis: { grain: 'week' } });
+    const text = option.tooltip.formatter([{ dataIndex: 0 }]);
+    assert.match(text, /Reserve emissions: unavailable/);
+    assert.match(text, /REVSHARE: unavailable/);
+    assert.match(text, /Gross system income: unavailable/);
+  }
+});
+
+test('headline and methodology describe retained income instead of the Midgard residual', () => {
+  const source = readFileSync(new URL('../src/lib/Financials.svelte', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /FEES \+ BLOCK REWARDS|Liquidity fees plus Reserve block rewards, before distribution/);
+  assert.match(source, /POST-REVSHARE/);
+  assert.match(source, /gross liquidity fees \+ Reserve emissions − REVSHARE/);
+  assert.match(source, /reconciliation adjustment/);
 });
 
 test('the real ECharts model preserves a UTC window across live updates and resets fully', async () => {

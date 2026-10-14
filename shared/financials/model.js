@@ -32,8 +32,8 @@ export function integerAmount(value) {
   return /^\d+$/.test(String(value ?? '')) ? String(value) : null;
 }
 
-// Midgard can report negative block rewards when the interval's net rewards
-// are below zero. Other Financials amounts remain unsigned.
+// Midgard's historical `blockRewards` is an accounting residual, not the
+// protocol's Reserve emission amount. Preserve it only as source evidence.
 export function signedIntegerAmount(value) {
   if (typeof value === 'string') return /^-?\d+$/.test(value) ? value : null;
   if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
@@ -56,6 +56,43 @@ function positive(value) {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
+// Independently observed payouts and protocol emissions must cover exactly the
+// same UTC interval as the source earnings. Never manufacture either component
+// from Midgard's residual, a current rate, a missing observation, or a clamp.
+export function financialRewardBreakdown(income, evidence, { from, through }) {
+  const covered = evidence?.complete === true && evidence.from === from && evidence.through === through
+    && ['finalized-revshare-payouts', 'before-first-finalized-revshare-payout'].includes(evidence.method);
+  const revshareE8 = covered ? integerAmount(evidence.revshareE8) : null;
+  const emissionsE8 = covered && evidence.emissionsComplete === true
+    && evidence.emissionsMethod === 'historical-reserve-formula-v1'
+    ? integerAmount(evidence.reserveEmissionsE8) : null;
+  const feesE8 = integerAmount(income?.liquidityFees);
+  const earningsE8 = integerAmount(income?.earnings);
+  const grossE8 = feesE8 !== null && emissionsE8 !== null ? BigInt(feesE8) + BigInt(emissionsE8) : null;
+  const adjustmentE8 = grossE8 !== null && revshareE8 !== null && earningsE8 !== null
+    ? BigInt(earningsE8) - (grossE8 - BigInt(revshareE8)) : null;
+  const price = positive(income?.runePriceUSD);
+  const grossIncomeRune = grossE8 === null ? null : Number(grossE8) / 1e8;
+  return {
+    reserveEmissionsRune: amount(emissionsE8),
+    revshareRune: amount(revshareE8),
+    grossIncomeRune,
+    grossIncomeUsd: grossIncomeRune === null || price === null ? null : grossIncomeRune * price,
+    reconciliationAdjustmentRune: adjustmentE8 === null ? null : Number(adjustmentE8) / 1e8,
+    midgardResidualRune: signedAmount(income?.blockRewards),
+    rewardAccounting: {
+      complete: revshareE8 !== null && emissionsE8 !== null,
+      revshareComplete: revshareE8 !== null,
+      emissionsComplete: emissionsE8 !== null,
+      method: evidence?.method ?? null,
+      emissionsMethod: evidence?.emissionsMethod ?? null,
+      from, through,
+      observedBlocks: evidence?.observedBlocks ?? 0,
+      expectedBlocks: evidence?.expectedBlocks ?? null
+    }
+  };
+}
+
 export function dailyBondingApr(rewardsE8, activeBondE8, elapsedSeconds = DAY_SECONDS) {
   const rewards = amount(rewardsE8);
   const bond = amount(activeBondE8);
@@ -71,7 +108,7 @@ function indexIntervals(intervals, from, to) {
   }).map((row) => [Number(row.startTime), row]));
 }
 
-export function buildFinancialsPoints({ swaps = [], earnings = [], bonds = {}, from, to }) {
+export function buildFinancialsPoints({ swaps = [], earnings = [], bonds = {}, rewardAccounting = {}, from, to }) {
   const swapDays = indexIntervals(swaps, from, to);
   const earningDays = indexIntervals(earnings, from, to);
   const points = [];
@@ -90,7 +127,10 @@ export function buildFinancialsPoints({ swaps = [], earnings = [], bonds = {}, f
       incomeRune,
       incomeUsd: incomeRune === null || runePriceUsd === null ? null : incomeRune * runePriceUsd,
       feesRune: amount(income?.liquidityFees),
+      // Backward-compatible raw source field; new consumers use the explicit
+      // components and must not label this residual as Reserve emissions.
       blockRewardsRune: signedAmount(income?.blockRewards),
+      ...financialRewardBreakdown(income, rewardAccounting[day], { from: start, through: start + DAY_SECONDS }),
       bondingEarningsRune: amount(income?.bondingEarnings),
       activeBondRune: amount(bond?.activeBondE8),
       bondingApr: dailyBondingApr(income?.bondingEarnings, bond?.activeBondE8),
@@ -102,13 +142,14 @@ export function buildFinancialsPoints({ swaps = [], earnings = [], bonds = {}, f
   return points;
 }
 
-export function buildLiveFinancialsPoint({ from, through = from, swaps, earnings, bond }) {
+export function buildLiveFinancialsPoint({ from, through = from, swaps, earnings, bond, rewardAccounting }) {
   const day = utcDay(from);
   const interval = (row) => row ? [{ ...row, startTime: from, endTime: from + DAY_SECONDS }] : [];
   const point = buildFinancialsPoints({ from, to: from + DAY_SECONDS,
     swaps: interval(swaps), earnings: interval(earnings), bonds: { [day]: bond }
   })[0];
   return { ...point, partial: true, through, elapsedSeconds: through - from,
+    ...financialRewardBreakdown(earnings, rewardAccounting, { from, through }),
     bondingApr: dailyBondingApr(earnings?.bondingEarnings, bond?.activeBondE8, through - from) };
 }
 

@@ -16,12 +16,14 @@ collector implementation. Install backend dependencies for either mode.
 ## Production operation
 
 `boonetools-financials.service` runs an independent collector process. It holds
-an advisory lock and keeps three concurrent loops: recent/all-time history
-refresh every five minutes, live acquisition every 30 seconds, and publication
-every five seconds. Slow archive backfills do not block live publication.
+an advisory lock and keeps independent loops: recent/all-time history refresh
+every five minutes, live acquisition every 30 seconds, publication every five
+seconds, and bounded reward-event repair and Reserve reconstruction. Slow
+archive backfills do not block live publication.
 The four allowed range payloads are persisted in existing Postgres
 `api_read_models` rows (`financials:30d:v1`, `financials:90d:v1`,
-`financials:1y:v1`, `financials:all:v1`); no new schema migration is needed.
+`financials:1y:v1`, `financials:all:v1`). Migration 067 adds the independent
+durable `financials_reward_blocks` ledger for exact reward accounting.
 Unchanged snapshots are coalesced, with a two-minute publisher TTL. Public GETs
 read only these rows, use the shared three-second row cache, and send a bounded
 15-second HTTP cache lifetime. Source ages are checked on every GET. Cold data
@@ -53,8 +55,12 @@ releases remains supported; rollback does not delete retained Financials data.
 - Volume: protocol-wide Midgard `/history/swaps`, with no pool filter. Uses
   executed pool legs, including both legs of cross-asset swaps. `totalVolume`
   is RUNE e8; `totalVolumeUSD` is USD cents at swap-time prices.
-- System income: Midgard `/history/earnings.earnings`, the sum of liquidity fees
-  and Reserve block rewards before distribution. USD income multiplies RUNE
+- System income: Midgard `/history/earnings.earnings`, retained reported income.
+  The separate breakdown is gross liquidity fees + independently verified
+  Reserve emissions − finalized REVSHARE payouts + a disclosed reconciliation
+  adjustment to Midgard's reported total. Midgard `blockRewards` is a signed
+  earnings-minus-fees residual, **not** actual Reserve emissions; adding
+  REVSHARE back to it is also insufficient. USD income multiplies RUNE
   income by that same bucket's closing `runePriceUSD`. Today's provisional USD
   income uses its latest covered five-minute closing price.
 - Daily bonding APR: `bondingEarnings / activeBond * 365 * 100`. It is a simple
@@ -101,6 +107,45 @@ snapshot even during an outage. Completed daily history replaces yesterday's
 intraday data rather than carrying a partial total forward.
 
 ## Historical state and acquisition
+
+### Reserve emissions and REVSHARE (October 13, 2026)
+
+The consolidated chain listener reuses finalized NewBlock events with no extra
+polling. Each durable observation retains the exact `rev_share.payout` sum and
+compact Reserve bank deltas from both transaction results and finalized events.
+The first positive indexed payout is block 28146078 at
+2026-10-07T20:29:31.355014883Z; earlier windows have known-zero REVSHARE, but
+that does not establish their emissions. The separate repair loop reuses SIPOL
+block timestamps and requests block results in batches of 20, capped at 2,000
+blocks / 20 seconds per pass, with five seconds between passes.
+
+Actual emissions use `historical-reserve-formula-v1`, pinned to reviewed
+THORNode v3.20.3 (`b08d81f79275093b0fcb753e0d68ff1c16c51cb8`). Height-verified
+historical bank balance, version, and Mimir queries anchor contiguous backward
+replay of compact bank movements. The Reserve balance immediately before the
+reward calculation (after REVSHARE) feeds the protocol formula, including its
+cap override and sequential Cosmos 18-decimal half-even rounding. Reward event
+amounts must reconcile with real outgoing bank transfers. Unsupported versions,
+configuration boundaries, missing transactions/events, or height gaps fail
+closed. No current balance is substituted for historical state. Reconstruction
+is bounded to 5,000 observations per pass and stores its evidence in the ledger.
+
+Verified block 28204118 emitted 4,822 e8 RUNE (0.00004822 RUNE); backward
+reconstruction also matched independently queried state at block 28204117.
+As of rollout, Liquify block results were only retained from height 28124001
+(October 6). Initial repair therefore starts at October 7 UTC. Older income and
+APR remain available from existing sources, but their unverified emission
+breakdowns remain null. Do not synthesize historical emissions from Midgard.
+
+Daily and live accounting require all heights plus adjacent UTC/cutoff boundary
+proof from the durable SIPOL ledger. A single missing block keeps that interval
+unavailable. Comparison methodology v4 reads the same ledger: retained fees are
+gross fees minus REVSHARE; net is retained fees minus actual Reserve emissions.
+Missing THORChain coverage does not hide NEAR or Chainflip. A monthly THORChain
+net total requires every constituent day and therefore remains unavailable for
+October until earlier evidence can be sourced. Preserve both raw acquisition
+caches; this migration never resets them. Local Vite has no production ledger
+by default and likewise leaves the new breakdown unavailable.
 
 Use Liquify Midgard and RPC. On 2026-09-10, the REST `/thorchain/nodes?height=…`
 endpoint returned current validator state even with the Cosmos height header;

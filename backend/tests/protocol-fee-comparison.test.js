@@ -25,14 +25,15 @@ test('NEAR deducts net issuance once, retains deflation and never substitutes ol
   for (const atomic of ['', null, 'NaN', '1.2']) assert.equal(deriveComparisonDay('2026-09-01', { ...raw, nearNetIssuanceAtomic: atomic }).near.netUsd, null);
 });
 
-test('retained NEAR income includes its frontend exactly once; subsidies and signed reserve residuals survive', () => {
+test('retained NEAR income includes its frontend exactly once; THORChain residuals are not Reserve emissions', () => {
   const row = deriveComparisonDay('2026-09-17', {
     earnings: { liquidityFees: '10000000000', blockRewards: '-1000000', runePriceUSD: '2' },
     wallets: { frontend_near: 1, other_near: 3 }, nearRevenue: 100, nearPrice: 2, nearIssuance: 999,
     nearNetIssuanceAtomic: '200000000000000000000000000', nearNetIssuanceMethod: 'onchain-utc-net-supply-v1',
     chainflipRevenue: 30, flipPrice: .5, flipIssuance: { atomic: '20000000000000000000' }
   });
-  assert.equal(row.thorchain.netUsd, 200.02);
+  assert.equal(row.thorchain.netUsd, null);
+  assert.equal(row.thorchain.grossIncomeUsd, 200);
   assert.deepEqual(row.near, { incomeUsd: 100, frontendIncomeUsd: 25, otherIncomeUsd: 75, subsidyUsd: 400, netUsd: -300 });
   assert.deepEqual(row.chainflip, { incomeUsd: 30, subsidyUsd: 10, netUsd: 20 });
   assert.equal(deriveComparisonDay('2026-09-17', { nearRevenue: 0 }).near.netUsd, null);
@@ -236,6 +237,11 @@ test('collector aligns independently refreshed daily sources and preserves verif
   const cache = emptyComparisonCache();
   const start = Date.parse('2026-08-01') / 1000;
   const days = ['2026-08-01', '2026-08-02'];
+  for (const day of days) cache.days[day] = { rewardAccounting: {
+    from: Date.parse(day) / 1000, through: Date.parse(day) / 1000 + 86400,
+    complete: true, method: 'before-first-finalized-revshare-payout', revshareE8: '0',
+    reserveEmissionsE8: '100000000', emissionsMethod: 'historical-reserve-formula-v1', emissionsComplete: true
+  } };
   let walletParameters;
   const request = async (url) => {
     if (url.endsWith('/health')) return { lastAggregated: { timestamp: start + 2 * 86400 } };
@@ -264,7 +270,7 @@ test('collector aligns independently refreshed daily sources and preserves verif
   assert.equal(points.near.netUsd, -200);
   assert.equal(points.near.frontendIncomeUsd, 50);
   assert.equal(points.near.otherIncomeUsd, 150);
-  assert.equal(result.payload.methodology, 'swap-income-less-network-subsidy-near-net-v3');
+  assert.equal(result.payload.methodology, 'retained-swap-income-less-network-subsidy-v4');
   assert.equal(points.chainflip.netUsd, 180);
   const failed = await collectComparison({ cache, now: Date.parse('2026-08-03'), startDay: '2026-08-01', request: async () => { throw new Error('offline'); } });
   assert.equal(failed.payload.stale, true);

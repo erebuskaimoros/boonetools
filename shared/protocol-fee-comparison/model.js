@@ -4,7 +4,7 @@ export function comparisonStartDay(now = Date.now()) {
   return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 12, 1)).toISOString().slice(0, 10);
 }
 export const COMPARISON_MODEL_KEY = 'protocol-fee-comparison:v1';
-export const COMPARISON_METHODOLOGY = 'swap-income-less-network-subsidy-near-net-v3';
+export const COMPARISON_METHODOLOGY = 'retained-swap-income-less-network-subsidy-v4';
 export const NEAR_NET_SUPPLY_METHOD = 'onchain-utc-net-supply-v1';
 export const COMPARISON_REFRESH_MS = 6 * 60 * 60_000;
 export const DAY_MS = 86_400_000;
@@ -51,11 +51,16 @@ export function monthlyComparison(daily, { now = Date.now(), startDay = comparis
     const expectedDays = partial ? days.length : (dayTime(monthEnd) - dayTime(monthStart)) / DAY_MS;
     const calendarComplete = days[0] === monthStart && (partial || nextDay(days.at(-1)) === monthEnd);
     const protocols = Object.fromEntries(PROTOCOLS.map(({ id }) => {
-      const observed = days.map((day) => index.get(day)?.[id]).filter((row) => finite(row?.netUsd) !== null);
+      const sourceRows = days.map(day => index.get(day)?.[id]);
+      const observed = sourceRows.filter(row => finite(row?.netUsd) !== null);
       const complete = calendarComplete && observed.length === days.length;
       const sum = (key) => complete && observed.every(row => finite(row[key]) !== null)
         ? observed.reduce((total, row) => total + Number(row[key]), 0) : null;
+      const sumKnown = key => calendarComplete && sourceRows.every(row => finite(row?.[key]) !== null)
+        ? sourceRows.reduce((total, row) => total + Number(row[key]), 0) : null;
       return [id, { incomeUsd: sum('incomeUsd'), subsidyUsd: sum('subsidyUsd'), netUsd: sum('netUsd'),
+        ...(id === 'thorchain' ? { grossIncomeUsd: sumKnown('grossIncomeUsd'), revshareUsd: sumKnown('revshareUsd'),
+          incomeUsd: sumKnown('incomeUsd'), subsidyUsd: sumKnown('subsidyUsd') } : {}),
         ...(id === 'near' ? { frontendIncomeUsd: sum('frontendIncomeUsd'), otherIncomeUsd: sum('otherIncomeUsd') } : {}),
         observedDays: observed.length, expectedDays, complete }];
     }));
@@ -78,6 +83,7 @@ export function ageComparisonPayload(payload, now = Date.now()) {
     const expectedDays = (dayTime(end) - dayTime(start)) / DAY_MS;
     return { ...month, partial: false, expectedDays, protocols: Object.fromEntries(PROTOCOLS.map(({ id }) => [id,
       { ...month.protocols[id], incomeUsd: null, subsidyUsd: null, netUsd: null, expectedDays, complete: false,
+        ...(id === 'thorchain' ? { grossIncomeUsd: null, revshareUsd: null } : {}),
         ...(id === 'near' ? { frontendIncomeUsd: null, otherIncomeUsd: null } : {}) }
     ])) };
   });

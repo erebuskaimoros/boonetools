@@ -7,6 +7,13 @@ import { createFinancialsService } from '../shared/financials-service.js';
 import { FINANCIALS_MIDGARD, FINANCIALS_RPC } from '../shared/financials-history.js';
 import { FINANCIALS_MODEL_TTL_MS, financialsModelKey } from '../shared/financials-read-model.js';
 import { createReadModelEtag, publishReadModel } from '../shared/read-models.js';
+import { readFinancialRewardAccountingDays, repairFinancialRewardBlocks } from '../shared/financials-reward-source.js';
+import { repairFinancialReserveEmissions } from '../shared/financials-reserve-service.js';
+
+// Liquify's block-results archive currently starts on October 6. Begin at the
+// next complete UTC day, including the full first REVSHARE day (October 7).
+// Older days stay unavailable; a signed Midgard residual is not a fallback.
+const REWARD_HISTORY_FROM = Date.parse('2026-10-07T00:00:00Z') / 1000;
 
 export function createFinancialsProviderRequest(client, { transport = requestFromProviders } = {}) {
   return (url, { lane = 'history' } = {}) => {
@@ -49,7 +56,8 @@ export async function runFinancialsCollector(options = {}) {
     const signal = controller.signal;
     const service = options.service || createFinancialsService({
       cacheDir: options.cacheDir || process.env.FINANCIALS_CACHE_DIR || '/var/lib/boonetools-financials',
-      requestJson: createFinancialsProviderRequest(client)
+      requestJson: createFinancialsProviderRequest(client),
+      readRewardAccounting: window => readFinancialRewardAccountingDays(client, window)
     });
     const published = new Map();
     const log = options.log || ((message) => console.error(JSON.stringify({ type: 'financials', message })));
@@ -72,7 +80,26 @@ export async function runFinancialsCollector(options = {}) {
           if (!signal.aborted) await service.refreshHistory('30d');
           await loop(5 * 60_000, () => service.refreshHistory('all'));
         })(),
-        loop(30_000, () => service.refreshLive()),
+        loop(30_000, async () => { await service.refreshLive(); await service.refreshRewardAccounting?.(); }),
+        // Steady-state capture is provider-free. A separate bounded lane
+        // repairs startup history and websocket gaps without blocking live
+        // publication or sharing the historical-bond acquisition lane.
+        ...(options.service && !options.repairRewards ? [] : [loop(5000, async () => {
+          const result = await (options.repairRewards || repairFinancialRewardBlocks)(client, {
+            signal, from: REWARD_HISTORY_FROM, limit: 2000, budgetMs: 20_000
+          });
+          if (result.repaired) log(`Reward archive: captured ${result.repaired} blocks (${result.reserveObserved ?? 0} Reserve observations)`);
+          await service.refreshRewardAccounting?.();
+        })]),
+        ...(options.service && !options.repairEmissions ? [] : [loop(5000, async () => {
+          const result = await (options.repairEmissions || repairFinancialReserveEmissions)(client, {
+            signal, from: REWARD_HISTORY_FROM, limit: 5000,
+            getJson: url => createFinancialsProviderRequest(client)(url, { lane: 'reserve-emissions' })
+          });
+          if (result.reconstructed) log(`Reserve emissions: verified ${result.reconstructed} blocks`);
+          if (result.deferred) log(`Reserve emissions: deferred ${result.deferred} blocks: ${result.errors.join('; ')}`);
+          await service.refreshRewardAccounting?.();
+        })]),
         loop(5000, () => publishFinancialsSnapshots(service, client, { published, publish: options.publish }))
       ]);
     } finally {

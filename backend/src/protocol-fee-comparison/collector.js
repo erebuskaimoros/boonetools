@@ -59,8 +59,23 @@ export function priceDays(payload) {
 export function deriveComparisonDay(day, raw = {}) {
   const earnings = raw.earnings;
   const runePrice = finite(earnings?.runePriceUSD);
-  const feesRune = finite(earnings?.liquidityFees), rewardsRune = finite(earnings?.blockRewards);
+  const feesRune = finite(earnings?.liquidityFees);
   const validRunePrice = runePrice > 0;
+  const accounting = raw.rewardAccounting;
+  const exact = accounting?.complete === true
+    && accounting?.from === dayTime(day) / 1000 && accounting?.through === dayTime(nextDay(day)) / 1000
+    && ['finalized-revshare-payouts', 'before-first-finalized-revshare-payout'].includes(accounting?.method);
+  const unsignedAtomic = value => typeof value === 'string' && /^\d+$/.test(value) ? BigInt(value) : null;
+  const feesAtomic = unsignedAtomic(String(earnings?.liquidityFees));
+  const revshareAtomic = exact ? unsignedAtomic(accounting.revshareE8) : null;
+  // Reserve emissions require their own explicit observation. Even after
+  // adding back REVSHARE, Midgard's signed residual still contains accounting
+  // differences: it is not a gross Reserve-emissions ledger.
+  const emissionsAtomic = exact && accounting.emissionsComplete === true
+    && accounting.emissionsMethod === 'historical-reserve-formula-v1' ? unsignedAtomic(accounting.reserveEmissionsE8) : null;
+  const retainedAtomic = feesAtomic !== null && revshareAtomic !== null && feesAtomic >= revshareAtomic
+    ? feesAtomic - revshareAtomic : null;
+  const usd = atomic => validRunePrice && atomic !== null ? Number(atomic) / 1e8 * runePrice : null;
   const wallets = raw.wallets;
   const front = finite(wallets?.frontend_near), other = finite(wallets?.other_near);
   const nearRevenue = finite(raw.nearRevenue), nearPrice = finite(raw.nearPrice);
@@ -79,20 +94,29 @@ export function deriveComparisonDay(day, raw = {}) {
   const flipPrice = finite(raw.flipPrice);
   const flipTokens = raw.flipIssuance?.atomic !== undefined ? Number(BigInt(raw.flipIssuance.atomic)) / 1e18 : null;
   return { day,
-    thorchain: contribution(validRunePrice && feesRune !== null ? feesRune / 1e8 * runePrice : null,
-      validRunePrice && rewardsRune !== null ? rewardsRune / 1e8 * runePrice : null),
+    thorchain: { ...contribution(usd(retainedAtomic), usd(emissionsAtomic)),
+      grossIncomeUsd: validRunePrice && feesRune !== null && feesRune >= 0 ? feesRune / 1e8 * runePrice : null,
+      revshareUsd: retainedAtomic !== null ? usd(revshareAtomic) : null },
     near: { ...contribution(nearIncome, nearPrice > 0 && nearIssuance !== null ? nearPrice * nearIssuance : null),
       frontendIncomeUsd, otherIncomeUsd: nearIncome === null ? null : nearIncome - frontendIncomeUsd },
     chainflip: contribution(raw.chainflipRevenue, flipPrice > 0 && flipTokens !== null ? flipTokens * flipPrice : null)
   };
 }
 
-export function buildComparisonPayload(cache, { now = Date.now(), startDay = comparisonStartDay(now), errors = [] } = {}) {
+export function buildComparisonPayload(cache, { now = Date.now(), startDay = comparisonStartDay(now), errors = [], rewardAccounting = {} } = {}) {
   const endDay = dayOf(now);
-  const daily = calendarDays(startDay, endDay).map((day) => deriveComparisonDay(day, cache.days[day]));
-  // Use a common endpoint; never compare different month-to-date durations.
-  const throughDay = daily.findLast((row) => PROTOCOLS.every(({ id }) => row[id].netUsd !== null))?.day;
+  const daily = calendarDays(startDay, endDay).map(day => deriveComparisonDay(day,
+    rewardAccounting[day] ? { ...cache.days[day], rewardAccounting: rewardAccounting[day] } : cache.days[day]));
+  // Keep the existing common source-day endpoint while exact THORChain reward
+  // accounting backfills. Missing TC deductions leave that bar unavailable,
+  // not zero, and must not hide verified NEAR/Chainflip history for the day.
+  const throughDay = daily.findLast(row => row.thorchain.grossIncomeUsd !== null
+    && row.near.netUsd !== null && row.chainflip.netUsd !== null)?.day;
   const months = throughDay ? monthlyComparison(daily, { startDay, endDay: nextDay(throughDay), now }) : [];
+  const thorchainDays = daily.filter(row => throughDay && row.day <= throughDay && row.thorchain.grossIncomeUsd !== null);
+  const observedDays = thorchainDays.filter(row => row.thorchain.netUsd !== null).length;
+  const thorchainRewardAccounting = { complete: thorchainDays.length > 0 && observedDays === thorchainDays.length,
+    observedDays, expectedDays: thorchainDays.length };
   return { schemaVersion: 1, asOf: new Date(now).toISOString(), fromDay: startDay,
     throughDay: throughDay || null, currency: 'USD', interval: 'month',
     stale: errors.length > 0 || !throughDay || nextDay(throughDay) < endDay
@@ -100,7 +124,7 @@ export function buildComparisonPayload(cache, { now = Date.now(), startDay = com
     errors, months, daily: daily.filter(row => throughDay && row.day <= throughDay), methodology: COMPARISON_METHODOLOGY,
     chainflipIssuance: 'Historical on-chain emission amounts × finalized block counts; not net supply or a reported monthly pace.',
     nearAllocation: '100% of whole-chain NEAR net supply change (emissions minus all protocol burns, not just gas); retained Intents wallet-receipt income including its own frontend, excluding third-party payouts.',
-    nearIssuanceMethod: NEAR_NET_SUPPLY_METHOD,
+    nearIssuanceMethod: NEAR_NET_SUPPLY_METHOD, thorchainRewardAccounting,
     nearWalletMethod: daysSourceMethod(cache, startDay, endDay, 'source', 'wallets', 'dune'),
     nearWalletSource: 'https://docs.fastnear.com/transfers/query' };
 }
@@ -114,7 +138,7 @@ function daysSourceMethod(cache, startDay, endDay, key, field, fallback) {
 /** Independent scheduler. Each source and finalized FLIP day is persisted before moving on. */
 export async function collectComparison({ cache = emptyComparisonCache(), request, walletQuery, save = async () => {},
   now = Date.now(), startDay = comparisonStartDay(now), log = () => {}, chainflipReader, maxFlipDays = 400,
-  nearNetSupplyReader = collectNearNetSupply, maxRunMs = COMPARISON_MAX_RUN_MS, clock = Date.now } = {}) {
+  nearNetSupplyReader = collectNearNetSupply, maxRunMs = COMPARISON_MAX_RUN_MS, clock = Date.now, rewardAccounting = {} } = {}) {
   if (cache.version !== 1) throw new Error('Unsupported protocol comparison cache');
   if (!(Number.isFinite(maxRunMs) && maxRunMs > 0)) throw new Error('Comparison runtime budget must be positive and finite');
   const endDay = dayOf(now), days = calendarDays(startDay, endDay);
@@ -138,7 +162,7 @@ export async function collectComparison({ cache = emptyComparisonCache(), reques
     return result;
   };
   const checkpoint = () => save(cache, {
-    ...buildComparisonPayload(cache, { now, startDay, errors: [...errors,
+    ...buildComparisonPayload(cache, { now, startDay, rewardAccounting, errors: [...errors,
       'Source acquisition is in progress; displaying verified checkpoints.'] }),
     stale: true, acquisitionInProgress: true
   });
@@ -229,7 +253,7 @@ export async function collectComparison({ cache = emptyComparisonCache(), reques
     });
     // A final unit may have completed at the deadline; retain it and stop cleanly.
     if (clock() >= deadline || controller.signal.aborted) deferred = true;
-    const payload = { ...buildComparisonPayload(cache, { now, startDay,
+    const payload = { ...buildComparisonPayload(cache, { now, startDay, rewardAccounting,
       errors: deferred ? [...errors, budgetError.message] : errors }), acquisitionInProgress: false };
     await save(cache, payload);
     return { cache, payload, sourceErrors: errors, deferred };

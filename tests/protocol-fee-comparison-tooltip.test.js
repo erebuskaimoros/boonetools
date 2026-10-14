@@ -25,7 +25,7 @@ test('monthly comparison tooltip retains fees and supply/subsidy breakdown for e
   assert.match(tooltip, /Fees collected: \$620/);
   assert.match(tooltip, /Fees collected: \$465/);
   assert.match(tooltip, /Net token supply change: \$6,200/);
-  assert.match(tooltip, /Token subsidy \(Reserve rewards\): \$31/);
+  assert.match(tooltip, /Midgard earnings residual \(legacy\): \$31/);
   assert.match(tooltip, /Token subsidy \(gross issuance\): \$310/);
   assert.match(tooltip, /After subsidy: -\$5,580/);
   assert.equal((tooltip.match(/data-series=/g) || []).length, 3);
@@ -86,4 +86,37 @@ test('an interior missing day does not become a smaller but apparently complete 
   const tooltip = chart.tooltip.formatter([{ dataIndex: 0 }]);
   assert.equal((tooltip.match(/Unavailable/g) || []).length, 3);
   assert.doesNotMatch(tooltip, /Fees collected: \$|After subsidy: \$/);
+});
+
+test('corrected THORChain tooltip separates gross fees, REVSHARE, retained income and Reserve emissions in every grain', () => {
+  const rows = daily.map(row => ({ ...row,
+    thorchain: { ...contribution(95, 1), grossIncomeUsd: 100, revshareUsd: 5 }
+  }));
+  for (const grain of ['day', 'week', 'month']) {
+    const chart = chartWithTools(rows, grain, { thorchainRewardAccounting: true });
+    const tooltip = chart.tooltip.formatter([{ dataIndex: 0 }]);
+    const count = grain === 'day' ? 1 : grain === 'week' ? 2 : 31;
+    assert.match(tooltip, new RegExp(`Gross liquidity fees: \\$${(count * 100).toLocaleString('en-US')}`));
+    assert.match(tooltip, new RegExp(`REVSHARE paid: \\$${count * 5}`));
+    assert.match(tooltip, new RegExp(`Retained fees: \\$${(count * 95).toLocaleString('en-US')}`));
+    assert.match(tooltip, new RegExp(`Reserve emissions: \\$${count}`));
+    assert.match(tooltip, new RegExp(`After subsidy: \\$${(count * 94).toLocaleString('en-US')}`));
+    assert.doesNotMatch(tooltip, /Reserve rewards|Midgard residual/);
+  }
+});
+
+test('corrected TC tooltips preserve observed fees and REVSHARE while Reserve emissions are unavailable', () => {
+  const rows = daily.map(row => ({ ...row,
+    thorchain: { ...contribution(95, null), grossIncomeUsd: 100, revshareUsd: 5 }
+  }));
+  const chart = chartWithTools(rows, 'month', { thorchainRewardAccounting: true });
+  const tooltip = chart.tooltip.formatter([{ dataIndex: 0 }]);
+  assert.match(tooltip, /Gross liquidity fees: \$3,100/);
+  assert.match(tooltip, /REVSHARE paid: \$155/);
+  assert.match(tooltip, /Retained fees: \$2,945/);
+  assert.match(tooltip, /Reserve emissions: Unavailable/);
+  assert.match(tooltip, /After subsidy: Unavailable/);
+  assert.match(tooltip, /0\/31 days covered/);
+  assert.equal(chart.series.find(item => item.id === 'thorchain').data[0], null);
+  assert.equal(chart.series.find(item => item.id === 'near').data[0], -5580);
 });

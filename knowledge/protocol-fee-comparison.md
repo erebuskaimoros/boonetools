@@ -4,7 +4,44 @@ Scope: a second ECharts panel below Financials, USD calendar months only,
 current month partial through a common completed UTC day. Metric is swap
 income minus network token subsidy, originally following the September 18,
 2026 report in `artifacts/protocol-fee-comparison/2026-09-18/`. NEAR now uses
-net issuance under the user-approved change below; TC and CF are unchanged.
+net issuance under the user-approved change below. THORChain's v4 correction
+separates retained fee income from Reserve emissions; CF is unchanged.
+
+## THORChain reward accounting — October 13, 2026
+
+Methodology v4 (`retained-swap-income-less-network-subsidy-v4`) corrects the
+former use of Midgard's `blockRewards` as a Reserve-emissions measure. That
+field is reported earnings minus gross liquidity fees. It includes the
+REVSHARE deduction and other reconciliation differences, so a negative value
+is not negative Reserve emissions. Adding REVSHARE back does not independently
+establish actual Reserve emissions either.
+
+The corrected comparison uses:
+
+`retained fees = gross liquidity fees − finalized affiliate REVSHARE`
+
+`after subsidy = retained fees − independently sourced Reserve emissions`
+
+All terms are valued at the same historical daily RUNE/USD price before
+aggregation. No hardcoded REVSHARE rate, negative-emission credit, residual
+fallback or zero substitution is permitted. The tooltip exposes gross fees,
+REVSHARE, retained fees, Reserve emissions and after-subsidy income in every
+calendar grain. Legacy snapshots explicitly identify their uncorrected
+Midgard-residual methodology and show a correction-pending warning.
+
+The comparison job reads the same finalized reward-accounting ledger as
+Financials and overlays each exact UTC-day observation in memory. It does not
+rewrite saved Midgard data or independently reacquire the same blocks. A
+cache-only rebuild can therefore publish new ledger evidence while preserving
+the collector's raw cache. The source must explicitly supply emission amounts
+and emission provenance; the REVSHARE source alone is insufficient.
+
+During backfill, unavailable THORChain deductions leave its after-subsidy bars
+unavailable with an explicit accounting-coverage notice. They do not erase
+verified NEAR or Chainflip history. The shared source-day endpoint still
+requires THORChain gross fees/price plus complete NEAR and Chainflip inputs;
+within that window, a protocol's incomplete month remains unavailable. This
+section supersedes the earlier TC residual-preservation instructions below.
 
 ## NEAR net supply methodology — September 28, 2026
 
@@ -163,9 +200,10 @@ See [the repair record](sessions/2026-09-18/session-3.md) for rollout verificati
 
 ## Accounting
 
-- TC: daily Midgard `liquidityFees / 1e8 * runePriceUSD` less the signed
-  `blockRewards` field at that price. Preserve accounting residuals and
-  describe this as reported Reserve rewards, not an audited release ledger.
+- TC v4: daily Midgard liquidity fees less finalized REVSHARE, then less
+  independently sourced Reserve emissions, all at that day's RUNE/USD price.
+  Preserve the original signed `blockRewards` in raw history for audit only;
+  do not interpret it as gross Reserve emissions. See the correction above.
 - NEAR: total daily published retained Intents revenue, **including its own
   frontend earnings**. This user-approved methodology v2 supersedes the report's
   narrower backend-only boundary. The total already includes the frontend; do

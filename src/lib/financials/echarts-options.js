@@ -1,4 +1,5 @@
 import { buildTimeSeriesOption, timeSeriesTooltip } from '../charts/time-series.js';
+import { DAY_MS, reduceObservations } from '../charts/analytics.js';
 import { FINANCIALS_SERIES } from './series.js';
 import { formatFinancialAmount, formatFinancialDay, formatFinancialPercent } from '../../../shared/financials/model.js';
 
@@ -10,31 +11,72 @@ const seriesFills = {
   bondingApr: FINANCIALS_SERIES[2].color
 };
 
-export function financialEChartsTooltip(row, currency, hidden = []) {
+function financialTooltip(row, currency, hidden = [], { header = '', grain = 'day' } = {}) {
   if (!row) return '';
   const suffix = currency === 'rune' ? 'Rune' : 'Usd';
   const amount = (value, unit = currency, compact = false) => formatFinancialAmount(value, unit, compact);
+  const preciseRuneAmount = (value) => value > 0 && value < 0.01
+    ? `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 8 }).format(value)} ᚱ` : amount(value, 'rune');
+  const accountingAmount = (value) => Number.isFinite(value) && value >= 0 ? preciseRuneAmount(value) : 'unavailable';
+  const adjustment = row.reconciliationAdjustmentRune;
+  const signedAdjustment = Number.isFinite(adjustment)
+    ? `${adjustment < 0 ? '−' : adjustment > 0 ? '+' : ''}${preciseRuneAmount(Math.abs(adjustment))}` : 'unavailable';
+  const grouped = grain !== 'day';
   const metrics = {
     volume: amount(row[`volume${suffix}`]), income: amount(row[`income${suffix}`]),
     bondingApr: formatFinancialPercent(row.bondingApr)
   };
   return timeSeriesTooltip([
-    `${formatFinancialDay(row.day)} · UTC${row.partial ? ' · IN PROGRESS' : ''}`,
+    header || `${formatFinancialDay(row.day)} · UTC${row.partial ? ' · IN PROGRESS' : ''}`,
     ...FINANCIALS_SERIES.filter((series) => !hidden.includes(series.id)).map((series) => ({
-      ...series, fill: seriesFills[series.id], text: `${series.label}: ${metrics[series.id]}`
+      ...series, fill: seriesFills[series.id],
+      text: `${grouped ? series.label.replace(/^DAILY /, grain === 'week' ? 'WEEKLY ' : 'MONTHLY ') : series.label}: ${metrics[series.id]}`
     })),
     '',
-    `Liquidity fees: ${amount(row.feesRune, 'rune')}`,
-    `Block rewards: ${amount(row.blockRewardsRune, 'rune')}`,
+    `Gross liquidity fees: ${accountingAmount(row.feesRune)}`,
+    `Reserve emissions: ${accountingAmount(row.reserveEmissionsRune)}`,
+    `Gross system income: ${accountingAmount(row.grossIncomeRune)}`,
+    `REVSHARE: ${Number.isFinite(row.revshareRune) && row.revshareRune > 0 ? '−' : ''}${accountingAmount(row.revshareRune)}`,
+    `Reconciliation adjustment: ${signedAdjustment}`,
+    `Retained system income: ${accountingAmount(row.incomeRune)}`,
     `Node rewards: ${amount(row.bondingEarningsRune, 'rune')}`,
-    `Active bond: ${amount(row.activeBondRune, 'rune', true)}`,
-    ...(row.partial ? [
+    `${grouped ? 'Closing active bond' : 'Active bond'}: ${amount(row.activeBondRune, 'rune', true)}`,
+    ...(grouped ? ['Flows: sum · active bond: closing observation · APR: mean daily rate.'] : []),
+    ...(row.partial && !grouped && Number.isFinite(row.through) ? [
       `Through ${new Date(row.through * 1000).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false })} UTC`,
       'APR: elapsed-time annualized estimate'
     ] : []),
+    ...(!Number.isFinite(row.reserveEmissionsRune) || !Number.isFinite(row.revshareRune)
+      ? ['Reward breakdown unavailable where verified source coverage is missing.'] : []),
+    ...(Number.isFinite(adjustment) && adjustment !== 0 ? ['Adjustment reconciles reported earnings; not emissions or REVSHARE.'] : []),
     ...(row.bondingApr === null ? ['Bonding APR: bond snapshot unavailable'] : []),
     ...(row.incomeUsd === null || row.volumeUsd === null ? ['Some source data is unavailable'] : [])
   ]);
+}
+
+export function financialEChartsTooltip(row, currency, hidden = []) {
+  return financialTooltip(row, currency, hidden);
+}
+
+function financialGroupedTooltip(bucket, { rows, grain, hidden }, currency) {
+  // Accounting is feature-owned: every periodic flow needs all observed days.
+  // Do not disguise missing source values or interior gaps as a smaller total.
+  const consecutive = rows.length > 0 && rows.every((row, index) =>
+    !index || Date.parse(row.day) - Date.parse(rows[index - 1].day) === DAY_MS);
+  const sum = (field) => consecutive ? reduceObservations(rows, rows.map(row =>
+    field !== 'reconciliationAdjustmentRune' && row[field] < 0 ? null : row[field]), 'sum') : null;
+  const aggregate = { ...bucket,
+    ...Object.fromEntries([
+      'volumeRune', 'volumeUsd', 'incomeRune', 'incomeUsd', 'feesRune',
+      'reserveEmissionsRune', 'revshareRune', 'grossIncomeRune', 'grossIncomeUsd', 'reconciliationAdjustmentRune', 'bondingEarningsRune'
+    ].map(field => [field, sum(field)])),
+    bondingApr: consecutive ? reduceObservations(rows, rows.map(row => row.bondingApr), 'mean') : null,
+    activeBondRune: rows.at(-1)?.activeBondRune ?? null
+  };
+  return financialTooltip(aggregate, currency, hidden, {
+    grain,
+    header: `${bucket.fromDay} → ${bucket.throughDay} · UTC ${grain.toUpperCase()}${bucket.partial ? ' · PARTIAL BUCKET' : ''}`
+  });
 }
 
 export function buildFinancialEChartsOption(rows, { currency = 'usd', hidden = [], ...viewport } = {}) {
@@ -63,6 +105,7 @@ export function buildFinancialEChartsOption(rows, { currency = 'usd', hidden = [
         symbolSize: (_value, item) => rows[item.dataIndex]?.partial ? 8 : 0 }
     ],
     tooltip: (row) => financialEChartsTooltip(row, currency, hidden),
+    groupedTooltip: (bucket, context) => financialGroupedTooltip(bucket, context, currency),
     xLabel: (day, index) => rows[index]?.partial ? 'Today*' : new Date(`${day}T00:00:00Z`).toLocaleDateString('en-US', {
       month: 'short', ...(rows.length <= 365 ? { day: 'numeric' } : { year: '2-digit' }), timeZone: 'UTC'
     })

@@ -1,4 +1,4 @@
-import { COMPARISON_MODEL_KEY, COMPARISON_REFRESH_MS, hasComparisonData, nextDay } from '../../../shared/protocol-fee-comparison/model.js';
+import { COMPARISON_MODEL_KEY, COMPARISON_REFRESH_MS, comparisonStartDay, dayOf, dayTime, hasComparisonData, nextDay } from '../../../shared/protocol-fee-comparison/model.js';
 import { withAdvisoryLock } from '../db/lock.js';
 import { requestFromProviders } from '../lib/provider-client.js';
 import { loadAcquisition, saveAcquisition } from '../shared/acquisition-cache.js';
@@ -6,6 +6,7 @@ import { providerLifecycleHooks } from '../shared/provider-cooldown.js';
 import { getReadModel, publishReadModel } from '../shared/read-models.js';
 import { buildComparisonPayload, collectComparison, emptyComparisonCache } from '../protocol-fee-comparison/collector.js';
 import { createComparisonRequest } from '../../../shared/protocol-fee-comparison/request.js';
+import { readFinancialRewardAccountingDays } from '../shared/financials-reward-source.js';
 
 export function comparisonRequest(client, { transport = requestFromProviders } = {}) {
   return createComparisonRequest({ transport,
@@ -17,8 +18,13 @@ export async function runProtocolFeeComparison(options = {}) {
     const now = options.now ?? Date.now();
     const cached = await loadAcquisition(client, COMPARISON_MODEL_KEY, 'collector', { allowStale: true });
     const cache = cached?.payload || emptyComparisonCache();
+    // Share the finalized reward ledger with Financials. This read-only overlay
+    // neither refetches blocks nor rewrites immutable Midgard observations.
+    const rewardAccounting = await (options.rewardAccountingReader || readFinancialRewardAccountingDays)(client, {
+      from: dayTime(comparisonStartDay(now)) / 1000, through: dayTime(dayOf(now)) / 1000
+    });
     const checkpointPayload = (current, asOf = new Date(now).toISOString()) => ({
-      ...buildComparisonPayload(current, { now, errors: ['Source acquisition is in progress; displaying verified checkpoints.'] }),
+      ...buildComparisonPayload(current, { now, rewardAccounting, errors: ['Source acquisition is in progress; displaying verified checkpoints.'] }),
       asOf, stale: true, acquisitionInProgress: true
     });
     const publish = async (payload, publication = {}) => {
@@ -29,7 +35,7 @@ export async function runProtocolFeeComparison(options = {}) {
       // Methodology releases can republish saved history without refetching or
       // modifying raw observations. Preserve source warnings and observation age.
       const previous = await getReadModel(COMPARISON_MODEL_KEY, { client });
-      const payload = { ...buildComparisonPayload(cache, { now,
+      const payload = { ...buildComparisonPayload(cache, { now, rewardAccounting,
         errors: previous?.payload?.errors || ['Rebuilt from saved observations; source refresh is pending.'] }),
         asOf: cached?.observedAt, acquisitionInProgress: false };
       if (!hasComparisonData(payload) || !payload.asOf) throw new Error('Saved comparison has no aligned observations to rebuild');
@@ -41,7 +47,7 @@ export async function runProtocolFeeComparison(options = {}) {
     // Expose that durable work before making any new provider requests, without
     // representing recovery as a successfully completed source refresh.
     await publish(checkpointPayload(cache, cached?.observedAt || new Date(now).toISOString()));
-    const result = await (options.collector || collectComparison)({ cache, now,
+    const result = await (options.collector || collectComparison)({ cache, now, rewardAccounting,
       maxRunMs: options.maxRunMs, clock: options.clock,
       request: comparisonRequest(client),
       log: (message) => console.log(JSON.stringify({ type: 'protocol_fee_comparison', message })),

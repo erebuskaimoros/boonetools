@@ -18,17 +18,21 @@ function comparisonBucket(rows, bucket, grain) {
       const observed = rows.map(row => row[id]).filter(point => keys.every(key => finite(point?.[key]) !== null));
       const complete = rows.length === expectedDays && observed.length === expectedDays;
       return [id, { complete, observedDays: observed.length, expectedDays,
-        ...Object.fromEntries(keys.map(key => [key, complete ? observed.reduce((total, point) => total + Number(point[key]), 0) : null])) }];
+        ...Object.fromEntries(keys.map(key => [key, complete ? observed.reduce((total, point) => total + Number(point[key]), 0) : null])),
+        ...(id === 'thorchain' ? Object.fromEntries(['grossIncomeUsd', 'revshareUsd', 'incomeUsd', 'subsidyUsd'].map(key => [key,
+          rows.length === expectedDays && rows.every(row => finite(row[id]?.[key]) !== null)
+            ? rows.reduce((total, row) => total + Number(row[id][key]), 0) : null
+        ])) : {}) }];
     }))
   };
 }
 
-export function buildComparisonTimeSeries(rows, { sourceGrain = 'day', hidden = [], nearNetSupply = false, ...viewport } = {}) {
+export function buildComparisonTimeSeries(rows, { sourceGrain = 'day', hidden = [], nearNetSupply = false, thorchainRewardAccounting = false, ...viewport } = {}) {
   return buildTimeSeriesOption(rows, { ...viewport, hidden, sourceGrain,
     axes: [{ id: 'net', label: 'NET INCOME · USD', color: '#c8c8c8', position: 'left', baseline: 'signed', format: value => formatComparisonUsd(value, true) }],
     series: PROTOCOLS.map(item => ({ ...item, aggregate: 'sum', axis: 'net', mark: 'bar',
       data: rows.map(row => sourceGrain === 'month' ? row.protocols?.[item.id]?.netUsd : row[item.id]?.netUsd) })),
-    tooltip: row => comparisonTooltip(sourceGrain === 'month' ? row : comparisonBucket([row], row, 'day'), hidden, nearNetSupply),
-    groupedTooltip: (bucket, context) => comparisonTooltip(comparisonBucket(context.rows, bucket, context.grain), context.hidden, nearNetSupply)
+    tooltip: row => comparisonTooltip(sourceGrain === 'month' ? row : comparisonBucket([row], row, 'day'), hidden, nearNetSupply, thorchainRewardAccounting),
+    groupedTooltip: (bucket, context) => comparisonTooltip(comparisonBucket(context.rows, bucket, context.grain), context.hidden, nearNetSupply, thorchainRewardAccounting)
   });
 }

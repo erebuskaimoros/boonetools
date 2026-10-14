@@ -77,6 +77,38 @@ test('Collector snapshots are read-only and do not start provider acquisition', 
   } finally { await service.stop(); }
 });
 
+test('Reward evidence refresh coalesces reads and preserves verified history after a ledger outage', async () => {
+  const priorDay = today - DAY_SECONDS;
+  let calls = 0;
+  let fail = false;
+  const service = createFinancialsService({ now: () => now,
+    fetchImpl: () => { throw new Error('evidence refresh must not fetch providers'); },
+    readRewardAccounting: async window => {
+      calls++;
+      assert.equal(window.through, today);
+      if (fail) throw new Error('ledger unavailable');
+      return { '2026-09-09': { from: priorDay, through: today, complete: true,
+        revshareE8: '0', method: 'before-first-finalized-revshare-payout',
+        reserveEmissionsE8: '4822', emissionsComplete: true,
+        emissionsMethod: 'historical-reserve-formula-v1' } };
+    }
+  });
+  try {
+    await Promise.all([service.refreshRewardAccounting(), service.refreshRewardAccounting()]);
+    assert.equal(calls, 1);
+    const first = await service.getSnapshot();
+    assert.equal(first.points.at(-2).reserveEmissionsRune, 0.00004822);
+    assert.equal(first.points.at(-2).revshareRune, 0);
+    assert.equal(first.points.at(-1).reserveEmissionsRune, null);
+    assert.equal(first.rewardAccounting.completeDays, 1);
+    fail = true;
+    await service.refreshRewardAccounting();
+    const stale = await service.getSnapshot();
+    assert.equal(stale.points.at(-2).reserveEmissionsRune, 0.00004822);
+    assert.equal(stale.rewardAccounting.error, 'ledger unavailable');
+  } finally { await service.stop(); }
+});
+
 test('Publisher persists each allowed range, coalesces unchanged snapshots, and leaves empty models untouched', async () => {
   const calls = [];
   const published = new Map();
@@ -120,6 +152,28 @@ test('Financials provider transport is allowlisted, bounded, and uses shared lif
   assert.equal(typeof request.beforeRequest, 'function');
   assert.equal(typeof request.onProviderError, 'function');
   assert.throws(() => get('https://untrusted.example/health'), /allowlisted/);
+});
+
+test('Reward archive repair and Reserve reconstruction run independently of live publication', async () => {
+  const abort = new AbortController();
+  const calls = [];
+  const service = {
+    refreshHistory: async () => {}, refreshLive: async () => {},
+    refreshRewardAccounting: async () => {},
+    getSnapshot: async (range) => ({ ...payload, range }), stop: async () => {}
+  };
+  await runFinancialsCollector({ service, signal: abort.signal, lockRunner: async (_key, work) => work({}),
+    repairRewards: async (_client, options) => { calls.push(['archive', options]); return { repaired: 0 }; },
+    repairEmissions: async (_client, options) => { calls.push(['emissions', options]); return { repaired: 0 }; },
+    publish: async () => abort.abort()
+  });
+  assert.deepEqual(calls.map(([lane]) => lane), ['archive', 'emissions']);
+  assert.equal(calls[0][1].from, daySeconds('2026-10-07'));
+  assert.equal(calls[0][1].limit, 2000);
+  assert.equal(calls[0][1].budgetMs, 20_000);
+  assert.equal(typeof calls[1][1].getJson, 'function');
+  assert.equal(calls[1][1].limit, 5000);
+  assert.equal(calls[0][1].signal.aborted, true);
 });
 
 test('Production deployment installs the collector and keeps durable cache outside releases', async () => {

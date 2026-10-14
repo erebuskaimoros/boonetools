@@ -3,6 +3,7 @@ import { parseRujiraBaseFeeBlock } from './rujira-base-fees.js';
 import { parseRujiraReservePaymentBlock } from './rujira-reserve-payments.js';
 import { parseSystemIncomeBurnEvents } from './burn-tracker-blocks.js';
 import { parseSystemIncomePolBlock } from './system-income-pol-blocks.js';
+import { FINANCIAL_REVSHARE_FIRST_HEIGHT, parseFinancialRevshareBlock } from './financials-reward-source.js';
 
 export function normalizeNewBlockForRujiraBaseFees(data = {}, blockHeight = 0) {
   const finalize = data?.result_finalize_block || data?.result_end_block || {};
@@ -25,12 +26,20 @@ export function parseConsolidatedChainBlock(input = {}) {
   if (!header) return null;
   const baseFeePayload = normalizeNewBlockForRujiraBaseFees(data, header.height);
   const systemIncomePol = parseSystemIncomePolBlock(data);
+  let financialRewards = null;
+  let financialRewardsError = '';
+  if (header.height >= FINANCIAL_REVSHARE_FIRST_HEIGHT) {
+    try { financialRewards = parseFinancialRevshareBlock(data, header.height); }
+    catch (error) { financialRewardsError = error.message; }
+  }
   return {
     header,
     data,
     events: baseFeePayload.result.finalize_block_events,
     incomeBurnE8: parseSystemIncomeBurnEvents(baseFeePayload.result.finalize_block_events),
     systemIncomePol,
+    financialRewards,
+    financialRewardsError,
     reservePayments: parseRujiraReservePaymentBlock(header.height, data, {
       blockTime: header.blockTime,
       source: 'liquify-ws'

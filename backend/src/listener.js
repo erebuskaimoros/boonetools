@@ -44,6 +44,7 @@ import {
   writeRujiraReservePaymentListenerHeartbeat
 } from './shared/rujira-reserve-payments.js';
 import { saveSystemIncomePolBlock } from './shared/system-income-pol-store.js';
+import { saveFinancialRewardBlocks } from './shared/financials-reward-source.js';
 import { classifyStreamBlock } from './shared/chain-head-probe.js';
 
 const RECONNECT_BASE_MS = 1000;
@@ -454,6 +455,15 @@ async function processConsolidatedBlock(data) {
         poolFees: parsed.systemIncomePol.poolFees,
         source: 'liquify-ws'
       });
+    }
+    // This extra consumer reuses the existing finalized block. Its own source
+    // failures leave a repairable gap without stalling the other consumers.
+    if (parsed.financialRewards) {
+      await saveFinancialRewardBlocks(client, [{ ...parsed.financialRewards,
+        blockTime: storedHeader.blockTime, source: 'liquify-ws:rev_share.payout'
+      }]).catch(error => log(`Financials rewards block ${storedHeader.height}: ${error.message}`));
+    } else if (parsed.financialRewardsError) {
+      log(`Financials rewards block ${storedHeader.height}: ${parsed.financialRewardsError}`);
     }
     persistedHeaders += 1;
     await saveChainStreamState(client, {
