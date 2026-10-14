@@ -139,7 +139,7 @@ test('primary time-series summaries retain chart-specific opt-outs, including le
     'system-income-pol/DailyFeeChart.svelte': 1, 'rapid-swaps/OverviewChart.svelte': 0,
     'app-layer/Chart.svelte': 1, 'protocol-fee-comparison/Chart.svelte': 1,
     'TCFeeDash.svelte': 2, 'WasmArbEconomics.svelte': 5, 'PoolDislocation.svelte': 1,
-    'BondTrackerV2.svelte': 1, 'DynamicFeeDashboard.svelte': 2, 'status/BlockProductionChart.svelte': 1
+    'BondTrackerV2.svelte': 0, 'DynamicFeeDashboard.svelte': 2, 'status/BlockProductionChart.svelte': 1
   };
   for (const [file, count] of Object.entries(configurations)) {
     const source = await readFile(new URL(`../src/lib/${file}`, import.meta.url), 'utf8');
@@ -158,6 +158,11 @@ test('primary time-series summaries retain chart-specific opt-outs, including le
   const financials = await readFile(new URL('../src/lib/financials/Chart.svelte', import.meta.url), 'utf8');
   assert.doesNotMatch(financials, /RangeSummary/);
   assert.match(financials, /<TimeSeriesChart/);
+  const bonds = await readFile(new URL('../src/lib/BondTrackerV2.svelte', import.meta.url), 'utf8');
+  assert.doesNotMatch(bonds, /RangeSummary|summaryHistory|Churn-observation averages/);
+  assert.match(bonds, /<EventTimeSeriesChart events=\{historySummaryRows\} metrics=\{calendarMetrics\} bind:hidden=\{historyHidden\}/);
+  assert.match(bonds, /<div class="metric-key">BOND ᚱ<\/div>/);
+  assert.match(bonds, /<h3>CHURN EARNINGS<\/h3>/);
   const deposits = await readFile(new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url), 'utf8');
   assert.match(deposits, /<RangeSummary[^>]*statistics: \['total', 'average'\]/);
   const dynamic = await readFile(new URL('../src/lib/DynamicFeeDashboard.svelte', import.meta.url), 'utf8');

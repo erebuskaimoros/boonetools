@@ -1,6 +1,6 @@
 <script>
   import EventTimeSeriesChart from './charts/EventTimeSeriesChart.svelte';
-  let historyHidden = [], historyGrain = 'native', historyWindow = null;
+  let historyHidden = [];
   $: calendarMetrics = [
     { id: 'rune', label: 'RUNE STACK', color: '#00cc66', value: row => row.rune, reduce: 'last', aggregate: 'last',
       tooltipFormat: value => `${formatNumber(value, { maximumFractionDigits: 2 })} RUNE` },
@@ -18,8 +18,6 @@
     historyChartInstance.options.plugins.legend.display = false;
     historyChartInstance.update('none');
   }
-  $: summaryHistory = historyGrain === 'native' || !historyWindow ? historySummaryRows : historySummaryRows.filter(row => row.time.slice(0, 10) >= historyWindow.startDay && row.time.slice(0, 10) <= historyWindow.endDay);
-  import RangeSummary from './charts/RangeSummary.svelte';
   let historySummaryRows = [];
   let historySummaryCurrency = 'USD';
   import { onMount, onDestroy } from "svelte";
@@ -1205,12 +1203,8 @@
         </span>
       </div>
 
-      <RangeSummary rows={historyLoaded && churnHistory.length && !historyError && !bondDataError ? summaryHistory : []} loading={historyLoading} bucket="churn" metrics={[
-        { field: 'rune', label: 'Bond', kind: 'level', unit: 'RUNE' },
-        { field: 'value', label: 'Bond valuation', kind: 'level', unit: historySummaryCurrency === 'USD' ? 'usd' : historySummaryCurrency }
-      ]} note="Churn-observation averages, not time-weighted balances. Historical conversion matches the chart." />
       <EventTimeSeriesChart events={historySummaryRows} metrics={calendarMetrics} bind:hidden={historyHidden}
-        bind:grain={historyGrain} bind:zoomWindow={historyWindow} ariaLabel="Bond history calendar closing observations">
+        ariaLabel="Bond history calendar closing observations">
       <div class="chart-area">
         {#if bondDataError}
           <div class="chart-msg dim">Current bond data unavailable.</div>

@@ -371,7 +371,7 @@ notify the feature, which must also provide a keyboard-accessible detail path.
 Hover callbacks may drive HTML values; preset-aware reset uses `resetWindow`.
 Primary time-series charts use `RangeSummary.svelte`: four square,
 flush cards above the plot, responsive to container width. Rapid Swaps, POL
-TVL and the main Financials plot are explicit exceptions: they omit per-chart summaries and retain
+TVL, Bond History and the main Financials plot are explicit exceptions: they omit per-chart summaries and retain
 their dashboards' top-level stats. POL Tracker deposits retain only total and
 average in a two-column summary. Pool Analysis places
 its controls and legend below these cards, immediately before the plot.
