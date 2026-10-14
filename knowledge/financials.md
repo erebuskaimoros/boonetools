@@ -116,7 +116,7 @@ compact Reserve bank deltas from both transaction results and finalized events.
 The first positive indexed payout is block 28146078 at
 2026-10-07T20:29:31.355014883Z; earlier windows have known-zero REVSHARE, but
 that does not establish their emissions. The separate repair loop reuses SIPOL
-block timestamps and requests block results in batches of 20, capped at 2,000
+block timestamps and requests block results in batches of 10, capped at 2,000
 blocks / 20 seconds per pass, with five seconds between passes.
 
 Actual emissions use `historical-reserve-formula-v1`, pinned to reviewed

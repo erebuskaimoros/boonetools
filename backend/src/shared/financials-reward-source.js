@@ -11,6 +11,15 @@ export const FINANCIAL_REVSHARE_FIRST_HEIGHT = 28146078;
 export const FINANCIAL_REVSHARE_FIRST_TIME = '2026-10-07T20:29:31.355014883Z';
 const FIRST_PAYOUT_SECONDS = Date.parse(FINANCIAL_REVSHARE_FIRST_TIME) / 1000;
 const RPC_BASE = 'https://gateway.liquify.com/chain/thorchain_rpc';
+const RPC_MAX_BATCH_SIZE = 10;
+
+function rpcError(details, fallback = 'REVSHARE RPC response failed') {
+  const detail = typeof details.data === 'string' ? details.data
+    : details.data == null ? '' : JSON.stringify(details.data);
+  const error = new Error([details.message || fallback, detail].filter(Boolean).join(': '));
+  error.archiveUnavailable = /height.*not available|lowest height|no archive/i.test(error.message);
+  return error;
+}
 
 // REVSHARE is paid in EndBlock, before the rewards allocations observed by
 // Midgard. Transaction-result events are intentionally not a second source.
@@ -24,12 +33,7 @@ function decoded(value) {
 }
 
 export function parseFinancialRevshareBlock(payload = {}, expectedHeight) {
-  if (payload.error) {
-    const detail = typeof payload.error.data === 'string' ? payload.error.data : '';
-    const error = new Error([payload.error.message || 'REVSHARE RPC response failed', detail].filter(Boolean).join(': '));
-    error.archiveUnavailable = /height.*not available|lowest height|no archive/i.test(error.message);
-    throw error;
-  }
+  if (payload.error) throw rpcError(payload.error);
   const result = payload.result ?? payload;
   const finalize = result.result_finalize_block ?? result.result_end_block ?? result;
   const height = Number(result.height ?? result.block?.header?.height);
@@ -213,7 +217,9 @@ export async function readFinancialRewardAccounting(client, window) {
 }
 
 export async function fetchFinancialRewardBlockBatch(client, heights, { signal, transport = requestFromProviders } = {}) {
-  if (!heights.length || heights.length > 20) throw new Error('Invalid REVSHARE RPC batch size');
+  if (!heights.length || heights.length > RPC_MAX_BATCH_SIZE) {
+    throw new Error(`Invalid REVSHARE RPC batch size (maximum ${RPC_MAX_BATCH_SIZE})`);
+  }
   signal?.throwIfAborted();
   const hooks = providerLifecycleHooks({ client, scope: 'financials-revshare-archive' });
   return transport({
@@ -240,7 +246,7 @@ export async function fetchFinancialRewardBlockBatch(client, heights, { signal, 
 // this bounded background repair handles deployment history and missed blocks.
 export async function repairFinancialRewardBlocks(client, options = {}) {
   const limit = Math.max(1, Math.min(5000, Math.trunc(options.limit ?? 300)));
-  const batchSize = Math.max(1, Math.min(20, Math.trunc(options.batchSize ?? 20)));
+  const batchSize = Math.max(1, Math.min(RPC_MAX_BATCH_SIZE, Math.trunc(options.batchSize ?? RPC_MAX_BATCH_SIZE)));
   const now = options.now || Date.now;
   const deadline = now() + Math.max(1, Number(options.budgetMs ?? 20_000));
   const minHeight = Math.max(1, Math.trunc(options.minHeight
@@ -271,7 +277,10 @@ export async function repairFinancialRewardBlocks(client, options = {}) {
     const batch = rows.slice(offset, offset + batchSize);
     const heights = batch.map((row) => Number(row.height));
     const payload = await fetchBatch(heights);
-    if (!Array.isArray(payload)) throw new Error('Invalid REVSHARE RPC batch response');
+    if (!Array.isArray(payload)) {
+      if (payload?.error) throw rpcError(payload.error, 'REVSHARE RPC batch failed');
+      throw new Error('Invalid REVSHARE RPC batch response');
+    }
     const byId = new Map(payload.map((entry) => [String(entry.id), entry]));
     const observations = [];
     let failure;

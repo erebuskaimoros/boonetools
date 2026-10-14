@@ -188,6 +188,51 @@ test('bounded repair checkpoints successful batches and preserves progress on a 
   assert.equal(persisted[0].revshareE8, '5');
 });
 
+test('archive repair respects the production RPC maximum of ten calls per batch', async () => {
+  const rows = Array.from({ length: 25 }, (_, index) => ({ height: 28232200 - index,
+    block_time: '2026-10-13T23:57:00Z' }));
+  const batches = [];
+  await repairFinancialRewardBlocks({ query: async () => ({ rows }) }, {
+    limit: 25, requestSpacingMs: 0,
+    fetchBatch: async heights => {
+      batches.push(heights.length);
+      if (heights.length > 10) return { jsonrpc: '2.0', error: { code: -32600,
+        message: 'Invalid Request', data: 'batch request exceeds maximum (10) allowed number of requests' } };
+      return heights.map(height => ({ id: String(height), result: {
+        height: String(height), txs_results: [], finalize_block_events: [] } }));
+    }, save: async () => {}
+  });
+  assert.deepEqual(batches, [10, 10, 5]);
+});
+
+test('an oversized caller batch setting cannot exceed the production maximum', async () => {
+  const rows = Array.from({ length: 12 }, (_, index) => ({ height: 28232200 - index,
+    block_time: '2026-10-13T23:57:00Z' }));
+  const batches = [];
+  await repairFinancialRewardBlocks({ query: async () => ({ rows }) }, {
+    batchSize: 50, requestSpacingMs: 0,
+    fetchBatch: async (heights) => {
+      batches.push(heights.length);
+      return heights.map((height) => ({ id: String(height), result: {
+        height: String(height), txs_results: [], finalize_block_events: [] } }));
+    }, save: async () => {}
+  });
+  assert.deepEqual(batches, [10, 2]);
+  await assert.rejects(fetchFinancialRewardBlockBatch({}, Array.from({ length: 11 }, (_, index) => 28232200 - index), {
+    transport: async () => { throw new Error('transport must not start'); }
+  }), /batch size.*10/);
+});
+
+test('a JSON-RPC batch rejection preserves provider error details instead of a generic array error', async () => {
+  await assert.rejects(repairFinancialRewardBlocks({ query: async () => ({ rows: [
+    { height: 28232200, block_time: '2026-10-13T23:57:00Z' }
+  ] }) }, {
+    fetchBatch: async () => ({ jsonrpc: '2.0', error: { code: -32600,
+      message: 'Invalid Request', data: 'batch request exceeds maximum (10) allowed number of requests' } }),
+    save: async () => { throw new Error('must not persist rejected data'); }
+  }), /Invalid Request: batch request exceeds maximum \(10\)/);
+});
+
 test('repair keeps successful responses when another result in the same batch is missing', async () => {
   const persisted = [];
   const rows = [28204119, 28204118].map((height) => ({ height, block_time: '2026-10-12T00:00:30Z' }));
