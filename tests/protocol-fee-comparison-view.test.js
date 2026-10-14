@@ -11,10 +11,10 @@ const daily = calendarDays('2026-09-01', '2026-10-14').map(day => ({ day,
 }));
 const months = monthlyComparison(daily, { now, startDay: '2026-09-01' });
 
-test('available THORChain days must not disappear behind an all-null initial monthly series', () => {
+test('the explicit verified scope exposes available THORChain days without inventing monthly totals', () => {
   const oldChart = buildComparisonTimeSeries(daily, { analysis: { grain: 'month' } });
   assert.ok(oldChart.series.find(series => series.id === 'thorchain').data.every(value => value === null));
-  const view = selectComparisonView(daily, months);
+  const view = selectComparisonView(daily, months, { mode: 'verified' });
   assert.equal(view.mode, 'verified');
   assert.equal(view.grain, 'day');
   assert.deepEqual(view.rows.map(row => row.day), calendarDays('2026-10-07', '2026-10-14'));
@@ -23,8 +23,8 @@ test('available THORChain days must not disappear behind an all-null initial mon
   assert.equal(months.at(-1).protocols.thorchain.netUsd, null, 'a partial observed subtotal must not become a full month');
 });
 
-test('full history remains available without replacing missing historical THORChain emissions with zero', () => {
-  const view = selectComparisonView(daily, months, { mode: 'full' });
+test('full history is the default without replacing missing historical THORChain emissions with zero', () => {
+  const view = selectComparisonView(daily, months);
   assert.equal(view.mode, 'full');
   assert.equal(view.grain, 'month');
   assert.deepEqual(view.rows, daily);
@@ -99,24 +99,25 @@ test('monthly-only snapshots keep their native grain and truthful calendar cover
   assert.deepEqual(selectComparisonView([], months, { mode: 'verified' }).rows, []);
 });
 
-test('a covered partial current month does not conceal the default daily comparison', () => {
+test('a covered partial current month retains the full-history monthly default', () => {
   const rows = daily.filter(row => row.day >= '2026-10-01').map(row => ({ ...row, thorchain: contribution(100, 1) }));
   const monthly = monthlyComparison(rows, { now, startDay: '2026-10-01' });
   assert.equal(monthly[0].partial, true);
   assert.equal(monthly[0].protocols.thorchain.complete, true);
   const view = selectComparisonView(rows, monthly);
-  assert.equal(view.mode, 'verified');
-  assert.equal(view.grain, 'day');
+  assert.equal(view.mode, 'full');
+  assert.equal(view.grain, 'month');
   assert.deepEqual(view.rows, rows);
 });
 
-test('explicit scopes survive refreshed data even when automatic coverage selection would change', () => {
+test('explicit scopes survive refreshed data as historical coverage improves', () => {
   const complete = daily.map(row => ({ ...row, thorchain: contribution(100, 1) }));
   const monthly = monthlyComparison(complete, { now, startDay: '2026-09-01' });
-  const original = selectComparisonView(daily, months);
-  assert.equal(original.mode, 'verified');
+  assert.equal(selectComparisonView(daily, months).mode, 'full');
+  const original = selectComparisonView(daily, months, { mode: 'verified' });
   assert.equal(selectComparisonView(complete, monthly).mode, 'full');
   assert.equal(selectComparisonView(complete, monthly, { mode: original.mode }).mode, 'verified');
+  assert.equal(selectComparisonView(complete, monthly, { mode: 'full' }).mode, 'full');
   assert.equal(selectComparisonView(daily, months, { mode: 'full' }).mode, 'full');
 });
 

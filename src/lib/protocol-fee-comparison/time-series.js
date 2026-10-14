@@ -1,4 +1,5 @@
-import { PROTOCOLS, DAY_MS, finite, formatComparisonUsd } from '../../../shared/protocol-fee-comparison/model.js';
+import { PROTOCOLS, DAY_MS, finite, formatComparisonUsd, comparisonDisplayDay, comparisonAccountingSummary,
+  monthlyComparison, nextDay } from '../../../shared/protocol-fee-comparison/model.js';
 import { buildTimeSeriesOption } from '../charts/time-series.js';
 import { comparisonTooltip } from './options.js';
 
@@ -6,6 +7,7 @@ const observedContribution = point => ['incomeUsd', 'subsidyUsd', 'netUsd']
   .every(key => finite(point?.[key]) !== null);
 const sharedMonth = row => PROTOCOLS.every(({ id }) => row.protocols?.[id]?.complete
   && observedContribution(row.protocols[id]));
+const correctedPoint = point => point?.accounting !== 'legacy' && point?.accounting !== 'mixed';
 
 // The latest continuous overlap is one common comparison window, not three
 // protocol-specific ranges. An observed zero is covered; a missing day is not.
@@ -17,21 +19,49 @@ function latestVerifiedRun(rows, covered, consecutive) {
   return rows.slice(first, last + 1);
 }
 
-export function selectComparisonView(daily = [], months = [], { mode = null } = {}) {
+export function selectComparisonView(daily = [], months = [], { mode = null, correctedAccounting = true } = {}) {
   const sourceGrain = daily.length ? 'day' : 'month';
   const history = (daily.length ? [...daily] : months.map(row => ({ ...row, day: row.fromDay })))
     .sort((a, b) => a.day.localeCompare(b.day));
-  const verified = sourceGrain === 'day'
-    ? latestVerifiedRun(history, row => PROTOCOLS.every(({ id }) => observedContribution(row[id])),
+  // Verify canonical observations before projecting any legacy display values.
+  // Already-projected rows and pre-v4 snapshots must not become exact coverage.
+  const verified = !correctedAccounting ? [] : sourceGrain === 'day'
+    ? latestVerifiedRun(history, row => correctedPoint(row.thorchain) && PROTOCOLS.every(({ id }) => observedContribution(row[id])),
       (previous, next) => Date.parse(next.day) - Date.parse(previous.day) === DAY_MS)
-    : latestVerifiedRun(history, sharedMonth, (previous, next) =>
+    : latestVerifiedRun(history, row => correctedPoint(row.protocols?.thorchain) && sharedMonth(row), (previous, next) =>
       Date.parse(next.fromDay) - Date.parse(previous.throughDay) === DAY_MS);
-  const selectedMode = mode === 'verified' || mode === 'full' ? mode
-    : (months.some(row => !row.partial && sharedMonth(row)) || !verified.length ? 'full' : 'verified');
-  const rows = selectedMode === 'verified' ? verified : history;
+  // Coverage gaps must not silently shorten every protocol's history. The
+  // common verified overlap is an explicit alternative to the full archive.
+  const selectedMode = mode === 'verified' ? 'verified' : 'full';
+  const rows = selectedMode === 'verified' ? verified : sourceGrain === 'day' ? history.map(comparisonDisplayDay) : history;
   return { mode: selectedMode, sourceGrain, grain: selectedMode === 'full' ? 'month' : sourceGrain, rows,
     fromDay: rows[0]?.fromDay || rows[0]?.day || null,
     throughDay: rows.at(-1)?.throughDay || rows.at(-1)?.day || null };
+}
+
+/** The table uses the same display observations as Full history, not exact-only months. */
+export function comparisonDisplayMonths(daily = [], months = [], { now = Date.now(), fromDay = null, throughDay = null } = {}) {
+  if (!daily.length) return months;
+  const { rows } = selectComparisonView(daily, months, { mode: 'full' });
+  return monthlyComparison(rows, { now, startDay: fromDay || rows[0].day,
+    endDay: nextDay(throughDay || rows.at(-1).day) });
+}
+
+/** Summary counts follow the visible rows, including native monthly snapshots. */
+export function comparisonViewAccounting(rows, { sourceGrain = 'day', correctedAccounting = true } = {}) {
+  const points = rows.map(row => sourceGrain === 'day' ? row.thorchain : row.protocols?.thorchain);
+  if (sourceGrain === 'day' && correctedAccounting) return comparisonAccountingSummary(points);
+  let legacyDays = 0, correctedDays = 0;
+  for (const point of points) {
+    if (finite(point?.netUsd) === null) continue;
+    const days = sourceGrain === 'day' ? 1 : finite(point.observedDays) ?? 1;
+    if (!correctedAccounting) legacyDays += days;
+    else if (finite(point.legacyDays) !== null && finite(point.correctedDays) !== null) {
+      legacyDays += Number(point.legacyDays); correctedDays += Number(point.correctedDays);
+    } else if (point.accounting === 'legacy') legacyDays += days;
+    else correctedDays += days;
+  }
+  return { accounting: legacyDays ? correctedDays ? 'mixed' : 'legacy' : 'corrected', legacyDays, correctedDays };
 }
 
 // These are monetary flows, including the signed USD value of NEAR's net
@@ -51,10 +81,11 @@ function comparisonBucket(rows, bucket, grain) {
       const complete = rows.length === expectedDays && observed.length === expectedDays;
       return [id, { complete, observedDays: observed.length, expectedDays,
         ...Object.fromEntries(keys.map(key => [key, complete ? observed.reduce((total, point) => total + Number(point[key]), 0) : null])),
-        ...(id === 'thorchain' ? Object.fromEntries(['grossIncomeUsd', 'revshareUsd', 'incomeUsd', 'subsidyUsd'].map(key => [key,
+        ...(id === 'thorchain' ? { ...comparisonAccountingSummary(rows.map(row => row[id])),
+          ...Object.fromEntries(['grossIncomeUsd', 'revshareUsd', 'incomeUsd', 'subsidyUsd'].map(key => [key,
           rows.length === expectedDays && rows.every(row => finite(row[id]?.[key]) !== null)
             ? rows.reduce((total, row) => total + Number(row[id][key]), 0) : null
-        ])) : {}) }];
+        ])) } : {}) }];
     }))
   };
 }

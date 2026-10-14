@@ -11,15 +11,23 @@ export function comparisonTooltip(month, hidden = [], nearNetSupply = false, tho
   return `<div style="line-height:16px"><strong>${escape(title)}${month.partial ? ' · PARTIAL' : ''}</strong><br>${escape(dates)} UTC`
     + PROTOCOLS.filter(({ id }) => !hidden.includes(id)).map(({ id, label, color }) => {
       const point = month.protocols?.[id];
+      const accounting = id === 'thorchain' ? thorchainRewardAccounting ? point?.accounting || 'corrected' : 'legacy' : null;
+      const legacy = accounting === 'legacy', mixed = accounting === 'mixed';
       const subsidyLabel = id === 'near' && nearNetSupply ? 'Net token supply change'
-        : id === 'thorchain' ? (thorchainRewardAccounting ? 'Reserve emissions' : 'Midgard earnings residual (legacy)') : 'Token subsidy (gross issuance)';
-      const heading = `<div style="margin-top:8px"><span aria-hidden="true" data-series="${id}" style="display:inline-block;width:10px;height:10px;background:${color};border:1px solid ${color};border-radius:0"></span> <strong>${label}</strong>`;
-      const income = id === 'thorchain' && thorchainRewardAccounting
+        : id === 'thorchain' ? legacy ? 'Midgard earnings residual (legacy)' : mixed ? 'Legacy earnings residual + Reserve emissions (mixed)' : 'Reserve emissions'
+          : 'Token subsidy (gross issuance)';
+      const heading = `<div style="margin-top:8px"><span aria-hidden="true" data-series="${id}" style="display:inline-block;width:10px;height:10px;background:${color};border:1px solid ${color};border-radius:0"></span> <strong>${label}${legacy ? ' · LEGACY' : mixed ? ' · MIXED' : ''}</strong>`;
+      const income = legacy ? `Gross liquidity fees (legacy): ${detailUsd(point?.incomeUsd)}`
+        : mixed ? `Income basis (legacy gross + corrected retained): ${detailUsd(point?.incomeUsd)}`
+        : id === 'thorchain' && thorchainRewardAccounting
         ? `Gross liquidity fees: ${detailUsd(point?.grossIncomeUsd)}<br>REVSHARE paid: ${detailUsd(point?.revshareUsd)}<br>Retained fees: ${detailUsd(point?.incomeUsd)}`
         : `Fees collected: ${detailUsd(point?.incomeUsd)}`;
+      const accountingNote = legacy ? '<br>Legacy gross fees minus the signed earnings residual; not independently verified Reserve emissions. REVSHARE is not separately deducted.'
+        : mixed ? `<br>${escape(point?.legacyDays ?? '?')} legacy / ${escape(point?.correctedDays ?? '?')} corrected days. Legacy residuals are not independently verified Reserve emissions.` : '';
       const showBreakdown = point?.complete || id === 'thorchain' && thorchainRewardAccounting && finite(point?.grossIncomeUsd) !== null;
       return heading + (showBreakdown
-        ? `<br>${income}<br>${subsidyLabel}: ${detailUsd(point.subsidyUsd)}<br><strong>After subsidy: ${detailUsd(point.netUsd)}</strong>` : '')
+        ? `<br>${income}<br>${subsidyLabel}: ${detailUsd(point.subsidyUsd)}<br><strong>${legacy ? 'Legacy net' : mixed ? 'Mixed net' : 'After subsidy'}: ${detailUsd(point.netUsd)}</strong>` : '')
+        + accountingNote
         + (!point?.complete ? `<br>Unavailable · ${escape(point?.observedDays ?? 0)}/${escape(point?.expectedDays ?? month.expectedDays ?? '?')} days covered` : '') + '</div>';
     }).join('') + `<div style="margin-top:8px">${nearNetSupply ? 'NEAR: whole-chain net supply change, including all protocol burns.' : 'NEAR: provisional income; 100% of chain issuance.'}<br>Not operating profit.</div></div>`;
 }

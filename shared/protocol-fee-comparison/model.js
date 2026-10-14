@@ -5,6 +5,8 @@ export function comparisonStartDay(now = Date.now()) {
 }
 export const COMPARISON_MODEL_KEY = 'protocol-fee-comparison:v1';
 export const COMPARISON_METHODOLOGY = 'retained-swap-income-less-network-subsidy-v4';
+export const THORCHAIN_LEGACY_METHOD = 'midgard-earnings-residual-legacy-v1';
+export const THORCHAIN_CORRECTED_FROM_DAY = '2026-10-07';
 export const NEAR_NET_SUPPLY_METHOD = 'onchain-utc-net-supply-v1';
 export const COMPARISON_REFRESH_MS = 6 * 60 * 60_000;
 export const DAY_MS = 86_400_000;
@@ -35,6 +37,33 @@ export function contribution(incomeUsd, subsidyUsd) {
     netUsd: income === null || subsidy === null ? null : income - subsidy };
 }
 
+/** Legacy history is display-only; canonical corrected accounting always wins. */
+export function comparisonDisplayDay(row) {
+  const thorchain = row?.thorchain;
+  const legacy = thorchain?.legacy;
+  const income = finite(legacy?.incomeUsd);
+  const reward = finite(legacy?.reportedRewardUsd);
+  const net = finite(legacy?.netUsd);
+  const useLegacy = typeof row?.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.day)
+    && row.day < THORCHAIN_CORRECTED_FROM_DAY && thorchain?.netUsd === null
+    && legacy?.method === THORCHAIN_LEGACY_METHOD && income !== null && income >= 0
+    && reward !== null && net !== null;
+  return { ...row, ...(thorchain ? { thorchain: { ...thorchain,
+    ...(useLegacy ? { accounting: 'legacy', incomeUsd: income, subsidyUsd: reward,
+      netUsd: net, grossIncomeUsd: income } : {}) } } : {}) };
+}
+
+/** Count available display points only; these are not independent-source coverage. */
+export function comparisonAccountingSummary(points) {
+  let legacyDays = 0, correctedDays = 0;
+  for (const point of points) {
+    if (finite(point?.netUsd) === null) continue;
+    if (point.accounting === 'legacy') legacyDays++;
+    else correctedDays++;
+  }
+  return { accounting: legacyDays ? correctedDays ? 'mixed' : 'legacy' : 'corrected', legacyDays, correctedDays };
+}
+
 /** Never silently turn missing observations into a zero or a complete month. */
 export function monthlyComparison(daily, { now = Date.now(), startDay = comparisonStartDay(now), endDay = dayOf(now) } = {}) {
   const index = new Map(daily.map((row) => [row.day, row]));
@@ -60,7 +89,8 @@ export function monthlyComparison(daily, { now = Date.now(), startDay = comparis
         ? sourceRows.reduce((total, row) => total + Number(row[key]), 0) : null;
       return [id, { incomeUsd: sum('incomeUsd'), subsidyUsd: sum('subsidyUsd'), netUsd: sum('netUsd'),
         ...(id === 'thorchain' ? { grossIncomeUsd: sumKnown('grossIncomeUsd'), revshareUsd: sumKnown('revshareUsd'),
-          incomeUsd: sumKnown('incomeUsd'), subsidyUsd: sumKnown('subsidyUsd') } : {}),
+          incomeUsd: sumKnown('incomeUsd'), subsidyUsd: sumKnown('subsidyUsd'),
+          ...comparisonAccountingSummary(sourceRows) } : {}),
         ...(id === 'near' ? { frontendIncomeUsd: sum('frontendIncomeUsd'), otherIncomeUsd: sum('otherIncomeUsd') } : {}),
         observedDays: observed.length, expectedDays, complete }];
     }));

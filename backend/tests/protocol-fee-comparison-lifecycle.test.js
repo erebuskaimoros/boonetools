@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runProtocolFeeComparison } from '../src/jobs/protocol-fee-comparison.js';
 import { collectComparison, emptyComparisonCache } from '../src/protocol-fee-comparison/collector.js';
+import { comparisonDisplayDay, THORCHAIN_LEGACY_METHOD } from '../../shared/protocol-fee-comparison/model.js';
 
 const NOW = Date.parse('2026-09-03T12:00:00Z');
 const day = (withFlip = true) => ({
@@ -105,7 +106,11 @@ test('rebuild overlays finalized TC reward evidence without changing or saving t
   assert.deepEqual(cache, original);
   assert.equal(client.saved.length, 0);
   const row = client.published[0].daily.find(row => row.day === '2026-09-01').thorchain;
-  assert.deepEqual(row, { grossIncomeUsd: 2, revshareUsd: .5, incomeUsd: 1.5, subsidyUsd: .25, netUsd: 1.25 });
+  const { legacy, ...canonical } = row;
+  assert.deepEqual(canonical, { grossIncomeUsd: 2, revshareUsd: .5, incomeUsd: 1.5, subsidyUsd: .25, netUsd: 1.25 });
+  assert.deepEqual(legacy, { method: THORCHAIN_LEGACY_METHOD, incomeUsd: 2, reportedRewardUsd: 1, netUsd: 1 });
+  assert.deepEqual(comparisonDisplayDay({ day: '2026-09-01', thorchain: row }).thorchain, row,
+    'available corrected accounting wins over the historical legacy value');
   assert.equal(client.published[0].months.at(-1).protocols.thorchain.netUsd, 1.25);
 });
 

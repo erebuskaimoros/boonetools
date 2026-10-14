@@ -1,4 +1,4 @@
-import { calendarDays, COMPARISON_METHODOLOGY, comparisonStartDay, contribution, DAY_MS, dayOf, dayTime, finite, monthlyComparison, nextDay } from '../../../shared/protocol-fee-comparison/model.js';
+import { calendarDays, COMPARISON_METHODOLOGY, comparisonStartDay, contribution, DAY_MS, dayOf, dayTime, finite, monthlyComparison, nextDay, THORCHAIN_CORRECTED_FROM_DAY, THORCHAIN_LEGACY_METHOD } from '../../../shared/protocol-fee-comparison/model.js';
 import { createChainflipReader } from './chainflip.js';
 import { nearWalletDays } from './near.js';
 import { collectNearNetSupply, NEAR_NET_SUPPLY_METHOD } from './near-net-supply.js';
@@ -76,6 +76,15 @@ export function deriveComparisonDay(day, raw = {}) {
   const retainedAtomic = feesAtomic !== null && revshareAtomic !== null && feesAtomic >= revshareAtomic
     ? feesAtomic - revshareAtomic : null;
   const usd = atomic => validRunePrice && atomic !== null ? Number(atomic) / 1e8 * runePrice : null;
+  // Preserve the old cached series as explicitly legacy display metadata only.
+  // It must never fill canonical emissions or extend beyond the correction date.
+  const reportedReward = String(earnings?.blockRewards);
+  const reportedAtomic = /^-?\d+$/.test(reportedReward) ? BigInt(reportedReward) : null;
+  const legacyIncome = usd(feesAtomic), legacyReward = usd(reportedAtomic);
+  const legacyNet = feesAtomic !== null && reportedAtomic !== null ? usd(feesAtomic - reportedAtomic) : null;
+  const legacy = day < THORCHAIN_CORRECTED_FROM_DAY && finite(legacyIncome) !== null
+    && finite(legacyReward) !== null && finite(legacyNet) !== null
+    ? { method: THORCHAIN_LEGACY_METHOD, incomeUsd: legacyIncome, reportedRewardUsd: legacyReward, netUsd: legacyNet } : null;
   const wallets = raw.wallets;
   const front = finite(wallets?.frontend_near), other = finite(wallets?.other_near);
   const nearRevenue = finite(raw.nearRevenue), nearPrice = finite(raw.nearPrice);
@@ -96,7 +105,8 @@ export function deriveComparisonDay(day, raw = {}) {
   return { day,
     thorchain: { ...contribution(usd(retainedAtomic), usd(emissionsAtomic)),
       grossIncomeUsd: validRunePrice && feesRune !== null && feesRune >= 0 ? feesRune / 1e8 * runePrice : null,
-      revshareUsd: retainedAtomic !== null ? usd(revshareAtomic) : null },
+      revshareUsd: retainedAtomic !== null ? usd(revshareAtomic) : null,
+      ...(legacy ? { legacy } : {}) },
     near: { ...contribution(nearIncome, nearPrice > 0 && nearIssuance !== null ? nearPrice * nearIssuance : null),
       frontendIncomeUsd, otherIncomeUsd: nearIncome === null ? null : nearIncome - frontendIncomeUsd },
     chainflip: contribution(raw.chainflipRevenue, flipPrice > 0 && flipTokens !== null ? flipTokens * flipPrice : null)
@@ -108,8 +118,8 @@ export function buildComparisonPayload(cache, { now = Date.now(), startDay = com
   const daily = calendarDays(startDay, endDay).map(day => deriveComparisonDay(day,
     rewardAccounting[day] ? { ...cache.days[day], rewardAccounting: rewardAccounting[day] } : cache.days[day]));
   // Keep the existing common source-day endpoint while exact THORChain reward
-  // accounting backfills. Missing TC deductions leave that bar unavailable,
-  // not zero, and must not hide verified NEAR/Chainflip history for the day.
+  // accounting backfills. Missing canonical deductions stay null, not zero;
+  // the separate legacy display history cannot change verified coverage.
   const throughDay = daily.findLast(row => row.thorchain.grossIncomeUsd !== null
     && row.near.netUsd !== null && row.chainflip.netUsd !== null)?.day;
   const months = throughDay ? monthlyComparison(daily, { startDay, endDay: nextDay(throughDay), now }) : [];

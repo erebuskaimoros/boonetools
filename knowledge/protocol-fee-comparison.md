@@ -7,20 +7,45 @@ income minus network token subsidy, originally following the September 18,
 net issuance under the user-approved change below. THORChain's v4 correction
 separates retained fee income from Reserve emissions; CF is unchanged.
 
+## Cached legacy history restoration — October 14, 2026
+
+The raw comparison acquisition cache retains 408 days (September 1, 2025 through
+October 13, 2026); no historical source rows were deleted. The v4 accounting gate
+made older THORChain bars unavailable because independently verified Reserve
+emissions were only collected from October 7. The user approved restoring the
+saved older calculation with explicit legacy labels, without altering the
+corrected calculation or refetching historical blocks.
+
+Each eligible pre-October 7 daily THORChain point now carries a separate `legacy`
+object with method `midgard-earnings-residual-legacy-v1`, gross `incomeUsd`, signed
+`reportedRewardUsd`, and `netUsd`. The historical calculation is
+`(liquidityFees - blockRewards) / 1e8 * runePriceUSD`. Missing inputs stay missing;
+negative residuals are preserved, not clamped or renamed Reserve emissions.
+The canonical exact daily fields, monthly values, methodology v4 identifier and
+verified-coverage counts remain exact-only. Raw caches are never rewritten.
+
+Full history uses a presentation-only selection of these saved legacy values
+where a corrected value is absent. Corrected values always win. No legacy
+fallback is permitted on or after October 7, even if a newer exact day is missing.
+Latest verified uses canonical corrected coverage only. The full historical
+monthly view is the default. Tooltips, range summaries and the monthly table
+label legacy and mixed buckets explicitly, including the October transition.
+The main Financials chart and its Reserve/REVSHARE accounting are unchanged.
+
 ## Coverage-aware chart scope — October 14, 2026
 
 Exact THORChain accounting initially covers only October 7–13, so none of the
 historical monthly THORChain bars is complete. An unconditional monthly view
 hid all of those verified observations even though the daily data was correct.
-The initial view now selects the latest contiguous period where all three
+The initial view retains the full historical window with monthly grouping;
+missing exact observations must not silently shorten every protocol's history.
+Latest verified explicitly selects the latest contiguous period where all three
 protocols have observed income, subsidy and net values (observed zero counts).
-If a complete shared historical month exists, the initial full-history monthly
-view is retained. Latest verified and Full history are explicit controls with
-their own date scope; every series and summary uses the same selected rows.
-Full history remains available, with missing months unavailable rather than
-invented zeroes or partial-month totals. Monthly-only snapshots remain supported.
+Latest verified and Full history have their own date scope; every series and
+summary uses the same selected rows. Missing months remain unavailable rather
+than invented zeroes or partial-month totals. Monthly-only snapshots remain supported.
 
-Automatic selection happens only once after data arrives. Refreshes retain the
+Initial selection happens only once after data arrives. Refreshes retain the
 chosen scope, grain, hidden series and zoom; explicitly changing scope resets
 grain and zoom. Source freshness is separate from historical completeness:
 current common source dates without provider errors are not labeled delayed

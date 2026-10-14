@@ -398,11 +398,18 @@ multi-select 7/30/90-day rolling menu and D/W/M calendar buttons. Disclose and
 disable source resolutions that cannot be reconstructed (including native epochs).
 Cross-chain Competitors instead hides unavailable calendar choices and the
 source-resolution note. Its Latest verified / Full history scope controls
-display exact UTC dates: default to the latest continuous shared daily coverage
-when no complete shared historical month exists, otherwise full monthly history.
+display exact UTC dates. Full monthly history is always the initial scope;
+Latest verified explicitly selects the latest continuous shared coverage.
+Missing accounting must not automatically shorten every protocol's date range.
 Background refreshes preserve the selected scope, grain, hidden series and zoom.
 Only an explicit scope change resets grain and zoom; historical missing buckets
 remain unavailable in Full history and the monthly coverage table.
+Cross-chain Competitors may display the retained pre-October 7, 2026 THORChain
+history as explicitly labelled legacy accounting. Its signed Midgard residual
+is not Reserve emissions. Full-history summaries, calendar-bucket tooltips and
+the monthly table disclose legacy or mixed accounting; Latest verified excludes
+legacy observations. Corrected observations always take priority, and missing
+corrected days on or after the cutoff never fall back to the legacy formula.
 `analytics.js` performs shared calendar mechanics using explicit feature reducers:
 sum flows, last stocks/cumulative, mean or a feature-owned weighted rate. Weeks
 start Monday; partial edges remain labeled. Rolling overlays remain daily means
