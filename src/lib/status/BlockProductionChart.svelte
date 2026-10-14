@@ -1,7 +1,4 @@
 <script>
-  import EventTimeSeriesChart from '../charts/EventTimeSeriesChart.svelte';
-  let hiddenSeries = [];
-  const calendarMetrics = [{ id: 'seconds', label: 'BLOCK INTERVAL', color: '#00cc66', value: row => row.seconds, weight: row => row.blocks, format: value => `${value.toFixed(2)}s` }];
   import RangeSummary from '../charts/RangeSummary.svelte';
   import { onDestroy, onMount } from 'svelte';
   import { createVisiblePoll } from '../utils/visible-poll.js';
@@ -382,10 +379,6 @@
     { label: 'Observed blocks', value: points.length ? totalBlocks : null, unit: 'blocks' }
   ]} note="Average is weighted by observed block count, including when samples are grouped. Maximum uses the displayed sample resolution." />
 
-  <EventTimeSeriesChart events={allPoints} metrics={calendarMetrics} bind:hidden={hiddenSeries}
-    zoomWindow={zoomStart === null ? null : { startDay: new Date(zoomStart).toISOString().slice(0, 10), endDay: new Date(zoomEnd).toISOString().slice(0, 10) }}
-    onZoom={window => { zoomStart = window ? Date.parse(window.startDay) : null; zoomEnd = window ? Date.parse(window.endDay) + 86400000 - 1 : null; }}
-    ariaLabel="Calendar block intervals, weighted by observed block count">
   {#if points.length > 1}
     <div class="chart-scroll">
       <svg
@@ -409,10 +402,8 @@
         <line class="target-line" x1={LEFT} x2={WIDTH - RIGHT} y1={targetY} y2={targetY} />
         <text class="target-label" x={WIDTH - RIGHT - 4} y={targetY - 6}>6S TARGET</text>
 
-        {#if !hiddenSeries.includes('seconds')}
         <path class="series-area" d={areaPath}></path>
         <path class="series-line" d={linePath}></path>
-        {/if}
 
         <rect
           class="zoom-capture"
@@ -439,7 +430,7 @@
           </g>
         {/if}
 
-        {#if activePoint && !hiddenSeries.includes('seconds')}
+        {#if activePoint}
           <line class="tooltip-guide" x1={activePointX} x2={activePointX} y1={TOP} y2={BOTTOM}></line>
           <circle class="tooltip-anchor" cx={activePointX} cy={activePointY} r="4"></circle>
           <g class="chart-tooltip" transform={`translate(${tooltipX} ${tooltipY})`} aria-hidden="true">
@@ -460,8 +451,6 @@
   {:else}
     <div class="empty-chart"><span>▓░░░░</span> Collecting block headers...</div>
   {/if}
-
-  </EventTimeSeriesChart>
 
   <div class="chart-source">
     <span>Liquify / THORChain block headers</span>

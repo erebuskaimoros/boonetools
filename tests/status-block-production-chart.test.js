@@ -130,3 +130,18 @@ test('block production drag surface stays above the series without per-block DOM
   assert.doesNotMatch(component, /class="point-target"/);
   assert.doesNotMatch(component, /cursor:\s*zoom-in/);
 });
+
+test('block interval keeps its native chart and interactions without the calendar toolbar', () => {
+  const component = readFileSync(
+    new URL('../src/lib/status/BlockProductionChart.svelte', import.meta.url),
+    'utf8'
+  );
+
+  assert.doesNotMatch(component, /EventTimeSeriesChart|ChartTools|calendarMetrics|hiddenSeries/);
+  assert.match(component, /<RangeSummary rows=\{points\}/);
+  assert.match(component, /<path class="series-line" d=\{linePath\}/);
+  assert.match(component, /on:mousemove=\{updateChartTooltip\}/);
+  assert.match(component, /on:pointerdown=\{startZoomSelection\}/);
+  assert.match(component, /on:pointerup=\{finishZoomSelection\}/);
+  assert.match(component, /on:click=\{resetZoom\}/);
+});

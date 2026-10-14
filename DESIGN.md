@@ -396,6 +396,8 @@ Render summaries outside fixed-height plot containers so charts keep their space
 All time-series toolbars use `ChartTools.svelte`: click-to-hide legends, a
 multi-select 7/30/90-day rolling menu and D/W/M calendar buttons. Disclose and
 disable source resolutions that cannot be reconstructed (including native epochs).
+Status Block Interval is native-only and omits this toolbar; keep its summary,
+per-block hover, drag-to-zoom and reset controls.
 Cross-chain Competitors instead hides unavailable calendar choices and the
 source-resolution note. Its Latest verified / Full history scope controls
 display exact UTC dates. Full monthly history is always the initial scope;

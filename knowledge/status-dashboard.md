@@ -60,6 +60,10 @@ path plus one active marker, so every block remains hoverable and zoomable
 without a DOM node per sample. The one-minute status read model keeps a bounded
 five-minute rollup as a fallback while the raw header lane warms up.
 
+The Block Interval panel stays in its native per-block view without the
+Native/D/W/M, series-toggle or rolling-average toolbar. Its summary cards,
+hover details, drag-to-zoom and reset control remain unchanged.
+
 The legacy `backfill-block-production.js` command remains available for the old
 five-minute sample table. Normal raw-header recovery is automatic and keyed by
 missing height; it does not interpolate or summarize across a gap.
