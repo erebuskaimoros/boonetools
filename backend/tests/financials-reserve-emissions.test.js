@@ -36,6 +36,52 @@ test('compact Reserve observation includes transaction and finalized bank moveme
   assert.equal(parseFinancialReserveObservation(payload, height).afterRewardsDeltaE8, '-7');
 });
 
+test('finalized ante fees remain Reserve receipts when a transaction message fails', () => {
+  // Observed at block 28232330: a code-99 transaction retains its committed
+  // 2,000,000 e8 Reserve fee; the failed message does not refund the ante fee.
+  const payload = blockPayload();
+  payload.result.txs_results = [{ code: 6, events: [] },
+    { code: 99, events: [received('2000000')] }];
+  assert.equal(parseFinancialReserveObservation(payload, height).reserveDeltaE8, '1995178');
+});
+
+test('failed-transaction fee replay reconciles independently verified historical bank balances', () => {
+  // Liquify height-verified ABCI snapshots for 28232330 and 28232329 on
+  // 2026-10-13. Condense unrelated successful events, retaining the exact
+  // Reserve delta and event-time rewards boundary from block_results.
+  const fixtureHeight = 28232330;
+  const payout = { bond_reward: '65865109', dev_fund_reward: '6276010', income_burn: '1255202',
+    tcy_stake_reward: '12552020', marketing_fund_reward: '6276010', pol_reserve_reward: '25104040',
+    'BASE.USDC-0X833589FCD6EDB6E08F4C7C32D4F71B54BDA02913': '14822',
+    'BSC.USDC-0X8AC76A51CC950D9822D68B83FE1AD97B32CD580D': '13279',
+    'BSC.USDT-0X55D398326F99059FF775485246999027B3197955': '3763', 'ETH.ETH': '2711539',
+    'ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48': '1384702', 'TRON.TRX': '4063704' };
+  const payload = { result: { height: String(fixtureHeight), txs_results: [
+    { code: 6, events: [] }, { code: 99, events: [received('2000000')] },
+    { code: 0, events: [received('4000000')] }
+  ], finalize_block_events: [received('163422077'), ...Object.values(payout).map(spent),
+    event('rewards', { ...payout, mode: 'EndBlock' }), spent('49821002')] } };
+  const point = parseFinancialReserveObservation(payload, fixtureHeight);
+  assert.equal(point.reserveDeltaE8, '-5919125');
+  assert.equal(point.afterRewardsDeltaE8, '-49821002');
+  const result = replayFinancialReserveEmissions([point], {
+    ...anchor, height: fixtureHeight, reserveBalanceE8: '2534953042560596'
+  });
+  assert.equal(result.previousReserveBalanceE8, '2534953048479721');
+  assert.equal(result.blocks[0].reserveEmissionsE8, '4823');
+});
+
+test('failed transaction event acceptance retains amount and result-code validation', () => {
+  for (const transaction of [
+    { code: -1, events: [received('2000000')] },
+    { code: 'bad', events: [received('2000000')] },
+    { code: 99, events: [event('coin_received', { receiver: FINANCIAL_RESERVE_ADDRESS, amount: 'bad' })] }
+  ]) {
+    const payload = blockPayload(); payload.result.txs_results = [transaction];
+    assert.throws(() => parseFinancialReserveObservation(payload, height));
+  }
+});
+
 test('capturing EndBlock alone is incomplete, never a full-block balance replay', () => {
   const payload = blockPayload();
   delete payload.result.txs_results;

@@ -112,14 +112,21 @@ export function parseFinancialReserveObservation(payload = {}, expectedHeight) {
   const movements = [];
   const relevant = new Set(['coin_spent', 'coin_received', 'rewards', 'set_mimir', 'version']);
   for (const transaction of transactions || []) {
+    const code = Number(transaction.code ?? 0);
+    if (!Number.isInteger(code) || code < 0 || code > 0xffffffff) throw new Error('Invalid Reserve transaction result code');
     if (transaction.events !== null && !Array.isArray(transaction.events)) throw new Error('Missing Reserve transaction events');
     for (const entry of transaction.events || []) {
       const type = decoded(entry.type).toLowerCase();
       if (!relevant.has(type)) continue;
       const attrs = attributes(entry);
       const delta = reserveMovement(type, attrs);
-      // Failed transaction event semantics are outside the reviewed contract.
-      if (Number(transaction.code || 0) !== 0 && delta !== 0n) throw new Error('Unverified Reserve movement in failed transaction');
+      // THORNode v3.20.3 pins Cosmos SDK v0.53.0: BaseApp.runTx writes the
+      // successful ante cache before executing messages in a separate cache.
+      // BaseApp.deliverTx returns only anteEvents on failure (baseapp.go
+      // lines 785–795, 915–955, 973–1025). A failed ante returns no events;
+      // failed message effects/events are discarded. Therefore finalized
+      // tx-result bank events remain committed even when code is nonzero.
+      // Do not infer them from logs or count speculative message events.
       reserveDelta += delta;
       const change = configurationChange(type, attrs);
       if (change) configChanges.push(change);

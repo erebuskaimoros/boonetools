@@ -113,6 +113,10 @@ intraday data rather than carrying a partial total forward.
 The consolidated chain listener reuses finalized NewBlock events with no extra
 polling. Each durable observation retains the exact `rev_share.payout` sum and
 compact Reserve bank deltas from both transaction results and finalized events.
+Finalized failed-transaction events still include committed ante fees: reviewed
+Cosmos SDK v0.53.0 discards failed message events, not the successful ante-stage
+transfer. Block 28232330's 2,000,000 e8 ante receipt reconciles its full bank
+delta exactly against historical Reserve balances on both sides of the block.
 The first positive indexed payout is block 28146078 at
 2026-10-07T20:29:31.355014883Z; earlier windows have known-zero REVSHARE, but
 that does not establish their emissions. The separate repair loop reuses SIPOL
