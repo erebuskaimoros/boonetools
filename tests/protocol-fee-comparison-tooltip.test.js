@@ -20,16 +20,16 @@ function chartWithTools(rows, grain, options = {}) {
 test('monthly comparison tooltip retains fees and supply/subsidy breakdown for every protocol', () => {
   const chart = chartWithTools(daily, 'month');
   const tooltip = chart.tooltip.formatter([{ dataIndex: 0 }]);
-  assert.equal((tooltip.match(/Fees collected:/g) || []).length, 2);
-  assert.match(tooltip, /Gross liquidity fees \(legacy\): \$3,100/);
+  assert.equal((tooltip.match(/Fees collected:/g) || []).length, 3);
+  assert.match(tooltip, /Fees collected: \$3,100/);
   assert.match(tooltip, /Fees collected: \$620/);
   assert.match(tooltip, /Fees collected: \$465/);
   assert.match(tooltip, /Net token supply change: \$6,200/);
-  assert.match(tooltip, /Midgard earnings residual \(legacy\): \$31/);
+  assert.match(tooltip, /Deduction: \$31/);
   assert.match(tooltip, /Token subsidy \(gross issuance\): \$310/);
   assert.match(tooltip, /After subsidy: -\$5,580/);
   assert.equal((tooltip.match(/data-series=/g) || []).length, 3);
-  assert.match(tooltip, /including all protocol burns/);
+  assert.doesNotMatch(tooltip, /including all protocol burns|legacy|mixed/i);
   assert.doesNotMatch(tooltip, /Own frontend|Other retained income/);
   assert.equal(chart.series.find(item => item.id === 'near').data[0], -5580);
 });
@@ -39,7 +39,7 @@ test('weekly details sum only the bucket dates and retain partial coverage', () 
   const tooltip = chart.tooltip.formatter([{ dataIndex: chart._rows.length - 1 }]);
   assert.match(tooltip, /2026-09-14.*2026-09-17/);
   assert.match(tooltip, /PARTIAL/);
-  assert.match(tooltip, /Gross liquidity fees \(legacy\): \$400/);
+  assert.match(tooltip, /Fees collected: \$400/);
   assert.match(tooltip, /Fees collected: \$80/);
   assert.match(tooltip, /Net token supply change: \$800/);
   assert.match(tooltip, /After subsidy: -\$720/);
@@ -49,7 +49,7 @@ test('hidden protocols stay out of grouped details while rolling overlays remain
   const chart = chartWithTools(daily, 'month', { hidden: ['near'], rolling: ['thorchain-7d'] });
   const tooltip = chart.tooltip.formatter([{ dataIndex: 0 }]);
   assert.doesNotMatch(tooltip, /data-series="near"|NEAR Intents|Net token supply change:/);
-  assert.equal((tooltip.match(/Fees collected:/g) || []).length, 1);
+  assert.equal((tooltip.match(/Fees collected:/g) || []).length, 2);
   assert.match(tooltip, /7D AVG.*THORChain/);
   assert.match(tooltip, /\$99/);
 });
@@ -67,7 +67,7 @@ test('daily tooltips retain signed net supply changes and monthly missing data s
   const tooltip = monthly.tooltip.formatter([{ dataIndex: 0 }]);
   assert.match(tooltip, /Unavailable/);
   assert.doesNotMatch(tooltip, /Net token supply change: \$0|After subsidy: \$0/);
-  assert.match(tooltip, /Gross liquidity fees \(legacy\): \$3,100/);
+  assert.match(tooltip, /Fees collected: \$3,100/);
 });
 
 test('daily reward details show sub-dollar emissions and escape signed sub-cent bounds', () => {
@@ -88,7 +88,7 @@ test('legacy monthly snapshots keep the breakdown without calling gross NEAR iss
   const months = monthlyComparison(daily, { now: Date.parse('2026-09-18T12:00:00Z'), startDay: '2026-08-01', endDay: '2026-09-18' });
   const rows = months.map(row => ({ ...row, day: row.fromDay }));
   const tooltip = chartWithTools(rows, 'month', { sourceGrain: 'month', nearNetSupply: false }).tooltip.formatter([{ dataIndex: 0 }]);
-  assert.equal((tooltip.match(/Fees collected:/g) || []).length, 2);
+  assert.equal((tooltip.match(/Fees collected:/g) || []).length, 3);
   assert.doesNotMatch(tooltip, /Net token supply change:/);
   assert.match(tooltip, /Token subsidy \(gross issuance\): \$6,200/);
 });

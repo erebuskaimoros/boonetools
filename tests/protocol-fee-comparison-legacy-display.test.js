@@ -20,14 +20,14 @@ function chart(grain, rows = comparison.selectComparisonView(daily, months).rows
     analysis: { grain } });
 }
 
-test('legacy daily display is explicit while corrected daily tooltips retain exact deductions', () => {
+test('historical daily tooltips show numbers without accounting labels while corrected deductions stay intact', () => {
   const before = structuredClone(daily);
   const option = chart('day');
   const legacy = option.tooltip.formatter([{ dataIndex: 0 }]);
-  assert.match(legacy, /THORChain.*LEGACY/);
-  assert.match(legacy, /Gross liquidity fees \(legacy\): \$100/);
-  assert.match(legacy, /Midgard earnings residual \(legacy\): -\$4/);
-  assert.match(legacy, /Legacy net: \$104/);
+  assert.match(legacy, /Fees collected: \$100/);
+  assert.match(legacy, /Deduction: -\$4/);
+  assert.match(legacy, /Net: \$104/);
+  assert.doesNotMatch(legacy, /legacy|mixed|not independently|not operating profit|whole-chain/i);
   assert.doesNotMatch(legacy, /Reserve emissions:|Retained fees:|REVSHARE paid:/);
   const corrected = option.tooltip.formatter([{ dataIndex: daily.length - 1 }]);
   assert.match(corrected, /Gross liquidity fees: \$100/);
@@ -39,17 +39,16 @@ test('legacy daily display is explicit while corrected daily tooltips retain exa
   assert.deepEqual(daily, before);
 });
 
-test('weekly and monthly transition buckets disclose mixed income and deduction bases', () => {
+test('weekly and monthly transition buckets retain the same numbers without accounting explainers', () => {
   for (const [grain, day, legacyDays, correctedDays] of [['week', '2026-10-05', 2, 5], ['month', '2026-10-01', 6, 7]]) {
     const option = chart(grain);
     const index = option._rows.findIndex(row => row.day === day);
     assert.ok(index >= 0);
     const tooltip = option.tooltip.formatter([{ dataIndex: index }]);
-    assert.match(tooltip, /THORChain.*MIXED/);
-    assert.match(tooltip, /Income basis \(legacy gross \+ corrected retained\):/);
-    assert.match(tooltip, /Legacy earnings residual \+ Reserve emissions \(mixed\):/);
-    assert.match(tooltip, new RegExp(`${legacyDays} legacy / ${correctedDays} corrected days`));
-    assert.match(tooltip, /Mixed net:/);
+    assert.match(tooltip, /Fees collected:/);
+    assert.match(tooltip, /Deduction:/);
+    assert.match(tooltip, /Net:/);
+    assert.doesNotMatch(tooltip, /legacy|mixed|not independently|not operating profit|whole-chain/i);
     assert.doesNotMatch(tooltip, /<br>Reserve emissions:|<br>REVSHARE paid:|<br>Retained fees:/);
     const net = option.series.find(item => item.id === 'thorchain').data[index];
     assert.ok(Math.abs(net - (legacyDays * 104 + correctedDays * 97.53)) < 1e-8);
@@ -95,15 +94,19 @@ test('summary accounting follows the selected daily range and native monthly cou
   assert.deepEqual(comparison.comparisonViewAccounting(monthly, { sourceGrain: 'month', correctedAccounting: false }), { accounting: 'legacy', legacyDays: 43, correctedDays: 0 });
 });
 
-test('visible chart summaries and monthly table disclose their accounting regimes', async () => {
-  const [chartSource, panelSource] = await Promise.all([
+test('comparison surfaces keep the numbers and controls without accounting labels or explainers', async () => {
+  const [chartSource, panelSource, summarySource] = await Promise.all([
     readFile(new URL('../src/lib/protocol-fee-comparison/Chart.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lib/protocol-fee-comparison/Comparison.svelte', import.meta.url), 'utf8')
+    readFile(new URL('../src/lib/protocol-fee-comparison/Comparison.svelte', import.meta.url), 'utf8'),
+    readFile(new URL('../src/lib/charts/RangeSummary.svelte', import.meta.url), 'utf8')
   ]);
-  assert.match(chartSource, /comparisonViewAccounting/);
-  assert.match(chartSource, /summaryAccounting/);
-  assert.match(chartSource, /legacy/i);
+  assert.doesNotMatch(chartSource, /legacy|mixed|scope-note|summaryAccounting/i);
+  assert.match(chartSource, /showNote=\{false\}/);
+  assert.match(chartSource, /protocol\.label \+ ' net income'/);
   assert.match(panelSource, /comparisonDisplayMonths/);
   assert.match(panelSource, /\[\.\.\.displayMonths\]/);
-  assert.match(panelSource, /Legacy residual \+ Reserve emissions/);
+  assert.match(panelSource, /<summary>MONTHLY DATA<\/summary>/);
+  assert.doesNotMatch(panelSource, /legacy|mixed|qualification|methodology &amp;|class="lede"|tag="TC"/i);
+  assert.match(summarySource, /export let showNote = true/, 'other charts retain their default notes');
+  assert.match(summarySource, /\{#if showNote\}<p>/);
 });

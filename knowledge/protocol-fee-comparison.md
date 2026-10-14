@@ -7,6 +7,18 @@ income minus network token subsidy, originally following the September 18,
 net issuance under the user-approved change below. THORChain's v4 correction
 separates retained fee income from Reserve emissions; CF is unchanged.
 
+## Numbers-only presentation — October 14, 2026
+
+At the user's request, removed visible legacy/mixed labels, accounting banners,
+scope and summary explainers, methodology paragraphs and tooltip explanations.
+The monthly disclosure now contains only the numerical table. Historical and
+combined deductions use the neutral `Deduction` label rather than being renamed
+Reserve emissions. Exact-day numerical fee/REVSHARE/emission breakdowns remain.
+This is frontend-only: all source data, provenance metadata, historical selection,
+cutoff guards, verified scope and calculations are unchanged. No cache rebuild,
+new data acquisition or backend deployment is needed. This supersedes the
+visible-label requirements in the original restoration note below.
+
 ## Cached legacy history restoration — October 14, 2026
 
 The raw comparison acquisition cache retains 408 days (September 1, 2025 through

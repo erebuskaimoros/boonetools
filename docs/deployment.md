@@ -108,8 +108,10 @@ daily values and NEAR/Chainflip values match the pre-release snapshot, that the
 separate `thorchain.legacy` object appears only before October 7, 2026, and that
 its signed residual reproduces the cached original calculation. After frontend
 activation, explicitly reload Financials: Full history should be selected with
-the full twelve-month-plus-current window, legacy/mixed labels should be visible,
-and Latest verified must still exclude legacy history. See
+the full twelve-month-plus-current window, and Latest verified must still exclude
+legacy history. The subsequent user-requested numbers-only presentation removes
+visible accounting labels and explainers without changing these data contracts;
+deploy that presentation change frontend-only, with no cache rebuild. See
 [the restoration contract](../knowledge/protocol-fee-comparison.md#cached-legacy-history-restoration--october-14-2026).
 
 ### Reserve emissions / REVSHARE accounting rollout
@@ -123,7 +125,7 @@ nonnegative `reserveEmissionsRune`, separate `revshareRune`, and
 The sum `fees + emissions - REVSHARE + adjustment` must equal reported income.
 Older unsupported periods remain unavailable in canonical exact fields rather
 than using Midgard's signed `blockRewards` residual as emissions. The separately
-labelled legacy comparison display described above does not change that rule.
+stored historical comparison data described above does not change that rule.
 After repair, rebuild the comparison from
 its saved acquisition cache (`protocol-fee-comparison` with `rebuildOnly: true`)
 under its normal advisory lock, or allow its normal timer to refresh it.

@@ -7,6 +7,7 @@
   export let bucket = 'day';
   export let loading = false;
   export let note = '';
+  export let showNote = true;
   /** Feature-owned reductions, e.g. block-weighted intervals. */
   export let cards = null;
   $: selected = selectSummaryRows(rows, window);
@@ -31,7 +32,7 @@
       </div>
     {/each}
   </dl>
-  <p>Selected range{first && last ? ` · ${first} → ${last}` : ''} · {selected.length} {bucket} observations{partial ? ` · ${partial} partial/provisional` : ''}. {note || 'Available observations only; partial buckets are not extrapolated.'}</p>
+  {#if showNote}<p>Selected range{first && last ? ` · ${first} → ${last}` : ''} · {selected.length} {bucket} observations{partial ? ` · ${partial} partial/provisional` : ''}. {note || 'Available observations only; partial buckets are not extrapolated.'}</p>{/if}
 </section>
 
 <style>

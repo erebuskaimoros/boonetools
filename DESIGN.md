@@ -404,12 +404,14 @@ Missing accounting must not automatically shorten every protocol's date range.
 Background refreshes preserve the selected scope, grain, hidden series and zoom.
 Only an explicit scope change resets grain and zoom; historical missing buckets
 remain unavailable in Full history and the monthly coverage table.
-Cross-chain Competitors may display the retained pre-October 7, 2026 THORChain
-history as explicitly labelled legacy accounting. Its signed Midgard residual
-is not Reserve emissions. Full-history summaries, calendar-bucket tooltips and
-the monthly table disclose legacy or mixed accounting; Latest verified excludes
-legacy observations. Corrected observations always take priority, and missing
-corrected days on or after the cutoff never fall back to the legacy formula.
+Cross-chain Competitors displays numbers, date controls and a monthly table
+without accounting-era labels or explanatory prose. Summary notes are hidden
+only in this panel; shared summaries retain their default notes elsewhere.
+Historical provenance remains in the data model: the retained pre-October 7,
+2026 Midgard residual is not Reserve emissions. Use the neutral “Deduction”
+label for historical or combined amounts. Latest verified excludes historical
+fallback observations, corrected observations always take priority, and missing
+corrected days on or after the cutoff never fall back to the historical formula.
 `analytics.js` performs shared calendar mechanics using explicit feature reducers:
 sum flows, last stocks/cumulative, mean or a feature-owned weighted rate. Weeks
 start Monday; partial edges remain labeled. Rolling overlays remain daily means

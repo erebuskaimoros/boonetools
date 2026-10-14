@@ -103,10 +103,10 @@ test('tooltip shows income, subsidy and net without the included NEAR breakdown'
   assert.match(tooltip, /PARTIAL/);
   assert.match(tooltip, /2026-09-17 UTC/);
   assert.equal((tooltip.match(/data-series=/g) || []).length, 3);
-  assert.match(tooltip, /Fees collected:/); assert.match(tooltip, /Midgard earnings residual \(legacy\):/);
+  assert.match(tooltip, /Fees collected:/); assert.match(tooltip, /Deduction:/);
   assert.doesNotMatch(tooltip, /Own frontend|Other retained income/);
   assert.match(tooltip, /Fees collected: \$340<br>Token subsidy \(gross issuance\): \$3,400<br><strong>After subsidy: -\$3,060/);
-  assert.match(tooltip, /100% of chain issuance/);
+  assert.doesNotMatch(tooltip, /100% of chain issuance|legacy|mixed/i);
   assert.doesNotMatch(comparisonTooltip(months[0], ['near']), /data-series="near"/);
   assert.equal(comparisonOption(months, ['near']).series.length, 2);
 });
@@ -128,10 +128,10 @@ test('net-supply tooltips identify NEAR separately without relabeling TC, CF or 
   const monthly = comparisonTooltip(months[1], [], true);
   assert.match(monthly, /Fees collected: \$340<br>Net token supply change: \$3,400/);
   assert.equal((monthly.match(/Token subsidy \(/g) || []).length, 1);
-  assert.match(monthly, /including all protocol burns/);
+  assert.doesNotMatch(monthly, /including all protocol burns/);
   const daily = buildComparisonTimeSeries(days, { nearNetSupply: true }).tooltip.formatter([{ dataIndex: 0 }]);
   assert.match(daily, /Net token supply change: \$200/);
-  assert.match(daily, /including all protocol burns/);
+  assert.doesNotMatch(daily, /including all protocol burns/);
   assert.doesNotMatch(comparisonTooltip(months[1]), /Net token supply change:/);
 });
 
