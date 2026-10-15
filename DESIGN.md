@@ -427,6 +427,13 @@ coerce event/epoch histories into daily buckets. Feature toolbars retain their
 range/unit/metric choices and reset policies. See
 `knowledge/shared-echarts-time-series.md` for the implemented profile and limits.
 
+ADR26 affiliate trends overlay dated, dashed vertical whitelist-change lines:
+green for active, amber for removed, blue for monitor-only. They follow the
+UTC bucket and zoom window without altering metric datasets. Accessible event
+links below the chart retain exact timestamps, source and block height; older
+reconstructed consensus dates are explicitly marked as estimates. Changes
+before the visible range appear as context, never pinned to an incorrect date.
+
 ## Do's and Don'ts
 
 Do:

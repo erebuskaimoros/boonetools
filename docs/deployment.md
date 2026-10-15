@@ -98,6 +98,23 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### Affiliate whitelist-change markers
+
+The October 15 marker update is frontend-only. It reads the existing
+`node-votes?view=vote&key=DYNAMICFEE-WHITELIST-{NAME}` effective history; no
+backend deployment, migration, historical refetch or cache reset is needed.
+Direct protocol events take precedence over duplicate same-state reconstructed
+consensus entries. Older consensus-only entries remain explicitly estimated;
+raw individual votes and current values never create marker dates. The API's
+retained-history limit and fetch failures are disclosed without blocking metrics.
+
+After reloading ADR26, verify EJ's September 25 addition and SYMBIOSIS's
+addition/removal/re-addition in the six-month view. Switch D/W/M and drag to zoom:
+lines should follow the actual UTC event position inside each bucket, disappear
+outside the viewport and return on reset. SS's July 3 consensus estimate is
+before a one-month view, so that view shows context below the chart rather than
+an incorrectly positioned line. Existing fee/volume accounting is unchanged.
+
 ### Affiliate trend fees differ from transaction totals
 
 Midgard earnings groups may contain slash-separated affiliate names such as

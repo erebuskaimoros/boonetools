@@ -11,6 +11,9 @@
   import { booneToolsApi } from '$lib/api/boonetools.js';
   import { subscribeChainHeads } from '$lib/api/chain-stream.js';
   import {
+    normalizeWhitelistHistory, positionWhitelistMarkers, createWhitelistMarkerPlugin, whitelistEventText
+  } from '$lib/dynamic-fees/whitelist.js';
+  import {
     buildAffiliateMidgardSeries,
     buildAffiliateTransactionView,
     buildAffiliateTrendView,
@@ -91,6 +94,8 @@
   let affiliateSummaryRange = null;
   let renderedAffiliateChartKey = '';
   let affiliateHistoryCache = {};
+  let whitelistHistoryCache = {};
+  let requestedWhitelistId = '';
   let affiliateHistoryLoading = false;
   let affiliateHistoryError = null;
   let requestedAffiliateHistoryKey = '';
@@ -174,6 +179,18 @@
     partial: index >= selectedRecord.history.length
   })) || [];
   $: affiliateSummaryRows = selectIndexSummaryRows(affiliateHistory?.points || [], affiliateSummaryRange);
+  $: whitelistHistory = whitelistHistoryCache[selectedAffiliate?.id] || null;
+  $: whitelistEvents = whitelistHistory?.events || [];
+  $: affiliateWhitelistMarkers = positionWhitelistMarkers(whitelistEvents, affiliateHistory?.points || []);
+  $: visibleWhitelistMarkers = affiliateWhitelistMarkers.filter(marker => !affiliateSummaryRange || (
+    marker.xValue >= affiliateSummaryRange.start - 0.5 && marker.xValue <= affiliateSummaryRange.end + 0.5
+  ));
+  $: priorWhitelistEvent = whitelistEvents.filter(event => event.timestamp < Number(affiliateSummaryRows[0]?.startTime)).at(-1);
+  $: redrawWhitelistMarkers(affiliateChartInstance, affiliateWhitelistMarkers);
+  $: if (selectedAffiliate && selectedAffiliate.id !== requestedWhitelistId) {
+    requestedWhitelistId = selectedAffiliate.id;
+    loadWhitelistHistory(selectedAffiliate);
+  }
   $: emptyState = model && records.length === 0 && currentEntries.length === 0;
   $: socketBlockHeight = rpcLastBlock || model?.config.blockHeight || 0;
   $: socketLabel = rpcConnected
@@ -224,6 +241,7 @@
       if (!affiliateHistoryLoading && affiliateVolumePartial && selectedAffiliate) {
         await loadAffiliateHistory(selectedAffiliate, affiliateHistoryKey);
       }
+      if (selectedAffiliate) await loadWhitelistHistory(selectedAffiliate);
     }, { intervalMs: 15_000, immediate: false });
   });
 
@@ -319,6 +337,36 @@
         affiliateHistoryLoading = false;
       }
     }
+  }
+
+  async function loadWhitelistHistory(affiliate) {
+    const cached = whitelistHistoryCache[affiliate.id];
+    if (cached?.loading || Date.now() - (cached?.attemptedAt || 0) < 60_000) return;
+    const attemptedAt = Date.now();
+    whitelistHistoryCache = { ...whitelistHistoryCache, [affiliate.id]: { ...cached, loading: true, attemptedAt } };
+    try {
+      const payload = await booneToolsApi.get('/node-votes', {
+        signal: requestController.signal,
+        query: { view: 'vote', key: `DYNAMICFEE-WHITELIST-${affiliate.thorname.toUpperCase()}` },
+        errorMessage: 'Failed to load whitelist history'
+      });
+      if (requestController.signal.aborted) return;
+      whitelistHistoryCache = { ...whitelistHistoryCache, [affiliate.id]: {
+        attemptedAt, loading: false, events: normalizeWhitelistHistory(payload, affiliate.thorname),
+        warning: Number(payload.summary?.detail?.effective_change_count) > (payload.effective_history?.length || 0)
+          ? 'Showing the most recent recorded whitelist changes.' : ''
+      } };
+    } catch (err) {
+      if (requestController.signal.aborted) return;
+      whitelistHistoryCache = { ...whitelistHistoryCache, [affiliate.id]: {
+        ...cached, attemptedAt, loading: false,
+        warning: cached?.events?.length ? 'Whitelist history refresh unavailable; showing saved changes.' : 'Whitelist history unavailable.'
+      } };
+    }
+  }
+
+  function redrawWhitelistMarkers(chart, _markers) {
+    chart?.draw();
   }
 
   function connectChainHeadStream() {
@@ -721,6 +769,7 @@
 
     affiliateChartInstance = new Chart(affiliateChartCanvas, {
       type: 'bar',
+      plugins: [createWhitelistMarkerPlugin(() => affiliateWhitelistMarkers)],
       data: {
         labels: affiliateHistory.labels,
         datasets: [
@@ -796,6 +845,9 @@
             titleFont: { family: 'JetBrains Mono', size: 12, weight: 700 },
             bodyFont: { family: 'JetBrains Mono', size: 12, weight: 500 },
             callbacks: {
+              afterBody: (items) => affiliateWhitelistMarkers
+                .filter(marker => marker.bucketIndex === items[0]?.dataIndex)
+                .map(whitelistEventText),
               label: (ctx) => {
                 if (ctx.dataset.label === 'fees / volume') {
                   return `fees / volume: ${formatRateBps(ctx.parsed.y)}`;
@@ -1578,13 +1630,28 @@
         {:else if affiliateHistory?.points?.length}
           <canvas
             bind:this={affiliateChartCanvas}
-            aria-label="Affiliate volume, fees, and fees per volume chart. Drag to highlight and zoom. Click a column to inspect its transactions."
+            aria-label="Affiliate volume, fees, and fees per volume chart with vertical whitelist-change markers. Event dates and sources are listed below. Drag to highlight and zoom. Click a column to inspect its transactions."
             title="Drag to highlight and zoom. Click a column to inspect its transactions."
             on:dblclick={resetAffiliateChartZoom}
           ></canvas>
         {:else}
           <div class="loading-block"><span class="loading-marker">----</span><span>no historical affiliate metrics</span></div>
         {/if}
+      </div>
+      <div class="whitelist-chart-events" aria-label="Affiliate whitelist changes">
+        {#each visibleWhitelistMarkers as event (event.id)}
+          <span class="whitelist-chart-event" style={`--event-color:${event.color}`}>
+            <span class="event-line" aria-hidden="true"></span>
+            {#if event.txId}<a href={`https://thorchain.net/tx/${event.txId}`} target="_blank" rel="noreferrer" title={`${event.source} · block ${event.height}`}>{whitelistEventText(event)}</a>
+            {:else}<span>{whitelistEventText(event)}</span>{/if}
+          </span>
+        {/each}
+        {#if priorWhitelistEvent}
+          <span class="prior-whitelist-event">Before displayed range: {whitelistEventText(priorWhitelistEvent)}</span>
+        {/if}
+        {#if whitelistHistory?.warning}<span>{whitelistHistory.warning}</span>
+        {:else if !whitelistHistory || (whitelistHistory.loading && !whitelistEvents.length)}<span>Loading whitelist changes…</span>
+        {:else if !whitelistEvents.length}<span>No recorded whitelist changes available.</span>{/if}
       </div>
     </section>
 
@@ -1759,6 +1826,12 @@
 </section>
 
 <style>
+  .whitelist-chart-events { display: flex; flex-wrap: wrap; gap: 8px 18px; padding-top: 12px; color: var(--term-text-3, #c8c8c8); font: 11px 'JetBrains Mono', monospace; }
+  .whitelist-chart-event { display: inline-flex; align-items: center; gap: 7px; }
+  .whitelist-chart-event a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+  .whitelist-chart-event a:hover { color: var(--event-color); }
+  .event-line { height: 14px; border-left: 2px dashed var(--event-color); }
+  .prior-whitelist-event { width: 100%; }
   .terminal {
     width: min(1380px, calc(100% - 24px));
     margin: 0 auto;
