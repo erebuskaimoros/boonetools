@@ -98,6 +98,23 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### Affiliate trend fees differ from transaction totals
+
+Midgard earnings groups may contain slash-separated affiliate names such as
+`ns/ss`. The affiliate trend includes routes containing the selected name,
+matching its volume and transaction sources. Sum each matching earnings group
+once; do not add the response aggregate again or include unrelated affiliates.
+Preserve Midgard's display-USD valuation and the separate historical RUNE/USD
+valuation used for fee rates. This is affiliate-tagged flow, not proof that
+every historical swap used a dynamic fee floor.
+
+The October 15, 2026 reconciliation fix is frontend-only: existing snapshots
+already contain the co-listed groups. No backend deploy, cache reset, migration,
+or refetch is required. Reload ADR26 and verify the SS October 12 bucket includes
+all nine transactions, totaling 157.0696314 RUNE in protocol liquidity fees.
+Display USD may change with Midgard's valuation; the chart and transaction sum
+must agree apart from per-row display rounding.
+
 ### Cached comparison legacy history restoration
 
 Deploy backend before frontend, then run the comparison job with

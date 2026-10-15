@@ -330,10 +330,13 @@ export function midgardRuneBaseToRune(value) {
   return parseNumeric(value) / 1e8;
 }
 
-function findAffiliateIntervalItem(row, thorname) {
-  const target = String(thorname || '').toLowerCase();
-  if (!target || !Array.isArray(row?.affiliates)) return null;
-  return row.affiliates.find((entry) => String(entry?.affiliate || '').toLowerCase() === target) || null;
+function findAffiliateIntervalItems(row, thorname) {
+  const target = String(thorname || '').trim().toLowerCase();
+  if (!target || !Array.isArray(row?.affiliates) || row.affiliates.length === 0) return null;
+  // Each entry is a route group, which may include multiple affiliates.
+  // Include a matching group once, not once for each occurrence of the name.
+  return row.affiliates.filter((entry) => String(entry?.affiliate || '')
+    .toLowerCase().split('/').some((name) => name.trim() === target));
 }
 
 function formatUnixDayLabel(startTime) {
@@ -398,20 +401,29 @@ export function buildAffiliateMidgardSeries(
   for (const row of Array.isArray(earningsRows) ? earningsRows : []) {
     const point = ensureRow(row);
     if (!point) continue;
-    const affiliateItem = findAffiliateIntervalItem(row, thorname);
-    point.feesUsd = midgardUsdCentsToUsd(
-      affiliateItem?.earningsUSD ?? row.totalEarningsUSD ?? row.earningsUSD
+    // Aggregate-only responses are already scoped by the affiliate request.
+    // When groups exist, never add or fall back to the whole-response totals.
+    const affiliateItems = findAffiliateIntervalItems(row, thorname) ?? [{
+      earningsUSD: row.totalEarningsUSD ?? row.earningsUSD,
+      earningsRUNE: row.totalEarningsRune ?? row.earningsRUNE,
+      count: row.count
+    }];
+    point.feesUsd = midgardUsdCentsToUsd(affiliateItems.reduce(
+      (sum, item) => sum + parseNumeric(item.earningsUSD), 0
+    ));
+    point.feesRuneAvailable = affiliateItems.every((item) =>
+      item.earningsRUNE !== undefined &&
+      item.earningsRUNE !== null &&
+      String(item.earningsRUNE) !== ''
     );
-    const rawFeesRune =
-      affiliateItem?.earningsRUNE ??
-      row.totalEarningsRune ??
-      row.earningsRUNE;
-    point.feesRuneAvailable =
-      rawFeesRune !== undefined &&
-      rawFeesRune !== null &&
-      String(rawFeesRune) !== '';
-    point.feesRune = midgardRuneBaseToRune(rawFeesRune);
-    point.count = Math.max(point.count, parseNumeric(affiliateItem?.count ?? row.count));
+    point.feesRune = point.feesRuneAvailable
+      ? midgardRuneBaseToRune(affiliateItems.reduce(
+        (sum, item) => sum + parseNumeric(item.earningsRUNE), 0
+      ))
+      : 0;
+    point.count = Math.max(point.count, affiliateItems.reduce(
+      (sum, item) => sum + parseNumeric(item.count), 0
+    ));
   }
 
   const points = Array.from(rows.values())
