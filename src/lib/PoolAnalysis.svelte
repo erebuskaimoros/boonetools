@@ -41,7 +41,7 @@
   let rollingAsset = '';
   let rollingController;
   let rollingSequence = 0;
-  let tablePeriodId = '30d';
+  let tablePeriodId = '24h';
   let search = '';
   let statusFilter = 'available';
   let sort = { column: 'depthUsd', direction: 'desc' };

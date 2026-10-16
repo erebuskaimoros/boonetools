@@ -3,6 +3,21 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { normalizePoolAnalysisSummary, selectPoolAnalysisPeriod, poolAnalysisPeriodDescription, poolAnalysisWindowLabel } from '../src/lib/pool-analysis/model.js';
 
+test('Pool Analysis initially selects 24H activity without changing the chart range', async () => {
+  const source = await readFile(new URL('../src/lib/PoolAnalysis.svelte', import.meta.url), 'utf8');
+  const initialPeriod = source.match(/let tablePeriodId = '([^']+)'/)?.[1];
+  assert.equal(initialPeriod, '24h');
+  assert.match(source, /let rangeId = '30d'/);
+  const dashboard = normalizePoolAnalysisSummary({ pools: [{ asset: 'BTC.BTC', period_metrics: {
+    '24h': { volume_usd: 123, fees_usd: 4 },
+    '30d': { volume_usd: 3690, fees_usd: 120 }
+  } }] });
+  const initialRow = selectPoolAnalysisPeriod(dashboard.pools[0], initialPeriod);
+  assert.equal(initialRow.selectedPeriodDays, 1);
+  assert.equal(initialRow.periodVolumeUsd, 123);
+  assert.equal(initialRow.periodFeesUsd, 4);
+});
+
 test('selected Pool Analysis periods retain exact bounds and stale/incomplete state', () => {
   const payload = { pools: [{ asset: 'BTC.BTC', period_metrics: {
     '24h': { window_start: '2026-09-04T12:03:00Z', window_end: '2026-09-05T12:03:00Z', stale: true, incomplete: false, usd_fee_estimate: true, volume_usd: 123 },
