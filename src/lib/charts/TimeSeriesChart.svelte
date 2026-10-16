@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { createTimeSeriesChart } from './echarts.js';
   import ChartTools from './ChartTools.svelte';
-  import { analysisLegend } from './analytics.js';
+  import { analysisLegend, analysisRollingSeries } from './analytics.js';
 
   export let points = [];
   export let options = {};
@@ -85,7 +85,7 @@
 </script>
 
 {#if tools && baseSpec}
-  <ChartTools series={legend} {hidden} {rolling} {grain} {sourceGrain} {hideUnavailableGrains} {showSourceResolution} calendar={baseSpec.calendar || 'UTC'}
+  <ChartTools series={legend} rollingSeries={analysisRollingSeries(baseSpec)} {hidden} {rolling} {grain} {sourceGrain} {hideUnavailableGrains} {showSourceResolution} calendar={baseSpec.calendar || 'UTC'}
     onHidden={changeHidden} onRolling={changeRolling} onGrain={changeGrain} />
 {/if}
 <slot name="controls" />

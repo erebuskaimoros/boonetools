@@ -59,6 +59,13 @@ export function analysisLegend(series) {
   }).map(item => ({ ...item, id: item.visibilityId || item.id }));
 }
 
+// Additional sources appear only in the rolling menu, not as primary plots or
+// legend toggles. Their data uses the same daily history and gap rules.
+export function analysisRollingSeries(spec) {
+  return [...(spec?.rollingSeries || []), ...analysisLegend(spec?.series || [])]
+    .filter(item => item.rolling !== false);
+}
+
 export function analyzeTimeSeries(rows, spec, settings = {}) {
   const sourceGrain = spec.sourceGrain || 'day';
   const grain = sourceGrain !== 'day' ? sourceGrain : settings.grain || sourceGrain;
@@ -84,8 +91,9 @@ export function analyzeTimeSeries(rows, spec, settings = {}) {
   }));
   const source = settings.historySpec || spec;
   const historyRows = settings.historyRows?.length ? settings.historyRows : rows;
-  const averages = sourceGrain !== 'day' ? [] : analysisLegend(spec.series).filter(item => item.rolling !== false).flatMap(item => {
-    const original = source.series.find(series => series.id === item.id) || item;
+  const historySeries = [...(source.rollingSeries || []), ...source.series];
+  const averages = sourceGrain !== 'day' ? [] : analysisRollingSeries(spec).flatMap(item => {
+    const original = historySeries.find(series => series.id === item.id) || item;
     // Fresh visible observations replace any older cached lookback for that day.
     const indexed = new Map(historyRows.map((row, index) => [row.day, { row, value: numericValue((original.rollingData || original.data)[index]) }]));
     rows.forEach((row, index) => indexed.set(row.day, { row, value: numericValue((item.rollingData || item.data)[index]) }));

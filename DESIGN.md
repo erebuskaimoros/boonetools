@@ -378,6 +378,10 @@ its controls and legend below these cards, immediately before the plot.
 Its Depth/Cumulative Fees switch uses a sliding indicator with reduced-motion
 support. POL deposit rolling averages apply only to daily deposits, not the
 cumulative total.
+The POL deposits rolling menu starts with TOTAL (7/30/90 days), averaging the
+daily total including hidden and unattributed pools. It is a rolling-only source,
+not another stacked bar or cumulative-balance average. Shared chart adapters can
+declare `rollingSeries` independently of primary plots and legend toggles.
 POL Tracker's current holdings use a USD-weighted ECharts pie with an always-visible
 asset/chain key, token amounts, dollar values, and allocation shares. Unpriced
 holdings remain listed but are excluded from the pie and its percentage denominator.

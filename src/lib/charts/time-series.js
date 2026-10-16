@@ -34,9 +34,10 @@ export function utcDayLabel(day) {
 export function buildTimeSeriesOption(rows, {
   axes, series, tooltip, groupedTooltip = null, hidden = [], window = null, width = 1000,
   zoomId = TIME_SERIES_ZOOM_ID, minSpan = 1, xLabel = utcDayLabel,
-  zoom = true, compact = false, tooltipEnabled = true, sourceGrain = 'day', calendar = 'UTC', analysis = null
+  zoom = true, compact = false, tooltipEnabled = true, sourceGrain = 'day', calendar = 'UTC', analysis = null,
+  rollingSeries = []
 }) {
-  const spec = { rows, axes, series, sourceGrain, calendar };
+  const spec = { rows, axes, series, sourceGrain, calendar, rollingSeries };
   if (analysis) {
     const sourceRows = rows;
     const view = analyzeTimeSeries(rows, analysis.baseSpec || spec, analysis);

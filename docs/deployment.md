@@ -98,6 +98,16 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### POL total rolling averages
+
+The October 16 total-average addition is frontend-only. Reload POL Tracker and
+open ROLLING AVGS: TOTAL should be first, with independent 7D/30D/90D choices.
+These use all daily deposits (including hidden and unattributed pools), not
+cumulative balances. Check RUNE/USD and D/W/M; averages retain daily historical
+prices and off-screen lookback, with incomplete windows unavailable. Pool stacks,
+the cumulative line, and existing pool averages are unchanged. No migration,
+cache rebuild, backfill, or backend deployment is needed.
+
 ### Affiliate whitelist-change markers
 
 The October 15 marker update is frontend-only. It reads the existing

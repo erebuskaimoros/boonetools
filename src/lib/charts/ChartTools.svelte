@@ -2,6 +2,7 @@
   import SeriesLegend from './SeriesLegend.svelte';
   import { ROLLING_DAYS } from './analytics.js';
   export let series = [];
+  export let rollingSeries = null;
   export let hidden = [];
   export let rolling = [];
   export let grain = 'day';
@@ -39,7 +40,7 @@
   <details bind:this={menu} bind:open>
     <summary bind:this={trigger}>[ROLLING AVGS{rolling.length ? ` · ${rolling.length}` : ''}]</summary>
     <div class="options">
-      {#each series.filter(item => item.rolling !== false) as item (item.id)}
+      {#each (rollingSeries || series).filter(item => item.rolling !== false) as item (item.id)}
         <fieldset><legend><i style={`background:${item.color}`}></i>{item.label}</legend>
           <div class="choices">{#each ROLLING_DAYS as days}
             <label><input type="checkbox" checked={rolling.includes(`${item.id}-${days}d`)} disabled={sourceGrain !== 'day'}

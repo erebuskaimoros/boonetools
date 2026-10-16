@@ -102,6 +102,8 @@ export function buildSystemIncomePolDepositOption(rows, { unit = 'rune', window 
   const needsUnattributed = !pools.length || rows.some(row => (row.unattributedRune ?? row.depositedPlotRune) > 0);
   return buildTimeSeriesOption(rows, {
     width, window, hidden, analysis,
+    rollingSeries: [{ id: 'total', label: 'TOTAL', color: palette.accent, axis: 'daily',
+      data: rows.map(row => row.depositedPlotValue) }],
     tooltip: (row) => polDepositTooltip(row, unit, hidden),
     groupedTooltip: (_row, context) => polDepositTooltip(polDepositBuckets(context.rows, context.grain)[0], unit, context.hidden),
     axes: POL_DEPOSIT_SERIES.map((item, index) => ({
