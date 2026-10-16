@@ -24,7 +24,7 @@ export function buildPolAssetAllocation(inventory = []) {
     const color = item.asset === 'THOR.RUNE' ? palette.accent
       : item.ticker === 'USDT' && item.asset.startsWith('BSC.') ? '#88cbbb' : series.color;
     return {
-      ...item, color, label: series.label,
+      ...item, color, label: item.asset.split('-')[0],
       value: usdE8 === null ? null : usdE8 / 1e8,
       percent: usdE8 === null || totalE8 <= 0 ? null : 100 * usdE8 / totalE8,
       amountLabel: item.ticker === 'RUNE' ? formatE8Rune(item.amountE8) : formatE8Asset(item.amountE8),

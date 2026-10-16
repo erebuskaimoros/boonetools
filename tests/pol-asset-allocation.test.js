@@ -50,10 +50,24 @@ test('unpriced, zero, and invalid holdings remain visible without invented slice
   }
 });
 
+test('POL holdings and pie tooltips use CHAIN.ASSET labels while retaining full asset identities', () => {
+  const assets = ['THOR.RUNE', 'XRP.XRP', 'TRON.USDT-contract', 'TRON.TRX', 'BSC.USDT-contract', 'BASE.USDC-contract', 'ZEC.ZEC'];
+  const labels = ['THOR.RUNE', 'XRP.XRP', 'TRON.USDT', 'TRON.TRX', 'BSC.USDT', 'BASE.USDC', 'ZEC.ZEC'];
+  const allocation = buildPolAssetAllocation(assets.map(asset => holding(asset, '100000000')));
+  assert.deepEqual(allocation.assets.map(item => item.label), labels);
+  assert.deepEqual(allocation.assets.map(item => item.asset), assets);
+  const option = buildPolAssetAllocationOption(allocation);
+  assert.deepEqual(option.series[0].data.map(item => item.name), labels);
+  assert.deepEqual(option.series[0].data.map(item => item.id), assets);
+  for (const item of option.series[0].data) {
+    assert.ok(option.tooltip.formatter({ data: item }).includes(item.name));
+  }
+});
+
 test('chain-specific stablecoins keep distinct labels/colors and tiny holdings retain true proportions', () => {
   const inventory = [holding('TRON.USDT-contract', '99999999999'), holding('BSC.USDT-contract', '1')];
   const allocation = buildPolAssetAllocation(inventory);
-  assert.deepEqual(allocation.assets.map(item => item.label), ['USDT · TRON', 'USDT · BSC']);
+  assert.deepEqual(allocation.assets.map(item => item.label), ['TRON.USDT', 'BSC.USDT']);
   assert.notEqual(allocation.assets[0].color, allocation.assets[1].color);
   assert.equal(allocationShare(allocation.assets[1].percent), '<0.1%');
   assert.equal(allocationShare(0), '0.0%');
