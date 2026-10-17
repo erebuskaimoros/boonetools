@@ -3,28 +3,38 @@
  *
  * Provider Strategy:
  * - Liquify Gateway (gateway.liquify.com/chain/thorchain_api): Primary public endpoint
+ * - NativeSwap: Public HTTP fallback (historical availability is limited)
  */
 
 import { fromBaseUnit } from '../utils/blockchain.js';
-import { requestFromProviders } from './provider.js';
+import { requestFromProviders, browserProviderHeaders } from './provider.js';
 import { resolveCoreSnapshotPath } from './core-snapshot.js';
+import { LIQUIFY_THORNODE, NATIVESWAP_THORNODE } from '../../../shared/thorchain-providers.js';
 
 /**
  * API Provider configurations
  */
 const DEV_THORNODE_BASES = {
-  primary: '/__thornode_primary'
+  primary: '/__thornode_primary',
+  fallback: '/__thornode_fallback'
 };
 
 export const PROVIDERS = {
   thorchain: {
     name: 'liquify',
-    base: import.meta.env.DEV
+    base: import.meta.env?.DEV
       ? DEV_THORNODE_BASES.primary
-      : 'https://gateway.liquify.com/chain/thorchain_api',
+      : LIQUIFY_THORNODE,
     supportsBlockHeight: true,
     updateFrequency: 6000,
     priority: 1
+  },
+  nativeswap: {
+    name: 'nativeswap',
+    base: import.meta.env?.DEV ? DEV_THORNODE_BASES.fallback : NATIVESWAP_THORNODE,
+    supportsBlockHeight: true,
+    updateFrequency: 6000,
+    priority: 2
   }
 };
 
@@ -64,6 +74,7 @@ class ThorNodeClient {
       realtime = true,
       timeoutMs = 10000,
       fetchImpl = globalThis.fetch,
+      headers = {},
       ...fetchOptions
     } = options;
 
@@ -105,19 +116,13 @@ class ThorNodeClient {
     }
 
     const pending = requestFromProviders({
-      bases: [PROVIDERS.thorchain.base],
+      bases: [PROVIDERS.thorchain.base, PROVIDERS.nativeswap.base],
       path: requestPath,
       responseType: parseJson ? 'json' : 'text',
       timeoutMs,
       fetchImpl,
-      request: {
-        ...fetchOptions,
-        headers: {
-          'x-client-id': 'BooneTools',
-          ...(fetchOptions.headers || {})
-        }
-      },
-      shouldStop: (error) => Number(error?.status) === 429
+      headers: ({ base }) => browserProviderHeaders(base, headers),
+      request: fetchOptions
     }).then((data) => {
       if (cache) {
         this.cache.set(cacheKey, { data, timestamp: Date.now() });
@@ -314,5 +319,6 @@ export { ThorNodeClient };
 
 // Export provider endpoints for direct use if needed
 export const THORNODE_ENDPOINTS = {
-  thorchain: PROVIDERS.thorchain.base
+  thorchain: PROVIDERS.thorchain.base,
+  nativeswap: PROVIDERS.nativeswap.base
 };

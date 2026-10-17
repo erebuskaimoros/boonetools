@@ -11,6 +11,23 @@ function event(type, attrs) {
   };
 }
 
+test('Rujira single and batch RPC requests fail over to NativeSwap on rate limits', async (t) => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { fetchRujiraBaseFeeRpcBlockResults, fetchRujiraBaseFeeRpcBlockResultsBatch } = await import('../src/shared/rujira-base-fees.js');
+  const primary = 'https://gateway.liquify.com/chain/thorchain_rpc';
+  const fallback = 'https://public-thorchain-rpc.nativeswap.io';
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    calls.push(url);
+    return url.startsWith(primary) ? new Response('rate limited', { status: 429 })
+      : Response.json({ jsonrpc: '2.0', id: '28274900', result: { height: '28274900' } });
+  });
+  assert.equal((await fetchRujiraBaseFeeRpcBlockResults(28274900)).result.height, '28274900');
+  const batch = await fetchRujiraBaseFeeRpcBlockResultsBatch([28274900]);
+  assert.equal(batch[0].payload.result.height, '28274900');
+  assert.deepEqual(calls, [`${primary}/block_results?height=28274900`, `${fallback}/block_results?height=28274900`, primary, fallback]);
+});
+
 function midgardAction(height, txId = `tx-${height}`) {
   return {
     height: String(height),

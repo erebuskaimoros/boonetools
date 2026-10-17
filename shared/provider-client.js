@@ -129,7 +129,7 @@ export async function requestFromProviders(options = {}) {
       const response = await fetchImpl(url, {
         ...request,
         headers: {
-          ...headers,
+          ...(typeof headers === 'function' ? headers({ base, path, url }) : headers),
           ...(request.headers || {})
         },
         signal: requestSignal.signal

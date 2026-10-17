@@ -6,9 +6,11 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { createFinancialsDevPlugin } from './scripts/dev-financials.mjs'
 import { createProtocolFeeComparisonDevPlugin } from './scripts/dev-protocol-fee-comparison.mjs'
+import { requestFromProviders } from './shared/provider-client.js'
+import { LIQUIFY_THORNODE, NATIVESWAP_THORNODE, THORNODE_PUBLIC_URLS } from './shared/thorchain-providers.js'
 
-const THORNODE_PRIMARY = 'https://gateway.liquify.com/chain/thorchain_api'
-export const THORNODE_ARCHIVE = 'https://thornode-archive.ninerealms.com'
+const THORNODE_PRIMARY = LIQUIFY_THORNODE
+export const THORNODE_ARCHIVE = LIQUIFY_THORNODE
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const RUJIRA_BASE_LAYER_DATA_DIR = path.resolve(__dirname, '../docs/rujira-base-layer-fees')
 const RUJIRA_BASE_LAYER_DATA_FILES = new Map([
@@ -47,40 +49,22 @@ function filterForwardHeaders(headers) {
   return forwarded
 }
 
-async function proxyThorNodeRequest(req, res, upstreams, prefix) {
+export async function proxyThorNodeRequest(req, res, upstreams, prefix) {
   const upstreamPath = req.url.replace(prefix, '') || '/'
-  let lastError = null
-  let lastStatus = 502
-
-  for (const upstream of upstreams) {
-    try {
-      const response = await fetch(`${upstream}${upstreamPath}`, {
-        method: req.method,
-        headers: filterForwardHeaders(req.headers)
-      })
-
-      if (!response.ok) {
-        lastStatus = response.status
-        lastError = new Error(`HTTP ${response.status} for ${upstream}${upstreamPath}`)
-        continue
-      }
-
-      const contentType = response.headers.get('content-type')
-      if (contentType) {
-        res.setHeader('Content-Type', contentType)
-      }
-
-      res.statusCode = response.status
-      res.end(Buffer.from(await response.arrayBuffer()))
-      return true
-    } catch (error) {
-      lastError = error
-    }
+  try {
+    const response = await requestFromProviders({
+      bases: upstreams, path: upstreamPath, responseType: 'response', timeoutMs: 10000,
+      request: { method: req.method, headers: Object.fromEntries(filterForwardHeaders(req.headers)) }
+    })
+    const contentType = response.headers.get('content-type')
+    if (contentType) res.setHeader('Content-Type', contentType)
+    res.statusCode = response.status
+    res.end(Buffer.from(await response.arrayBuffer()))
+  } catch (error) {
+    res.statusCode = error.status || 502
+    res.setHeader('Content-Type', 'application/json')
+    res.end(JSON.stringify({ error: error.message || `Failed to proxy ${upstreamPath}` }))
   }
-
-  res.statusCode = lastStatus
-  res.setHeader('Content-Type', 'application/json')
-  res.end(JSON.stringify({ error: lastError?.message || `Failed to proxy ${upstreamPath}` }))
   return true
 }
 
@@ -96,18 +80,7 @@ function createTreasuryLpProxy() {
   const tokenPriceCache = new Map()
 
   async function fetchJson(path) {
-    let lastError = null
-
-    for (const baseUrl of [THORNODE_PRIMARY]) {
-      const response = await fetch(`${baseUrl}${path}`)
-      if (response.ok) {
-        return response.json()
-      }
-
-      lastError = new Error(`HTTP ${response.status} for ${baseUrl}${path}`)
-    }
-
-    throw lastError || new Error(`Failed to fetch ${path}`)
+    return requestFromProviders({ bases: THORNODE_PUBLIC_URLS, path, timeoutMs: 10000 })
   }
 
   async function mapWithConcurrency(items, concurrency, worker) {
@@ -222,7 +195,12 @@ function createTreasuryLpProxy() {
         }
 
         if (req.method === 'GET' && req.url?.startsWith('/__thornode_archive')) {
-          await proxyThorNodeRequest(req, res, [THORNODE_ARCHIVE], '/__thornode_archive')
+          await proxyThorNodeRequest(req, res, THORNODE_PUBLIC_URLS, '/__thornode_archive')
+          return
+        }
+
+        if (req.method === 'GET' && req.url?.startsWith('/__thornode_fallback')) {
+          await proxyThorNodeRequest(req, res, [NATIVESWAP_THORNODE], '/__thornode_fallback')
           return
         }
 
@@ -342,6 +320,11 @@ export default defineConfig({
         target: THORNODE_ARCHIVE,
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/__thornode_archive/, '')
+      },
+      '/__thornode_fallback': {
+        target: NATIVESWAP_THORNODE,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/__thornode_fallback/, '')
       }
     }
   },

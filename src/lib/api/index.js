@@ -41,9 +41,12 @@ export {
 /**
  * All endpoint constants for reference
  */
+import { LIQUIFY_THORNODE, NATIVESWAP_THORNODE } from '../../../shared/thorchain-providers.js';
+
 export const ENDPOINTS = {
   thornode: {
-    thorchain: 'https://gateway.liquify.com/chain/thorchain_api'
+    thorchain: LIQUIFY_THORNODE,
+    nativeswap: NATIVESWAP_THORNODE
   },
   midgard: 'https://gateway.liquify.com/chain/thorchain_midgard/v2',
   coingecko: 'https://api.coingecko.com/api/v3'

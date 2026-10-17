@@ -249,7 +249,7 @@ test('RPC batches use the allowlisted shared provider transport, cancellation an
   await fetchFinancialRewardBlockBatch({}, [28204118, 28204119], {
     signal: controller.signal, transport: async (options) => { request = options; return []; }
   });
-  assert.deepEqual(request.bases, ['https://gateway.liquify.com/chain/thorchain_rpc']);
+  assert.deepEqual(request.bases, ['https://gateway.liquify.com/chain/thorchain_rpc', 'https://public-thorchain-rpc.nativeswap.io']);
   assert.equal(request.request.signal, controller.signal);
   assert.equal(request.request.method, 'POST');
   assert.equal(typeof request.beforeRequest, 'function');
@@ -291,5 +291,7 @@ test('collector cancellation never writes provider outages, but actual timeouts 
     console.log(JSON.stringify(outcomes));
   `], { cwd: new URL('../', import.meta.url), encoding: 'utf8', timeout: 5000,
     env: { ...process.env, PROVIDER_COOLDOWN_ENABLED: 'true' } });
-  assert.deepEqual(JSON.parse(output).map((row) => row.writes), [0, 0, 1, 1]);
+  // Independent provider timeouts record both failed hosts. Cancellation
+  // prevents contacting the fallback or recording a shutdown as an outage.
+  assert.deepEqual(JSON.parse(output).map((row) => row.writes), [0, 0, 2, 1]);
 });

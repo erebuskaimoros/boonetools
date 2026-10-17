@@ -798,9 +798,6 @@ async function fetchJsonFromBases(bases, pathname, params = {}) {
       }
     } catch (error) {
       lastError = error;
-      if (isProviderRateLimit(error)) {
-        throw error;
-      }
     } finally {
       clearTimeout(timeoutId);
     }

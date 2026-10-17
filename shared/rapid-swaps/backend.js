@@ -11,6 +11,7 @@ import {
   pickBestRapidSwapRowMatch
 } from './reconciliation.js';
 import { ProviderRequestError, requestFromProviders } from '../provider-client.js';
+import { LIQUIFY_THORNODE, NATIVESWAP_THORNODE } from '../thorchain-providers.js';
 
 let providerLifecycle = {};
 
@@ -41,7 +42,8 @@ const configuredThornodeBases = envBases('THORNODE_URLS');
 export const THORNODE_BASES = uniqueBases(configuredThornodeBases.length
   ? configuredThornodeBases
   : [
-      readEnv('THORNODE_PRIMARY_URL') || 'https://gateway.liquify.com/chain/thorchain_api'
+      readEnv('THORNODE_PRIMARY_URL') || LIQUIFY_THORNODE,
+      readEnv('THORNODE_FALLBACK_URL') || NATIVESWAP_THORNODE
     ]);
 
 export const ACTION_PAGE_LIMIT = 50;
@@ -169,7 +171,7 @@ export function getRapidSwapRateLimitCooldownMs(error, fallbackMs = 60 * 60 * 10
 }
 
 async function fetchWithFallback(bases, path, options = {}) {
-  const { startIndex = 0, headers = {}, validatePayload = null } = options;
+  const { startIndex = 0, headers = {}, validatePayload = null, stopOnRateLimit = true } = options;
   const orderedBases = bases.map((_, offset) => bases[(startIndex + offset) % bases.length]);
   const payload = await requestFromProviders({
     bases: orderedBases,
@@ -186,13 +188,13 @@ async function fetchWithFallback(bases, path, options = {}) {
         : null
       : null,
     ...providerLifecycle,
-    shouldStop: (error) => !error?.skipProvider && isRapidSwapRateLimitError(error)
+    shouldStop: (error) => stopOnRateLimit && !error?.skipProvider && isRapidSwapRateLimitError(error)
   });
   return { payload, index: startIndex };
 }
 
 export async function fetchThorchain(endpoint) {
-  return (await fetchWithFallback(THORNODE_BASES, endpoint)).payload;
+  return (await fetchWithFallback(THORNODE_BASES, endpoint, { stopOnRateLimit: false })).payload;
 }
 
 export async function fetchThorchainTx(txId) {

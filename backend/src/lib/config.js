@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
+import { LIQUIFY_THORNODE, NATIVESWAP_THORNODE, LIQUIFY_RPC, NATIVESWAP_RPC } from '../../../shared/thorchain-providers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultEnvPath = path.resolve(__dirname, '../../.env');
@@ -34,14 +35,14 @@ function readList(name, fallback = []) {
   return [...new Set(values)];
 }
 
-const thornodePrimaryUrl = optional(process.env.THORNODE_PRIMARY_URL) || 'https://gateway.liquify.com/chain/thorchain_api';
+const thornodePrimaryUrl = optional(process.env.THORNODE_PRIMARY_URL) || LIQUIFY_THORNODE;
 const thornodeArchiveUrl = optional(process.env.THORNODE_ARCHIVE_URL) || thornodePrimaryUrl;
-const thornodeFallbackUrl = '';
+const thornodeFallbackUrl = optional(process.env.THORNODE_FALLBACK_URL) || NATIVESWAP_THORNODE;
 const midgardUrl = optional(process.env.MIDGARD_URL) || 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
 const midgardFallbackUrl = '';
 const rpcWsUrl = optional(process.env.RPC_WS_URL) || 'wss://gateway.liquify.com/chain/thorchain_rpc/websocket';
-const rpcRestUrl = optional(process.env.RPC_REST_URL) || 'https://gateway.liquify.com/chain/thorchain_rpc';
-const rpcFallbackRestUrl = '';
+const rpcRestUrl = optional(process.env.RPC_REST_URL) || LIQUIFY_RPC;
+const rpcFallbackRestUrl = optional(process.env.RPC_FALLBACK_REST_URL) || NATIVESWAP_RPC;
 const rpcArchiveRestUrl = optional(process.env.RPC_ARCHIVE_REST_URL) || 'https://rpc.thorchain.liquify.com';
 const bifrostScannerInfoUrl = optional(process.env.BIFROST_SCANNER_INFO_URL)
   || 'https://vanaheimex.com/api/nodesInfo';
@@ -181,7 +182,7 @@ export const config = Object.freeze({
   poolDislocationBackfillRetryAttempts: readInt('POOL_DISLOCATION_BACKFILL_RETRY_ATTEMPTS', 8),
   poolDislocationBackfillRetryBaseDelayMs: readInt('POOL_DISLOCATION_BACKFILL_RETRY_BASE_DELAY_MS', 1000),
   poolDislocationBackfillRetryMaxDelayMs: readInt('POOL_DISLOCATION_BACKFILL_RETRY_MAX_DELAY_MS', 60_000),
-  poolDislocationThornodeUrls: readList('POOL_DISLOCATION_THORNODE_URLS', [thornodePrimaryUrl]),
+  poolDislocationThornodeUrls: readList('POOL_DISLOCATION_THORNODE_URLS', [thornodePrimaryUrl, thornodeFallbackUrl]),
   poolDislocationSnapshotRetryAttempts: readInt('POOL_DISLOCATION_SNAPSHOT_RETRY_ATTEMPTS', 3),
   poolDislocationSnapshotRetryBaseDelayMs: readInt('POOL_DISLOCATION_SNAPSHOT_RETRY_BASE_DELAY_MS', 1000),
   poolDislocationCoreFallbackMaxAgeMs: readInt('POOL_DISLOCATION_CORE_FALLBACK_MAX_AGE_SECONDS', 180) * 1000,
@@ -204,11 +205,13 @@ export const config = Object.freeze({
   polTrackerStartDate: optional(process.env.POL_TRACKER_START_DATE) || '2025-02-01',
   polTrackerThornodeUrls: readList('POL_TRACKER_THORNODE_URLS', [
     thornodeArchiveUrl,
-    thornodePrimaryUrl
+    thornodePrimaryUrl,
+    thornodeFallbackUrl
   ]),
   polTrackerRpcUrls: readList('POL_TRACKER_RPC_URLS', [
     rpcArchiveRestUrl,
-    rpcRestUrl
+    rpcRestUrl,
+    rpcFallbackRestUrl
   ]),
   polTrackerLpConcurrency: readInt('POL_TRACKER_LP_CONCURRENCY', 4),
   polTrackerRequestDelayMs: readInt('POL_TRACKER_REQUEST_DELAY_MS', 75),

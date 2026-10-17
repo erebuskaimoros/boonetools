@@ -2,6 +2,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { FINANCIALS_RANGES } from '../../../shared/financials/model.js';
 import { withAdvisoryLock } from '../db/lock.js';
 import { requestFromProviders } from '../lib/provider-client.js';
+import { config } from '../lib/config.js';
 import { providerLifecycleHooks } from '../shared/provider-cooldown.js';
 import { createFinancialsService } from '../shared/financials-service.js';
 import { FINANCIALS_MIDGARD, FINANCIALS_RPC } from '../shared/financials-history.js';
@@ -19,7 +20,7 @@ export function createFinancialsProviderRequest(client, { transport = requestFro
   return (url, { lane = 'history' } = {}) => {
     const base = [FINANCIALS_MIDGARD, FINANCIALS_RPC].find((candidate) => url.startsWith(`${candidate}/`));
     if (!base) throw new Error('Financials provider is not allowlisted');
-    return transport({ bases: [base], path: url.slice(base.length), timeoutMs: 60_000,
+    return transport({ bases: base === FINANCIALS_RPC ? config.rpcRestUrls : [base], path: url.slice(base.length), timeoutMs: 60_000,
       headers: { Accept: 'application/json', 'x-client-id': 'BooneTools-Financials' },
       ...providerLifecycleHooks({ client, scope: `financials-${lane}` })
     });

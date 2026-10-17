@@ -13,8 +13,9 @@
  * const data = await response.json();
  */
 
-import { requestFromProviders } from '../api/provider.js';
+import { requestFromProviders, browserProviderHeaders } from '../api/provider.js';
 import { resolveCoreSnapshotPath } from '../api/core-snapshot.js';
+import { LIQUIFY_THORNODE, NATIVESWAP_THORNODE } from '../../../shared/thorchain-providers.js';
 
 // ============================================
 // API Endpoint Configuration
@@ -24,14 +25,16 @@ import { resolveCoreSnapshotPath } from '../api/core-snapshot.js';
  * THORNode API endpoint
  */
 const DEV_THORNODE_ENDPOINTS = {
-  primary: '/__thornode_primary'
+  primary: '/__thornode_primary',
+  fallback: '/__thornode_fallback'
 };
 const IS_DEV = Boolean(import.meta.env?.DEV);
 
 export const THORNODE_ENDPOINTS = {
   primary: IS_DEV
     ? DEV_THORNODE_ENDPOINTS.primary
-    : 'https://gateway.liquify.com/chain/thorchain_api'
+    : LIQUIFY_THORNODE,
+  fallback: IS_DEV ? DEV_THORNODE_ENDPOINTS.fallback : NATIVESWAP_THORNODE
 };
 
 /**
@@ -70,25 +73,25 @@ export const MIDGARD_ENDPOINTS = {
  * });
  */
 export async function fetchWithFallback(endpoint, options = {}, endpoints = THORNODE_ENDPOINTS) {
+  return fetchFromConfiguredProviders(endpoint, options, endpoints, 'response');
+}
+
+async function fetchFromConfiguredProviders(endpoint, options, endpoints, responseType) {
   const {
     stopOnRateLimit = false,
     timeoutMs = 10000,
     fetchImpl = globalThis.fetch,
+    headers = {},
     ...fetchOptions
   } = options;
   return requestFromProviders({
     bases: [endpoints.primary, endpoints.fallback].filter(Boolean),
     path: endpoint,
-    responseType: 'response',
+    responseType,
     timeoutMs,
     fetchImpl,
-    request: {
-      ...fetchOptions,
-      headers: {
-        'x-client-id': 'BooneTools',
-        ...(fetchOptions.headers || {})
-      }
-    },
+    headers: ({ base }) => browserProviderHeaders(base, headers),
+    request: fetchOptions,
     shouldStop: (error) => stopOnRateLimit && Number(error?.status) === 429
   });
 }
@@ -118,8 +121,7 @@ export async function fetchJSONWithFallback(endpoint, options = {}, endpoints = 
       // read-model endpoint is unavailable.
     }
   }
-  const response = await fetchWithFallback(endpoint, options, endpoints);
-  return response.json();
+  return fetchFromConfiguredProviders(endpoint, options, endpoints, 'json');
 }
 
 /**
@@ -146,8 +148,7 @@ export async function fetchTextWithFallback(endpoint, options = {}, endpoints = 
       // See fetchJSONWithFallback.
     }
   }
-  const response = await fetchWithFallback(endpoint, options, endpoints);
-  return response.text();
+  return fetchFromConfiguredProviders(endpoint, options, endpoints, 'text');
 }
 
 /**

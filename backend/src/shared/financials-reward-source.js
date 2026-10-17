@@ -1,5 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { requestFromProviders } from '../lib/provider-client.js';
+import { config } from '../lib/config.js';
 import { providerLifecycleHooks } from './provider-cooldown.js';
 import { parseFinancialReserveObservation } from './financials-reserve-emissions.js';
 
@@ -10,7 +11,6 @@ import { parseFinancialReserveObservation } from './financials-reserve-emissions
 export const FINANCIAL_REVSHARE_FIRST_HEIGHT = 28146078;
 export const FINANCIAL_REVSHARE_FIRST_TIME = '2026-10-07T20:29:31.355014883Z';
 const FIRST_PAYOUT_SECONDS = Date.parse(FINANCIAL_REVSHARE_FIRST_TIME) / 1000;
-const RPC_BASE = 'https://gateway.liquify.com/chain/thorchain_rpc';
 const RPC_MAX_BATCH_SIZE = 10;
 
 function rpcError(details, fallback = 'REVSHARE RPC response failed') {
@@ -222,8 +222,8 @@ export async function fetchFinancialRewardBlockBatch(client, heights, { signal, 
   }
   signal?.throwIfAborted();
   const hooks = providerLifecycleHooks({ client, scope: 'financials-revshare-archive' });
-  return transport({
-    bases: [RPC_BASE], path: '/', timeoutMs: 30_000,
+  const payload = await transport({
+    bases: config.rpcRestUrls, path: '/', timeoutMs: 30_000,
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'x-client-id': 'BooneTools-Financials' },
     request: { method: 'POST', signal, body: JSON.stringify(heights.map((height) => ({
       jsonrpc: '2.0', id: String(height), method: 'block_results', params: { height: String(height) }
@@ -239,6 +239,10 @@ export async function fetchFinancialRewardBlockBatch(client, heights, { signal, 
     onProviderError: (error, context) => signal?.aborted && (error === signal.reason || error.name === 'AbortError')
       ? undefined : hooks.onProviderError(error, context)
   });
+  // NativeSwap unwraps a single-item JSON-RPC batch. Match the requested ID
+  // before normalizing; the existing parser still verifies the result height.
+  return heights.length === 1 && payload && !Array.isArray(payload)
+    && String(payload.id) === String(heights[0]) ? [payload] : payload;
 }
 
 // Reuses durable SIPOL timestamps, does not reread headers, and never runs in

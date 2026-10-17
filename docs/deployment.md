@@ -98,6 +98,40 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### NativeSwap HTTP fallback
+
+Deploy backend before frontend. No migration, cache reset, or backfill is
+required. Shared THORNode and HTTP RPC clients now use Liquify first, then
+`https://public-thornode.nativeswap.io` and
+`https://public-thorchain-rpc.nativeswap.io`, respectively. This includes core
+snapshots, browser clients, Rapid Swaps THORNode reads, Rujira HTTP RPC, POL,
+node-vote RPC, and Financials RPC/reward batches. Midgard is unchanged.
+
+Before activation, check DNS and bounded `/thorchain/pools`, RPC `/status`, and
+`/block_results` requests from the production host. Preserve dedicated/private
+providers and archive ordering. Explicit `THORNODE_URLS`, `RPC_REST_URLS`,
+`POOL_DISLOCATION_THORNODE_URLS`, `POL_TRACKER_THORNODE_URLS`,
+`POL_TRACKER_RPC_URLS`, `NODE_VOTES_RPC_URLS`, `RUJIRA_BASE_FEES_RPC_URLS`, and
+`RUJIRA_RESERVE_PAYMENTS_RPC_URLS` override defaults: append the corresponding
+NativeSwap URL if these are set, rather than replacing custom providers.
+
+Local live checks on October 16, 2026 verified mainnet HTTP reads, recent block
+queries, browser-origin CORS, and one-/two-item `block_results` POST batches.
+NativeSwap unwraps one-item batches; reward acquisition normalizes matching IDs
+while retaining exact-height validation. RPC advertised earliest height
+27,984,001 at inspection, so old history must remain unavailable when pruned.
+The WebSocket handshake at `/websocket` returned HTTP 400; it is not configured
+as a fallback. Do not infer WebSocket or full-archive support from HTTP success.
+
+Frontend NativeSwap GETs omit the optional `x-client-id` header because its
+preflight was rejected (HTTP 403), while simple cross-origin GETs allow `*`.
+The local Vite fallback proxy uses the same provider, bounded transport, and
+unchanged query paths. After rollout verify unchanged healthy-primary traffic
+and exercise simulated failures locally; do not disable Liquify in production
+just to test failover. Historical height/gap checks and provider cooldowns remain
+in force. Archived, unreachable UI components and standalone research scripts
+are outside this runtime change.
+
 ### POL total rolling averages
 
 The October 16 total-average addition is frontend-only. Reload POL Tracker and

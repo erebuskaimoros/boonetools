@@ -29,6 +29,8 @@
  */
 
 import { fetchJSONWithFallback } from './api.js';
+import { requestFromProviders, browserProviderHeaders } from '../api/provider.js';
+import { RPC_PUBLIC_URLS } from '../../../shared/thorchain-providers.js';
 import { fromBaseUnit } from './blockchain.js';
 import { CHAIN_LOGOS } from '../constants/assets.js';
 
@@ -909,8 +911,13 @@ export function calculateVaultSurplus(vaultBalance, poolBalance, tradeDepth = 0)
 export async function getCurrentBlock() {
   // Try RPC status endpoint first (fastest)
   try {
-    const response = await fetch('https://gateway.liquify.com/chain/thorchain_rpc/status');
-    const data = await response.json();
+    const data = await requestFromProviders({
+      bases: RPC_PUBLIC_URLS,
+      path: '/status',
+      headers: ({ base }) => browserProviderHeaders(base),
+      validateResponse: (payload) => Number(payload?.result?.sync_info?.latest_block_height) > 0
+        ? null : 'RPC status is missing its block height'
+    });
     const height = Number(data.result?.sync_info?.latest_block_height);
     if (height > 0) return height;
   } catch (e) {

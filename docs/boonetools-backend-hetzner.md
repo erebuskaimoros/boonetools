@@ -304,6 +304,7 @@ PROVIDER_COOLDOWN_ENABLED=true
 PROVIDER_FAILURE_COOLDOWN_SECONDS=60
 PROVIDER_RATE_LIMIT_COOLDOWN_SECONDS=3600
 THORNODE_PRIMARY_URL=https://gateway.liquify.com/chain/thorchain_api
+THORNODE_FALLBACK_URL=https://public-thornode.nativeswap.io
 THORNODE_URLS=
 BIFROST_SCANNER_INFO_URL=https://vanaheimex.com/api/nodesInfo
 BIFROST_SCANNER_INFO_TIMEOUT_MS=8000
@@ -314,7 +315,7 @@ POOL_DISLOCATION_BACKFILL_BATCH_BUCKETS=12
 POOL_DISLOCATION_BACKFILL_RETRY_ATTEMPTS=8
 POOL_DISLOCATION_BACKFILL_RETRY_BASE_DELAY_MS=1000
 POOL_DISLOCATION_BACKFILL_RETRY_MAX_DELAY_MS=60000
-POOL_DISLOCATION_THORNODE_URLS=https://gateway.liquify.com/chain/thorchain_api
+POOL_DISLOCATION_THORNODE_URLS=
 POOL_DISLOCATION_SNAPSHOT_RETRY_ATTEMPTS=3
 POOL_DISLOCATION_SNAPSHOT_RETRY_BASE_DELAY_MS=1000
 POOL_DISLOCATION_CORE_FALLBACK_MAX_AGE_SECONDS=180
@@ -327,6 +328,8 @@ POOL_DISLOCATION_REPAIR_RETRY_MAX_DELAY_MS=10000
 MIDGARD_URL=https://gateway.liquify.com/chain/thorchain_midgard/v2
 MIDGARD_URLS=
 RPC_REST_URL=https://gateway.liquify.com/chain/thorchain_rpc
+RPC_FALLBACK_REST_URL=https://public-thorchain-rpc.nativeswap.io
+RPC_REST_URLS=
 RPC_WS_URL=wss://gateway.liquify.com/chain/thorchain_rpc/websocket
 RAPID_SWAPS_CANONICAL_SCAN_INTERVAL_SECONDS=900
 RAPID_SWAPS_NORMAL_HEAD_PAGES=4
@@ -346,11 +349,17 @@ WASM_ARB_ECONOMICS_ORACLE_STRIDE_BLOCKS=30
 WASM_ARB_ECONOMICS_ORACLE_SAMPLES_PER_RUN=40
 ```
 
-`THORNODE_URLS`, `MIDGARD_URLS`, and `BINANCE_API_BASE_URLS` are optional
+`THORNODE_URLS`, `RPC_REST_URLS`, `MIDGARD_URLS`, and `BINANCE_API_BASE_URLS` are optional
 comma-separated ordered lists.
 Use them to put a dedicated node or paid provider ahead of the public defaults
 without changing application code. The older primary/fallback variables remain
 the defaults when the list variables are empty.
+
+THORNode and HTTP RPC defaults try Liquify first, then NativeSwap. Explicit
+lists replace the defaults, so existing single-Liquify lists must be updated
+deliberately during rollout. NativeSwap is not a Midgard or full-history archive
+replacement. The WebSocket list remains unchanged; see the
+[NativeSwap rollout checks](deployment.md#nativeswap-http-fallback).
 
 `BIFROST_SCANNER_INFO_URL` supplies the compact five-minute scanner-health
 snapshot used by the status page's `Avg Blocks Behind Tip` column. The default
@@ -384,8 +393,8 @@ Pool Analysis's entire fifteen-minute refresh; it does not bypass failures
 from Pool Analysis's own endpoints or change its historical catch-up budget.
 
 `POOL_DISLOCATION_THORNODE_URLS` is an independent ordered list for this
-sampler and its historical repair. Add a second provider only after its DNS and
-`/thorchain/pools` response have been verified from the production host. The
+sampler and its historical repair; an empty list uses Liquify then NativeSwap.
+Verify both providers from the production host before rollout. The
 sampler retries transient pool failures inside the same exact five-minute
 bucket, then may use the independently persisted `thornode-core:v1` pool field
 for up to three minutes. Those degraded rows retain

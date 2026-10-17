@@ -23,8 +23,8 @@ test('rapid swap backend uses only Liquify Midgard by default', () => {
   assert.deepEqual(MIDGARD_BASES, ['https://gateway.liquify.com/chain/thorchain_midgard/v2']);
 });
 
-test('rapid swap backend uses only Liquify THORNode by default', () => {
-  assert.deepEqual(THORNODE_BASES, ['https://gateway.liquify.com/chain/thorchain_api']);
+test('rapid swap backend uses Liquify THORNode with NativeSwap fallback by default', () => {
+  assert.deepEqual(THORNODE_BASES, ['https://gateway.liquify.com/chain/thorchain_api', 'https://public-thornode.nativeswap.io']);
 });
 
 test('rapid swap backend recognizes provider rate limits and daily cooldowns', () => {

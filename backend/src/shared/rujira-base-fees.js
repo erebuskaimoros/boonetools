@@ -795,9 +795,6 @@ async function fetchJsonFromBases(bases, pathname, params = {}) {
       }
     } catch (error) {
       lastError = error;
-      if (isRujiraBaseFeeProviderRateLimit(error)) {
-        throw error;
-      }
     } finally {
       clearTimeout(timeoutId);
     }
@@ -901,7 +898,6 @@ export async function fetchRujiraBaseFeeRpcBlockResultsBatch(heights) {
       return parseRujiraBaseFeeRpcBatchResponse(payload, normalizedHeights);
     } catch (error) {
       lastError = error;
-      if (isRujiraBaseFeeProviderRateLimit(error)) throw error;
     } finally {
       clearTimeout(timeoutId);
     }
