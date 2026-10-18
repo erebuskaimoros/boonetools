@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { appendFinancialsLivePoint, buildFinancialsPoints, buildLiveFinancialsPoint, daySeconds, financialsWindow, utcDay } from '../../../shared/financials/model.js';
-import { fetchFinancialBondDay, fetchFinancialHistory, fetchFinancialLiveTotals, FINANCIALS_MIDGARD } from './financials-history.js';
+import { fetchFinancialBondDay, fetchFinancialHistory, fetchFinancialLiveTotals, FINANCIALS_MIDGARD, FINANCIALS_RPC } from './financials-history.js';
 
 const CACHE_VERSION = 1;
 const REFRESH_MS = 5 * 60_000;
@@ -9,7 +9,7 @@ const RETRY_MS = 60 * 60_000;
 const LIVE_REFRESH_MS = 30_000;
 
 export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJson, readRewardAccounting,
-  now = Date.now, requestSpacingMs = 650 } = {}) {
+  now = Date.now, requestSpacingMs = 650, rpcConcurrency = 3 } = {}) {
   let cache = { version: CACHE_VERSION, swaps: {}, earnings: {}, bonds: {} };
   let providerQueue = Promise.resolve();
   let lastRequestAt = 0;
@@ -57,6 +57,15 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
   }
 
   function getJson(url, lane = 'history') {
+    if (requestJson && url.startsWith(`${FINANCIALS_RPC}/`)) {
+      if (stopped) return Promise.reject(new Error('Financials collector stopped'));
+      // The shared RPC dispatcher owns per-provider pacing and cooldowns.
+      // A Midgard pause must not pause otherwise healthy RPC partners.
+      return requestJson(url, { lane }).catch((error) => {
+        error.archiveUnavailable ||= /no archive|version does not exist|height.*not available/i.test(`${error.message} ${error.body || ''}`);
+        throw error;
+      });
+    }
     const start = providerQueue.catch(() => {}).then(async () => {
       if (stopped) throw new Error('Financials collector stopped');
       if (now() < cooldownUntil) throw new Error('History provider is cooling down; retry later');
@@ -198,9 +207,9 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
         || (failedDays.get(point.day) || 0) > now()) continue;
       pendingDays.add(point.day);
     }
-    if (bondPromise || !pendingDays.size || stopped || cooldownUntil > now()) return;
+    if (bondPromise || !pendingDays.size || stopped || !requestJson && cooldownUntil > now()) return;
     const worker = async () => {
-      while (pendingDays.size && !stopped && now() >= cooldownUntil) {
+      while (pendingDays.size && !stopped && (requestJson || now() >= cooldownUntil)) {
         const day = [...pendingDays].sort().at(-1);
         pendingDays.delete(day);
         if (cache.bonds[day] || archiveFloor && day <= archiveFloor) continue;
@@ -224,9 +233,9 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
         } finally { activeBondDays.delete(day); }
       }
     };
-    // Archive responses include large validator lists. Keep a small fixed
-    // number in flight while retaining the shared provider start-rate limit.
-    bondPromise = Promise.all(Array.from({ length: 3 }, worker)).finally(() => { bondPromise = null; });
+    // Historical validators are large: three workers per configured partner,
+    // still bounded by the transport's retention checks and per-provider pace.
+    bondPromise = Promise.all(Array.from({ length: Math.max(1, Math.min(6, rpcConcurrency)) }, worker)).finally(() => { bondPromise = null; });
   }
 
   function snapshot(range = '30d') {
@@ -258,7 +267,7 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
           completeDays: points.filter(point => point.rewardAccounting.complete).length,
           observedDays: points.length },
         sources: { volume: 'liquify-midgard:history/swaps', income: 'liquify-midgard:history/earnings',
-          bond: 'liquify-rpc:types.Query/Nodes', revshare: 'liquify-rpc:rev_share.payout',
+          bond: 'thorchain-rpc:types.Query/Nodes', revshare: 'thorchain-rpc:rev_share.payout',
           emissions: 'historical-reserve-formula-v1' }
       };
   }

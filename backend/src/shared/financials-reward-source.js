@@ -1,5 +1,6 @@
-import { setTimeout as delay } from 'node:timers/promises';
 import { requestFromProviders } from '../lib/provider-client.js';
+import { concurrentBatchWindows } from '../lib/concurrent-batches.js';
+import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-pool.js';
 import { config } from '../lib/config.js';
 import { providerLifecycleHooks } from './provider-cooldown.js';
 import { parseFinancialReserveObservation } from './financials-reserve-emissions.js';
@@ -83,7 +84,7 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
       reserve_observation: reserveObservation,
       reserve_emissions_e8: reserveEmissions === null ? null : BigInt(reserveEmissions).toString(),
       emissions_method: reserveEmissions === null ? null : emissionsMethod,
-      source: String(observation.source || 'liquify-rpc:rev_share.payout') };
+      source: String(observation.source || 'thorchain-rpc:rev_share.payout') };
   });
   const result = await client.query(
     `insert into financials_reward_blocks as current (
@@ -108,7 +109,7 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
 function windowEvidence(from, through) {
   return { from, through, revshareE8: null, complete: false,
     reserveEmissionsE8: null, emissionsComplete: false, emissionsMethod: null,
-    method: 'finalized-revshare-payouts', source: 'liquify-rpc:rev_share.payout',
+    method: 'finalized-revshare-payouts', source: 'thorchain-rpc:rev_share.payout',
     firstHeight: null, lastHeight: null, observedBlocks: 0, expectedBlocks: null };
 }
 
@@ -272,34 +273,36 @@ export async function repairFinancialRewardBlocks(client, options = {}) {
   const save = options.save || saveFinancialRewardBlocks;
   let repaired = 0;
   let reserveObserved = 0;
-  for (let offset = 0; offset < rows.length; offset += batchSize) {
-    if (options.signal?.aborted || now() >= deadline) break;
-    if (offset && options.requestSpacingMs !== 0) {
-      await delay(options.requestSpacingMs ?? 250, undefined, { signal: options.signal });
-      if (now() >= deadline) break;
-    }
-    const batch = rows.slice(offset, offset + batchSize);
-    const heights = batch.map((row) => Number(row.height));
-    const payload = await fetchBatch(heights);
-    if (!Array.isArray(payload)) {
-      if (payload?.error) throw rpcError(payload.error, 'REVSHARE RPC batch failed');
-      throw new Error('Invalid REVSHARE RPC batch response');
-    }
-    const byId = new Map(payload.map((entry) => [String(entry.id), entry]));
-    const observations = [];
+  const windows = concurrentBatchWindows(rows, (batch) => fetchBatch(batch.map((row) => Number(row.height))), {
+    batchSize, concurrency: options.batchConcurrency ?? (config.thorchainProviderBalancingEnabled && hasThorchainProviderPair(config.rpcRestUrls) ? 2 : 1),
+    delayMs: options.requestSpacingMs ?? 250, signal: options.signal, shouldContinue: () => now() < deadline
+  });
+  for await (const window of windows) {
     let failure;
-    for (const row of batch) {
-      try {
-        const result = byId.get(String(row.height));
-        if (!result) throw new Error(`REVSHARE batch is missing block ${row.height}`);
-        observations.push({ ...parseFinancialRevshareBlock(result, Number(row.height)),
-          blockTime: row.block_time, source: 'liquify-rpc:rev_share.payout' });
-      } catch (error) { failure ||= error; }
-    }
-    if (observations.length) {
-      await save(client, observations);
-      repaired += observations.length;
-      reserveObserved += observations.filter((observation) => observation.reserveObservation !== null).length;
+    for (const outcome of window) {
+      if (outcome.status === 'rejected') { failure ||= outcome.reason; continue; }
+      const batch = outcome.items;
+      const payload = outcome.value;
+      if (!Array.isArray(payload)) {
+        failure ||= payload?.error ? rpcError(payload.error, 'REVSHARE RPC batch failed')
+          : new Error('Invalid REVSHARE RPC batch response');
+        continue;
+      }
+      const byId = new Map(payload.map((entry) => [String(entry.id), entry]));
+      const observations = [];
+      for (const row of batch) {
+        try {
+          const result = byId.get(String(row.height));
+          if (!result) throw new Error(`REVSHARE batch is missing block ${row.height}`);
+          observations.push({ ...parseFinancialRevshareBlock(result, Number(row.height)),
+            blockTime: row.block_time, source: 'thorchain-rpc:rev_share.payout' });
+        } catch (error) { failure ||= error; }
+      }
+      if (observations.length) {
+        await save(client, observations);
+        repaired += observations.length;
+        reserveObserved += observations.filter((observation) => observation.reserveObservation !== null).length;
+      }
     }
     if (failure) throw failure;
   }

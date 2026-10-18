@@ -51,8 +51,8 @@ export const MIDGARD_ENDPOINTS = {
 /**
  * Fetch data from THORNode API with automatic fallback
  *
- * Tries the primary endpoint first, and falls back to the secondary
- * endpoint if the primary fails or returns an error.
+ * Distributes supported current reads across the configured providers, with
+ * per-provider cooldowns and fallback if the selected provider fails.
  *
  * @param {string} endpoint - API endpoint path (e.g., '/thorchain/nodes')
  * @param {Object} [options={}] - Fetch options (method, headers, body, etc.)
@@ -82,6 +82,8 @@ async function fetchFromConfiguredProviders(endpoint, options, endpoints, respon
     timeoutMs = 10000,
     fetchImpl = globalThis.fetch,
     headers = {},
+    providerPool,
+    providerMode,
     ...fetchOptions
   } = options;
   return requestFromProviders({
@@ -90,6 +92,8 @@ async function fetchFromConfiguredProviders(endpoint, options, endpoints, respon
     responseType,
     timeoutMs,
     fetchImpl,
+    providerPool,
+    providerMode,
     headers: ({ base }) => browserProviderHeaders(base, headers),
     request: fetchOptions,
     shouldStop: (error) => stopOnRateLimit && Number(error?.status) === 429

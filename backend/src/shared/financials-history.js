@@ -115,7 +115,7 @@ export async function fetchFinancialBondDay(dayStart, { getJson, head, to = dayS
   if (Number(response.height) !== height) throw new Error('RPC did not return the requested historical block');
   return {
     ...decodeActiveBond(response.value, height), height, timestamp, blockTimeVerified,
-    source: 'liquify-rpc:types.Query/Nodes', fetchedAt: new Date().toISOString()
+    source: 'thorchain-rpc:types.Query/Nodes', fetchedAt: new Date().toISOString()
   };
 }
 

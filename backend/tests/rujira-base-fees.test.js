@@ -19,13 +19,17 @@ test('Rujira single and batch RPC requests fail over to NativeSwap on rate limit
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url) => {
     calls.push(url);
+    if (url.endsWith('/status')) return Response.json({ result: {
+      node_info: { network: 'thorchain-1' }, sync_info: { earliest_block_height: '27984001',
+        latest_block_height: '28280000', latest_block_time: new Date().toISOString(), catching_up: false }
+    } });
     return url.startsWith(primary) ? new Response('rate limited', { status: 429 })
       : Response.json({ jsonrpc: '2.0', id: '28274900', result: { height: '28274900' } });
   });
   assert.equal((await fetchRujiraBaseFeeRpcBlockResults(28274900)).result.height, '28274900');
   const batch = await fetchRujiraBaseFeeRpcBlockResultsBatch([28274900]);
   assert.equal(batch[0].payload.result.height, '28274900');
-  assert.deepEqual(calls, [`${primary}/block_results?height=28274900`, `${fallback}/block_results?height=28274900`, primary, fallback]);
+  assert.deepEqual(calls, [`${fallback}/status`, `${primary}/block_results?height=28274900`, `${fallback}/block_results?height=28274900`, `${fallback}/`]);
 });
 
 function midgardAction(height, txId = `tx-${height}`) {

@@ -33,6 +33,18 @@ test('explicit operator provider lists remain authoritative', () => {
   assert.deepEqual(JSON.parse(output.trim()), [['https://custom-api.example'], ['https://custom-rpc.example'], ['https://pool.example'], ['https://history.example']]);
 });
 
+test('the backend balancing switch restores ordered provider selection', () => {
+  const source = `import { fetchThorchain } from ${JSON.stringify(new URL('../src/shared/thornode.js', import.meta.url).href)};
+    const calls = [];
+    globalThis.fetch = async url => { calls.push(url); return Response.json({ ok: true }); };
+    await fetchThorchain('/thorchain/network', { sharedCooldown: false });
+    await fetchThorchain('/thorchain/network', { sharedCooldown: false });
+    console.log(JSON.stringify(calls));`;
+  const output = execFileSync(process.execPath, ['--input-type=module', '-e', source], { encoding: 'utf8',
+    env: { ...process.env, THORCHAIN_PROVIDER_BALANCING_ENABLED: 'false' } });
+  assert.deepEqual(JSON.parse(output.trim()), Array(2).fill(`${API_PRIMARY}/thorchain/network`));
+});
+
 test('a Liquify cooldown skips it without blocking NativeSwap HTTP reads', async (t) => {
   const calls = [];
   const cooldownClient = { query: async (sql, params) => ({ rows:
@@ -59,7 +71,7 @@ for (const failure of ['network', '429', '503', 'invalid-json']) {
       return Response.json({ ok: true });
     });
     assert.deepEqual(await fetchThorchain('/thorchain/network?height=28274900', { sharedCooldown: false }), { ok: true });
-    assert.deepEqual(await fetchThorchainRpc('/block', { height: 28274900 }, { sharedCooldown: false }), { ok: true });
+    assert.deepEqual(await fetchThorchainRpc('/block', { height: 28274900 }, { sharedCooldown: false, providerMode: 'fallback' }), { ok: true });
     assert.deepEqual(calls, [
       `${API_PRIMARY}/thorchain/network?height=28274900`, `${API_FALLBACK}/thorchain/network?height=28274900`,
       `${RPC_PRIMARY}/block?height=28274900`, `${RPC_FALLBACK}/block?height=28274900`

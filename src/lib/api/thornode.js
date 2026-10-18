@@ -2,8 +2,8 @@
  * THORNode API Client
  *
  * Provider Strategy:
- * - Liquify Gateway (gateway.liquify.com/chain/thorchain_api): Primary public endpoint
- * - NativeSwap: Public HTTP fallback (historical availability is limited)
+ * - Liquify Gateway and NativeSwap share supported current HTTP reads.
+ * - Historical REST reads retain ordered fallback and endpoint validation.
  */
 
 import { fromBaseUnit } from '../utils/blockchain.js';
@@ -75,6 +75,8 @@ class ThorNodeClient {
       timeoutMs = 10000,
       fetchImpl = globalThis.fetch,
       headers = {},
+      providerPool,
+      providerMode,
       ...fetchOptions
     } = options;
 
@@ -121,6 +123,8 @@ class ThorNodeClient {
       responseType: parseJson ? 'json' : 'text',
       timeoutMs,
       fetchImpl,
+      providerPool,
+      providerMode,
       headers: ({ base }) => browserProviderHeaders(base, headers),
       request: fetchOptions
     }).then((data) => {

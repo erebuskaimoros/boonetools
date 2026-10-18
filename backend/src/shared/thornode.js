@@ -23,6 +23,8 @@ export async function fetchThorchain(endpoint, options = {}) {
     path: endpoint,
     responseType,
     timeoutMs,
+    request: { signal: options.signal },
+    providerMode: options.providerMode,
     headers: {
       Accept: responseType === 'text' ? 'text/plain' : 'application/json',
       'x-client-id': config.providerClientId,

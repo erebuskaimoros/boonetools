@@ -63,7 +63,7 @@ async function ensureHeaderRange(client, startHeight, endHeight, options = {}) {
   await persistConcurrentBatches(
     ranges,
     options.concurrency || config.systemIncomePolRepairConcurrency,
-    async (range) => parseChainHeaderRange(await fetchRpc('/blockchain', range), 'liquify-rpc-sipol-repair'),
+    async (range) => parseChainHeaderRange(await fetchRpc('/blockchain', range), 'thorchain-rpc-sipol-repair'),
     (pages) => upsertChainHeaders(client, pages.flat())
   );
   const resolved = await client.query(
@@ -173,7 +173,7 @@ export async function repairSystemIncomePolBlocks(client, options = {}) {
         systemIncomeE8: parsed.systemIncomeE8,
         deployments: parsed.deployments,
         poolFees: parsed.poolFees,
-        source: storedEvents ? header.source : 'liquify-rpc-repair',
+        source: storedEvents ? header.source : 'thorchain-rpc-repair',
         header,
         parsed
       };

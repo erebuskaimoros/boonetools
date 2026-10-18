@@ -262,9 +262,11 @@ test('collector cancellation never writes provider outages, but actual timeouts 
   const output = execFileSync(process.execPath, ['--input-type=module', '-e', `
     import { fetchFinancialRewardBlockBatch } from './src/shared/financials-reward-source.js';
     import { requestFromProviders } from './src/lib/provider-client.js';
+    import { createThorchainProviderPool } from '../shared/thorchain-provider-pool.js';
     const outcomes = [];
     for (const kind of ['collector-reason', 'collector-body-abort', 'provider-timeout', 'unrelated-failure']) {
       const controller = new AbortController();
+      const providerPool = createThorchainProviderPool();
       const writes = [];
       const client = { query: async (sql, values) => {
         if (sql.includes('insert into provider_circuit_breakers')) writes.push(values);
@@ -281,7 +283,7 @@ test('collector cancellation never writes provider outages, but actual timeouts 
       });
       const pending = fetchFinancialRewardBlockBatch(client, [28204118], {
         signal: controller.signal,
-        transport: options => requestFromProviders({ ...options, timeoutMs: kind === 'provider-timeout' ? 5 : 500 })
+        transport: options => requestFromProviders({ ...options, providerPool, timeoutMs: kind === 'provider-timeout' ? 5 : 500 })
       });
       await ready;
       if (kind !== 'provider-timeout') controller.abort(new Error('Collector shutting down'));

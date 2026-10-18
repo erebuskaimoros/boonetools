@@ -36,7 +36,7 @@ function repairStore(firstHeight, lastHeight) {
       block_hash: `BLOCK${height}`,
       block_time: new Date(Date.UTC(2026, 8, 2, 0, 0, index * 6)).toISOString(),
       has_swap_events: false,
-      source: 'liquify-rpc-repair',
+      source: 'thorchain-rpc-repair',
       system_income_pol_observed: false
     }];
   }));

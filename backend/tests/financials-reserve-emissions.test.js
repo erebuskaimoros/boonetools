@@ -181,7 +181,7 @@ function anchorGetJson(overrides = {}) {
 test('anchor acquisition verifies historical bank, protocol version and Mimir heights', async () => {
   const result = await fetchFinancialReserveAnchor(height, { getJson: anchorGetJson() });
   assert.deepEqual(result, { ...anchor, method: 'historical-reserve-formula-v1',
-    source: 'liquify-rpc:height-verified-bank-version-mimirs' });
+    source: 'thorchain-rpc:height-verified-bank-version-mimirs' });
   await assert.rejects(fetchFinancialReserveAnchor(height, { getJson: anchorGetJson({
     '/cosmos.bank.v1beta1.Query/Balance': abciResponse(QueryBalanceResponse.encode({ balance: { denom: 'rune', amount: '1' } }).finish(), height + 1)
   }) }), /height/);

@@ -101,11 +101,41 @@ No database migration or cache reset is required. See
 ### NativeSwap HTTP fallback
 
 Deploy backend before frontend. No migration, cache reset, or backfill is
-required. Shared THORNode and HTTP RPC clients now use Liquify first, then
+required. Shared THORNode and HTTP RPC clients include Liquify and
 `https://public-thornode.nativeswap.io` and
 `https://public-thorchain-rpc.nativeswap.io`, respectively. This includes core
 snapshots, browser clients, Rapid Swaps THORNode reads, Rujira HTTP RPC, POL,
 node-vote RPC, and Financials RPC/reward batches. Midgard is unchanged.
+
+The October 17 concurrent-provider rollout distributes supported current GETs
+and read-only RPC work between the configured Liquify and NativeSwap partners.
+Each HTTP batch stays intact. Rujira base-fee/reserve and Financials reward
+collectors fetch two independent batches per window, drain both, then persist
+serially. Existing parallel consumers use the same dispatcher. Per-run history
+budgets are unchanged; this is not a blanket rate-limit increase.
+
+NativeSwap RPC `/status` is coalesced and cached for 60 seconds. Only a fresh,
+synced `thorchain-1` node receives heights inside its advertised retention.
+Unbounded searches and old RPC ranges stay on the configured archive path.
+Historical REST retains ordered fallback and domain checks; coherent core
+snapshots stay source-pinned. Midgard, WebSockets, writes, and unrelated APIs
+are not balanced. Unsupported endpoints are not added to explicit provider lists.
+
+`THORCHAIN_PROVIDER_CONCURRENCY=6` bounds active requests per gateway per backend
+process (browser default: 4); public Liquify API/RPC share a lane, and dedicated
+credentials have a separate lane. This is not a global cross-process quota.
+The existing SQL circuit breakers remain cross-process, with 60-second failure
+and one-hour quota cooldowns and `Retry-After` floors. Both providers retain
+failover, cancellation, queue bounds, and exact-height checks. Financials' 650ms
+RPC start spacing is now per provider, independent of its Midgard queue.
+Set `THORCHAIN_PROVIDER_BALANCING_ENABLED=false` to restore backend ordered
+selection and serial collector windows while retaining cooldown protection.
+Transport callers may explicitly request `providerMode: 'fallback'`.
+
+Run `node scripts/verify-thorchain-provider-pool.mjs` for bounded live reads:
+it verifies overlapping two-item RPC batches on both public providers and
+simulates a Liquify 503 only in its own process to check NativeSwap failover.
+It neither changes server configuration nor writes shared cooldown state.
 
 Before activation, check DNS and bounded `/thorchain/pools`, RPC `/status`, and
 `/block_results` requests from the production host. Preserve dedicated/private
@@ -126,8 +156,8 @@ as a fallback. Do not infer WebSocket or full-archive support from HTTP success.
 Frontend NativeSwap GETs omit the optional `x-client-id` header because its
 preflight was rejected (HTTP 403), while simple cross-origin GETs allow `*`.
 The local Vite fallback proxy uses the same provider, bounded transport, and
-unchanged query paths. After rollout verify unchanged healthy-primary traffic
-and exercise simulated failures locally; do not disable Liquify in production
+unchanged query paths. After rollout verify overlapping successful reads on both
+providers and exercise simulated failures locally; do not disable Liquify in production
 just to test failover. Historical height/gap checks and provider cooldowns remain
 in force. Archived, unreachable UI components and standalone research scripts
 are outside this runtime change.

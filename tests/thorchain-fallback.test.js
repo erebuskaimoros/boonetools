@@ -3,6 +3,7 @@ import test from 'node:test';
 import { fetchWithFallback, fetchJSONWithFallback, THORNODE_ENDPOINTS } from '../src/lib/utils/api.js';
 import { fetchThorchain as fetchRapidSwapThorchain } from '../shared/rapid-swaps/backend.js';
 import { getCurrentBlock } from '../src/lib/utils/network.js';
+import { createThorchainProviderPool } from '../shared/thorchain-provider-pool.js';
 
 const PRIMARY = 'https://gateway.liquify.com/chain/thorchain_api';
 const FALLBACK = 'https://public-thornode.nativeswap.io';
@@ -13,20 +14,22 @@ test('browser THORNode defaults remain Liquify first, NativeSwap second', () => 
   assert.deepEqual(THORNODE_ENDPOINTS, { primary: PRIMARY, fallback: FALLBACK });
 });
 
-test('healthy Liquify does not contact NativeSwap, and total failure is not swallowed', async () => {
+test('healthy reads alternate providers without duplication, and total failure is not swallowed', async () => {
   const calls = [];
-  await fetchWithFallback('/thorchain/pools', { fetchImpl: async url => { calls.push(url); return Response.json([]); } });
+  const providerPool = createThorchainProviderPool();
+  await fetchWithFallback('/thorchain/pools', { providerPool, fetchImpl: async url => { calls.push(url); return Response.json([]); } });
   assert.deepEqual(calls, [`${PRIMARY}/thorchain/pools`]);
   calls.length = 0;
-  await assert.rejects(fetchWithFallback('/thorchain/pools', { fetchImpl: async url => {
+  await assert.rejects(fetchWithFallback('/thorchain/pools', { providerPool, fetchImpl: async url => {
     calls.push(url); throw new TypeError('offline');
   } }), /offline/);
-  assert.deepEqual(calls, [PRIMARY, FALLBACK].map(base => `${base}/thorchain/pools`));
+  assert.deepEqual(calls, [FALLBACK, PRIMARY].map(base => `${base}/thorchain/pools`));
 });
 
 test('browser JSON parsing failures advance to NativeSwap', async () => {
   const calls = [];
   const result = await fetchJSONWithFallback('/thorchain/pools?height=28274900', {
+    providerPool: createThorchainProviderPool(),
     fetchImpl: async url => {
       calls.push(url);
       return url.startsWith(PRIMARY) ? new Response('invalid JSON') : Response.json([]);
@@ -40,6 +43,7 @@ for (const failure of ['network', 'timeout', '429', '503', 'challenge']) {
   test(`browser THORNode fails over after ${failure} without NativeSwap CORS preflight`, async () => {
     const calls = [];
     const response = await fetchWithFallback('/thorchain/pools?height=28274900', {
+      providerPool: createThorchainProviderPool(),
       timeoutMs: 5,
       fetchImpl: async (url, options) => {
         calls.push({ url, options });
@@ -65,7 +69,7 @@ test('THORNode class uses the fallback on rate limits and retains height and cac
   const { ThorNodeClient } = await import('../src/lib/api/thornode.js');
   const client = new ThorNodeClient();
   const calls = [];
-  const options = { blockHeight: 28274900, fetchImpl: async (url, request) => {
+  const options = { providerPool: createThorchainProviderPool(), blockHeight: 28274900, fetchImpl: async (url, request) => {
     calls.push(url);
     if (url.startsWith(PRIMARY)) return new Response('rate limited', { status: 429 });
     assert.equal(request.headers['x-client-id'], undefined);
@@ -86,7 +90,7 @@ test('Rapid Swaps THORNode rate limits fail over without changing Midgard policy
   assert.deepEqual(calls, [PRIMARY, FALLBACK].map(base => `${base}/thorchain/tx/test`));
 });
 
-test('browser current block tries NativeSwap RPC before the THORNode read model', async (t) => {
+test('browser current block respects the shared Liquify 429 cooldown and uses NativeSwap RPC', async (t) => {
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (url) => {
     calls.push(url);
@@ -95,5 +99,17 @@ test('browser current block tries NativeSwap RPC before the THORNode read model'
     return Response.json({ result: { sync_info: { latest_block_height: '28274900' } } });
   });
   assert.equal(await getCurrentBlock(), 28274900);
-  assert.deepEqual(calls, [RPC_PRIMARY, RPC_FALLBACK].map(base => `${base}/status`));
+  assert.deepEqual(calls, [`${RPC_FALLBACK}/status`]);
+});
+
+test('development Financials shares the RPC provider pool without changing Midgard', async () => {
+  const { createFinancialsDevRequest } = await import('../scripts/dev-financials.mjs');
+  const calls = [];
+  const get = createFinancialsDevRequest(async options => { calls.push(options); return {}; });
+  await get(`${RPC_PRIMARY}/abci_query?height=150`);
+  await get('https://gateway.liquify.com/chain/thorchain_midgard/v2/health');
+  assert.deepEqual(calls[0].bases, [RPC_PRIMARY, RPC_FALLBACK]);
+  assert.equal(calls[0].providerMinIntervalMs, 650);
+  assert.deepEqual(calls[1].bases, ['https://gateway.liquify.com/chain/thorchain_midgard/v2']);
+  assert.throws(() => get('https://unrelated.example/health'), /allowlisted/);
 });

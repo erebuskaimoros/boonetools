@@ -66,6 +66,8 @@ export const config = Object.freeze({
   providerCooldownEnabled,
   providerFailureCooldownMs: readInt('PROVIDER_FAILURE_COOLDOWN_SECONDS', 60) * 1000,
   providerRateLimitCooldownMs: readInt('PROVIDER_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000,
+  thorchainProviderConcurrency: readInt('THORCHAIN_PROVIDER_CONCURRENCY', 6),
+  thorchainProviderBalancingEnabled: readBool('THORCHAIN_PROVIDER_BALANCING_ENABLED', true),
   thornodePrimaryUrl,
   thornodeArchiveUrl,
   thornodeFallbackUrl,

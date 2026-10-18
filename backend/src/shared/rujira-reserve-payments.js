@@ -16,6 +16,9 @@ import { executeDuneQueryRows, formatDuneDateTime, summarizeDuneError } from './
 import { fetchMidgardActions, isMidgardRateLimitError } from './midgard.js';
 import { fetchThorchain } from './thornode.js';
 import { loadRujiraRunePrices } from './rujira-rune-prices.js';
+import { fetchThorchainRpc } from './rpc.js';
+import { concurrentBatchWindows } from '../lib/concurrent-batches.js';
+import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-pool.js';
 
 const ACTION_SYNC_KEY = 'rujira-reserve-payment-actions:v1';
 const SCHEDULE_SYNC_KEY = 'rujira-reserve-payment-schedule:v1';
@@ -767,49 +770,15 @@ function isProviderRateLimit(error) {
   );
 }
 
-async function fetchJsonFromBases(bases, pathname, params = {}) {
-  const queryString = new URLSearchParams(params).toString();
-  const path = queryString ? `${pathname}?${queryString}` : pathname;
-  let lastError = null;
-
-  for (const base of bases) {
-    const url = `${String(base || '').replace(/\/$/, '')}${path}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), RPC_REQUEST_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(url, {
-        headers: { Accept: 'application/json' },
-        signal: controller.signal
-      });
-      const text = await response.text();
-      if (!response.ok) {
-        throw createHttpError(`RPC error: ${response.status} ${response.statusText} for ${path}`, {
-          status: response.status,
-          url,
-          body: text.slice(0, 240)
-        });
-      }
-
-      try {
-        return JSON.parse(text);
-      } catch {
-        throw createHttpError(`Invalid JSON from ${url}`, { url, body: text.slice(0, 240) });
-      }
-    } catch (error) {
-      lastError = error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  throw lastError || new Error(`Unable to fetch ${path}`);
+async function fetchJsonFromBases(bases, pathname, params = {}, options = {}) {
+  return fetchThorchainRpc(pathname, params, { rpcUrls: bases,
+    timeoutMs: RPC_REQUEST_TIMEOUT_MS, cooldownScope: 'rujira-reserve-payments', ...options });
 }
 
-async function fetchRpcBlockResults(height) {
+async function fetchRpcBlockResults(height, options = {}) {
   return fetchJsonFromBases(config.rujiraReservePaymentsRpcUrls, '/block_results', {
     height: String(height)
-  });
+  }, options);
 }
 
 async function fetchRpcBlock(height) {
@@ -1191,33 +1160,40 @@ export async function processRujiraReservePaymentBlocks(client, options = {}) {
     repair_candidates: repairCandidates
   };
 
-  for (const row of blocks) {
-    try {
-      let blockTime = row.block_time ? new Date(row.block_time).toISOString() : null;
-      if (!blockTime) {
-        const resolveBlockTime = options.resolveBlockTime || (await import('./chain-data.js')).resolveThorchainBlockTime;
-        blockTime = await resolveBlockTime(client, Number(row.height), { fetchBlock: fetchRpcBlock });
+  const windows = concurrentBatchWindows(blocks,
+    ([row]) => (options.fetchBlockResults || fetchRpcBlockResults)(row.height, { signal: options.signal }), {
+      concurrency: options.batchConcurrency ?? (config.thorchainProviderBalancingEnabled && hasThorchainProviderPair(config.rujiraReservePaymentsRpcUrls) ? 2 : 1),
+      delayMs: options.requestDelayMs ?? config.rujiraReservePaymentsRequestDelayMs, signal: options.signal
+    });
+  for await (const window of windows) {
+    let fatalError;
+    for (const outcome of window) {
+      const [row] = outcome.items;
+      try {
+        if (outcome.status === 'rejected') throw outcome.reason;
+        let blockTime = row.block_time ? new Date(row.block_time).toISOString() : null;
+        if (!blockTime) {
+          const resolveBlockTime = options.resolveBlockTime || (await import('./chain-data.js')).resolveThorchainBlockTime;
+          blockTime = await resolveBlockTime(client, Number(row.height), { fetchBlock: fetchRpcBlock });
+        }
+        const payload = outcome.value;
+        const parsed = await saveParsedRujiraReservePaymentBlock(client, Number(row.height), payload, {
+          blockTime,
+          source: row.source || 'backfill',
+          attempts: Number(row.attempts || 0) + 1
+        });
+        stats.fetched += 1;
+        stats.events += parsed.events.length;
+      } catch (error) {
+        stats.errored += 1;
+        if (isProviderRateLimit(error)) {
+          fatalError ||= error;
+        }
+        await markBlockError(client, row, error);
       }
-      const payload = await fetchRpcBlockResults(row.height);
-      const parsed = await saveParsedRujiraReservePaymentBlock(client, Number(row.height), payload, {
-        blockTime,
-        source: row.source || 'backfill',
-        attempts: Number(row.attempts || 0) + 1
-      });
-      stats.fetched += 1;
-      stats.events += parsed.events.length;
-    } catch (error) {
-      stats.errored += 1;
-      if (isProviderRateLimit(error)) {
-        await putCooldown(client, ACTION_SYNC_KEY, error);
-        throw error;
-      }
-      await markBlockError(client, row, error);
-    }
 
-    if (config.rujiraReservePaymentsRequestDelayMs > 0) {
-      await sleep(config.rujiraReservePaymentsRequestDelayMs);
     }
+    if (fatalError) { await putCooldown(client, ACTION_SYNC_KEY, fatalError); throw fatalError; }
   }
 
   return stats;

@@ -10,6 +10,7 @@ import { FINANCIALS_MODEL_TTL_MS, financialsModelKey } from '../shared/financial
 import { createReadModelEtag, publishReadModel } from '../shared/read-models.js';
 import { readFinancialRewardAccountingDays, repairFinancialRewardBlocks } from '../shared/financials-reward-source.js';
 import { repairFinancialReserveEmissions } from '../shared/financials-reserve-service.js';
+import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-pool.js';
 
 // Liquify's block-results archive currently starts on October 6. Begin at the
 // next complete UTC day, including the full first REVSHARE day (October 7).
@@ -21,6 +22,9 @@ export function createFinancialsProviderRequest(client, { transport = requestFro
     const base = [FINANCIALS_MIDGARD, FINANCIALS_RPC].find((candidate) => url.startsWith(`${candidate}/`));
     if (!base) throw new Error('Financials provider is not allowlisted');
     return transport({ bases: base === FINANCIALS_RPC ? config.rpcRestUrls : [base], path: url.slice(base.length), timeoutMs: 60_000,
+      // Preserve the existing 650ms start-rate limit separately on each RPC
+      // provider, instead of serializing both behind the Midgard queue.
+      providerMinIntervalMs: base === FINANCIALS_RPC ? 650 : 0,
       headers: { Accept: 'application/json', 'x-client-id': 'BooneTools-Financials' },
       ...providerLifecycleHooks({ client, scope: `financials-${lane}` })
     });
@@ -58,6 +62,7 @@ export async function runFinancialsCollector(options = {}) {
     const service = options.service || createFinancialsService({
       cacheDir: options.cacheDir || process.env.FINANCIALS_CACHE_DIR || '/var/lib/boonetools-financials',
       requestJson: createFinancialsProviderRequest(client),
+      rpcConcurrency: config.thorchainProviderBalancingEnabled && hasThorchainProviderPair(config.rpcRestUrls) ? 6 : 3,
       readRewardAccounting: window => readFinancialRewardAccountingDays(client, window)
     });
     const published = new Map();

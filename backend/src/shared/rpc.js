@@ -24,6 +24,9 @@ async function fetchFromBases(bases, path, params = {}, options = {}) {
   return requestFromProviders({
     bases: bases.filter(Boolean).map(trimBaseUrl),
     path: requestPath,
+    request: { signal: options.signal },
+    providerMode: options.providerMode,
+    validateResponse: options.validateResponse,
     timeoutMs: options.timeoutMs || RPC_TIMEOUT_MS,
     headers: {
       Accept: 'application/json',

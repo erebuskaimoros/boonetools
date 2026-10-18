@@ -2,6 +2,8 @@
  * Isomorphic provider transport shared by browser and backend adapters.
  * Domain clients retain response-validation and stop/fallback policy.
  */
+import { thorchainProviderPool } from './thorchain-provider-pool.js';
+import { parseRetryAfter } from './provider-policy.js';
 
 export class ProviderRequestError extends Error {
   constructor(message, details = {}) {
@@ -104,7 +106,7 @@ export async function requestFromProviders(options = {}) {
     onProviderSuccess = null,
     errorMessage = null
   } = options;
-  const baseList = [...new Set((Array.isArray(bases) ? bases : [bases]).filter(Boolean))];
+  let baseList = [...new Set((Array.isArray(bases) ? bases : [bases]).filter(Boolean))];
 
   if (baseList.length === 0) {
     throw new ProviderRequestError(`No providers configured for ${path}`);
@@ -113,16 +115,29 @@ export async function requestFromProviders(options = {}) {
     throw new ProviderRequestError(`No fetch implementation available for ${path}`);
   }
 
+  request.signal?.throwIfAborted();
+  const providerPool = options.providerPool === false ? null : options.providerPool || thorchainProviderPool;
+  const routing = { ...options, bases: baseList, path, request };
+  if (providerPool) baseList = await providerPool.order(routing, (base) => requestFromProviders({
+    ...options, bases: [base], path: '/status', timeoutMs: Math.min(timeoutMs, 5000),
+    responseType: 'json', request: { method: 'GET', signal: request.signal },
+    validateResponse: null, shouldStop: null, onProviderSuccess: null, providerPool: false
+  }));
+
   let lastError = null;
 
   for (const base of baseList) {
+    request.signal?.throwIfAborted();
     const url = providerUrl(base, path);
     const controller = new AbortController();
     const normalizedTimeoutMs = Math.max(1, Math.trunc(Number(timeoutMs) || 10000));
-    const timeoutId = setTimeout(() => controller.abort(), normalizedTimeoutMs);
     const requestSignal = combinedSignal(request.signal, controller.signal);
+    let timeoutId, release;
 
     try {
+      release = await providerPool?.acquire(base, { signal: request.signal, scope: options.providerScope,
+        cooldown: options.providerCooldownEnabled !== false, minIntervalMs: options.providerMinIntervalMs });
+      timeoutId = setTimeout(() => controller.abort(), normalizedTimeoutMs);
       if (typeof beforeRequest === 'function') {
         await beforeRequest({ base, path, url });
       }
@@ -143,10 +158,7 @@ export async function requestFromProviders(options = {}) {
           url,
           body: body.slice(0, 240),
           provider: String(base),
-          retryAfterSeconds: Math.max(
-            0,
-            Math.trunc(Number(response.headers?.get?.('retry-after')) || 0)
-          )
+          retryAfterSeconds: parseRetryAfter(response.headers?.get?.('retry-after'), providerPool?.now())
         };
         const message = typeof errorMessage === 'function'
           ? errorMessage({ ...details, path })
@@ -165,6 +177,8 @@ export async function requestFromProviders(options = {}) {
       }
 
       const payload = await readResponseBody(response, responseType, url);
+      const invalidRpc = providerPool?.validate(routing, base, payload);
+      if (invalidRpc) throw validationError(invalidRpc, path, url);
       if (typeof validateResponse === 'function') {
         const invalid = validationError(
           validateResponse(payload, { base, path, response, url }),
@@ -180,16 +194,24 @@ export async function requestFromProviders(options = {}) {
 
       return payload;
     } catch (error) {
+      // Caller cancellation is neither a failed provider nor permission to
+      // retry the same work elsewhere. Queued work must also stop promptly.
+      if (request.signal?.aborted && (error === request.signal.reason || error?.name === 'AbortError')) {
+        throw request.signal.reason;
+      }
       lastError = error;
+      providerPool?.failure(base, error, options.providerScope, options.providerCooldownEnabled !== false);
       if (typeof onProviderError === 'function') {
         await onProviderError(error, { base, path, url });
       }
+      request.signal?.throwIfAborted();
       if (typeof shouldStop === 'function' && shouldStop(error, { base, path, url })) {
         throw error;
       }
     } finally {
       clearTimeout(timeoutId);
       requestSignal.cleanup();
+      release?.();
     }
   }
 

@@ -6,6 +6,11 @@ import { chunkArray, safeNumber, sleep, toIsoString } from '../lib/utils.js';
 import { executeDuneQueryRows, summarizeDuneError } from './dune.js';
 import { fetchMidgard, isMidgardRateLimitError } from './midgard.js';
 import { loadRujiraRunePrices } from './rujira-rune-prices.js';
+import { fetchThorchainRpc } from './rpc.js';
+import { requestFromProviders } from '../lib/provider-client.js';
+import { providerLifecycleHooks } from './provider-cooldown.js';
+import { concurrentBatchWindows } from '../lib/concurrent-batches.js';
+import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-pool.js';
 
 const ACTION_SYNC_KEY = 'rujira-thorchain-swap-actions:v1';
 const ACTION_PAGE_LIMIT = 50;
@@ -762,45 +767,8 @@ export function isRujiraBaseFeeProviderRateLimit(error) {
 }
 
 async function fetchJsonFromBases(bases, pathname, params = {}) {
-  const queryString = new URLSearchParams(params).toString();
-  const path = queryString ? `${pathname}?${queryString}` : pathname;
-  let lastError = null;
-
-  for (const base of bases) {
-    const url = `${String(base || '').replace(/\/$/, '')}${path}`;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), RPC_REQUEST_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(url, {
-        headers: {
-          Accept: 'application/json',
-          ...(config.providerClientId ? { 'x-client-id': config.providerClientId } : {})
-        },
-        signal: controller.signal
-      });
-      const text = await response.text();
-      if (!response.ok) {
-        throw createHttpError(`RPC error: ${response.status} ${response.statusText} for ${path}`, {
-          status: response.status,
-          url,
-          body: text.slice(0, 240)
-        });
-      }
-
-      try {
-        return JSON.parse(text);
-      } catch {
-        throw createHttpError(`Invalid JSON from ${url}`, { url, body: text.slice(0, 240) });
-      }
-    } catch (error) {
-      lastError = error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  throw lastError || new Error(`Unable to fetch ${path}`);
+  return fetchThorchainRpc(pathname, params, { rpcUrls: bases,
+    timeoutMs: RPC_REQUEST_TIMEOUT_MS, cooldownScope: 'rujira-base-fees' });
 }
 
 export async function fetchRujiraBaseFeeRpcBlockResults(height) {
@@ -838,11 +806,13 @@ export function parseRujiraBaseFeeRpcBatchResponse(payload, heights) {
         })
       };
     }
+    if (Number(response.result.height) !== height) return { height,
+      error: createHttpError(`RPC batch returned a different block height for ${height}`) };
     return { height, payload: response };
   });
 }
 
-export async function fetchRujiraBaseFeeRpcBlockResultsBatch(heights) {
+export async function fetchRujiraBaseFeeRpcBlockResultsBatch(heights, options = {}) {
   const normalizedHeights = [...new Set(
     (Array.isArray(heights) ? heights : [])
       .map((height) => Math.max(0, Math.trunc(Number(height) || 0)))
@@ -856,54 +826,13 @@ export async function fetchRujiraBaseFeeRpcBlockResultsBatch(heights) {
     method: 'block_results',
     params: { height: String(height) }
   }));
-  let lastError = null;
-
-  for (const base of config.rujiraBaseFeesRpcUrls) {
-    const url = String(base || '').replace(/\/$/, '');
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), RPC_REQUEST_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-          ...(config.providerClientId ? { 'x-client-id': config.providerClientId } : {})
-        },
-        body: JSON.stringify(requests),
-        signal: controller.signal
-      });
-      const text = await response.text();
-      if (!response.ok) {
-        throw createHttpError(
-          `RPC batch error: ${response.status} ${response.statusText} for ${normalizedHeights.length} heights`,
-          {
-            status: response.status,
-            url,
-            body: text.slice(0, 240)
-          }
-        );
-      }
-
-      let payload;
-      try {
-        payload = JSON.parse(text);
-      } catch {
-        throw createHttpError(`Invalid JSON batch response from ${url}`, {
-          url,
-          body: text.slice(0, 240)
-        });
-      }
-      return parseRujiraBaseFeeRpcBatchResponse(payload, normalizedHeights);
-    } catch (error) {
-      lastError = error;
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  }
-
-  throw lastError || new Error('Unable to fetch RPC block-results batch');
+  const payload = await requestFromProviders({
+    bases: config.rujiraBaseFeesRpcUrls, path: '/', timeoutMs: RPC_REQUEST_TIMEOUT_MS,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'x-client-id': config.providerClientId },
+    request: { method: 'POST', body: JSON.stringify(requests), signal: options.signal },
+    ...providerLifecycleHooks({ scope: 'rujira-base-fees' })
+  });
+  return parseRujiraBaseFeeRpcBatchResponse(payload, normalizedHeights);
 }
 
 async function loadActionSyncState(client) {
@@ -1825,7 +1754,7 @@ export async function processRujiraBaseFeeBlocks(client, options = {}) {
     1,
     Math.trunc(Number(options.batchSize ?? config.rujiraBaseFeesRpcBatchSize) || 1)
   );
-  const fetchBatch = options.fetchBatch || fetchRujiraBaseFeeRpcBlockResultsBatch;
+  const fetchBatch = options.fetchBatch || ((heights) => fetchRujiraBaseFeeRpcBlockResultsBatch(heights, options));
   const stats = {
     selected: blocks.length,
     batches: 0,
@@ -1836,53 +1765,59 @@ export async function processRujiraBaseFeeBlocks(client, options = {}) {
     excluded_events: 0
   };
 
-  const batches = chunkArray(blocks, batchSize);
-  for (const [batchIndex, batch] of batches.entries()) {
-    let results;
-    try {
-      results = await fetchBatch(batch.map((row) => Number(row.height)));
-      stats.batches += 1;
-    } catch (error) {
-      if (isRujiraBaseFeeProviderRateLimit(error)) {
-        await putActionSyncCooldown(client, error);
-        throw error;
-      }
-      for (const row of batch) {
-        await markBlockError(client, row, error);
-        stats.errored += 1;
-      }
-      results = [];
-    }
-
-    const byHeight = new Map(results.map((entry) => [Number(entry.height), entry]));
-    for (const row of batch) {
-      const result = byHeight.get(Number(row.height));
-      if (!result || result.error) {
-        if (result?.error) {
-          await markBlockError(client, row, result.error);
+  const windows = concurrentBatchWindows(blocks, (batch) => fetchBatch(batch.map((row) => Number(row.height))), {
+    batchSize, concurrency: options.batchConcurrency ?? (config.thorchainProviderBalancingEnabled && hasThorchainProviderPair(config.rujiraBaseFeesRpcUrls) ? 2 : 1),
+    delayMs: options.requestDelayMs ?? config.rujiraBaseFeesRequestDelayMs, signal: options.signal
+  });
+  for await (const window of windows) {
+    let fatalError;
+    for (const outcome of window) {
+      const batch = outcome.items;
+      let results;
+      if (outcome.status === 'fulfilled') {
+        results = outcome.value;
+        stats.batches += 1;
+      } else {
+        const error = outcome.reason;
+        if (isRujiraBaseFeeProviderRateLimit(error)) {
+          fatalError ||= error;
+        }
+        for (const row of batch) {
+          await markBlockError(client, row, error);
           stats.errored += 1;
         }
-        continue;
+        results = [];
       }
 
-      try {
-        const parsed = parseRujiraBaseFeeBlock(Number(row.height), result.payload, {
-          blockTime: row.block_time ? new Date(row.block_time).toISOString() : null
-        });
-        await saveParsedBlock(client, row, result.payload, parsed);
-        stats.fetched += 1;
-        stats.events += parsed.events.length;
-        stats.included_events += parsed.events.filter((event) => event.included).length;
-        stats.excluded_events += parsed.events.filter((event) => !event.included).length;
-      } catch (error) {
-        await markBlockError(client, row, error);
-        stats.errored += 1;
-      }
-    }
+      const byHeight = new Map(results.map((entry) => [Number(entry.height), entry]));
+      for (const row of batch) {
+        const result = byHeight.get(Number(row.height));
+        if (!result || result.error) {
+          if (result?.error) {
+            await markBlockError(client, row, result.error);
+            stats.errored += 1;
+          }
+          continue;
+        }
 
-    if (batchIndex < batches.length - 1 && config.rujiraBaseFeesRequestDelayMs > 0) {
-      await sleep(config.rujiraBaseFeesRequestDelayMs);
+        try {
+          const parsed = parseRujiraBaseFeeBlock(Number(row.height), result.payload, {
+            blockTime: row.block_time ? new Date(row.block_time).toISOString() : null
+          });
+          await saveParsedBlock(client, row, result.payload, parsed);
+          stats.fetched += 1;
+          stats.events += parsed.events.length;
+          stats.included_events += parsed.events.filter((event) => event.included).length;
+          stats.excluded_events += parsed.events.filter((event) => !event.included).length;
+        } catch (error) {
+          await markBlockError(client, row, error);
+          stats.errored += 1;
+        }
+      }
+
     }
+    // Persist the other provider's completed batch before surfacing a failure.
+    if (fatalError) { await putActionSyncCooldown(client, fatalError); throw fatalError; }
   }
 
   return stats;

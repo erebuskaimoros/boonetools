@@ -276,7 +276,7 @@ export async function fetchFinancialReserveAnchor(requestedHeight, { getJson }) 
   const config = (key, fallback) => mimirs.has(key) && mimirs.get(key) >= 0n ? mimirs.get(key).toString() : fallback;
   const anchor = { height, reserveBalanceE8: integer(balance.amount, 'Reserve balance').toString(), version,
     emissionCurve: config('EMISSIONCURVE', '6'), reserveMaxCapE8: config('RESERVEMAXCAP', '0'), blocksPerYear: BLOCKS_PER_YEAR,
-    method: METHOD, source: 'liquify-rpc:height-verified-bank-version-mimirs' };
+    method: METHOD, source: 'thorchain-rpc:height-verified-bank-version-mimirs' };
   calculateFinancialReserveEmissionE8(anchor.reserveBalanceE8, anchor);
   return anchor;
 }

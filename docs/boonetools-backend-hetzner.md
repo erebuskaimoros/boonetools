@@ -355,11 +355,20 @@ Use them to put a dedicated node or paid provider ahead of the public defaults
 without changing application code. The older primary/fallback variables remain
 the defaults when the list variables are empty.
 
-THORNode and HTTP RPC defaults try Liquify first, then NativeSwap. Explicit
+Supported current THORNode and retained HTTP RPC reads are distributed across
+Liquify and NativeSwap, with immediate failover and per-provider cooldowns. Explicit
 lists replace the defaults, so existing single-Liquify lists must be updated
 deliberately during rollout. NativeSwap is not a Midgard or full-history archive
 replacement. The WebSocket list remains unchanged; see the
 [NativeSwap rollout checks](deployment.md#nativeswap-http-fallback).
+
+`THORCHAIN_PROVIDER_CONCURRENCY` defaults to 6 active requests per gateway per
+process. Public Liquify API/RPC share that ceiling; dedicated credentials have
+a separate lane. SQL cooldowns remain cross-process; the queue is not a global
+quota. `THORCHAIN_PROVIDER_BALANCING_ENABLED=false` restores backend ordered
+selection and serial batch windows. Historical REST and source-pinned snapshots
+retain ordered selection; NativeSwap RPC retention is rechecked every minute.
+Midgard history budgets, WebSocket limits, and per-run collector bounds are unchanged.
 
 `BIFROST_SCANNER_INFO_URL` supplies the compact five-minute scanner-health
 snapshot used by the status page's `Avg Blocks Behind Tip` column. The default
@@ -377,7 +386,7 @@ supplies and verifies a dedicated WebSocket URL.
 
 Cooldown errors are not themselves new upstream requests. Ordinary HTTP 5xx
 and transport failures normally pause their service lane for 60 seconds;
-rate-limit/breach failures default to one hour. Parsed `Retry-After` seconds
+rate-limit/breach failures default to one hour. Parsed `Retry-After` seconds or HTTP dates
 are a lower bound for either duration. Inspect `last_status`, `last_failed_at`,
 `blocked_until`, and the redacted failure reason before attributing cooldowns
 to quota exhaustion. Heights or hashes containing `429` are not HTTP status

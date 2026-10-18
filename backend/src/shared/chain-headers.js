@@ -126,7 +126,7 @@ export function parseChainHeaderFromNewBlock(data = {}) {
   });
 }
 
-export function parseChainHeaderRange(payload = {}, source = 'liquify-rpc-repair') {
+export function parseChainHeaderRange(payload = {}, source = 'thorchain-rpc-repair') {
   return uniqueHeaders(
     (Array.isArray(payload?.result?.block_metas) ? payload.result.block_metas : [])
       .map((row) => ({

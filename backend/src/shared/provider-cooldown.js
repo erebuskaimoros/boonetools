@@ -1,93 +1,9 @@
 import { config } from '../lib/config.js';
-
-// Error messages include request URLs, where heights and hashes can contain
-// 429. Recognize the number only when it is written as an HTTP status.
-const RATE_LIMIT_PATTERN = /\bHTTP(?:\/\d(?:\.\d)?)?\s+429\b|\bRequest failed\s*\(429\)|too many requests|daily request limit|rate.?limit|rune pouch is empty|too many breaches|temporarily blocked/i;
-const PAYLOAD_SIZE_PATTERN = /\bgrpc:\s*(?:received|sent) message larger than max\b|\b(?:request|response|payload|entity) (?:body )?too large\b/i;
-
-export class ProviderCooldownError extends Error {
-  constructor(providerKey, blockedUntil, reason = '') {
-    super(`Provider ${providerKey} is cooling down until ${blockedUntil}${reason ? `: ${reason}` : ''}`);
-    this.name = 'ProviderCooldownError';
-    this.providerKey = providerKey;
-    this.blockedUntil = blockedUntil;
-    this.skipProvider = true;
-  }
-}
-
-function providerHostname(base) {
-  try {
-    return new URL(String(base || '')).hostname.toLowerCase();
-  } catch {
-    return String(base || '').trim().toLowerCase();
-  }
-}
-
-function providerServicePath(base) {
-  try {
-    const pathname = new URL(String(base || '')).pathname
-      .replace(/\/+$/, '')
-      .toLowerCase();
-    if (/^\/api=[^/]+/i.test(pathname)) {
-      return '/api=dedicated';
-    }
-    const liquifyService = pathname.match(/^\/chain\/[^/]+/i)?.[0];
-    return liquifyService || pathname;
-  } catch {
-    return '';
-  }
-}
-
-export function providerCooldownKeys(base, options = {}) {
-  const hostname = providerHostname(base);
-  if (!hostname) return { global: '', service: '' };
-  const servicePath = providerServicePath(base);
-  const gatewayScope = servicePath === '/api=dedicated'
-    ? servicePath
-    : '';
-  const scope = String(options.scope || '')
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-');
-  return {
-    global: `global:${hostname}${gatewayScope}`,
-    service: `service:${hostname}${servicePath}${scope ? `:${scope}` : ''}`
-  };
-}
-
-function errorMessage(error) {
-  const body = typeof error?.body === 'object' ? JSON.stringify(error.body) : error?.body;
-  return [error?.message, body].filter(Boolean).map(String).join(' ').slice(0, 500);
-}
-
-export function isProviderPayloadSizeError(error) {
-  return Number(error?.status) === 413 || PAYLOAD_SIZE_PATTERN.test(errorMessage(error));
-}
-
-function isRequestSizeFailure(error) {
-  // Liquify maps oversized gRPC replies to HTTP 429. Retrying a smaller query
-  // can succeed immediately; it must not disable the whole provider. An
-  // explicit Retry-After still takes precedence over this exception.
-  return isProviderPayloadSizeError(error) && !(Number(error?.retryAfterSeconds) > 0);
-}
-
-export function isProviderRateLimitError(error) {
-  if (isRequestSizeFailure(error)) return false;
-  return Number(error?.status) === 429 || RATE_LIMIT_PATTERN.test(errorMessage(error));
-}
-
-export function isProviderGatewayRateLimitError(error) {
-  if (isRequestSizeFailure(error)) return false;
-  return Number(error?.status) === 429 || Number(error?.retryAfterSeconds) > 0;
-}
-
-function shouldRecordServiceFailure(error) {
-  if (isRequestSizeFailure(error)) return false;
-  const status = Number(error?.status) || 0;
-  if (isProviderRateLimitError(error) || Number(error?.retryAfterSeconds) > 0) return true;
-  if (status === 0) return true;
-  return status === 408 || status === 425 || status >= 500;
-}
+import { ProviderCooldownError, providerCooldownKeys, PAYLOAD_SIZE_PATTERN,
+  providerErrorMessage as errorMessage, isProviderRateLimitError,
+  isProviderGatewayRateLimitError, shouldRecordServiceFailure } from '../../../shared/provider-policy.js';
+export { ProviderCooldownError, providerCooldownKeys, isProviderRateLimitError,
+  isProviderGatewayRateLimitError, isProviderPayloadSizeError } from '../../../shared/provider-policy.js';
 
 function enabled(options) {
   return options.enabled === undefined
@@ -204,6 +120,8 @@ export async function recordProviderSuccess(base, options = {}) {
 
 export function providerLifecycleHooks(options = {}) {
   return {
+    providerCooldownEnabled: enabled(options),
+    providerScope: options.scope || '',
     beforeRequest: ({ base }) => assertProviderAvailable(base, options),
     onProviderError: (error, { base }) => recordProviderFailure(base, error, options)
   };
