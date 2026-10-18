@@ -86,7 +86,9 @@
 
 {#if tools && baseSpec}
   <ChartTools series={legend} rollingSeries={analysisRollingSeries(baseSpec)} {hidden} {rolling} {grain} {sourceGrain} {hideUnavailableGrains} {showSourceResolution} calendar={baseSpec.calendar || 'UTC'}
-    onHidden={changeHidden} onRolling={changeRolling} onGrain={changeGrain} />
+    onHidden={changeHidden} onRolling={changeRolling} onGrain={changeGrain}>
+    <slot name="legend-extra" slot="legend-extra" />
+  </ChartTools>
 {/if}
 <slot name="controls" />
 <div class="time-series-frame" aria-busy={loading} style={`--chart-height:${height};--chart-narrow-height:${narrowHeight}`}>

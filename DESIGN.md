@@ -372,7 +372,12 @@ Hover callbacks may drive HTML values; preset-aware reset uses `resetWindow`.
 Primary time-series charts use `RangeSummary.svelte`: four square,
 flush cards above the plot, responsive to container width. Rapid Swaps, POL
 TVL, Bond History and the main Financials plot are explicit exceptions: they omit per-chart summaries and retain
-their dashboards' top-level stats. POL Tracker deposits retain only total and
+their dashboards' top-level stats. Financials defaults its amber line to closing
+RUNE/USD price, with a sliding RUNE Price / Bonding APR switch in the legend row.
+Daily clicks expand top-swap and pool-volume tables below the chart; a UTC date
+picker provides keyboard access and day selection from weekly/monthly views.
+Drag-to-zoom never selects a day, and changing the line preserves the viewport.
+POL Tracker deposits retain only total and
 average in a two-column summary. Pool Analysis places
 its controls and legend below these cards, immediately before the plot.
 Its Depth/Cumulative Fees switch uses a sliding indicator with reduced-motion

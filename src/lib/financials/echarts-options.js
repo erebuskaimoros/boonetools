@@ -1,6 +1,6 @@
 import { buildTimeSeriesOption, timeSeriesTooltip } from '../charts/time-series.js';
 import { DAY_MS, reduceObservations } from '../charts/analytics.js';
-import { FINANCIALS_SERIES } from './series.js';
+import { FINANCIALS_SERIES, financialLineSeries } from './series.js';
 import { formatFinancialAmount, formatFinancialDay, formatFinancialPercent } from '../../../shared/financials/model.js';
 
 export { utcDayZoomWindow as financialEChartsWindow } from '../charts/viewport.js';
@@ -11,7 +11,7 @@ const seriesFills = {
   bondingApr: FINANCIALS_SERIES[2].color
 };
 
-function financialTooltip(row, currency, hidden = [], { header = '', grain = 'day' } = {}) {
+function financialTooltip(row, currency, hidden = [], { header = '', grain = 'day', lineMetric = 'runePriceUsd' } = {}) {
   if (!row) return '';
   const suffix = currency === 'rune' ? 'Rune' : 'Usd';
   const amount = (value, unit = currency, compact = false) => formatFinancialAmount(value, unit, compact);
@@ -24,12 +24,12 @@ function financialTooltip(row, currency, hidden = [], { header = '', grain = 'da
   const grouped = grain !== 'day';
   const metrics = {
     volume: amount(row[`volume${suffix}`]), income: amount(row[`income${suffix}`]),
-    bondingApr: formatFinancialPercent(row.bondingApr)
+    bondingApr: formatFinancialPercent(row.bondingApr), runePriceUsd: amount(row.runePriceUsd, 'usd')
   };
   return timeSeriesTooltip([
     header || `${formatFinancialDay(row.day)} · UTC${row.partial ? ' · IN PROGRESS' : ''}`,
-    ...FINANCIALS_SERIES.filter((series) => !hidden.includes(series.id)).map((series) => ({
-      ...series, fill: seriesFills[series.id],
+    ...[...FINANCIALS_SERIES.slice(0, 2), financialLineSeries(lineMetric)].filter((series) => !hidden.includes(series.id)).map((series) => ({
+      ...series, fill: seriesFills[series.id] || series.color,
       text: `${grouped ? series.label.replace(/^DAILY /, grain === 'week' ? 'WEEKLY ' : 'MONTHLY ') : series.label}: ${metrics[series.id]}`
     })),
     '',
@@ -41,7 +41,7 @@ function financialTooltip(row, currency, hidden = [], { header = '', grain = 'da
     `Retained system income: ${accountingAmount(row.incomeRune)}`,
     `Node rewards: ${amount(row.bondingEarningsRune, 'rune')}`,
     `${grouped ? 'Closing active bond' : 'Active bond'}: ${amount(row.activeBondRune, 'rune', true)}`,
-    ...(grouped ? ['Flows: sum · active bond: closing observation · APR: mean daily rate.'] : []),
+    ...(grouped ? ['Flows: sum · RUNE price / active bond: closing observation · APR: mean daily rate.'] : []),
     ...(row.partial && !grouped && Number.isFinite(row.through) ? [
       `Through ${new Date(row.through * 1000).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false })} UTC`,
       'APR: elapsed-time annualized estimate'
@@ -54,11 +54,11 @@ function financialTooltip(row, currency, hidden = [], { header = '', grain = 'da
   ]);
 }
 
-export function financialEChartsTooltip(row, currency, hidden = []) {
-  return financialTooltip(row, currency, hidden);
+export function financialEChartsTooltip(row, currency, hidden = [], lineMetric = 'runePriceUsd') {
+  return financialTooltip(row, currency, hidden, { lineMetric });
 }
 
-function financialGroupedTooltip(bucket, { rows, grain, hidden }, currency) {
+function financialGroupedTooltip(bucket, { rows, grain, hidden }, currency, lineMetric) {
   // Accounting is feature-owned: every periodic flow needs all observed days.
   // Do not disguise missing source values or interior gaps as a smaller total.
   const consecutive = rows.length > 0 && rows.every((row, index) =>
@@ -71,41 +71,45 @@ function financialGroupedTooltip(bucket, { rows, grain, hidden }, currency) {
       'reserveEmissionsRune', 'revshareRune', 'grossIncomeRune', 'grossIncomeUsd', 'reconciliationAdjustmentRune', 'bondingEarningsRune'
     ].map(field => [field, sum(field)])),
     bondingApr: consecutive ? reduceObservations(rows, rows.map(row => row.bondingApr), 'mean') : null,
-    activeBondRune: rows.at(-1)?.activeBondRune ?? null
+    activeBondRune: rows.at(-1)?.activeBondRune ?? null,
+    runePriceUsd: rows.at(-1)?.runePriceUsd ?? null
   };
   return financialTooltip(aggregate, currency, hidden, {
-    grain,
+    grain, lineMetric,
     header: `${bucket.fromDay} → ${bucket.throughDay} · UTC ${grain.toUpperCase()}${bucket.partial ? ' · PARTIAL BUCKET' : ''}`
   });
 }
 
-export function buildFinancialEChartsOption(rows, { currency = 'usd', hidden = [], ...viewport } = {}) {
+export function buildFinancialEChartsOption(rows, { currency = 'usd', hidden = [], lineMetric = 'runePriceUsd', ...viewport } = {}) {
   const suffix = currency === 'rune' ? 'Rune' : 'Usd';
   const unit = currency === 'rune' ? 'RUNE' : 'USD';
-  const apr = FINANCIALS_SERIES[2];
+  const line = financialLineSeries(lineMetric);
+  const isApr = line.id === 'bondingApr';
+  const metricSeries = [...FINANCIALS_SERIES.slice(0, 2), line];
   // Feature-owned provisional segment: never bridge a missing APR day.
   const partialApr = rows.map((row, index) => (
-    row.partial || (rows[index + 1]?.partial && row.bondingApr !== null) ? row.bondingApr : null
+    row.partial || (rows[index + 1]?.partial && row[line.id] !== null) ? row[line.id] : null
   ));
   return buildTimeSeriesOption(rows, {
     ...viewport, hidden, zoomId: 'financials-window', minSpan: 2,
-    axes: FINANCIALS_SERIES.map((series, index) => ({
+    axes: metricSeries.map((series, index) => ({
       ...series, position: index === 0 ? 'left' : 'right',
-      label: `${index === 0 ? 'VOLUME' : index === 1 ? 'INCOME' : 'BONDING APR'} · ${index === 2 ? '%' : unit}`,
-      format: index === 2 ? formatFinancialPercent : (value) => formatFinancialAmount(value, currency)
+      label: `${index === 0 ? 'VOLUME' : index === 1 ? 'INCOME' : line.label} · ${index === 2 ? isApr ? '%' : 'USD' : unit}`,
+      format: index === 2 ? isApr ? formatFinancialPercent : value => formatFinancialAmount(value, 'usd', false) : (value) => formatFinancialAmount(value, currency)
     })),
     series: [
       ...FINANCIALS_SERIES.slice(0, 2).map((series, index) => ({
         ...series, aggregate: 'sum', axis: series.id, fill: seriesFills[series.id], barMaxWidth: 20, order: 2 - index,
         data: rows.map((row) => row[`${series.id}${suffix}`])
       })),
-      { ...apr, axis: apr.id, aggregate: 'mean', aggregateData: rows.map(row => row.bondingApr), rollingData: rows.map(row => row.bondingApr), data: rows.map((row) => row.partial ? null : row.bondingApr) },
-      { ...apr, id: 'bondingApr-partial', visibilityId: apr.id, axis: apr.id,
-        label: 'BONDING APR · IN PROGRESS', legend: false, rolling: false, data: partialApr, dashed: true,
+      { ...line, legend: false, axis: line.id, aggregate: isApr ? 'mean' : 'last', aggregateData: rows.map(row => row[line.id]), rollingData: rows.map(row => row[line.id]), data: rows.map((row) => row.partial ? null : row[line.id]) },
+      { ...line, id: `${line.id}-partial`, visibilityId: line.id, axis: line.id,
+        label: `${line.label} · IN PROGRESS`, legend: false, rolling: false, data: partialApr, dashed: true,
         symbolSize: (_value, item) => rows[item.dataIndex]?.partial ? 8 : 0 }
     ],
-    tooltip: (row) => financialEChartsTooltip(row, currency, hidden),
-    groupedTooltip: (bucket, context) => financialGroupedTooltip(bucket, context, currency),
+    rollingSeries: [{ ...line, axis: line.id, data: rows.map(row => row[line.id]) }],
+    tooltip: (row) => financialEChartsTooltip(row, currency, hidden, lineMetric),
+    groupedTooltip: (bucket, context) => financialGroupedTooltip(bucket, context, currency, lineMetric),
     xLabel: (day, index) => rows[index]?.partial ? 'Today*' : new Date(`${day}T00:00:00Z`).toLocaleDateString('en-US', {
       month: 'short', ...(rows.length <= 365 ? { day: 'numeric' } : { year: '2-digit' }), timeZone: 'UTC'
     })

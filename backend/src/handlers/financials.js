@@ -2,8 +2,16 @@ import { FINANCIALS_RANGES } from '../../../shared/financials/model.js';
 import { error, json } from '../lib/http.js';
 import { createReadModelEtag, getReadModel } from '../shared/read-models.js';
 import { ageFinancialsPayload, financialsModelKey } from '../shared/financials-read-model.js';
+import { financialDetailDay, readFinancialDay } from '../shared/financials-day-detail.js';
 
 export async function handleFinancials(_request, url, options = {}) {
+  if (url.searchParams.has('day')) {
+    const day = url.searchParams.get('day');
+    try { financialDetailDay(day, options.now?.() ?? Date.now()); }
+    catch (failure) { return error(failure.message, 400); }
+    const detail = await (options.readDay || readFinancialDay)(day);
+    return json(detail, 200, { 'Cache-Control': 'no-store' });
+  }
   const range = url.searchParams.get('range') || '30d';
   if (!FINANCIALS_RANGES.some((item) => item.id === range)) return error('Range must be 30d, 90d, 1y, or all', 400);
   const model = await (options.getReadModel || getReadModel)(financialsModelKey(range));

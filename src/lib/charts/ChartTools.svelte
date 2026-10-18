@@ -37,6 +37,7 @@
     {/each}
   </div>
   <SeriesLegend series={legendSeries} {hidden} onToggle={(id) => onHidden(toggle(hidden, id))} />
+  <slot name="legend-extra" />
   <details bind:this={menu} bind:open>
     <summary bind:this={trigger}>[ROLLING AVGS{rolling.length ? ` · ${rolling.length}` : ''}]</summary>
     <div class="options">

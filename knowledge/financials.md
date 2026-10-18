@@ -1,6 +1,6 @@
 # Financials dashboard
 
-`/financials` is the protocol-wide volume, income, and bonding APR dashboard.
+`/financials` is the protocol-wide volume, income, RUNE price, and bonding APR dashboard.
 For local development, start it with:
 
 ```sh
@@ -48,6 +48,11 @@ Collector startup is conditional on its unit existing so rollback to older
 releases remains supported; rollback does not delete retained Financials data.
 
 ## Accounting
+
+- The amber line defaults to closing RUNE/USD price. The sliding control switches
+  it to bonding APR without resetting zoom; price stays USD even when volume and
+  income are denominated in RUNE. Weekly/monthly prices use the closing observation,
+  APR uses the mean daily rate, and missing prices remain gaps.
 
 - Default: 30 UTC calendar days including today. Additional ranges: 90D, 1Y,
   and all time from the multi-chain mainnet/Chaosnet launch on 2021-04-13.
@@ -105,6 +110,39 @@ five-minute cutoff changes. Partial-day totals and bonds stay in memory only,
 never in the completed-day disk cache. A new UTC day clears the old partial
 snapshot even during an outage. Completed daily history replaces yesterday's
 intraday data rather than carrying a partial total forward.
+
+## Day drill-down
+
+Click a daily chart bucket or use the UTC date picker to expand two tables below
+the plot: the ten largest successful swaps by input USD value (once per route),
+and ten pools by executed USD volume. Weekly/monthly views retain the date picker
+rather than treating an aggregated bucket as one day. Transaction links open the
+explorer; the tables always identify their USD ranking basis, independently of
+the chart's denomination. Dragging to zoom must not select a day.
+
+`/financials?day=YYYY-MM-DD` validates the mainnet date range and enqueues/reads
+`financials_day_details` (migration 068), without upstream calls in the public
+handler. The existing independent Financials collector advances up to ten requests
+per pass on a separate five-second loop. Each request checkpoints the opaque
+Midgard cursor and compact top-ten candidates; errors retain the last checkpoint
+and last-good payload. Full-day acquisition can take several minutes on busy days.
+Repeated visitors share the same scan and result. No extra service/timer is needed.
+
+The source horizon is pinned to a completed five-minute boundary behind Midgard's
+watermark and the clock. Descending action pagination continues past UTC midnight;
+only successful, priced actions inside `[day start, cutoff)` are ranked. Missing
+prices and pending swaps are disclosed, not converted to zeros. Streaming swaps
+use their Midgard action date, not a claim that every sub-swap executed that day.
+Pool discovery combines the matching earnings intervals and encountered action
+pools. Each pool's volume is fetched separately from `/history/swaps`, with exact
+contiguous coverage and base-unit validation, rather than attributing input value
+to every pool. No ranking is published until both complete scans finish.
+
+Current/recent data refreshes at most every fifteen minutes while requested;
+complete, fully priced days older than two days are retained as final. Source
+failures retry no sooner than one minute. The local Vite route runs the same
+acquisition/normalization logic with an in-memory development cache; production
+cursor/results survive service restarts and immutable releases in Postgres.
 
 ## Historical state and acquisition
 

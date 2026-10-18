@@ -8,6 +8,12 @@ export function createTimeSeriesController(chart, initial, { buildOption, width,
   let zoomId;
   let minPoints = 2;
   let renderedPoints = initial.points;
+  let pointerStart = null;
+  let dragged = false;
+  const pointerDown = event => { pointerStart = [event.offsetX, event.offsetY]; dragged = false; };
+  const pointerMove = event => {
+    if (pointerStart && Math.hypot(event.offsetX - pointerStart[0], event.offsetY - pointerStart[1]) > 5) dragged = true;
+  };
 
   function render() {
     if (disposed) return;
@@ -39,10 +45,10 @@ export function createTimeSeriesController(chart, initial, { buildOption, width,
     const index = Math.round(chart.convertFromPixel({ xAxisIndex: 0 }, pixel[0]));
     return renderedPoints[index]?.throughDay || renderedPoints[index]?.day || null;
   }
-  // Overview charts can select any day, including blank/missing bars. Canvas
-  // selection is optional; keyboard details remain ordinary feature-owned HTML.
+  // Selection includes blank/missing bars. Zoomable features explicitly opt in
+  // and suppress selection after a drag; keyboard details stay feature-owned.
   function selectPoint(event) {
-    if (disposed || !onSelect || zoomId) return;
+    if (disposed || !onSelect || dragged || (zoomId && !state.options?.selectWithZoom)) return;
     const day = pointDay(event);
     if (day) onSelect(day);
   }
@@ -50,7 +56,11 @@ export function createTimeSeriesController(chart, initial, { buildOption, width,
   const clearHover = () => { if (!disposed) onHover?.(null); };
   chart.on('datazoom', handleZoom);
   chart.getZr()?.on('dblclick', resetZoom);
-  if (onSelect) chart.getZr()?.on('click', selectPoint);
+  if (onSelect) {
+    chart.getZr()?.on('click', selectPoint);
+    chart.getZr()?.on('mousedown', pointerDown);
+    chart.getZr()?.on('mousemove', pointerMove);
+  }
   if (onHover) {
     chart.getZr()?.on('mousemove', hoverPoint);
     chart.getZr()?.on('globalout', clearHover);
@@ -87,7 +97,11 @@ export function createTimeSeriesController(chart, initial, { buildOption, width,
       disposed = true;
       chart.off('datazoom', handleZoom);
       chart.getZr()?.off('dblclick', resetZoom);
-      if (onSelect) chart.getZr()?.off('click', selectPoint);
+      if (onSelect) {
+        chart.getZr()?.off('click', selectPoint);
+        chart.getZr()?.off('mousedown', pointerDown);
+        chart.getZr()?.off('mousemove', pointerMove);
+      }
       if (onHover) {
         chart.getZr()?.off('mousemove', hoverPoint);
         chart.getZr()?.off('globalout', clearHover);

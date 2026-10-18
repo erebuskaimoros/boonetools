@@ -240,6 +240,17 @@ under its normal advisory lock, or allow its normal timer to refresh it.
 Check methodology v4 and retain NEAR/Chainflip coverage; missing canonical exact
 THORChain monthly evidence is expected. See [accounting and archive limits](../knowledge/financials.md#reserve-emissions-and-revshare-october-13-2026).
 
+### Financials day rankings and RUNE price line
+
+Deploy backend before frontend. Migration 068 adds `financials_day_details`; the
+existing Financials collector gains its bounded day-detail queue loop. Preserve
+the current Financials acquisition cache and reward ledger. No new timer, full
+history backfill, or provider warmup is required. Check that `financials?day=`
+returns promptly with loading/progress metadata on a cold date and then the two
+top-ten lists after collector completion. Invalid/future dates must return 400.
+Verify daily clicks open the tables, drags still zoom, and the amber line defaults
+to RUNE/USD with a working Bonding APR switch that preserves zoom.
+
 ### Crosschain comparison stuck at a shared date
 
 Check the public `protocol-fee-comparison` endpoint's `errors` and the

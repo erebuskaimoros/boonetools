@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
   import ProtocolComparison from './protocol-fee-comparison/Comparison.svelte';
-  import { FINANCIALS_SERIES } from './financials/series.js';
+  import DayDetail from './financials/DayDetail.svelte';
   import { fetchFinancials } from './financials/api.js';
   import {
     FINANCIALS_RANGES, formatFinancialAmount, formatFinancialDay,
@@ -23,6 +23,10 @@
   let destroyed = false;
   let ChartComponent = null;
   let chartError = '';
+  let selectedDay = '';
+  function selectDay(day) {
+    if (points.some(point => point.day === day)) selectedDay = day;
+  }
   let historyPoints = [], historyRequest, historyLoading = false, historyError = '';
   async function loadRollingHistory(ids) {
     if (!ids.length || historyLoading || historyPoints.length) return;
@@ -109,6 +113,7 @@
   function selectRange(next) {
     if (next === range) return;
     range = next;
+    selectedDay = '';
     zoomWindow = null;
     load();
   }
@@ -119,15 +124,11 @@
     zoomWindow = null;
   }
 
-  function toggleSeries(id) {
-    if (!hidden.includes(id) && hidden.length === FINANCIALS_SERIES.length - 1) return;
-    hidden = hidden.includes(id) ? hidden.filter((value) => value !== id) : [...hidden, id];
-  }
 </script>
 
 <svelte:head>
   <title>THORChain Financials | BooneTools</title>
-  <meta name="description" content="THORChain protocol-wide daily swap volume, system income, and historical bonding APR." />
+  <meta name="description" content="THORChain daily swap volume, system income, RUNE price, bonding APR, and daily top swaps and pools." />
   {#if import.meta.env.DEV}<meta name="robots" content="noindex" />{/if}
 </svelte:head>
 
@@ -143,7 +144,7 @@
   <header class="page-heading">
     <div>
       <h1>FINANCIALS<span class="cursor" aria-hidden="true">_</span></h1>
-      <p>THORChain volume, system income, and the return to bonded RUNE.</p>
+      <p>THORChain volume, system income, RUNE price, and bonding returns.</p>
     </div>
     <div class="source-state" class:stale={sourceDelayed || Boolean(error)} aria-live="polite">
       <span><i class:live={!loading && !sourceDelayed && !error}></i>{loading ? 'LOADING HISTORY' : error ? 'SOURCE ERROR' : sourceDelayed ? 'SOURCE DELAYED' : 'LIVE · 5 MIN BUCKETS'}</span>
@@ -208,7 +209,7 @@
       <TerminalAlert tone="err" tag="ERR">{chartError} <button class="inline-action" on:click={loadChart}>retry chart</button></TerminalAlert>
     {:else if ChartComponent}
       {#if historyLoading || historyError}<p class="muted-text">{historyError || 'Loading rolling-average lookback…'}</p>{/if}
-      <svelte:component this={ChartComponent} {points} {historyPoints} onRollingChange={loadRollingHistory} {currency} {hidden} {zoomWindow} {loading} {hasData} onZoom={(window) => zoomWindow = window} />
+      <svelte:component this={ChartComponent} {points} {historyPoints} onRollingChange={loadRollingHistory} {currency} {hidden} {zoomWindow} {loading} {hasData} onZoom={(window) => zoomWindow = window} onSelect={selectDay} />
     {:else}
       <div class="chart-loading" role="status">Loading chart renderer…</div>
     {/if}
@@ -216,6 +217,13 @@
       <span>{formatFinancialDay(selectedPoints[0]?.day)} → {formatFinancialDay(selectedPoints.at(-1)?.day)} <span class="muted-text">· UTC</span></span>
       <span>Independent scales <span class="muted-text">·</span> Drag or pinch to zoom</span>
     </div>
+    <div class="day-picker">
+      <label for="financial-detail-day">Click a daily bar or choose a day</label>
+      <input id="financial-detail-day" type="date" value={selectedDay} min={points[0]?.day} max={points.at(-1)?.day}
+        disabled={!hasData} on:change={event => selectDay(event.currentTarget.value)} />
+      <span class="muted-text">Top swaps &amp; pools · UTC</span>
+    </div>
+    {#if selectedDay}{#key selectedDay}<DayDetail day={selectedDay} onClose={() => selectedDay = ''} />{/key}{/if}
     {#if livePoint}
       <div class="live-note"><span>TODAY · IN PROGRESS</span>
         {#if payload?.live?.through}
@@ -225,7 +233,7 @@
       </div>
     {/if}
     {#if pending}
-      <div class="coverage-note" role="status">Loading historical bonds · {summary.aprDays} / {summary.days} APR days ready. The line fills in as snapshots arrive.</div>
+      <div class="coverage-note" role="status">Loading historical bonds · {summary.aprDays} / {summary.days} APR days ready. APR becomes available as snapshots arrive.</div>
     {:else if hasData && summary.aprDays < summary.days}
       <div class="coverage-note">Bonding APR is available for {summary.aprDays} / {summary.days} days. Gaps indicate unavailable historical validator state.</div>
     {/if}
@@ -239,7 +247,7 @@
   <section class="methodology" aria-label="Metric definitions">
     <div><h2><span class="volume-value">01</span> VOLUME</h2><p>Executed swap volume across every pool, including trade, secured, and synth swaps. Cross-asset swaps contribute both pool legs.</p></div>
     <div><h2><span class="income-value">02</span> SYSTEM INCOME</h2><p>Midgard’s retained earnings after REVSHARE. The hover breakdown is gross liquidity fees + Reserve emissions − REVSHARE + a separately disclosed reconciliation adjustment. Emissions use historical Reserve balances and the protocol formula; REVSHARE uses finalized payouts. Missing coverage stays unavailable. USD income uses each day’s closing RUNE price, or the latest covered five-minute price today. Swap USD uses prices at execution.</p></div>
-    <div><h2><span class="apr-value">03</span> BONDING APR</h2><p>Daily node rewards ÷ closing active bond × 365. Today’s estimate scales rewards by the elapsed covered time, using a bond snapshot at the same cutoff. Snapshots reflect bonds, unbonds, and active-set changes; balances are not time-weighted. Excludes individual fees and performance adjustments.</p></div>
+    <div><h2><span class="apr-value">03</span> RUNE PRICE / BONDING APR</h2><p>The amber line defaults to closing RUNE price in USD; weekly and monthly views use the last observation. Switch to APR for daily node rewards ÷ closing active bond × 365. Today’s APR estimate scales rewards by the elapsed covered time, using a bond snapshot at the same cutoff. Snapshots reflect bonds, unbonds, and active-set changes; balances are not time-weighted. Excludes individual fees and performance adjustments.</p></div>
   </section>
 
   {#if hasData}
@@ -249,7 +257,7 @@
       <div class="table-scroll" tabindex="0" role="region" aria-label="Daily financials table">
         <table>
           <thead><tr><th scope="col">DAY · UTC</th><th scope="col">VOLUME · {currency.toUpperCase()}</th><th scope="col">SYSTEM INCOME · {currency.toUpperCase()}</th><th scope="col">BONDING APR</th></tr></thead>
-          <tbody>{#each tablePoints as row}<tr class:partial={row.partial}><th scope="row">{row.day}{#if row.partial}<span class="partial-label">LIVE / PARTIAL</span>{/if}</th><td>{amount(currency === 'usd' ? row.volumeUsd : row.volumeRune, false)}</td><td>{amount(currency === 'usd' ? row.incomeUsd : row.incomeRune, false)}</td><td class="apr-value">{formatFinancialPercent(row.bondingApr)}{row.partial ? ' est.' : ''}</td></tr>{/each}</tbody>
+          <tbody>{#each tablePoints as row}<tr class:partial={row.partial}><th scope="row"><button class="inline-action" on:click={() => selectDay(row.day)} aria-label={`Show top swaps and pools for ${row.day}`}>{row.day}</button>{#if row.partial}<span class="partial-label">LIVE / PARTIAL</span>{/if}</th><td>{amount(currency === 'usd' ? row.volumeUsd : row.volumeRune, false)}</td><td>{amount(currency === 'usd' ? row.incomeUsd : row.incomeRune, false)}</td><td class="apr-value">{formatFinancialPercent(row.bondingApr)}{row.partial ? ' est.' : ''}</td></tr>{/each}</tbody>
         </table>
       </div>
     </details>
@@ -261,6 +269,9 @@
 <style>
   .financials { max-width: 1440px; margin: 0 auto; padding: 24px 24px 56px; color: var(--term-text-body); font-family: var(--term-font-mono); }
   .financials :global(*) { font-family: inherit; }
+  .day-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; font-size: 11px; }
+  .day-picker input { color-scheme: dark; border: 1px solid var(--term-border); border-radius: 0; padding: 6px; background: var(--term-surface); color: var(--term-text-body); font: 12px var(--term-font-mono); }
+  .day-picker input:focus-visible { outline: 2px solid var(--term-accent); outline-offset: 2px; }
   .command-line, .command-actions, .chart-controls, .panel-heading, .chart-toolbar, .chart-footer { display: flex; align-items: center; gap: 12px; }
   .command-line { justify-content: space-between; border-bottom: 1px solid var(--term-border); padding-bottom: 14px; font-family: var(--term-font-mono); font-size: 12px; }
   .prompt, .cursor, .panel-heading h2 > span, .metric-index, .bracket-button > span { color: var(--term-accent); }

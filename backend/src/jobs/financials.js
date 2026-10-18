@@ -11,6 +11,7 @@ import { createReadModelEtag, publishReadModel } from '../shared/read-models.js'
 import { readFinancialRewardAccountingDays, repairFinancialRewardBlocks } from '../shared/financials-reward-source.js';
 import { repairFinancialReserveEmissions } from '../shared/financials-reserve-service.js';
 import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-pool.js';
+import { refreshFinancialDayQueue } from '../shared/financials-day-detail.js';
 
 // Liquify's block-results archive currently starts on October 6. Begin at the
 // next complete UTC day, including the full first REVSHARE day (October 7).
@@ -87,6 +88,9 @@ export async function runFinancialsCollector(options = {}) {
           await loop(5 * 60_000, () => service.refreshHistory('all'));
         })(),
         loop(30_000, async () => { await service.refreshLive(); await service.refreshRewardAccounting?.(); }),
+        ...(options.service && !options.refreshDayDetails ? [] : [loop(5000, () =>
+          (options.refreshDayDetails || refreshFinancialDayQueue)(client, { signal,
+            getJson: route => createFinancialsProviderRequest(client)(`${FINANCIALS_MIDGARD}${route}`, { lane: 'day-details' }) }))]),
         // Steady-state capture is provider-free. A separate bounded lane
         // repairs startup history and websocket gaps without blocking live
         // publication or sharing the historical-bond acquisition lane.

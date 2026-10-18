@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
-import { buildFinancialEChartsOption, financialEChartsTooltip, financialEChartsWindow } from '../src/lib/financials/echarts-options.js';
+import { buildFinancialEChartsOption as buildOption, financialEChartsTooltip as tooltip, financialEChartsWindow } from '../src/lib/financials/echarts-options.js';
 import { financialChartIndices, financialChartWindow } from '../src/lib/financials/series.js';
+
+// Keep the accounting/APR regression suite explicitly on the APR selection.
+// Default-price behavior and metric switching have their own interaction suite.
+const buildFinancialEChartsOption = (rows, options = {}) => buildOption(rows, { lineMetric: 'bondingApr', ...options });
+const financialEChartsTooltip = (row, currency, hidden = []) => tooltip(row, currency, hidden, 'bondingApr');
 
 const rows = Array.from({ length: 6 }, (_, index) => ({
   day: `2026-09-0${index + 1}`, volumeUsd: index * 1000, volumeRune: index * 5000,
