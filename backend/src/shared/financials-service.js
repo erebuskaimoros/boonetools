@@ -207,9 +207,11 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
         || (failedDays.get(point.day) || 0) > now()) continue;
       pendingDays.add(point.day);
     }
-    if (bondPromise || !pendingDays.size || stopped || !requestJson && cooldownUntil > now()) return;
+    // Every new bond day starts with a Midgard action anchor. Pause new days
+    // when that source is cooling down; already-started RPC work is independent.
+    if (bondPromise || !pendingDays.size || stopped || cooldownUntil > now()) return;
     const worker = async () => {
-      while (pendingDays.size && !stopped && (requestJson || now() >= cooldownUntil)) {
+      while (pendingDays.size && !stopped && now() >= cooldownUntil) {
         const day = [...pendingDays].sort().at(-1);
         pendingDays.delete(day);
         if (cache.bonds[day] || archiveFloor && day <= archiveFloor) continue;

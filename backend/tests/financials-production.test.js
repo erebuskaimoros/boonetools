@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { setImmediate as tick } from 'node:timers/promises';
 import { DAY_SECONDS, buildFinancialsPoints, buildLiveFinancialsPoint, daySeconds } from '../../shared/financials/model.js';
 import { handleFinancials } from '../src/handlers/financials.js';
 import { ageFinancialsPayload } from '../src/shared/financials-read-model.js';
@@ -74,6 +75,32 @@ test('Collector snapshots are read-only and do not start provider acquisition', 
     assert.equal(snapshot.stale, true);
     assert.equal(snapshot.bonding.pending, 0);
     assert.equal(snapshot.points.at(-1).partial, true);
+  } finally { await service.stop(); }
+});
+
+test('a Midgard cooldown keeps unstarted bond days queued with parallel RPC enabled', async () => {
+  let actionCalls = 0;
+  const service = createFinancialsService({ now: () => now, requestSpacingMs: 0, rpcConcurrency: 6,
+    requestJson: async url => {
+      if (url.endsWith('/health')) return { inSync: true, lastAggregated: { timestamp: now / 1000, height: 28290000 } };
+      if (url.includes('/actions?')) {
+        actionCalls++;
+        throw Object.assign(new Error('Midgard HTTP 429'), { status: 429 });
+      }
+      const params = new URL(url).searchParams;
+      const from = Number(params.get('from'));
+      return { intervals: Array.from({ length: Number(params.get('count')) }, (_, i) => ({
+        startTime: String(from + i * DAY_SECONDS), endTime: String(from + (i + 1) * DAY_SECONDS),
+        totalVolume: '100000000', totalVolumeUSD: '200', earnings: '100000000', runePriceUSD: '2'
+      })) };
+    }
+  });
+  try {
+    await service.refreshHistory();
+    await tick();
+    const snapshot = await service.getSnapshot();
+    assert.ok(actionCalls <= 6, 'no fresh provider traffic beyond the started worker window');
+    assert.ok(snapshot.bonding.pending >= 20, 'cooldown must not drain unstarted days as failed attempts');
   } finally { await service.stop(); }
 });
 
