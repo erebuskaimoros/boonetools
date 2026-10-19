@@ -2,10 +2,10 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { FINANCIALS_RANGES } from '../../../shared/financials/model.js';
 import { withAdvisoryLock } from '../db/lock.js';
 import { requestFromProviders } from '../lib/provider-client.js';
+import { createBackendProviderServices } from '../lib/provider-services.js';
 import { config } from '../lib/config.js';
 import { providerLifecycleHooks } from '../shared/provider-cooldown.js';
 import { createFinancialsService } from '../shared/financials-service.js';
-import { FINANCIALS_MIDGARD, FINANCIALS_RPC } from '../shared/financials-history.js';
 import { FINANCIALS_MODEL_TTL_MS, financialsModelKey } from '../shared/financials-read-model.js';
 import { createReadModelEtag, publishReadModel } from '../shared/read-models.js';
 import { readFinancialRewardAccountingDays, repairFinancialRewardBlocks } from '../shared/financials-reward-source.js';
@@ -21,13 +21,13 @@ import { acquisitionMetrics } from '../lib/acquisition-metrics.js';
 const REWARD_HISTORY_FROM = Date.parse('2026-10-07T00:00:00Z') / 1000;
 
 export function createFinancialsProviderRequest(client, { transport = requestFromProviders, midgardBases = config.midgardUrls } = {}) {
-  return (url, { lane = 'history', midgardBudgetClass } = {}) => {
-    const base = [FINANCIALS_MIDGARD, FINANCIALS_RPC].find((candidate) => url.startsWith(`${candidate}/`));
-    if (!base) throw new Error('Financials provider is not allowlisted');
-    return transport({ bases: base === FINANCIALS_RPC ? config.rpcRestUrls : midgardBases, path: url.slice(base.length), timeoutMs: 60_000,
+  const request = createBackendProviderServices({ transport, services: { midgard: midgardBases } });
+  return (path, { service = 'midgard', lane = 'history', midgardBudgetClass, signal } = {}) => {
+    if (!['midgard', 'rpc'].includes(service)) throw new Error('Financials provider is not allowlisted');
+    return request(service, path, { timeoutMs: 60_000, request: { signal },
       // Preserve the existing 650ms start-rate limit separately on each RPC
       // provider, instead of serializing both behind the Midgard queue.
-      providerMinIntervalMs: base === FINANCIALS_RPC ? 650 : 0,
+      providerMinIntervalMs: service === 'rpc' ? 650 : 0,
       ...(midgardBudgetClass ? { midgardBudgetClass } : {}),
       headers: { Accept: 'application/json', 'x-client-id': 'BooneTools-Financials' },
       ...providerLifecycleHooks({ client, scope: `financials-${lane}` })
@@ -72,7 +72,7 @@ export async function runFinancialsCollector(options = {}) {
     const published = new Map();
     const log = options.log || ((message) => console.error(JSON.stringify({ type: 'financials', message })));
     const daySource = createFinancialDaySource({ client,
-      getJson: route => createFinancialsProviderRequest(client)(`${FINANCIALS_MIDGARD}${route}`,
+      getJson: route => createFinancialsProviderRequest(client)(route,
         { lane: 'day-details', midgardBudgetClass: 'bulk' }) });
     let stopping;
     const stop = () => {
@@ -114,7 +114,7 @@ export async function runFinancialsCollector(options = {}) {
         ...(options.service && !options.repairEmissions ? [] : [loop(5000, async () => {
           const result = await (options.repairEmissions || repairFinancialReserveEmissions)(client, {
             signal, from: REWARD_HISTORY_FROM, limit: 5000,
-            getJson: url => createFinancialsProviderRequest(client)(url, { lane: 'reserve-emissions' })
+            getJson: (path, options) => createFinancialsProviderRequest(client)(path, { ...options, lane: 'reserve-emissions' })
           });
           if (result.reconstructed) log(`Reserve emissions: verified ${result.reconstructed} blocks`);
           if (result.deferred) log(`Reserve emissions: deferred ${result.deferred} blocks: ${result.errors.join('; ')}`);

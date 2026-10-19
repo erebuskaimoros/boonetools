@@ -4,12 +4,16 @@ import { safeNumber, sleep } from '../lib/utils.js';
 import { executeDuneQueryRows, isDuneLimitError, summarizeDuneError } from './dune.js';
 import { fetchMidgard, fetchMidgardSwapHistory } from './midgard.js';
 import { computeFeesPerBillionUsd } from './tc-fee-dash.js';
+import { requestProviderJson } from '../lib/provider-json.js';
+import { isProviderRateLimitError } from '../../../shared/provider-policy.js';
+import { LLAMA_API } from '../../../shared/external-providers.js';
+import { LIQUIFY_MIDGARD } from '../../../shared/thorchain-providers.js';
 
 const BILLION = 1_000_000_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const RUNE_BASE = 100_000_000;
 const SYNC_KEY = 'daily';
-const DEFILLAMA_DEX_VOLUME_URL = 'https://api.llama.fi/overview/dexs?excludeTotalDataChartBreakdown=true&dataType=dailyVolume';
+const DEFILLAMA_DEX_VOLUME_URL = `${LLAMA_API}/overview/dexs?excludeTotalDataChartBreakdown=true&dataType=dailyVolume`;
 const CMC_VOLUME_FIELDS = [
   'totalVolume24H',
   'totalVolume24h',
@@ -61,8 +65,7 @@ function shortDateLabel(date) {
 }
 
 function isRateLimitError(error) {
-  const status = Number(error?.status || 0);
-  return status === 429 || /HTTP 429|Too Many Requests|rate.?limit/i.test(String(error?.message || ''));
+  return isProviderRateLimitError(error);
 }
 
 function isDuneBackfillError(error) {
@@ -81,21 +84,6 @@ function firstValue(row, names) {
 
 function isCmcProApiUrl() {
   return /pro-api\.coinmarketcap\.com/i.test(config.cmcGlobalMetricsHistoricalUrl);
-}
-
-async function withHttpError(response, url) {
-  if (response.ok) return response;
-
-  const body = await response.text().catch(() => '');
-  const error = new Error(`HTTP ${response.status} from ${url}${body ? `: ${body.slice(0, 500)}` : ''}`);
-  error.status = response.status;
-  error.url = url;
-  throw error;
-}
-
-async function fetchJson(url, options = {}) {
-  const response = await withHttpError(await fetch(url, options), url);
-  return response.json();
 }
 
 export function parseCmcGlobalVolumeDays(payload) {
@@ -127,7 +115,7 @@ export function parseCmcGlobalVolumeDays(payload) {
   return new Map(entries);
 }
 
-async function fetchCmcGlobalVolumeDays(startDate, count) {
+export async function fetchCmcGlobalVolumeDays(startDate, count, options = {}) {
   const cmcUrl = config.cmcGlobalMetricsHistoricalUrl;
   const usesProApi = isCmcProApiUrl();
   if (usesProApi && !config.cmcApiKey) {
@@ -154,7 +142,8 @@ async function fetchCmcGlobalVolumeDays(startDate, count) {
     ? { Accept: 'application/json', 'X-CMC_PRO_API_KEY': config.cmcApiKey }
     : { Accept: 'application/json' };
 
-  return parseCmcGlobalVolumeDays(await fetchJson(`${cmcUrl}?${params.toString()}`, { headers }));
+  return parseCmcGlobalVolumeDays(await requestProviderJson(`${cmcUrl}?${params.toString()}`, {
+    ...options, headers, scope: 'tc-fee-external' }));
 }
 
 export function parseDefiLlamaDexVolumeDays(payload) {
@@ -185,11 +174,11 @@ export function parseDefiLlamaDexVolumeDays(payload) {
   return new Map(entries);
 }
 
-async function fetchDefiLlamaDexVolumeDays(startDate, count) {
+export async function fetchDefiLlamaDexVolumeDays(startDate, count, options = {}) {
   const startMs = parseDateKey(startDate).getTime();
   const endMs = parseDateKey(addDays(startDate, count)).getTime();
-  const parsed = parseDefiLlamaDexVolumeDays(await fetchJson(DEFILLAMA_DEX_VOLUME_URL, {
-    headers: { Accept: 'application/json' }
+  const parsed = parseDefiLlamaDexVolumeDays(await requestProviderJson(DEFILLAMA_DEX_VOLUME_URL, {
+    ...options, headers: { Accept: 'application/json' }, scope: 'tc-fee-external'
   }));
   return new Map([...parsed].filter(([day]) => {
     const dayMs = parseDateKey(day).getTime();
@@ -364,7 +353,7 @@ export function buildTcFeeDailyRowsFromMidgard(earningsIntervals = [], runeInter
       source_label: hasDexVolume
         ? 'Midgard TC fees + CMC volume + DeFiLlama DEX volume'
         : 'Midgard TC fees + CMC volume',
-      source_thread: 'https://gateway.liquify.com/chain/thorchain_midgard/v2/history/earnings',
+      source_thread: `${LIQUIFY_MIDGARD}/history/earnings`,
       source_json: {
         midgard: interval,
         midgardRune: runeInterval,
@@ -433,7 +422,7 @@ export async function fetchDuneTcFeeRows(startDate, count, options = {}) {
     await sleep(config.tcFeeDashRequestDelayMs);
   }
   const [cmcVolumesByDate, thorchainVolumesByDate] = await Promise.all([
-    (options.fetchCmc || fetchCmcGlobalVolumeDays)(startDate, count),
+    (options.fetchCmc || fetchCmcGlobalVolumeDays)(startDate, count, options),
     (options.fetchSwapVolumes || fetchMidgardSwapVolumeDays)(startDate, count)
   ]);
 
@@ -471,8 +460,8 @@ export async function fetchMidgardTcFeeRows(startDate, count, options = {}) {
       ? { intervals: [...acquired.thorchainVolumesByDate.values()].map((row) => row.raw) }
       : (options.fetchSwapHistory || fetchMidgardSwapHistory)(Object.fromEntries(params)),
     acquired?.cmcVolumesByDate instanceof Map ? acquired.cmcVolumesByDate
-      : (options.fetchCmc || fetchCmcGlobalVolumeDays)(startDate, count),
-    (options.fetchDex || fetchDefiLlamaDexVolumeDays)(startDate, count)
+      : (options.fetchCmc || fetchCmcGlobalVolumeDays)(startDate, count, options),
+    (options.fetchDex || fetchDefiLlamaDexVolumeDays)(startDate, count, options)
       .then((rows) => ({ rows, error: null }))
       .catch((error) => ({ rows: new Map(), error }))
   ]);

@@ -1,7 +1,6 @@
 import { BinaryReader } from 'cosmjs-types/binary.js';
 import { QueryBalanceRequest, QueryBalanceResponse } from 'cosmjs-types/cosmos/bank/v1beta1/query.js';
 
-const RPC_BASE = 'https://gateway.liquify.com/chain/thorchain_rpc';
 export const FINANCIAL_RESERVE_ADDRESS = 'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
 const METHOD = 'historical-reserve-formula-v1';
 const SUPPORTED_VERSION = '3.20.3';
@@ -263,7 +262,7 @@ export async function fetchFinancialReserveAnchor(requestedHeight, { getJson }) 
   const height = checkedHeight(requestedHeight);
   const query = async (route, data = new Uint8Array()) => {
     const params = new URLSearchParams({ path: JSON.stringify(route), data: `0x${Buffer.from(data).toString('hex')}`, height: String(height) });
-    return responseBytes(await getJson(`${RPC_BASE}/abci_query?${params}`), height);
+    return responseBytes(await getJson(`/abci_query?${params}`, { service: 'rpc' }), height);
   };
   const [bankBytes, versionBytes, mimirBytes] = await Promise.all([
     query('/cosmos.bank.v1beta1.Query/Balance', QueryBalanceRequest.encode({ address: FINANCIAL_RESERVE_ADDRESS, denom: 'rune' }).finish()),

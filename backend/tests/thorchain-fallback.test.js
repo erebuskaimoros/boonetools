@@ -83,10 +83,10 @@ test('Financials historical RPC and reward batch use configured fallback lists',
   const requests = [];
   const transport = async (request) => { requests.push(request); return {}; };
   const get = createFinancialsProviderRequest({}, { transport });
-  await get(`${RPC_PRIMARY}/abci_query?height=28274900`);
+  await get('/abci_query?height=28274900', { service: 'rpc' });
   await fetchFinancialRewardBlockBatch({}, [28274900], { transport });
   for (const request of requests) assert.deepEqual(request.bases, [RPC_PRIMARY, RPC_FALLBACK]);
-  await get('https://gateway.liquify.com/chain/thorchain_midgard/v2/health');
+  await get('/health');
   assert.deepEqual(requests.at(-1).bases, ['https://gateway.liquify.com/chain/thorchain_midgard/v2']);
 });
 

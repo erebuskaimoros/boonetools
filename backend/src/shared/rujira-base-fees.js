@@ -4,7 +4,8 @@ import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
 import { chunkArray, safeNumber, sleep, toIsoString } from '../lib/utils.js';
 import { executeDuneQueryRows, summarizeDuneError } from './dune.js';
-import { fetchMidgard, isMidgardRateLimitError } from './midgard.js';
+import { fetchMidgard } from './midgard.js';
+import { isProviderRateLimitError } from '../../../shared/provider-policy.js';
 import { loadRujiraRunePrices } from './rujira-rune-prices.js';
 import { fetchThorchainRpc } from './rpc.js';
 import { requestFromProviders } from '../lib/provider-client.js';
@@ -757,14 +758,7 @@ function createHttpError(message, details = {}) {
   return error;
 }
 
-export function isRujiraBaseFeeProviderRateLimit(error) {
-  return Boolean(
-    isMidgardRateLimitError(error) ||
-    error?.status === 429 ||
-    /HTTP 429|Too Many Requests|daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.message || '')) ||
-    /daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.body || ''))
-  );
-}
+export const isRujiraBaseFeeProviderRateLimit = isProviderRateLimitError;
 
 async function fetchJsonFromBases(bases, pathname, params = {}) {
   return fetchThorchainRpc(pathname, params, { rpcUrls: bases,

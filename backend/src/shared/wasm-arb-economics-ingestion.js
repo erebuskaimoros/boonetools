@@ -1430,9 +1430,9 @@ export async function fetchPriceIntervals(poolAsset, from, to, options = {}) {
 
   // Rounded history endTime does not prove the bucket has been aggregated.
   // Capture this provider's watermark before requesting any of its history.
-  const fetch = options.fetchMidgard || fetchMidgard;
+  const fetchSource = options.fetchMidgard || fetchMidgard;
   const fetchOptions = { cooldownClient: options.client, sharedCooldown: true, bases: [base] };
-  const health = await fetch('/health', fetchOptions);
+  const health = await fetchSource('/health', fetchOptions);
   const now = typeof options.healthNow === 'function' ? options.healthNow() : options.healthNow ?? Date.now();
   const nowMs = typeof now === 'number' ? now : Date.parse(now);
   const watermark = Number(health?.lastAggregated?.timestamp);
@@ -1453,7 +1453,7 @@ export async function fetchPriceIntervals(poolAsset, from, to, options = {}) {
       from: String(range.from),
       to: String(range.until)
     });
-    const payload = await fetch(
+    const payload = await fetchSource(
       `/history/depths/${encodeURIComponent(poolAsset)}?${query}`,
       fetchOptions
     );

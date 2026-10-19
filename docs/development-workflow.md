@@ -41,6 +41,37 @@ canonical workspace:
 /Users/boonewheeler/Desktop/Projects/THORChain/scripts/audit-workspace.sh --project boonetools-website
 ```
 
+## Provider boundaries
+
+`npm run check:boundaries` also checks outbound acquisition boundaries with a
+syntax-tree guard. Backend collectors must use `backend/src/lib/provider-client.js`
+or its service/JSON adapters, preserving durable admission, cooldowns and metrics.
+`shared/provider-services.js` resolves a service plus a relative route; production
+uses `createBackendProviderServices`, while browser/Vite callers use public defaults.
+Do not translate a public URL into a private URL inside a job. Financials request
+callbacks take `(path, { service = 'midgard', lane, ...options })`; RPC callers must
+explicitly select `service: 'rpc'`. Comparison selects Midgard explicitly and retains
+an origin allowlist for its other providers.
+
+Public endpoint declarations live in the shared provider catalogs; credentials and
+environment resolution stay in backend configuration. Rapid receives backend bases
+and client ID by injection, never by reading environment variables in `shared/`.
+The Rujira Midgard lists inherit the resolved shared list unless explicitly overridden.
+
+`shared/midgard-policy.js` owns response checks. Its explicit Rapid profile retains
+transaction-filter, cursor and height validation without tightening unrelated clients.
+Rate-limit aliases delegate to `shared/provider-policy.js`: a size-related 429 is not
+a quota failure unless accompanied by Retry-After. TC Fee CMC/DeFiLlama requests use
+the backend JSON adapter with a 30-second deadline and existing payload parsers.
+
+The guard covers backend source, shared modules, the Financials/comparison dev
+adapters and browser Midgard adapter. Explicit independent L1 transport/catalog
+owners remain allowlisted; archived UI and standalone research scripts are outside
+this pass. New raw fetch/HTTP imports, hard-coded provider URLs in collectors,
+public transport imports from backend jobs, and shared environment reads fail CI.
+Tests include deliberately violating fixtures and routing, budget, cancellation,
+redaction, validation and external-provider transport contracts.
+
 ## Deployment and browser verification
 
 Follow [deployment.md](deployment.md): publish the intended commit to production

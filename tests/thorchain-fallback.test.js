@@ -106,10 +106,10 @@ test('development Financials shares the RPC provider pool without changing Midga
   const { createFinancialsDevRequest } = await import('../scripts/dev-financials.mjs');
   const calls = [];
   const get = createFinancialsDevRequest(async options => { calls.push(options); return {}; });
-  await get(`${RPC_PRIMARY}/abci_query?height=150`);
-  await get('https://gateway.liquify.com/chain/thorchain_midgard/v2/health');
+  await get('/abci_query?height=150', { service: 'rpc' });
+  await get('/health');
   assert.deepEqual(calls[0].bases, [RPC_PRIMARY, RPC_FALLBACK]);
   assert.equal(calls[0].providerMinIntervalMs, 650);
   assert.deepEqual(calls[1].bases, ['https://gateway.liquify.com/chain/thorchain_midgard/v2']);
-  assert.throws(() => get('https://unrelated.example/health'), /allowlisted/);
+  assert.throws(() => get('https://unrelated.example/health'), /service base/);
 });

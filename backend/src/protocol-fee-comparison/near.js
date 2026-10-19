@@ -1,7 +1,8 @@
 import { calendarDays, dayOf, dayTime, nextDay } from '../../../shared/protocol-fee-comparison/model.js';
 
-export const NEAR_RPC = 'https://archival-rpc.mainnet.fastnear.com';
-export const NEAR_TRANSFERS = 'https://transfers.main.fastnear.com/v0/transfers';
+import { NEAR_RPC, NEAR_TRANSFERS_ORIGIN } from '../../../shared/external-providers.js';
+export { NEAR_RPC };
+export const NEAR_TRANSFERS = `${NEAR_TRANSFERS_ORIGIN}/v0/transfers`;
 export const FEE_WALLETS = ['fefundsadmin.sputnik-dao.near', '1csfundsadmin.sputnik-dao.near', 'buybacks.multisignature.near'];
 const tokens = (atomic) => Number(atomic) / 1e24;
 

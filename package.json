@@ -9,7 +9,7 @@
     "start": "vite",
     "test": "node --test tests/**/*.test.js",
     "check": "npm run check:boundaries && npm run check:surface && npm run check:svelte",
-    "check:boundaries": "node ./scripts/check-import-boundaries.mjs",
+    "check:boundaries": "node ./scripts/check-import-boundaries.mjs && node ./scripts/check-provider-boundaries.mjs",
     "check:surface": "node ./scripts/audit-frontend-surface.mjs --check",
     "check:svelte": "node ./scripts/check-svelte-diagnostics.mjs",
     "design:lint": "npx --yes @google/design.md@0.1.1 lint DESIGN.md",

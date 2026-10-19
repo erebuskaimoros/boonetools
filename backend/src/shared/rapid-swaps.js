@@ -5,7 +5,9 @@ import { configureRapidSwapProviderLifecycle } from '../../../shared/rapid-swaps
 import { requestFromProviders, thorchainProviderPool } from '../lib/provider-client.js';
 
 configureRapidSwapProviderLifecycle({ ...providerLifecycleHooks(), requestFromProviders, providerPool: thorchainProviderPool,
-  providerMode: config.thorchainProviderBalancingEnabled ? undefined : 'fallback' });
+  providerMode: config.thorchainProviderBalancingEnabled ? undefined : 'fallback' }, {
+  midgardBases: config.midgardUrls, thornodeBases: config.thornodeUrls, clientId: config.providerClientId
+});
 
 export {
   ACTION_PAGE_LIMIT,

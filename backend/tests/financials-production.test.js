@@ -87,7 +87,7 @@ test('a Midgard cooldown keeps unstarted bond days queued with parallel RPC enab
         actionCalls++;
         throw Object.assign(new Error('Midgard HTTP 429'), { status: 429 });
       }
-      const params = new URL(url).searchParams;
+      const params = new URL(url, 'https://provider.invalid').searchParams;
       const from = Number(params.get('from'));
       return { intervals: Array.from({ length: Number(params.get('count')) }, (_, i) => ({
         startTime: String(from + i * DAY_SECONDS), endTime: String(from + (i + 1) * DAY_SECONDS),
@@ -173,12 +173,12 @@ test('Live publication continues while historical acquisition is blocked and shu
 test('Financials provider transport is allowlisted, bounded, and uses shared lifecycle hooks', async () => {
   let request;
   const get = createFinancialsProviderRequest({}, { transport: async (options) => { request = options; return {}; } });
-  await get('https://gateway.liquify.com/chain/thorchain_midgard/v2/health', { lane: 'live' });
+  await get('/health', { lane: 'live' });
   assert.equal(request.timeoutMs, 60000);
   assert.equal(request.path, '/health');
   assert.equal(typeof request.beforeRequest, 'function');
   assert.equal(typeof request.onProviderError, 'function');
-  assert.throws(() => get('https://untrusted.example/health'), /allowlisted/);
+  assert.throws(() => get('https://untrusted.example/health'), /service base/);
 });
 
 test('Reward archive repair and Reserve reconstruction run independently of live publication', async () => {

@@ -1,7 +1,7 @@
 import { requestFromProviders } from '../lib/provider-client.js';
 import { acquireCached } from './acquisition-cache.js';
 
-const YAHOO_BASE = 'https://query1.finance.yahoo.com/v8/finance/chart';
+import { YAHOO_CHART as YAHOO_BASE } from '../../../shared/external-providers.js';
 export const ALLOWED_SYMBOLS = ['SPY', 'VT', 'GC=F'];
 
 export async function fetchYahooQuote(symbol, from, to) {

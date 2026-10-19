@@ -1,8 +1,9 @@
 import { calendarDays, dayTime, nextDay, NEAR_NET_SUPPLY_METHOD } from '../../../shared/protocol-fee-comparison/model.js';
 import { NEAR_RPC, isUnknownBlockError } from './near.js';
+import { LLAMA_COINS } from '../../../shared/external-providers.js';
 
 export { NEAR_NET_SUPPLY_METHOD };
-const INDEX = 'https://coins.llama.fi/block/near';
+const INDEX = `${LLAMA_COINS}/block/near`;
 const atomic = value => typeof value === 'string' && /^\d+$/.test(value);
 const nanoseconds = day => BigInt(dayTime(day)) * 1_000_000n;
 

@@ -8,17 +8,11 @@ import { buildComparisonPayload, collectComparison, emptyComparisonCache } from 
 import { createComparisonRequest } from '../../../shared/protocol-fee-comparison/request.js';
 import { readFinancialRewardAccountingDays } from '../shared/financials-reward-source.js';
 import { config } from '../lib/config.js';
-import { FINANCIALS_MIDGARD } from '../shared/financials-history.js';
+import { createBackendProviderServices } from '../lib/provider-services.js';
 
 export function comparisonRequest(client, { transport = requestFromProviders, midgardBases = config.midgardUrls } = {}) {
-  // The runtime-neutral collector uses a public service identifier. Resolve it
-  // here, before budgets/cooldowns, so credentials never enter browser modules.
-  const publicMidgard = new URL(FINANCIALS_MIDGARD);
-  return createComparisonRequest({ transport: options => transport(
-    options.bases.length === 1 && options.bases[0] === publicMidgard.origin
-      && options.path.startsWith(`${publicMidgard.pathname}/`)
-      ? { ...options, bases: midgardBases, path: options.path.slice(publicMidgard.pathname.length) }
-      : options),
+  return createComparisonRequest({ transport,
+    services: createBackendProviderServices({ transport, services: { midgard: midgardBases } }),
     hooks: client ? providerLifecycleHooks({ client, scope: 'protocol-fee-comparison' }) : {} });
 }
 

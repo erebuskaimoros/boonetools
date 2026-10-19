@@ -3,6 +3,7 @@ import { upsertRows } from '../db/sql.js';
 import { error, isValidThorAddress, json } from '../lib/http.js';
 import { config } from '../lib/config.js';
 import { requestFromProviders } from '../lib/provider-client.js';
+import { COINGECKO_BASE } from '../../../shared/external-providers.js';
 import {
   hasBondHistoryValue,
   isPoisonedBondHistoryRow,
@@ -18,7 +19,6 @@ const BOND_HISTORY_SCOPE_CURRENT = 'current';
 const BOND_HISTORY_SCOPE_HISTORICAL = 'historical';
 const BOND_HISTORY_SCOPE_LEGACY = 'legacy';
 const BOND_TX_EVENT_SYNC_TTL_MS = 6 * 60 * 60 * 1000;
-const COINGECKO_BASE = 'https://api.coingecko.com';
 
 function fetchCoinGecko(path) {
   return requestFromProviders({

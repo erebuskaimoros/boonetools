@@ -2,9 +2,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { financialsWindow } from '../shared/financials/model.js';
 import { createFinancialsService } from '../backend/src/shared/financials-service.js';
-import { FINANCIALS_MIDGARD, FINANCIALS_RPC } from '../backend/src/shared/financials-history.js';
 import { requestFromProviders } from '../shared/provider-client.js';
-import { RPC_PUBLIC_URLS } from '../shared/thorchain-providers.js';
+import { createProviderServices } from '../shared/provider-services.js';
 import { advanceFinancialDay, financialDetailDay, financialDaySnapshotComplete, financialDayRetryAt,
   FINANCIAL_DAY_REFRESH_MS, FINANCIAL_DAY_VISITOR_LEASE_MS } from '../backend/src/shared/financials-day-detail.js';
 
@@ -39,12 +38,12 @@ export function createFinancialsDevBudget({ now = Date.now } = {}) {
 const devMidgardBudget = createFinancialsDevBudget();
 
 export function createFinancialsDevRequest(transport = requestFromProviders, { budget = devMidgardBudget, bulk = false } = {}) {
-  return (url) => {
-    const base = [FINANCIALS_MIDGARD, FINANCIALS_RPC].find(candidate => url.startsWith(`${candidate}/`));
-    if (!base) throw new Error('Financials provider is not allowlisted');
-    if (base === FINANCIALS_MIDGARD) budget({ bulk: bulk || url.startsWith(`${base}/actions`) });
-    return transport({ bases: base === FINANCIALS_RPC ? RPC_PUBLIC_URLS : [base], path: url.slice(base.length),
-      timeoutMs: 60_000, providerMinIntervalMs: base === FINANCIALS_RPC ? 650 : 1000,
+  const request = createProviderServices({ transport });
+  return (path, { service = 'midgard' } = {}) => {
+    if (!['midgard', 'rpc'].includes(service)) throw new Error('Financials provider is not allowlisted');
+    if (service === 'midgard') budget({ bulk: bulk || /^\/actions(?:[/?]|$)/.test(path) });
+    return request(service, path, {
+      timeoutMs: 60_000, providerMinIntervalMs: service === 'rpc' ? 650 : 1000,
       headers: { Accept: 'application/json', 'x-client-id': 'BooneTools-Financials' } });
   };
 }
@@ -56,7 +55,7 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
     entry.running = true;
     try {
       for (let index = 0; index < 10 && !stopped && now() - entry.requestedAt < FINANCIAL_DAY_VISITOR_LEASE_MS; index++) {
-        const result = await advanceFinancialDay(day, entry.state, route => requestJson(`${FINANCIALS_MIDGARD}${route}`), now());
+        const result = await advanceFinancialDay(day, entry.state, requestJson, now());
         entry.state = result.state;
         if (result.payload) { entry.payload = result.payload; entry.retryAt = now() + FINANCIAL_DAY_REFRESH_MS; break; }
       }

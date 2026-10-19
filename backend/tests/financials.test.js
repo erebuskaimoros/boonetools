@@ -138,7 +138,7 @@ test('Live day replaces any duplicate and keeps rolling ranges at 30 calendar da
 test('Live totals sum completed five-minute buckets exactly and ignore future zero placeholders', async () => {
   const calls = [];
   const getJson = async (url) => {
-    calls.push(new URL(url));
+    calls.push(new URL(url, 'https://provider.invalid'));
     return { intervals: Array.from({ length: 3 }, (_, i) => ({
       startTime: from + i * 300, endTime: from + (i + 1) * 300,
       totalVolume: '9007199254740993', totalVolumeUSD: '150',
@@ -191,7 +191,7 @@ test('Long history paginates beyond the 400-day cap without count/from/to overco
   const calls = [];
   const rows = await fetchFinancialHistory('earnings', { from, to: from + 401 * DAY,
     getJson: async (url) => {
-      const u = new URL(url); calls.push(u);
+      const u = new URL(url, 'https://provider.invalid'); calls.push(u);
       const start = Number(u.searchParams.get('from'));
       assert.equal(u.searchParams.has('to'), false);
       const count = Number(u.searchParams.get('count'));
@@ -223,7 +223,7 @@ test('Historical bond decoder sums only active nodes and keeps base-unit precisi
 test('Bond snapshot resolves a same-day block and validates RPC height before using its bond', async () => {
   const calls = [];
   const getJson = async (url) => {
-    calls.push(new URL(url));
+    calls.push(new URL(url, 'https://provider.invalid'));
     if (url.includes('/actions?')) return { actions: [{ height: '100', date: String(BigInt(from + DAY - 2) * 1_000_000_000n) }] };
     return { result: { response: { code: 0, height: '100', value: nodeResponse([{ bond: '500000000' }]) } } };
   };
@@ -247,7 +247,7 @@ test('A stale action block from a different day cannot populate a daily APR', as
 test('Live bond queries stop at the matching intraday cutoff rather than the end of today', async () => {
   const cutoff = from + 6 * 3600;
   const bond = await fetchFinancialBondDay(from, { to: cutoff, getJson: async (url) => {
-    const u = new URL(url);
+    const u = new URL(url, 'https://provider.invalid');
     if (u.pathname.endsWith('/actions')) {
       assert.equal(u.searchParams.get('timestamp'), String(cutoff));
       return { actions: [{ height: '100', date: String(BigInt(cutoff - 2) * 1_000_000_000n) }] };
@@ -261,7 +261,7 @@ test('Live bond queries stop at the matching intraday cutoff rather than the end
 test('A no-action day gets a closing balance only after adjacent block times prove the boundary', async () => {
   const to = from + DAY;
   const getJson = async (url) => {
-    const u = new URL(url);
+    const u = new URL(url, 'https://provider.invalid');
     if (u.pathname.endsWith('/actions')) return { actions: [{ height: '1', date: String(BigInt(from - DAY) * 1_000_000_000n) }] };
     if (u.pathname.endsWith('/blockchain')) {
       const first = Number(u.searchParams.get('minHeight'));
@@ -300,7 +300,7 @@ test('Dev data cache reuses history, excludes unindexed buckets, and serves stal
       if (fail) return new Response('{}', { status: 503 });
       if (url.endsWith('/health')) return Response.json({ inSync: true, lastAggregated: { timestamp: initial / 1000, height: 100 } });
       if (url.includes('/actions?')) return Response.json({ actions: [] });
-      const params = new URL(url).searchParams;
+      const params = new URL(url, 'https://provider.invalid').searchParams;
       const start = Number(params.get('from'));
       return Response.json({ intervals: Array.from({ length: Number(params.get('count')) }, (_, i) => ({
         startTime: String(start + i * DAY), endTime: String(start + (i + 1) * DAY),
@@ -333,7 +333,7 @@ test('Live service refreshes at bucket boundaries, coalesces tabs, survives outa
       if (fail) return new Response('{}', { status: 503 });
       if (url.endsWith('/health')) return Response.json({ inSync: true, lastAggregated: { timestamp: clock / 1000 - indexLag, height: 100000 } });
       if (url.includes('/actions?')) return Response.json({ actions: [] });
-      const params = new URL(url).searchParams;
+      const params = new URL(url, 'https://provider.invalid').searchParams;
       const step = params.get('interval') === '5min' ? 300 : DAY;
       if (step === 300) liveCalls++;
       const start = Number(params.get('from'));

@@ -4,7 +4,7 @@ import { createFinancialsDevBudget, createFinancialsDevRequest, createFinancials
 
 const day = '2026-10-12', from = Date.parse(`${day}T00:00:00Z`) / 1000, to = from + 86400;
 const now = (to + 3 * 86400) * 1000;
-const base = 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
+const base = '';
 const pendingAction = { type: 'swap', status: 'pending', date: String(BigInt(from + 1) * 1000000000n),
   in: [{ txID: 'PENDING', coins: [{ asset: 'BTC.BTC', amount: '1000' }] }], pools: [] };
 

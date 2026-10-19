@@ -1,6 +1,8 @@
 import { config } from '../lib/config.js';
 import { ProviderRequestError, requestFromProviders } from '../lib/provider-client.js';
 import { providerLifecycleHooks } from './provider-cooldown.js';
+import { isMidgardPayloadInvalid as shouldRetryMidgardResponse } from '../../../shared/midgard-policy.js';
+import { isProviderRateLimitError } from '../../../shared/provider-policy.js';
 
 const MIDGARD_PRIMARY = (config.midgardUrls[0] || config.midgardUrl).replace(/\/$/, '');
 const MIDGARD_FALLBACK = (config.midgardUrls[1] || config.midgardFallbackUrl).replace(/\/$/, '');
@@ -10,48 +12,11 @@ const MIDGARD_BASES = Array.from(
   new Set(config.midgardUrls.map((base) => base.replace(/\/$/, '')).filter(Boolean))
 );
 
-function getPathSearchParams(path) {
-  try {
-    return new URL(path, MIDGARD_PRIMARY).searchParams;
-  } catch {
-    return new URLSearchParams();
-  }
-}
-
-function shouldRetryMidgardResponse(path, data) {
-  const params = getPathSearchParams(path);
-
-  if (path.startsWith('/history/') && params.has('interval')) {
-    return Array.isArray(data?.intervals) && data.intervals.length === 0 && data?.meta;
-  }
-
-  const requestedLimit = Number(params.get('limit'));
-  if (
-    path.startsWith('/actions') &&
-    params.has('limit') &&
-    Number.isFinite(requestedLimit) &&
-    requestedLimit > 0 &&
-    requestedLimit < 50 &&
-    Array.isArray(data?.actions) &&
-    data.actions.length > requestedLimit
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
 function createMidgardError(message, details = {}) {
   return new ProviderRequestError(message, details);
 }
 
-export function isMidgardRateLimitError(error) {
-  return Boolean(
-    error?.status === 429 ||
-    /HTTP 429|Too Many Requests|daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.message || '')) ||
-    /daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.body || ''))
-  );
-}
+export const isMidgardRateLimitError = isProviderRateLimitError;
 
 export async function fetchMidgard(path, options = {}) {
   const {

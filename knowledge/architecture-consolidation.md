@@ -77,3 +77,37 @@ into focused modules and share terminal alerts and chart tokens.
 CI enforces import boundaries, tests frontend and backend domains, checks the
 production Svelte surface, and ratchets unreachable-file, source-line, and
 public-asset budgets.
+
+## Provider consolidation — October 19, 2026
+
+The shared service-request factory accepts a service and relative route. Backend
+composition supplies configured Midgard/THORNode/RPC lists and the durable budgeted
+transport; standalone Vite/browser use public catalogs. Financials (including day
+details and historical Reserve anchors) and Protocol Comparison no longer construct
+public Midgard/RPC URLs for runtime rewriting. RPC lanes retain 650ms per-provider
+spacing; Midgard keeps existing history/live/action budget and queue semantics.
+Rapid no longer reads environment variables in a runtime-neutral module. Backend
+initialization injects resolved settings, and Rujira Midgard defaults inherit the
+shared list unless explicitly overridden.
+
+One Midgard response validator retains explicit general/Rapid profiles, including
+Rapid's txid, cursor-advance and fromHeight evidence. All rate-limit aliases use the
+shared classification policy: oversized-response 429s do not imply quota exhaustion;
+real throttling and Retry-After still stop fallback and preserve backoff.
+
+TC Fee CMC/DeFiLlama reads now use the backend JSON adapter (30-second deadlines,
+Retry-After, cooldowns and attempt metrics), with unchanged payload parsing. Echoed
+sensitive request headers join dedicated URL credentials in error redaction.
+
+The CI syntax-tree guard rejects raw HTTP calls, new provider URL literals in
+collectors, backend imports of public transports, and shared environment reads.
+Explicit independent L1 adapter owners remain allowlisted. Contract tests cover
+routing/config precedence, private/public separation, budget admission, cancellation,
+redaction, Midgard validation/fallback, external-provider failures and guard fixtures.
+Shared raw-history caching and RPC batch consolidation are deliberately deferred;
+this release changes no migrations, cache schemas, collector schedules or quotas.
+
+Pre-release verification passed 628 frontend tests, 875 backend tests with a fully
+migrated disposable PostgreSQL database (zero skips), all architecture/Svelte checks,
+the production build, and the project ownership audit. The existing 56 Svelte
+warnings and large-chunk build advisory remain unchanged.

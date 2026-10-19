@@ -1,6 +1,7 @@
 import { dayTime, nextDay } from '../../../shared/protocol-fee-comparison/model.js';
 
-export const CHAINFLIP_RPC = 'https://mainnet-archive.chainflip.io';
+import { CHAINFLIP_RPC } from '../../../shared/external-providers.js';
+export { CHAINFLIP_RPC };
 const TIMESTAMP_KEY = '0xf0c365c3cf59d671eb72da0e7a4113c49f1f0515f462cdcf84e0f1d6045dfcbb';
 // Reviewed historical emissions + delegation paths; source references and
 // boundary-block reconciliation are in knowledge/protocol-fee-comparison.md.

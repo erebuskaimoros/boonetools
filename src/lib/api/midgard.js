@@ -8,55 +8,17 @@
  */
 
 import { requestFromProviders } from './provider.js';
+import { isMidgardPayloadInvalid as shouldRetryMidgardResponse } from '../../../shared/midgard-policy.js';
+import { isProviderRateLimitError } from '../../../shared/provider-policy.js';
+import { LIQUIFY_MIDGARD, MIDGARD_PUBLIC_URLS } from '../../../shared/thorchain-providers.js';
 
 /**
  * Midgard API base URL
  */
-export const MIDGARD_BASE = 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
-export const MIDGARD_BASES = [MIDGARD_BASE];
+export const MIDGARD_BASE = LIQUIFY_MIDGARD;
+export const MIDGARD_BASES = MIDGARD_PUBLIC_URLS;
 
-function getPathSearchParams(path) {
-  try {
-    return new URL(path, MIDGARD_BASE).searchParams;
-  } catch (_) {
-    return new URLSearchParams();
-  }
-}
-
-function shouldRetryMidgardResponse(path, data) {
-  const params = getPathSearchParams(path);
-
-  // Some Midgard providers can return empty interval buckets for history queries
-  // that should contain data. Retry on the next configured provider before
-  // treating the response as valid.
-  if (path.startsWith('/history/') && params.has('interval')) {
-    return Array.isArray(data?.intervals) && data.intervals.length === 0 && data?.meta;
-  }
-
-  // Some proxy responses also ignore action paging/limit params. If the response
-  // exceeds a sub-50 requested limit, retry on the fallback origin.
-  const requestedLimit = Number(params.get('limit'));
-  if (
-    path.startsWith('/actions') &&
-    params.has('limit') &&
-    Number.isFinite(requestedLimit) &&
-    requestedLimit > 0 &&
-    requestedLimit < 50 &&
-    Array.isArray(data?.actions) &&
-    data.actions.length > requestedLimit
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-export function isMidgardRateLimitError(error) {
-  return Boolean(
-    error?.status === 429 ||
-    /HTTP 429|Too Many Requests|daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.message || ''))
-  );
-}
+export const isMidgardRateLimitError = isProviderRateLimitError;
 
 /**
  * Midgard API Client class
@@ -88,7 +50,7 @@ class MidgardClient {
       bases = this.bases,
       validateResponse = shouldRetryMidgardResponse,
       timeoutMs = 10000,
-      fetchImpl = globalThis.fetch,
+      fetchImpl,
       ...fetchOptions
     } = options;
 

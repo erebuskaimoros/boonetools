@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
-import { LIQUIFY_THORNODE, NATIVESWAP_THORNODE, LIQUIFY_RPC, NATIVESWAP_RPC } from '../../../shared/thorchain-providers.js';
+import { LIQUIFY_THORNODE, NATIVESWAP_THORNODE, LIQUIFY_RPC, NATIVESWAP_RPC, LIQUIFY_MIDGARD } from '../../../shared/thorchain-providers.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const defaultEnvPath = path.resolve(__dirname, '../../.env');
@@ -38,8 +38,9 @@ function readList(name, fallback = []) {
 const thornodePrimaryUrl = optional(process.env.THORNODE_PRIMARY_URL) || LIQUIFY_THORNODE;
 const thornodeArchiveUrl = optional(process.env.THORNODE_ARCHIVE_URL) || thornodePrimaryUrl;
 const thornodeFallbackUrl = optional(process.env.THORNODE_FALLBACK_URL) || NATIVESWAP_THORNODE;
-const midgardUrl = optional(process.env.MIDGARD_URL) || 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
+const midgardUrl = optional(process.env.MIDGARD_URL) || LIQUIFY_MIDGARD;
 const midgardFallbackUrl = '';
+const midgardUrls = readList('MIDGARD_URLS', [midgardUrl, midgardFallbackUrl]);
 const rpcWsUrl = optional(process.env.RPC_WS_URL) || 'wss://gateway.liquify.com/chain/thorchain_rpc/websocket';
 const rpcRestUrl = optional(process.env.RPC_REST_URL) || LIQUIFY_RPC;
 const rpcFallbackRestUrl = optional(process.env.RPC_FALLBACK_REST_URL) || NATIVESWAP_RPC;
@@ -77,10 +78,7 @@ export const config = Object.freeze({
   ]),
   midgardUrl,
   midgardFallbackUrl,
-  midgardUrls: readList('MIDGARD_URLS', [
-    midgardUrl,
-    midgardFallbackUrl
-  ]),
+  midgardUrls,
   // Operator-selected safety ceilings, NOT a statement of any upstream plan's
   // quota. Bulk scans cannot consume the capacity reserved for cheap live reads.
   midgardRequestBudgetEnabled: readBool('MIDGARD_REQUEST_BUDGET_ENABLED',
@@ -131,10 +129,7 @@ export const config = Object.freeze({
   appLayerLiveStateTtlMs: readInt('APP_LAYER_LIVE_STATE_TTL_SECONDS', 2 * 60) * 1000,
   appLayerStaticStateTtlMs: readInt('APP_LAYER_STATIC_STATE_TTL_SECONDS', 15 * 60) * 1000,
   appLayerRouteConcurrency: readInt('APP_LAYER_ROUTE_CONCURRENCY', 4),
-  rujiraBaseFeesMidgardUrls: readList('RUJIRA_BASE_FEES_MIDGARD_URLS', [
-    midgardUrl,
-    midgardFallbackUrl
-  ]),
+  rujiraBaseFeesMidgardUrls: readList('RUJIRA_BASE_FEES_MIDGARD_URLS', midgardUrls),
   rujiraBaseFeesRpcUrls: readList('RUJIRA_BASE_FEES_RPC_URLS', [
     rpcRestUrl,
     rpcFallbackRestUrl
@@ -154,10 +149,7 @@ export const config = Object.freeze({
   rujiraBaseFeesDuneDaysPerRun: readInt('RUJIRA_BASE_FEES_DUNE_DAYS_PER_RUN', 3),
   rujiraBaseFeesDuneHeadLagHours: readInt('RUJIRA_BASE_FEES_DUNE_HEAD_LAG_HOURS', 6),
   rujiraBaseFeesDuneLimit: readInt('RUJIRA_BASE_FEES_DUNE_LIMIT', 5000),
-  rujiraReservePaymentsMidgardUrls: readList('RUJIRA_RESERVE_PAYMENTS_MIDGARD_URLS', [
-    midgardUrl,
-    midgardFallbackUrl
-  ]),
+  rujiraReservePaymentsMidgardUrls: readList('RUJIRA_RESERVE_PAYMENTS_MIDGARD_URLS', midgardUrls),
   rujiraReservePaymentsRpcUrls: readList('RUJIRA_RESERVE_PAYMENTS_RPC_URLS', [
     rpcRestUrl,
     rpcFallbackRestUrl

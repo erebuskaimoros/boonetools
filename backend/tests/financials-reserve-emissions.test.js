@@ -167,7 +167,7 @@ function mimirBytes(entries) {
 }
 function anchorGetJson(overrides = {}) {
   return async (url) => {
-    const params = new URL(url).searchParams;
+    const params = new URL(url, 'https://provider.invalid').searchParams;
     assert.equal(params.get('height'), String(height));
     const route = JSON.parse(params.get('path'));
     if (overrides[route]) return overrides[route];

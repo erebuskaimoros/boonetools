@@ -88,8 +88,10 @@ Keep Liquify Portal credentials only in the protected server environment. Append
 `/v2` to its supplied HTTPS endpoint and set `MIDGARD_URL`, `MIDGARD_URLS`,
 `RUJIRA_BASE_FEES_MIDGARD_URLS`, and `RUJIRA_RESERVE_PAYMENTS_MIDGARD_URLS`
 consistently; explicit list overrides otherwise retain their previous providers.
-Financials (including day rankings) and Protocol Comparison resolve their public
-service identifiers through these backend settings. Runtime-neutral modules and
+Financials (including day rankings) and Protocol Comparison select the Midgard
+service with relative routes, resolved by the shared backend service adapter.
+Rujira lists inherit the resolved `MIDGARD_URLS` when no explicit override is set;
+Rapid receives the same resolved backend configuration. Runtime-neutral modules and
 browser bundles must not receive the key; standalone browser lookups stay public.
 
 Back up the environment with its protected permissions, validate one bounded
@@ -99,7 +101,15 @@ Do not reset historical caches, cursors, request budgets, or public-provider
 cooldowns. Dedicated requests retain the shared admission limits and existing
 dedicated breaker scope, independent of public-gateway throttling. Error messages,
 gateway bodies, URLs and nested causes are redacted before persistence or public
-source-error publication. RPC and WebSocket settings are separate and unchanged.
+source-error publication. Sensitive API-key/authorization headers are also redacted
+if an upstream error echoes them. RPC and WebSocket settings are separate and unchanged.
+
+The provider consolidation changes no migrations, cadences, cache schemas, request
+budgets or archive ordering. Deploy backend before frontend, let ordinary collectors
+resume, and check the configured service routes and DB-backed Financials/comparison/
+TC Fee endpoints. Do not trigger historical scans as a smoke test. TC Fee's CMC and
+DeFiLlama requests now use the common backend transport with 30-second deadlines,
+Retry-After, durable cooldowns and endpoint-family metrics.
 
 ### NEAR net-supply methodology rollout
 

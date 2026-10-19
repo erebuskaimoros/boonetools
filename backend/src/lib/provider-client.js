@@ -22,6 +22,12 @@ export function requestFromProviders(options = {}) {
       try { return [new URL(base).pathname.match(/^\/api=([^/]+)/i)?.[1]].filter(Boolean); }
       catch { return []; }
     });
+  for (const [name, value] of new Headers({ ...options.request?.headers, ...options.headers })) {
+    if (/authorization|api[-_]?key|token|secret/i.test(name) && value) {
+      secrets.push(value);
+      if (/^Bearer\s+/i.test(value)) secrets.push(value.replace(/^Bearer\s+/i, ''));
+    }
+  }
   const redact = value => secrets.reduce((text, secret) => text.split(secret).join('[redacted]'), String(value));
   const redactError = (error, seen = new Set()) => {
     if (!secrets.length || !error || typeof error !== 'object' || seen.has(error)) return error;

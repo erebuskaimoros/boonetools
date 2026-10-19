@@ -355,6 +355,20 @@ Use them to put a dedicated node or paid provider ahead of the public defaults
 without changing application code. The older primary/fallback variables remain
 the defaults when the list variables are empty.
 
+Financials and Protocol Comparison use service-relative Midgard routes resolved by
+`backend/src/lib/provider-services.js`; Rapid receives the same resolved backend
+list. Empty `RUJIRA_BASE_FEES_MIDGARD_URLS` and `RUJIRA_RESERVE_PAYMENTS_MIDGARD_URLS`
+inherit `MIDGARD_URLS`, while explicit overrides remain authoritative. Public
+defaults live in shared catalogs, never in collectors. Browser/Vite adapters do not
+read server credentials. CI enforces these boundaries; see
+[provider development guidance](development-workflow.md#provider-boundaries).
+
+TC Fee's CMC and DeFiLlama acquisition uses the common backend transport with a
+30-second deadline, parsed Retry-After, `tc-fee-external` ordinary-failure scope,
+durable quota cooldowns and endpoint-family attempt metrics. Provider failure
+messages redact echoed API-key/authorization headers. Payload parsers and collection
+cadences are unchanged; an unavailable DEX source remains an explicit partial result.
+
 Supported current THORNode and retained HTTP RPC reads are distributed across
 Liquify and NativeSwap, with immediate failover and per-provider cooldowns. Explicit
 lists replace the defaults, so existing single-Liquify lists must be updated

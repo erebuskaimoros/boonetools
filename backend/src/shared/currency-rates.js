@@ -1,6 +1,6 @@
 import { requestFromProviders } from '../lib/provider-client.js';
 
-const COINGECKO_BASE = 'https://api.coingecko.com';
+import { COINGECKO_BASE } from '../../../shared/external-providers.js';
 const COINGECKO_PATH = '/api/v3/simple/price?ids=thorchain%2Cmonero%2Czcash&vs_currencies=usd%2Ceur%2Cgbp%2Cjpy%2Cbtc%2Cxau';
 
 export const CURRENCY_RATES_TTL_MS = 10 * 60 * 1000;
@@ -48,7 +48,7 @@ export async function fetchCoinGeckoCurrencyRates(options = {}) {
     bases: [COINGECKO_BASE],
     path: COINGECKO_PATH,
     timeoutMs: 10_000,
-    fetchImpl: options.fetchImpl || globalThis.fetch,
+    fetchImpl: options.fetchImpl,
     headers: {
       Accept: 'application/json',
       'User-Agent': 'BooneTools/1.0'

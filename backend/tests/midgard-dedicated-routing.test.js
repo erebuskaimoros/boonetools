@@ -3,7 +3,6 @@ import test from 'node:test';
 import { execFileSync } from 'node:child_process';
 import { createFinancialsProviderRequest } from '../src/jobs/financials.js';
 import { comparisonRequest } from '../src/jobs/protocol-fee-comparison.js';
-import { FINANCIALS_MIDGARD, FINANCIALS_RPC } from '../src/shared/financials-history.js';
 import { requestFromProviders } from '../src/lib/provider-client.js';
 import { providerLifecycleHooks } from '../src/shared/provider-cooldown.js';
 import { config } from '../src/lib/config.js';
@@ -16,12 +15,12 @@ test('Financials routes history, live health and day actions through configured 
   const request = createFinancialsProviderRequest(null, { midgardBases: [dedicated],
     transport: async options => { calls.push(options); return {}; } });
   for (const route of ['/history/swaps?interval=day', '/health', '/actions?limit=50']) {
-    await request(`${FINANCIALS_MIDGARD}${route}`, { midgardBudgetClass: 'bulk' });
+    await request(route, { midgardBudgetClass: 'bulk' });
     assert.deepEqual(calls.at(-1).bases, [dedicated]);
     assert.equal(calls.at(-1).path, route);
     assert.equal(calls.at(-1).midgardBudgetClass, 'bulk');
   }
-  await request(`${FINANCIALS_RPC}/block?height=28000000`);
+  await request('/block?height=28000000', { service: 'rpc' });
   assert.deepEqual(calls.at(-1).bases, config.rpcRestUrls, 'RPC routing is unchanged');
 });
 
@@ -29,15 +28,15 @@ test('comparison routes only the Midgard service through configured credentials'
   const calls = [];
   const request = comparisonRequest(null, { midgardBases: [dedicated],
     transport: async options => { calls.push(options); return {}; } });
-  await request(`${FINANCIALS_MIDGARD}/history/earnings?interval=day`);
+  await request('/history/earnings?interval=day', { service: 'midgard' });
   assert.deepEqual(calls.at(-1).bases, [dedicated]);
   assert.equal(calls.at(-1).path, '/history/earnings?interval=day');
-  for (const url of ['https://api.llama.fi/overview/fees', 'https://gateway.liquify.com/chain/thorchain_rpc/status',
-    'https://gateway.liquify.com/chain/thorchain_midgard/v20/health']) {
+  for (const url of ['https://api.llama.fi/overview/fees', 'https://coins.llama.fi/chart/near']) {
     await request(url);
     assert.deepEqual(calls.at(-1).bases, [new URL(url).origin]);
     assert.equal(calls.at(-1).path, new URL(url).pathname);
   }
+  assert.throws(() => request('https://gateway.liquify.com/chain/thorchain_midgard/v2/health'), /not allowlisted/);
 });
 
 test('dedicated transport failures redact keys before persistence and public-facing errors', async () => {
@@ -91,14 +90,13 @@ test('server environment drives all adapters with one dedicated budget identity 
     import { fetchMidgard } from './src/shared/midgard.js';
     import { createFinancialsProviderRequest } from './src/jobs/financials.js';
     import { comparisonRequest } from './src/jobs/protocol-fee-comparison.js';
-    import { FINANCIALS_MIDGARD } from './src/shared/financials-history.js';
     const urls = [], claims = [];
     const budget = { async claim(context) { claims.push(context); } };
     globalThis.fetch = async url => { urls.push(url); return new Response('{"ok":true}'); };
     const transport = options => requestFromProviders({ ...options, providerPool: false, midgardBudget: budget });
     await fetchMidgard('/health', { midgardBudget: budget });
-    await createFinancialsProviderRequest(null, { transport })(FINANCIALS_MIDGARD + '/actions?limit=50');
-    await comparisonRequest(null, { transport })(FINANCIALS_MIDGARD + '/history/earnings?interval=day');
+    await createFinancialsProviderRequest(null, { transport })('/actions?limit=50');
+    await comparisonRequest(null, { transport })('/history/earnings?interval=day', { service: 'midgard' });
     assert.equal(urls.length, 3);
     assert.ok(urls.every(url => url.startsWith(config.midgardUrl + '/')));
     assert.equal(claims.length, 3);

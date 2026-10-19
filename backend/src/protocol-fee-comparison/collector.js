@@ -2,11 +2,11 @@ import { calendarDays, COMPARISON_METHODOLOGY, comparisonStartDay, contribution,
 import { createChainflipReader } from './chainflip.js';
 import { nearWalletDays } from './near.js';
 import { collectNearNetSupply, NEAR_NET_SUPPLY_METHOD } from './near-net-supply.js';
+import { LLAMA_API, LLAMA_COINS } from '../../../shared/external-providers.js';
 
 export const WALLET_QUERY_ID = '8767542';
 // Leave time for final persistence/publication before the service's 30m limit.
 export const COMPARISON_MAX_RUN_MS = 20 * 60_000;
-const MIDGARD = 'https://gateway.liquify.com/chain/thorchain_midgard/v2';
 export function emptyComparisonCache() { return { version: 1, days: {}, boundaries: {} }; }
 
 export function parseNearEmissions(html) {
@@ -189,12 +189,12 @@ export async function collectComparison({ cache = emptyComparisonCache(), reques
     || [startDay, dayOf(now - 7 * DAY_MS)].sort().at(-1);
   try {
     await source('THORChain', async () => {
-      const health = await request(`${MIDGARD}/health`);
+      const health = await request('/health', { service: 'midgard' });
       const watermark = Number(health?.lastAggregated?.timestamp);
       if (!(watermark > 0)) throw new Error('Missing aggregation watermark');
       for (let from = dayTime(firstMissing('earnings')); from < dayTime(endDay); from += 60 * DAY_MS) {
         const to = Math.min(from + 60 * DAY_MS, dayTime(endDay));
-        const result = await request(`${MIDGARD}/history/earnings?interval=day&from=${from / 1000}&to=${to / 1000}`);
+        const result = await request(`/history/earnings?interval=day&from=${from / 1000}&to=${to / 1000}`, { service: 'midgard' });
         if (!Array.isArray(result.intervals)) throw new Error('Missing daily earnings');
         for (const row of result.intervals) {
           if (Number(row.endTime) > watermark || Number(row.endTime) - Number(row.startTime) !== 86400) continue;
@@ -205,7 +205,7 @@ export async function collectComparison({ cache = emptyComparisonCache(), reques
     });
     for (const [slug, field] of [['chainflip-amm', 'chainflipRevenue'], ['near-intents', 'nearRevenue']]) {
       await source(slug, async () => {
-        const result = await request(`https://api.llama.fi/summary/fees/${slug}?dataType=dailyRevenue`);
+        const result = await request(`${LLAMA_API}/summary/fees/${slug}?dataType=dailyRevenue`);
         if (!Array.isArray(result.totalDataChart) || !result.totalDataChart.length) throw new Error('Daily revenue unavailable');
         for (const [timestamp, value] of result.totalDataChart) if (finite(value) !== null && value >= 0) put(dayOf(timestamp * 1000), { [field]: Number(value) });
       });
@@ -214,7 +214,7 @@ export async function collectComparison({ cache = emptyComparisonCache(), reques
       const fromDay = [firstMissing('nearPrice'), firstMissing('flipPrice')].sort()[0];
       for (let from = dayTime(fromDay); from < dayTime(endDay); from += 60 * DAY_MS) {
         const span = Math.min(60, (dayTime(endDay) - from) / DAY_MS);
-        const result = priceDays(await request(`https://coins.llama.fi/chart/coingecko:chainflip,coingecko:near?start=${from / 1000}&span=${span}&period=1d&searchWidth=4h`));
+        const result = priceDays(await request(`${LLAMA_COINS}/chart/coingecko:chainflip,coingecko:near?start=${from / 1000}&span=${span}&period=1d&searchWidth=4h`));
         for (const [coin, field] of [['coingecko:near', 'nearPrice'], ['coingecko:chainflip', 'flipPrice']]) {
           for (const [day, value] of Object.entries(result[coin] || {})) put(day, { [field]: value });
         }

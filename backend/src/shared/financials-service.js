@@ -1,15 +1,20 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { appendFinancialsLivePoint, buildFinancialsPoints, buildLiveFinancialsPoint, daySeconds, financialsWindow, utcDay } from '../../../shared/financials/model.js';
-import { fetchFinancialBondDay, fetchFinancialHistory, fetchFinancialLiveTotals, FINANCIALS_MIDGARD, FINANCIALS_RPC } from './financials-history.js';
+import { fetchFinancialBondDay, fetchFinancialHistory, fetchFinancialLiveTotals } from './financials-history.js';
+import { createProviderServices } from '../../../shared/provider-services.js';
+import { isProviderRateLimitError } from '../../../shared/provider-policy.js';
 
 const CACHE_VERSION = 1;
 const REFRESH_MS = 5 * 60_000;
 const RETRY_MS = 60 * 60_000;
 const LIVE_REFRESH_MS = 30_000;
 
-export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJson, readRewardAccounting,
+export function createFinancialsService({ cacheDir, fetchImpl, requestJson, readRewardAccounting,
   now = Date.now, requestSpacingMs = 650, rpcConcurrency = 3 } = {}) {
+  const publicRequest = createProviderServices({ defaults: { fetchImpl, timeoutMs: 60_000,
+    headers: { Accept: 'application/json', 'x-client-id': 'BooneTools-Financials' } } });
+  const request = requestJson || ((path, { service = 'midgard' } = {}) => publicRequest(service, path));
   let cache = { version: CACHE_VERSION, swaps: {}, earnings: {}, bonds: {} };
   let providerQueue = Promise.resolve();
   let lastRequestAt = 0;
@@ -56,12 +61,12 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
     return saveQueue;
   }
 
-  function getJson(url, lane = 'history') {
-    if (requestJson && url.startsWith(`${FINANCIALS_RPC}/`)) {
+  function getJson(path, { service = 'midgard', lane = 'history' } = {}) {
+    if (service === 'rpc') {
       if (stopped) return Promise.reject(new Error('Financials collector stopped'));
       // The shared RPC dispatcher owns per-provider pacing and cooldowns.
       // A Midgard pause must not pause otherwise healthy RPC partners.
-      return requestJson(url, { lane }).catch((error) => {
+      return request(path, { service, lane }).catch((error) => {
         error.archiveUnavailable ||= /no archive|version does not exist|height.*not available/i.test(`${error.message} ${error.body || ''}`);
         throw error;
       });
@@ -75,27 +80,14 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
     });
     providerQueue = start;
     return start.then(async () => {
-      if (requestJson) {
-        try { return await requestJson(url, { lane }); }
-        catch (error) {
-          if (error.status === 429 || String(error.providerKey || '').startsWith('global:')) {
-            cooldownUntil = Math.max(now() + RETRY_MS, Date.parse(error.blockedUntil) || 0);
-          }
-          error.archiveUnavailable ||= /no archive|version does not exist|height.*not available/i.test(`${error.message} ${error.body || ''}`);
-          throw error;
+      try { return await request(path, { service, lane }); }
+      catch (error) {
+        if (isProviderRateLimitError(error) || String(error.providerKey || '').startsWith('global:')) {
+          cooldownUntil = Math.max(now() + RETRY_MS, Date.parse(error.blockedUntil) || 0);
         }
-      }
-      const response = await fetchImpl(url, {
-        signal: AbortSignal.timeout(60_000), headers: { Accept: 'application/json', 'x-client-id': 'BooneTools-Financials' }
-      });
-      const body = await response.text();
-      if (response.status === 429) cooldownUntil = now() + RETRY_MS;
-      if (!response.ok || !body.trim().startsWith('{') && !body.trim().startsWith('[')) {
-        const error = new Error(`History provider returned HTTP ${response.status}${/no archive/i.test(body) ? ': no archive available' : ''}`);
-        error.archiveUnavailable = /no archive|version does not exist|height.*not available/i.test(body);
+        error.archiveUnavailable ||= /no archive|version does not exist|height.*not available/i.test(`${error.message} ${error.body || ''}`);
         throw error;
       }
-      return JSON.parse(body);
     });
   }
 
@@ -117,7 +109,7 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
     if (historyIsFresh(window)) return;
     const work = async () => {
       if (now() >= healthExpires) {
-        health = await getJson(`${FINANCIALS_MIDGARD}/health`);
+        health = await getJson('/health');
         if (!Number(health?.lastAggregated?.timestamp)) throw new Error('History source watermark is unavailable');
         healthExpires = now() + REFRESH_MS;
       }
@@ -159,7 +151,7 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
 
   function queueLiveBond(snapshot) {
     if (liveBondPromise || snapshot.bond || snapshot.through <= snapshot.from || stopped) return;
-    liveBondPromise = fetchFinancialBondDay(snapshot.from, { getJson: (url) => getJson(url, 'live'),
+    liveBondPromise = fetchFinancialBondDay(snapshot.from, { getJson: (path, options) => getJson(path, { ...options, lane: 'live' }),
       head: health?.lastAggregated, to: snapshot.through
     }).then((bond) => {
       if (live === snapshot) { snapshot.bond = bond; liveBondError = ''; }
@@ -182,14 +174,14 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
     liveExpires = now() + LIVE_REFRESH_MS;
     const work = async () => {
       try {
-        const latest = await getJson(`${FINANCIALS_MIDGARD}/health`, 'live');
+        const latest = await getJson('/health', { lane: 'live' });
         const indexed = Number(latest?.lastAggregated?.timestamp);
         if (!Number.isFinite(indexed) || indexed < dayStart) throw new Error('Today is not indexed yet');
         health = latest;
         healthExpires = now() + REFRESH_MS;
         const through = Math.min(dayStart + 86400, Math.floor(Math.min(indexed, now() / 1000) / 300) * 300);
         if (through > dayStart && through > live.through) {
-          const totals = await fetchFinancialLiveTotals(dayStart, through, { getJson: (url) => getJson(url, 'live') });
+          const totals = await fetchFinancialLiveTotals(dayStart, through, { getJson: (path, options) => getJson(path, { ...options, lane: 'live' }) });
           live = { from: dayStart, through, ...totals };
           liveBondError = '';
         }
@@ -217,7 +209,7 @@ export function createFinancialsService({ cacheDir, fetchImpl = fetch, requestJs
         if (cache.bonds[day] || archiveFloor && day <= archiveFloor) continue;
         activeBondDays.add(day);
         try {
-          cache.bonds[day] = await fetchFinancialBondDay(daySeconds(day), { getJson: (url) => getJson(url, 'archive'), head: health?.lastAggregated });
+          cache.bonds[day] = await fetchFinancialBondDay(daySeconds(day), { getJson: (path, options) => getJson(path, { ...options, lane: 'archive' }), head: health?.lastAggregated });
           archiveFailures = 0;
           bondError = '';
           await save();

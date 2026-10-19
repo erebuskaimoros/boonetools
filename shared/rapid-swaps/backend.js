@@ -11,42 +11,28 @@ import {
   pickBestRapidSwapRowMatch
 } from './reconciliation.js';
 import { ProviderRequestError, requestFromProviders } from '../provider-client.js';
-import { LIQUIFY_THORNODE, NATIVESWAP_THORNODE } from '../thorchain-providers.js';
+import { isMidgardPayloadInvalid as validateMidgardPayload, MIDGARD_ACTION_PAGE_LIMIT, RAPID_MIDGARD_VALIDATION_OPTIONS } from '../midgard-policy.js';
+import { isProviderRateLimitError } from '../provider-policy.js';
+import { MIDGARD_PUBLIC_URLS, THORNODE_PUBLIC_URLS } from '../thorchain-providers.js';
 
 let providerLifecycle = {};
+let providerSettings = { midgardBases: MIDGARD_PUBLIC_URLS, thornodeBases: THORNODE_PUBLIC_URLS, clientId: 'BooneTools' };
 
-export function configureRapidSwapProviderLifecycle(hooks = {}) {
+export function configureRapidSwapProviderLifecycle(hooks = {}, settings = {}) {
   providerLifecycle = hooks && typeof hooks === 'object' ? hooks : {};
-}
-
-function readEnv(name) {
-  return typeof process !== 'undefined' ? String(process.env?.[name] || '').trim() : '';
+  providerSettings = { midgardBases: MIDGARD_PUBLIC_URLS, thornodeBases: THORNODE_PUBLIC_URLS,
+    clientId: 'BooneTools', ...settings };
 }
 
 function uniqueBases(values) {
   return [...new Set(values.map((value) => String(value || '').replace(/\/$/, '')).filter(Boolean))];
 }
 
-function envBases(name) {
-  return readEnv(name).split(',').map((value) => value.trim()).filter(Boolean);
-}
+// Public compatibility exports never inspect server environment variables.
+export const MIDGARD_BASES = MIDGARD_PUBLIC_URLS;
+export const THORNODE_BASES = THORNODE_PUBLIC_URLS;
 
-const configuredMidgardBases = envBases('MIDGARD_URLS');
-export const MIDGARD_BASES = uniqueBases(configuredMidgardBases.length
-  ? configuredMidgardBases
-  : [
-      readEnv('MIDGARD_URL') || 'https://gateway.liquify.com/chain/thorchain_midgard/v2'
-    ]);
-
-const configuredThornodeBases = envBases('THORNODE_URLS');
-export const THORNODE_BASES = uniqueBases(configuredThornodeBases.length
-  ? configuredThornodeBases
-  : [
-      readEnv('THORNODE_PRIMARY_URL') || LIQUIFY_THORNODE,
-      readEnv('THORNODE_FALLBACK_URL') || NATIVESWAP_THORNODE
-    ]);
-
-export const ACTION_PAGE_LIMIT = 50;
+export const ACTION_PAGE_LIMIT = MIDGARD_ACTION_PAGE_LIMIT;
 export const DIRECT_RESOLUTION_HEIGHT_BUFFER = 40;
 export const RECENT_SCAN_HEIGHT_BUFFER = 80;
 
@@ -86,78 +72,11 @@ function coreSnapshotStale(snapshot, requiredFields = []) {
   });
 }
 
-function getSearchParams(path) {
-  try {
-    return new URL(path, MIDGARD_BASES[0]).searchParams;
-  } catch (_) {
-    return new URLSearchParams();
-  }
-}
-
-function actionContainsTxId(action, txId) {
-  if (!txId) {
-    return false;
-  }
-
-  const target = String(txId).toUpperCase();
-  const inTxIds = Array.isArray(action?.in) ? action.in.map((item) => String(item?.txID || '').toUpperCase()) : [];
-  const outTxIds = Array.isArray(action?.out) ? action.out.map((item) => String(item?.txID || '').toUpperCase()) : [];
-  return [...inTxIds, ...outTxIds].includes(target);
-}
-
 function isMidgardPayloadInvalid(path, payload) {
-  const params = getSearchParams(path);
-
-  if (path.startsWith('/history/') && params.has('interval')) {
-    const intervals = Array.isArray(payload?.intervals) ? payload.intervals : null;
-    const metaStart = safeNumber(payload?.meta?.startTime, 0);
-    const metaEnd = safeNumber(payload?.meta?.endTime, 0);
-    if (intervals && intervals.length === 0 && metaEnd > metaStart) {
-      return true;
-    }
-  }
-
-  if (!path.startsWith('/actions')) {
-    return false;
-  }
-
-  const actions = Array.isArray(payload?.actions) ? payload.actions : [];
-  const requestedLimit = Math.max(1, Math.trunc(safeNumber(params.get('limit'), ACTION_PAGE_LIMIT)));
-  if (requestedLimit < ACTION_PAGE_LIMIT && actions.length > requestedLimit) {
-    return true;
-  }
-
-  const requestedTxId = String(params.get('txid') || '');
-  if (requestedTxId && actions.length > 0 && !actions.some((action) => actionContainsTxId(action, requestedTxId))) {
-    return true;
-  }
-
-  const requestedNextPageToken = String(params.get('nextPageToken') || '');
-  if (requestedNextPageToken && String(payload?.meta?.nextPageToken || '') === requestedNextPageToken) {
-    return true;
-  }
-
-  const requestedFromHeight = Math.max(0, Math.trunc(safeNumber(params.get('fromHeight'), 0)));
-  if (requestedFromHeight > 0 && actions.length > 0) {
-    const highestReturnedHeight = actions.reduce(
-      (maxHeight, action) => Math.max(maxHeight, Math.max(0, Math.trunc(safeNumber(action?.height, 0)))),
-      0
-    );
-    if (highestReturnedHeight < requestedFromHeight) {
-      return true;
-    }
-  }
-
-  return false;
+  return validateMidgardPayload(path, payload, RAPID_MIDGARD_VALIDATION_OPTIONS);
 }
 
-export function isRapidSwapRateLimitError(error) {
-  return Boolean(
-    error?.status === 429 ||
-    /HTTP 429|Too Many Requests|daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.message || '')) ||
-    /daily request limit|rate.?limit|rune pouch is empty/i.test(String(error?.body || ''))
-  );
-}
+export const isRapidSwapRateLimitError = isProviderRateLimitError;
 
 export function getRapidSwapRateLimitCooldownMs(error, fallbackMs = 60 * 60 * 1000) {
   if (!isRapidSwapRateLimitError(error)) {
@@ -182,7 +101,7 @@ async function fetchWithFallback(bases, path, options = {}) {
     timeoutMs: 10_000,
     headers: {
       Accept: 'application/json',
-      'x-client-id': readEnv('BOONETOOLS_PROVIDER_CLIENT_ID') || 'BooneTools',
+      'x-client-id': providerSettings.clientId,
       ...headers
     },
     validateResponse: typeof validatePayload === 'function'
@@ -197,7 +116,7 @@ async function fetchWithFallback(bases, path, options = {}) {
 }
 
 export async function fetchThorchain(endpoint) {
-  return (await fetchWithFallback(THORNODE_BASES, endpoint, { stopOnRateLimit: false })).payload;
+  return (await fetchWithFallback(providerSettings.thornodeBases, endpoint, { stopOnRateLimit: false })).payload;
 }
 
 export async function fetchThorchainTx(txId) {
@@ -257,7 +176,7 @@ export async function fetchMidgardActions(options = {}) {
 
   const bases = Array.isArray(options.bases) && options.bases.length
     ? uniqueBases(options.bases)
-    : MIDGARD_BASES;
+    : providerSettings.midgardBases;
   const result = await fetchWithFallback(bases, `/actions?${params.toString()}`, {
     startIndex: 0,
     validatePayload: isMidgardPayloadInvalid

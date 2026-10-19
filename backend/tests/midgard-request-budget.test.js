@@ -77,14 +77,14 @@ test('provider versions share budget without coupling public, dedicated, or othe
   })?.budgetClass, 'bulk');
 });
 
-test('origin-based comparison history requests cannot bypass the shared budget', async () => {
+test('service-based comparison history requests cannot bypass the shared budget', async () => {
   let claims = 0;
   const deferred = new MidgardBudgetDeferredError({ providerKey: 'test', retryAt: '2099-01-01T00:00:00Z', reason: 'total-day' });
   const comparison = createComparisonRequest({ transport: (options) => requestFromProviders({ ...options, providerPool: false,
     midgardBudget: { async claim(context) {
       claims++; assert.equal(context.budgetClass, 'live'); throw deferred;
     } }, fetchImpl: async () => assert.fail('origin-based URL bypassed Midgard budget') }) });
-  await assert.rejects(comparison(`${BASE}/history/swaps?interval=day`), (error) => error === deferred);
+  await assert.rejects(comparison('/history/swaps?interval=day', { service: 'midgard' }), (error) => error === deferred);
   assert.equal(claims, 1);
 });
 
