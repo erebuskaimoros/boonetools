@@ -63,6 +63,10 @@ export async function fetchMidgard(path, options = {}) {
     bases: baseList,
     path,
     timeoutMs: options.timeoutMs || MIDGARD_REQUEST_TIMEOUT_MS,
+    ...(options.midgardBudget !== undefined ? { midgardBudget: options.midgardBudget } : {}),
+    ...(options.midgardBudgetClass ? { midgardBudgetClass: options.midgardBudgetClass } : {}),
+    ...(options.signal || options.request ? { request: { ...options.request,
+      ...(options.signal ? { signal: options.signal } : {}) } } : {}),
     headers: {
       Accept: 'application/json',
       'x-client-id': config.providerClientId

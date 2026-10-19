@@ -134,15 +134,61 @@ only successful, priced actions inside `[day start, cutoff)` are ranked. Missing
 prices and pending swaps are disclosed, not converted to zeros. Streaming swaps
 use their Midgard action date, not a claim that every sub-swap executed that day.
 Pool discovery combines the matching earnings intervals and encountered action
-pools. Each pool's volume is fetched separately from `/history/swaps`, with exact
-contiguous coverage and base-unit validation, rather than attributing input value
-to every pool. No ranking is published until both complete scans finish.
+pools. Each pool's volume uses `/history/swaps`, with exact contiguous coverage
+and base-unit validation, rather than attributing input value to every pool.
+Completed pool days first reuse `pool_analysis_daily` only when the asset, UTC
+interval, source, raw units, non-partial status and completion watermark all match.
+Missing pools still use the budgeted source; the tracked-pool subset never replaces
+discovery of the full day's pool universe. No ranking is published until both
+complete scans finish.
 
-Current/recent data refreshes at most every fifteen minutes while requested;
-complete, fully priced days older than two days are retained as final. Source
-failures retry no sooner than one minute. The local Vite route runs the same
-acquisition/normalization logic with an in-memory development cache; production
-cursor/results survive service restarts and immutable releases in Postgres.
+### Request efficiency and bounded acquisition (October 18, 2026)
+
+A completed UTC-day snapshot is retained without automatic rescanning, even when
+pending or unpriced actions remain. Acquisition completion is not financial
+finality: the UI identifies exclusions and late settlements can change the true
+ranking. There is no automatic targeted settlement repair yet. This stops the old
+fifteen-minute full-day repeat triggered by a single unresolved action.
+
+Today's completed prefix refreshes at most every fifteen minutes while viewed.
+It scans only the new action interval and merges the prior and new top tens;
+pool totals refresh for all discovered pools. Up to 512 unresolved transaction
+identities are retained to reconcile reappearing actions. Legacy count-only
+exclusions and overflow stay explicitly provisional; rare stale duplicates outside
+retained identities can conservatively overcount exclusions. Legacy in-progress cursors
+resume in place; subsequent completed prefixes use delta acquisition.
+
+Public reads renew a two-minute visitor lease; the worker checks that lease before
+each source step. Leaving/closing the panel or hiding the tab pauses unfinished
+work after the lease expires, preserving its checkpoint. Reopening resumes it.
+Provider and request-budget deferrals preserve state and honor the advertised
+retry time. Completed-day reads cost zero upstream calls.
+
+Migration 069 adds an atomic Postgres request budget shared by backend processes
+for each Midgard provider. All `/actions` and Financials day acquisition requests
+consume a bulk subset of the total budget. Defaults are 60/minute, 2,000/hour and
+20,000/UTC day total, with bulk capped at 30/minute, 1,000/hour and 5,000/UTC day.
+These are application safety limits, **not published Liquify public-gateway quotas**.
+Bulk therefore cannot consume the whole allowance for normal reads. Admission is
+checked before HTTP, after circuit-breaker checks; deferral does not record a 429
+or poison provider health. Storage failure defers safely. Existing provider-wide
+429 cooldowns remain in force. Counters survive processes and deploys; no reset or
+historical request accounting is implied by first installation. The collector
+logs acquisition/cache metrics every minute.
+
+The remaining first-visit cost is substantial: Midgard `/actions` returns at most
+50 entries and offers no amount ordering/filter, so an exact ranking for 37,500
+actions requires roughly 750 action pages, plus source metadata and uncached pool
+days. The bulk cap deliberately spreads that across tens of minutes and can defer
+it longer when other consumers use the allowance. Existing Rapid Swaps/affiliate
+datasets cover subsets, not all routes, and cannot replace this scan honestly.
+A canonical local all-swap ledger would be a separate ingestion project.
+
+The local Vite route uses the same acquisition/normalization and a process-local
+budget with these limits and one-second Midgard start spacing. Its day cache and
+counters do not survive Vite restart or share the production database. Production
+cursor/results and request counters survive service restarts and immutable releases
+in Postgres. No historical cache reset or provider warmup is needed.
 
 ## Historical state and acquisition
 

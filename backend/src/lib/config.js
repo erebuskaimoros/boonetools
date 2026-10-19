@@ -81,6 +81,20 @@ export const config = Object.freeze({
     midgardUrl,
     midgardFallbackUrl
   ]),
+  // Operator-selected safety ceilings, NOT a statement of any upstream plan's
+  // quota. Bulk scans cannot consume the capacity reserved for cheap live reads.
+  midgardRequestBudgetEnabled: readBool('MIDGARD_REQUEST_BUDGET_ENABLED',
+    optional(process.env.NODE_ENV).toLowerCase() === 'production'),
+  midgardRequestBudgetTotal: Object.freeze({
+    minute: readInt('MIDGARD_REQUEST_BUDGET_TOTAL_MINUTE', 60),
+    hour: readInt('MIDGARD_REQUEST_BUDGET_TOTAL_HOUR', 2000),
+    day: readInt('MIDGARD_REQUEST_BUDGET_TOTAL_DAY', 20000)
+  }),
+  midgardRequestBudgetBulk: Object.freeze({
+    minute: readInt('MIDGARD_REQUEST_BUDGET_BULK_MINUTE', 30),
+    hour: readInt('MIDGARD_REQUEST_BUDGET_BULK_HOUR', 1000),
+    day: readInt('MIDGARD_REQUEST_BUDGET_BULK_DAY', 5000)
+  }),
   rpcRestUrl,
   rpcArchiveRestUrl,
   rpcRestUrls: readList('RPC_REST_URLS', [

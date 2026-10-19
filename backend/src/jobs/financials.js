@@ -12,6 +12,8 @@ import { readFinancialRewardAccountingDays, repairFinancialRewardBlocks } from '
 import { repairFinancialReserveEmissions } from '../shared/financials-reserve-service.js';
 import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-pool.js';
 import { refreshFinancialDayQueue } from '../shared/financials-day-detail.js';
+import { createFinancialDaySource } from '../shared/financials-day-source.js';
+import { acquisitionMetrics } from '../lib/acquisition-metrics.js';
 
 // Liquify's block-results archive currently starts on October 6. Begin at the
 // next complete UTC day, including the full first REVSHARE day (October 7).
@@ -19,13 +21,14 @@ import { refreshFinancialDayQueue } from '../shared/financials-day-detail.js';
 const REWARD_HISTORY_FROM = Date.parse('2026-10-07T00:00:00Z') / 1000;
 
 export function createFinancialsProviderRequest(client, { transport = requestFromProviders } = {}) {
-  return (url, { lane = 'history' } = {}) => {
+  return (url, { lane = 'history', midgardBudgetClass } = {}) => {
     const base = [FINANCIALS_MIDGARD, FINANCIALS_RPC].find((candidate) => url.startsWith(`${candidate}/`));
     if (!base) throw new Error('Financials provider is not allowlisted');
     return transport({ bases: base === FINANCIALS_RPC ? config.rpcRestUrls : [base], path: url.slice(base.length), timeoutMs: 60_000,
       // Preserve the existing 650ms start-rate limit separately on each RPC
       // provider, instead of serializing both behind the Midgard queue.
       providerMinIntervalMs: base === FINANCIALS_RPC ? 650 : 0,
+      ...(midgardBudgetClass ? { midgardBudgetClass } : {}),
       headers: { Accept: 'application/json', 'x-client-id': 'BooneTools-Financials' },
       ...providerLifecycleHooks({ client, scope: `financials-${lane}` })
     });
@@ -68,6 +71,9 @@ export async function runFinancialsCollector(options = {}) {
     });
     const published = new Map();
     const log = options.log || ((message) => console.error(JSON.stringify({ type: 'financials', message })));
+    const daySource = createFinancialDaySource({ client,
+      getJson: route => createFinancialsProviderRequest(client)(`${FINANCIALS_MIDGARD}${route}`,
+        { lane: 'day-details', midgardBudgetClass: 'bulk' }) });
     let stopping;
     const stop = () => {
       controller.abort();
@@ -90,7 +96,11 @@ export async function runFinancialsCollector(options = {}) {
         loop(30_000, async () => { await service.refreshLive(); await service.refreshRewardAccounting?.(); }),
         ...(options.service && !options.refreshDayDetails ? [] : [loop(5000, () =>
           (options.refreshDayDetails || refreshFinancialDayQueue)(client, { signal,
-            getJson: route => createFinancialsProviderRequest(client)(`${FINANCIALS_MIDGARD}${route}`, { lane: 'day-details' }) }))]),
+            getJson: daySource }))]),
+        loop(60_000, () => {
+          const acquisition = acquisitionMetrics({ reset: true });
+          if (acquisition) log({ type: 'acquisition_metrics', window_seconds: 60, acquisition });
+        }),
         // Steady-state capture is provider-free. A separate bounded lane
         // repairs startup history and websocket gaps without blocking live
         // publication or sharing the historical-bond acquisition lane.

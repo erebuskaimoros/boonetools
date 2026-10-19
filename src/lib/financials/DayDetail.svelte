@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { fetchFinancialDay } from './api.js';
+  import { financialDayPollDelay } from './day-poll.js';
   import { formatFinancialAmount } from '../../../shared/financials/model.js';
   export let day;
   export let onClose = () => {};
@@ -20,9 +21,8 @@
     finally {
       if (!destroyed && id === sequence) {
         loading = false;
-        if (detail?.loading || detail?.refreshing || detail?.partial || error) {
-          timer = setTimeout(refreshWhenVisible, error || detail?.error ? 30_000 : detail?.loading || detail?.refreshing ? 5000 : 60_000);
-        }
+        const nextPoll = financialDayPollDelay(detail, error);
+        if (nextPoll !== null) timer = setTimeout(refreshWhenVisible, nextPoll);
       }
     }
   }
@@ -39,11 +39,14 @@
   <header><h3><span aria-hidden="true">▌</span> {day} <span class="muted">· UTC{detail?.partial ? ' · IN PROGRESS' : ''}</span></h3>
     <button on:click={onClose} aria-label="Close day details">[×] close</button></header>
   <p class="progress" role="status">
-    {#if error || detail?.error}{error || detail.error} <button on:click={load}>[R] retry</button>
+    {#if !error && detail?.deferred}
+      Acquisition paused{detail.retryAt ? ` until ${new Date(detail.retryAt).toLocaleString('en-US', { timeZone: 'UTC', hour12: false })} UTC` : ''} · saved progress is preserved.
+      <span class="deferred-reason">{detail.error}</span>
+    {:else if error || detail?.error}{error || detail.error} <button on:click={load}>[R] retry</button>
     {:else if loading || detail?.loading}Loading the full day’s rankings{detail?.progress?.pages ? ` · ${detail.progress.pages} swap pages checked` : ''}…
     {:else}Through {detail?.through ? new Date(detail.through).toLocaleString('en-US', { timeZone: 'UTC', hour12: false }) : day} UTC{detail?.refreshing ? ' · refreshing' : ''}{/if}
   </p>
-  {#if detail?.unpricedSwaps || detail?.pendingSwaps}<p class="warning">Provisional ranking · {detail.unpricedSwaps || 0} unpriced and {detail.pendingSwaps || 0} pending swaps excluded.</p>{/if}
+  {#if detail?.unpricedSwaps || detail?.pendingSwaps || detail?.exclusionsIncomplete}<p class="warning">Provisional snapshot · {detail.unpricedSwaps || 0} unpriced and {detail.pendingSwaps || 0} unresolved pending swaps excluded. Late settlements are not automatically rescanned.</p>{/if}
   <div class="rankings">
     <section aria-labelledby="top-swaps-title"><h4 id="top-swaps-title">TOP 10 SWAPS <span>INPUT VALUE · USD</span></h4>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
@@ -68,6 +71,7 @@
     </section>
   </div>
   <p class="basis">Swaps use input value once per route and Midgard’s action date. Pool volume counts each executed leg; cross-asset swaps touch two pools. All rankings are in USD.</p>
+  <p class="basis">Completed-day snapshots stay cached. Today adds newly indexed activity while this panel is open; leaving pauses unfinished scans.</p>
 </section>
 
 <style>
@@ -79,6 +83,7 @@
   button:hover, a:hover { color: var(--term-accent); }
   button:focus-visible, a:focus-visible, .table-scroll:focus-visible { outline: 2px solid var(--term-accent); outline-offset: 2px; }
   .progress, .basis, .warning { font: 11px/1.7 var(--term-font-mono); color: var(--term-text-3); margin: 10px 0; }
+  .deferred-reason { display: block; color: var(--term-amber); overflow-wrap: anywhere; }
   .warning { color: var(--term-amber); }
   .rankings { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 24px; }
   h4 { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font: 12px var(--term-font-mono); color: var(--term-text); margin: 16px 0 12px; }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { advanceFinancialDay, financialDetailDay, financialPoolVolume, readFinancialDay, refreshFinancialDayQueue } from '../src/shared/financials-day-detail.js';
+import { advanceFinancialDay, financialDetailDay, financialPoolVolume, readFinancialDay, refreshFinancialDayQueue,
+  financialDayStateFromSnapshot, financialDayRetryAt } from '../src/shared/financials-day-detail.js';
 import { handleFinancials } from '../src/handlers/financials.js';
 
 const day = '2026-10-12', from = Date.parse(`${day}T00:00:00Z`) / 1000, to = from + 86400;
@@ -98,6 +99,125 @@ test('queue bounds provider requests and persists every successful step for rest
   assert.equal(JSON.parse(writes[1][1]).phase, 'actions');
 });
 
+test('live refresh scans only the new disjoint interval, merges top ten, and resolves tracked duplicate exclusions', async () => {
+  const previousThrough = from + 3600, through = from + 7200;
+  let state = { day, from, to, through: previousThrough, phase: 'done', swaps: [
+    { txId: 'PRIOR', volumeUsd: 9000 }, { txId: 'DUPLICATE', volumeUsd: 20 }
+  ], pools: ['BTC.BTC', 'ETH.ETH'], poolRows: [], tokens: [], pages: 700,
+  unpriced: 1, pending: 1, exclusions: [{ txId: 'SETTLED', kind: 'pending' }, { txId: 'UNPRICED', kind: 'unpriced' }] };
+  const calls = [];
+  const getJson = async route => {
+    calls.push(route);
+    if (route === '/health') return { inSync: true, lastAggregated: { timestamp: through } };
+    if (route.startsWith('/history/earnings')) return { intervals: Array.from({ length: 24 }, (_, i) => ({
+      startTime: from + i * 300, endTime: from + (i + 1) * 300, pools: [{ pool: 'BTC.BTC' }] })) };
+    if (route.startsWith('/actions')) return { actions: [action('settled', through - 10, 100),
+      action('duplicate', through - 20, 2), action('unpriced', through - 30, 1, { metadata: {} }),
+      action('boundary', previousThrough, 500), action('old', previousThrough - 1, 1000000)] };
+    return { intervals: [{ startTime: from, endTime: through, totalVolumeUSD: '10000', totalVolume: '500000000' }] };
+  };
+  let payload;
+  for (let i = 0; i < 5; i++) {
+    const result = await advanceFinancialDay(day, state, getJson, (through + 1) * 1000);
+    state = result.state; payload = result.payload;
+    if (i < 4) assert.equal(payload, null, 'old payload must remain published until delta action and pool coverage both complete');
+  }
+  assert.equal(calls.filter(route => route.startsWith('/actions')).length, 1, 'no replay of 700 historical pages');
+  assert.equal(state.actionFrom, previousThrough); assert.equal(state.pages, 701);
+  assert.deepEqual(payload.swaps.map(row => row.txId), ['PRIOR', 'BOUNDARY', 'SETTLED', 'DUPLICATE']);
+  assert.equal(payload.pendingSwaps, 0); assert.equal(payload.unpricedSwaps, 1);
+  assert.deepEqual(payload.excludedSwaps, [{ txId: 'UNPRICED', kind: 'unpriced' }]);
+  assert.equal(payload.finalized, false); assert.equal(payload.partial, true);
+  assert.deepEqual(payload.pools.map(row => row.asset), ['BTC.BTC', 'ETH.ETH'], 'retain prior pools even when absent from new earnings');
+});
+
+test('unchanged live watermark costs only health and preserves the previous observed snapshot', async () => {
+  const state = financialDayStateFromSnapshot(day, { through: new Date((from + 3600) * 1000).toISOString(),
+    observedAt: new Date((from + 4000) * 1000).toISOString(), swaps: [], pools: [], pendingSwaps: 0, unpricedSwaps: 0 }, now);
+  let calls = 0;
+  const result = await advanceFinancialDay(day, state, async route => {
+    calls++; assert.equal(route, '/health'); return { inSync: true, lastAggregated: { timestamp: from + 3300 } };
+  }, now);
+  assert.equal(calls, 1); assert.deepEqual(result.state, state);
+  assert.equal(result.payload.through, new Date((from + 3600) * 1000).toISOString());
+  assert.equal(result.payload.observedAt, state.observedAt);
+});
+
+test('legacy count-only exclusions survive delta scans without claiming resolved finality', async () => {
+  let state = financialDayStateFromSnapshot(day, { through: new Date((to - 300) * 1000).toISOString(),
+    swaps: [], pools: [], pendingSwaps: 3, unpricedSwaps: 2 }, now);
+  let payload;
+  for (let i = 0; i < 4; i++) {
+    const result = await advanceFinancialDay(day, state, async route => route === '/health'
+      ? { inSync: true, lastAggregated: { timestamp: to } }
+      : route.startsWith('/history/earnings') ? { intervals: [{ startTime: from, endTime: to, pools: [] }] }
+        : { actions: [] }, now);
+    state = result.state; payload = result.payload;
+  }
+  assert.equal(payload.partial, false); assert.equal(payload.finalized, false);
+  assert.equal(payload.pendingSwaps, 3); assert.equal(payload.unpricedSwaps, 2);
+  assert.equal(payload.exclusionsIncomplete, true);
+});
+
+test('unresolved identity retention is bounded and duplicates do not inflate tracked counts', async () => {
+  const state = { day, from, to, through: to, phase: 'actions', swaps: [], pools: [], poolRows: [], pages: 0, tokens: [], unpriced: 0, pending: 0 };
+  const actions = Array.from({ length: 520 }, (_, index) => action(`pending-${index}`, from + 10, 1, { status: 'pending' }));
+  actions.push(action('pending-0', from + 10, 1, { status: 'pending' }), action('old', from - 1, 1));
+  const result = await advanceFinancialDay(day, state, async () => ({ actions }), now);
+  assert.equal(result.state.exclusions.length, 512); assert.equal(result.state.pending, 520);
+  assert.equal(result.state.exclusionsIncomplete, true);
+});
+
+test('a known successful top-ten transaction is not reclassified by a stale pending duplicate', async () => {
+  const state = { day, from, to, through: to, phase: 'actions',
+    swaps: [{ txId: 'SETTLED', volumeUsd: 1000 }], pools: [], poolRows: [], pages: 0, tokens: [], unpriced: 0, pending: 0 };
+  const result = await advanceFinancialDay(day, state, async () => ({ actions: [
+    action('settled', from + 10, 1, { status: 'pending' }), action('old', from - 1, 1)
+  ] }), now);
+  assert.equal(result.state.pending, 0);
+  assert.deepEqual(result.state.exclusions, []);
+});
+
+test('queue stops between requests when its visitor lease expires, preserving the last checkpoint', async () => {
+  let clock = now, calls = 0;
+  const writes = [];
+  const client = { query: async (sql, args) => sql.startsWith('select') ? { rows: [{ day, state_json: null, requested_at: new Date(now) }] }
+    : (writes.push(args), { rows: [{ requested_at: new Date(now) }] }) };
+  await refreshFinancialDayQueue(client, { now: () => clock, getJson: async () => {
+    calls++; clock += 120_001; return { inSync: true, lastAggregated: { timestamp: to } };
+  } });
+  assert.equal(calls, 1); assert.equal(writes.length, 1); assert.equal(JSON.parse(writes[0][1]).phase, 'earnings');
+});
+
+test('queue honors fresh visitor lease renewals while a bounded batch is in flight', async () => {
+  let clock = now, calls = 0;
+  const client = { query: async sql => sql.startsWith('select') ? { rows: [{ day, state_json: null, requested_at: new Date(now) }] }
+    : { rows: [{ requested_at: new Date(clock) }] } };
+  await refreshFinancialDayQueue(client, { maxRequests: 2, now: () => clock, getJson: async route => {
+    calls++; clock += 120_001;
+    return route === '/health' ? { inSync: true, lastAggregated: { timestamp: to } }
+      : { intervals: [{ startTime: from, endTime: to, pools: [] }] };
+  } });
+  assert.equal(calls, 2);
+});
+
+test('budget deferral persists its real retry horizon without replacing checkpoints or the last-good payload', async () => {
+  const writes = [], retryAt = new Date(now + 6 * 3600_000).toISOString();
+  const client = { query: async (sql, args) => sql.startsWith('select') ? { rows: [{ day, state_json: null }] }
+    : (writes.push({ sql, args }), { rows: [] }) };
+  await refreshFinancialDayQueue(client, { now: () => now, getJson: async () => {
+    throw Object.assign(new Error('Midgard daily budget deferred'), { code: 'MIDGARD_BUDGET_DEFERRED', retryAt, skipProvider: true });
+  } });
+  assert.equal(writes.length, 1); assert.equal(writes[0].args[2], retryAt);
+  assert.doesNotMatch(writes[0].sql, /state_json\s*=|payload_json\s*=/);
+});
+
+test('short budget retries resume at the provider horizon while unclassified failures retain a minute backoff', () => {
+  assert.equal(financialDayRetryAt({ retryAt: new Date(now + 10_000).toISOString() }, now), now + 10_000);
+  assert.equal(financialDayRetryAt({ retryAfterSeconds: 90 }, now), now + 90_000);
+  assert.equal(financialDayRetryAt(new Error('Temporary failure'), now), now + 60_000);
+});
+
 test('Postgres migration, cold enqueue, resumable worker, last-good errors and final cache work together', {
   skip: !process.env.ACQUISITION_TEST_DATABASE_URL
 }, async () => {
@@ -115,7 +235,9 @@ test('Postgres migration, cold enqueue, resumable worker, last-good errors and f
     await client.query(await readFile(new URL('../migrations/068_financials_day_details.sql', import.meta.url), 'utf8'));
     assert.equal((await readFinancialDay(day, { client })).loading, true);
     let fail = false;
-    const options = { now: () => now, maxRequests: 1, getJson: async route => {
+    // The real queue uses database wall-clock eligibility, so retry horizons
+    // must use the same wall clock in this SQL integration test.
+    const options = { maxRequests: 1, getJson: async route => {
       if (fail) throw new Error('Temporary source failure');
       if (route === '/health') return { inSync: true, lastAggregated: { timestamp: to } };
       if (route.startsWith('/history/earnings')) return { intervals: [{ startTime: from, endTime: to, pools: [] }] };
@@ -138,5 +260,58 @@ test('Postgres migration, cold enqueue, resumable worker, last-good errors and f
     await client.query('update financials_day_details set available_at = now()');
     await refreshFinancialDayQueue(client, { getJson: () => { throw new Error('final cache must not reacquire'); } });
     assert.equal((await readFinancialDay(day, { client })).error, '');
+  } finally { await client.query('rollback'); await client.end(); }
+});
+
+test('Postgres queue freezes provisional closed days, pauses abandoned scans and resumes exact checkpoints', {
+  skip: !process.env.ACQUISITION_TEST_DATABASE_URL
+}, async () => {
+  const databaseUrl = process.env.ACQUISITION_TEST_DATABASE_URL;
+  assert.match(new URL(databaseUrl).pathname, /^\/(?:boonetools_)?acquisition_test(?:_|$)/);
+  const { default: pg } = await import('pg');
+  const { readFile } = await import('node:fs/promises');
+  const client = new pg.Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    await client.query('begin');
+    await client.query(`create schema financial_day_budget_test_${process.pid}`);
+    await client.query(`set local search_path to financial_day_budget_test_${process.pid}`);
+    await client.query("set local time zone 'America/New_York'");
+    await client.query(await readFile(new URL('../migrations/068_financials_day_details.sql', import.meta.url), 'utf8'));
+    const complete = { day, through: new Date(to * 1000).toISOString(), observedAt: new Date(now).toISOString(),
+      partial: false, finalized: false, pendingSwaps: 82, unpricedSwaps: 1, swaps: [], pools: [] };
+    await client.query(`insert into financials_day_details(day, payload_json, last_error) values ($1, $2, 'Old rate limit')`, [day, complete]);
+    let calls = 0;
+    await refreshFinancialDayQueue(client, { getJson: () => { calls++; throw new Error('closed day must not reacquire'); } });
+    assert.equal(calls, 0);
+    const frozen = await readFinancialDay(day, { client });
+    assert.equal(frozen.refreshing, false); assert.equal(frozen.error, ''); assert.equal(frozen.finalized, false);
+    assert.equal(frozen.pendingSwaps, 82); assert.equal(frozen.observedAt, complete.observedAt);
+
+    const coldDay = '2026-10-11', coldFrom = from - 86400;
+    const checkpoint = { day: coldDay, from: coldFrom, to: from, through: from, phase: 'actions',
+      token: 'saved-cursor', tokens: ['saved-cursor'], pages: 121, swaps: [], pools: [], poolRows: [], pending: 0, unpriced: 0 };
+    await client.query(`insert into financials_day_details(day, state_json, requested_at) values ($1, $2, now() - interval '10 minutes')`, [coldDay, checkpoint]);
+    await refreshFinancialDayQueue(client, { getJson: () => { calls++; throw new Error('abandoned must not run'); } });
+    assert.equal(calls, 0);
+    assert.deepEqual((await client.query('select state_json from financials_day_details where day = $1', [coldDay])).rows[0].state_json, checkpoint);
+    await readFinancialDay(coldDay, { client });
+    const retryAt = new Date(Date.now() + 4 * 3600_000).toISOString();
+    await refreshFinancialDayQueue(client, { maxRequests: 1, getJson: route => {
+      calls++;
+      assert.equal(new URL(route, 'https://example.test').searchParams.get('nextPageToken'), 'saved-cursor');
+      throw Object.assign(new Error('Budget deferred'), { code: 'MIDGARD_BUDGET_DEFERRED', retryAt });
+    } });
+    assert.equal(calls, 1);
+    const deferred = await readFinancialDay(coldDay, { client });
+    assert.equal(deferred.deferred, true); assert.equal(deferred.retryAt, retryAt);
+    const saved = (await client.query('select state_json, available_at from financials_day_details where day = $1', [coldDay])).rows[0];
+    assert.deepEqual(saved.state_json, checkpoint); assert.equal(saved.available_at.toISOString(), retryAt);
+    await refreshFinancialDayQueue(client, { getJson: () => { calls++; throw new Error('must wait for budget horizon'); } });
+    assert.equal(calls, 1);
+    await client.query('update financials_day_details set available_at = now() where day = $1', [coldDay]);
+    await refreshFinancialDayQueue(client, { maxRequests: 2, getJson: async () => { calls++; return { actions: [] }; } });
+    const resumed = await readFinancialDay(coldDay, { client });
+    assert.equal(resumed.loading, false); assert.equal(resumed.progress.pages, 122); assert.equal(resumed.error, '');
   } finally { await client.query('rollback'); await client.end(); }
 });

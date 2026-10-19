@@ -1,7 +1,9 @@
 import { midgardActionTimestampSeconds } from '../../../shared/dynamic-fees/affiliate-volume.js';
 
 const DAY = 86400;
-const REFRESH_MS = 15 * 60_000;
+export const FINANCIAL_DAY_REFRESH_MS = 15 * 60_000;
+export const FINANCIAL_DAY_VISITOR_LEASE_MS = 2 * 60_000;
+const MAX_EXCLUSION_IDS = 512;
 const iso = seconds => new Date(seconds * 1000).toISOString();
 const positive = value => value !== null && value !== '' && Number.isFinite(Number(value)) && Number(value) > 0;
 const integer = value => /^\d+$/.test(String(value ?? ''));
@@ -17,28 +19,85 @@ export function financialDetailDay(day, now = Date.now()) {
 
 function rankedSwaps(actions, from, through) {
   const rows = [];
-  let unpriced = 0, pending = 0;
+  const exclusions = [];
   for (const action of actions) {
     const seconds = midgardActionTimestampSeconds(action.date);
     if (seconds < from || seconds >= through || action.type !== 'swap') continue;
-    if (action.status !== 'success') { pending++; continue; }
+    const txId = action.in?.find(leg => leg.txID)?.txID;
+    const exclude = kind => exclusions.push({ txId: txId ? String(txId).toUpperCase() : null, kind });
+    if (action.status !== 'success') { exclude('pending'); continue; }
     const inputs = (action.in || []).flatMap(leg => leg.coins || []);
     const asset = inputs[0]?.asset;
-    const txId = action.in?.find(leg => leg.txID)?.txID;
     const price = action.metadata?.swap?.inPriceUSD;
     // One source asset per route. Never turn an unpriced swap into a zero.
     if (!txId || !inputs.length || !positive(price) || inputs.some(coin => coin.asset !== asset || !integer(coin.amount))) {
-      unpriced++; continue;
+      exclude('unpriced'); continue;
     }
     const inputAmount = Number(inputs.reduce((sum, coin) => sum + BigInt(coin.amount), 0n)) / 1e8;
     const volumeUsd = inputAmount * Number(price);
-    if (!Number.isFinite(volumeUsd)) { unpriced++; continue; }
+    if (!Number.isFinite(volumeUsd)) { exclude('unpriced'); continue; }
     const outputs = (action.out || []).filter(leg => !leg.affiliate).flatMap(leg => leg.coins || []);
     rows.push({ txId: String(txId).toUpperCase(), timestamp: iso(seconds),
       inputAsset: asset, inputAmount, outputAsset: outputs[0]?.asset || action.metadata?.swap?.streamingSwapMeta?.outCoin?.asset || '',
       volumeUsd, streaming: Boolean(action.metadata?.swap?.isStreamingSwap) });
   }
-  return { rows, unpriced, pending };
+  return { rows, exclusions };
+}
+
+function mergeRankedSwaps(state, ranked) {
+  const exclusions = new Map((state.exclusions || []).map(row => [row.txId, row]));
+  const successful = new Set([...state.swaps, ...ranked.rows].map(row => row.txId));
+  const removeExclusion = txId => {
+    const previous = exclusions.get(txId);
+    if (!previous) return;
+    state[previous.kind] = Math.max(0, state[previous.kind] - 1);
+    exclusions.delete(txId);
+  };
+  for (const row of ranked.rows) removeExclusion(row.txId);
+  for (const row of ranked.exclusions) {
+    if (row.txId) removeExclusion(row.txId);
+    // Pages may repeat an older pending/unpriced view of a settled action.
+    // Known success wins over that stale duplicate, including across deltas.
+    if (successful.has(row.txId)) continue;
+    state[row.kind]++;
+    if (row.txId && exclusions.size < MAX_EXCLUSION_IDS) exclusions.set(row.txId, row);
+    else state.exclusionsIncomplete = true;
+  }
+  state.exclusions = [...exclusions.values()];
+  state.swaps = topSwaps([...state.swaps, ...ranked.rows]);
+}
+
+/** Acquisition completion is independent of pending/unpriced financial finality. */
+export function financialDaySnapshotComplete(day, payload) {
+  return Boolean(payload && Date.parse(payload.through) >= Date.parse(`${day}T00:00:00Z`) + DAY * 1000);
+}
+
+export function financialDayStateFromSnapshot(day, payload, now = Date.now()) {
+  if (!payload) return null;
+  return { ...financialDetailDay(day, now), through: Date.parse(payload.through) / 1000,
+    phase: 'done', swaps: payload.swaps || [], pools: (payload.pools || []).map(row => row.asset),
+    poolRows: payload.pools || [], pages: 0, tokens: [], unpriced: payload.unpricedSwaps || 0,
+    pending: payload.pendingSwaps || 0, exclusions: payload.excludedSwaps || [],
+    exclusionsIncomplete: payload.exclusionsIncomplete ?? Boolean((payload.unpricedSwaps || payload.pendingSwaps) && !payload.excludedSwaps),
+    observedAt: payload.observedAt };
+}
+
+export function financialDayRetryAt(error, now = Date.now()) {
+  const providerRetry = Date.parse(error?.retryAt || error?.blockedUntil || '');
+  const retrySeconds = Math.max(0, Number(error?.retryAfterSeconds) || 0);
+  return Math.max(now + (providerRetry > now || retrySeconds ? 1000 : 60_000), Number.isFinite(providerRetry) ? providerRetry : 0,
+    now + retrySeconds * 1000);
+}
+
+function dayPayload(day, state, now) {
+  return {
+    day, through: iso(state.through), observedAt: state.observedAt || new Date(now).toISOString(),
+    partial: state.through < state.to, unpricedSwaps: state.unpriced, pendingSwaps: state.pending,
+    excludedSwaps: state.exclusions || [], exclusionsIncomplete: Boolean(state.exclusionsIncomplete),
+    finalized: state.through === state.to && !state.unpriced && !state.pending && !state.exclusionsIncomplete && now / 1000 >= state.to + 2 * DAY,
+    swaps: state.swaps, pools: state.poolRows.filter(row => row.volumeUsd > 0).sort((a, b) => b.volumeUsd - a.volumeUsd || a.asset.localeCompare(b.asset)).slice(0, 10),
+    swapVolumeBasis: 'input-notional-usd', poolVolumeBasis: 'executed-leg-usd', source: 'liquify-midgard'
+  };
 }
 
 function topSwaps(rows) {
@@ -86,17 +145,31 @@ export function financialPoolVolume(payload, { from, through }, asset) {
  * and opaque descending cursor survive both provider errors and restarts. */
 export async function advanceFinancialDay(day, previous, getJson, now = Date.now()) {
   const bounds = financialDetailDay(day, now);
-  const state = previous ? structuredClone(previous) : { ...bounds, phase: 'health', swaps: [], pools: [], poolRows: [], tokens: [], pages: 0, unpriced: 0, pending: 0 };
+  let state = previous ? structuredClone(previous) : { ...bounds, phase: 'health', swaps: [], pools: [], poolRows: [], tokens: [], pages: 0, unpriced: 0, pending: 0 };
+  if (state.phase === 'done') {
+    if (state.through >= bounds.to) return { state, payload: dayPayload(day, state, now) };
+    // A completed prefix needs only the next disjoint action interval. Retain
+    // all known pool assets and unresolved IDs; the top ten of a union is the
+    // top ten of its partitions' top tens. Pool totals are refreshed in full.
+    state = { ...state, phase: 'health', actionFrom: state.through, poolRows: [],
+      tokens: [], token: null, lastTimestamp: null, scanPages: 0, observedAt: null };
+  }
   if (state.phase === 'health') {
     const health = await getJson('/health');
     const watermark = Number(health?.lastAggregated?.timestamp);
     if (health?.inSync !== true || !positive(watermark)) throw new Error('Midgard day-detail source is delayed');
     state.through = Math.min(bounds.to, Math.floor(Math.min(watermark, now / 1000) / 300) * 300);
     if (state.through <= bounds.from) throw new Error('Waiting for the first indexed five-minute bucket');
+    if (state.actionFrom && state.through <= state.actionFrom) {
+      // A delayed/unchanged watermark must neither regress the old snapshot
+      // nor cause another pass over the same action pages.
+      if (previous?.phase === 'done') return { state: structuredClone(previous), payload: dayPayload(day, previous, now) };
+      throw new Error('Waiting for the next indexed five-minute bucket');
+    }
     state.phase = 'earnings';
   } else if (state.phase === 'earnings') {
     const params = new URLSearchParams(financialDetailHistoryQuery(state.from, state.through));
-    state.pools = poolsFromEarnings(await getJson(`/history/earnings?${params}`), state.from, state.through);
+    state.pools = [...new Set([...state.pools, ...poolsFromEarnings(await getJson(`/history/earnings?${params}`), state.from, state.through)])].sort();
     state.phase = 'actions';
   } else if (state.phase === 'actions') {
     // Midgard rejects timestamp + nextPageToken together. The first request
@@ -112,19 +185,19 @@ export async function advanceFinancialDay(day, previous, getJson, now = Date.now
       if (!(timestamp > 0)) throw new Error('Day swap is missing its timestamp');
       if (state.lastTimestamp && timestamp > state.lastTimestamp) throw new Error('Day swap pages are not descending');
       state.lastTimestamp = timestamp;
-      if (timestamp < state.from) finished = true;
-      if (timestamp >= state.from && timestamp < state.through) {
+      if (timestamp < (state.actionFrom || state.from)) finished = true;
+      if (timestamp >= (state.actionFrom || state.from) && timestamp < state.through) {
         for (const pool of action.pools || []) if (/^[A-Z0-9]+\./.test(pool) && !state.pools.includes(pool)) state.pools.push(pool);
       }
     }
-    const ranked = rankedSwaps(payload.actions, state.from, state.through);
-    state.swaps = topSwaps([...state.swaps, ...ranked.rows]);
-    state.unpriced += ranked.unpriced; state.pending += ranked.pending; state.pages++;
+    const ranked = rankedSwaps(payload.actions, state.actionFrom || state.from, state.through);
+    mergeRankedSwaps(state, ranked);
+    state.pages++; state.scanPages = (state.scanPages || 0) + 1;
     if (finished) state.phase = 'pools';
     else {
       const token = String(payload.meta?.nextPageToken || '');
       if (!token || state.tokens.includes(token)) throw new Error('Day swap pagination did not advance');
-      if (state.pages > 10000) throw new Error('Day swap scan exceeded its safety limit');
+      if (state.scanPages > 10000) throw new Error('Day swap scan exceeded its safety limit');
       state.tokens.push(token); state.token = token;
     }
   } else if (state.phase === 'pools') {
@@ -133,15 +206,9 @@ export async function advanceFinancialDay(day, previous, getJson, now = Date.now
       const params = new URLSearchParams({ ...financialDetailHistoryQuery(state.from, state.through), pool: asset });
       state.poolRows.push(financialPoolVolume(await getJson(`/history/swaps?${params}`), state, asset));
     }
-    if (state.poolRows.length === state.pools.length) state.phase = 'done';
+    if (state.poolRows.length === state.pools.length) { state.phase = 'done'; state.observedAt = new Date(now).toISOString(); }
   }
-  const payload = state.phase !== 'done' ? null : {
-    day, through: iso(state.through), observedAt: new Date(now).toISOString(),
-    partial: state.through < state.to, unpricedSwaps: state.unpriced, pendingSwaps: state.pending,
-    finalized: state.through === state.to && !state.unpriced && !state.pending && now / 1000 >= state.to + 2 * DAY,
-    swaps: state.swaps, pools: state.poolRows.filter(row => row.volumeUsd > 0).sort((a, b) => b.volumeUsd - a.volumeUsd || a.asset.localeCompare(b.asset)).slice(0, 10),
-    swapVolumeBasis: 'input-notional-usd', poolVolumeBasis: 'executed-leg-usd', source: 'liquify-midgard'
-  };
+  const payload = state.phase !== 'done' ? null : dayPayload(day, state, now);
   return { state, payload };
 }
 
@@ -152,30 +219,38 @@ export async function readFinancialDay(day, options = {}) {
     on conflict (day) do update set requested_at = now()
     returning payload_json, state_json->>'phase' as phase, state_json->>'pages' as pages, last_error, available_at`, [day]);
   const row = rows[0];
+  const complete = financialDaySnapshotComplete(day, row?.payload_json);
   return { day, ...(row?.payload_json || {}), loading: !row?.payload_json,
-    refreshing: Boolean(row?.payload_json && !row.payload_json.finalized && new Date(row.available_at).getTime() <= (options.now?.() ?? Date.now())),
-    progress: { phase: row?.phase || (row?.payload_json ? 'done' : 'queued'), pages: Number(row?.pages) || 0 }, error: row?.last_error || '' };
+    refreshing: Boolean(row?.payload_json && !complete && new Date(row.available_at).getTime() <= (options.now?.() ?? Date.now())),
+    retryAt: !complete && row?.last_error ? new Date(row.available_at).toISOString() : null,
+    deferred: Boolean(!complete && row?.last_error && new Date(row.available_at).getTime() > (options.now?.() ?? Date.now())),
+    progress: { phase: complete ? 'done' : row?.phase || (row?.payload_json ? 'done' : 'queued'), pages: Number(row?.pages) || 0 }, error: complete ? '' : row?.last_error || '' };
 }
 
 export async function refreshFinancialDayQueue(client, options = {}) {
-  const { rows } = await client.query(`select day::text, state_json from financials_day_details
-    where available_at <= now() and requested_at > now() - interval '7 days'
-      and coalesce((payload_json->>'finalized')::boolean, false) = false
+  const { rows } = await client.query(`select day::text, state_json, payload_json, requested_at from financials_day_details
+    where available_at <= now() and requested_at > now() - interval '2 minutes'
+      and (payload_json is null or (payload_json->>'through')::timestamptz < ((day + 1)::timestamp at time zone 'UTC'))
     order by available_at, requested_at limit 1`);
   const row = rows[0];
   if (!row) return;
-  let state = row.state_json;
+  if (financialDaySnapshotComplete(row.day, row.payload_json)) return;
+  let requestedAt = row.requested_at ? new Date(row.requested_at).getTime() : options.now?.() ?? Date.now();
+  let state = row.state_json || financialDayStateFromSnapshot(row.day, row.payload_json, options.now?.() ?? Date.now());
   try {
     for (let index = 0; index < Math.max(1, Math.min(10, Number(options.maxRequests) || 10)) && !options.signal?.aborted; index++) {
+      if ((options.now?.() ?? Date.now()) - requestedAt >= FINANCIAL_DAY_VISITOR_LEASE_MS) return;
       const result = await advanceFinancialDay(row.day, state, options.getJson, options.now?.() ?? Date.now());
       state = result.state;
-      await client.query(`update financials_day_details set state_json = $2::jsonb,
+      const saved = await client.query(`update financials_day_details set state_json = $2::jsonb,
         payload_json = coalesce($3::jsonb, payload_json), updated_at = now(), last_error = null,
-        available_at = now() + ($4 * interval '1 millisecond') where day = $1::date`,
-      [row.day, result.payload ? null : JSON.stringify(state), result.payload ? JSON.stringify(result.payload) : null, result.payload ? REFRESH_MS : 0]);
+        available_at = now() + ($4 * interval '1 millisecond') where day = $1::date returning requested_at`,
+      [row.day, JSON.stringify(state), result.payload ? JSON.stringify(result.payload) : null, result.payload ? FINANCIAL_DAY_REFRESH_MS : 0]);
+      if (saved.rows[0]?.requested_at) requestedAt = new Date(saved.rows[0].requested_at).getTime();
       if (result.payload) return;
     }
   } catch (error) {
-    await client.query(`update financials_day_details set last_error = $2, available_at = now() + interval '1 minute' where day = $1::date`, [row.day, error.message]);
+    const retryAt = financialDayRetryAt(error, options.now?.() ?? Date.now());
+    await client.query(`update financials_day_details set last_error = $2, available_at = $3::timestamptz where day = $1::date`, [row.day, error.message, new Date(retryAt).toISOString()]);
   }
 }

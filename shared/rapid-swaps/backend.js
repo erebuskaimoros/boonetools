@@ -173,7 +173,10 @@ export function getRapidSwapRateLimitCooldownMs(error, fallbackMs = 60 * 60 * 10
 async function fetchWithFallback(bases, path, options = {}) {
   const { startIndex = 0, headers = {}, validatePayload = null, stopOnRateLimit = true } = options;
   const orderedBases = bases.map((_, offset) => bases[(startIndex + offset) % bases.length]);
-  const payload = await requestFromProviders({
+  // Backend injects its durable budgeted transport. The browser retains the
+  // isomorphic transport and never imports backend/database modules.
+  const { requestFromProviders: requestProvider = requestFromProviders, ...hooks } = providerLifecycle;
+  const payload = await requestProvider({
     bases: orderedBases,
     path,
     timeoutMs: 10_000,
@@ -187,7 +190,7 @@ async function fetchWithFallback(bases, path, options = {}) {
         ? `Invalid payload for ${path}`
         : null
       : null,
-    ...providerLifecycle,
+    ...hooks,
     shouldStop: (error) => stopOnRateLimit && !error?.skipProvider && isRapidSwapRateLimitError(error)
   });
   return { payload, index: startIndex };

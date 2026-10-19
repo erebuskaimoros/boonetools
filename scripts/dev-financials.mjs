@@ -5,38 +5,87 @@ import { createFinancialsService } from '../backend/src/shared/financials-servic
 import { FINANCIALS_MIDGARD, FINANCIALS_RPC } from '../backend/src/shared/financials-history.js';
 import { requestFromProviders } from '../shared/provider-client.js';
 import { RPC_PUBLIC_URLS } from '../shared/thorchain-providers.js';
-import { advanceFinancialDay, financialDetailDay } from '../backend/src/shared/financials-day-detail.js';
+import { advanceFinancialDay, financialDetailDay, financialDaySnapshotComplete, financialDayRetryAt,
+  FINANCIAL_DAY_REFRESH_MS, FINANCIAL_DAY_VISITOR_LEASE_MS } from '../backend/src/shared/financials-day-detail.js';
 
-export function createFinancialsDevRequest(transport = requestFromProviders) {
+// Local development does not share the production database/quota counters.
+// All Financials dev requests do share this process-local admission budget.
+export function createFinancialsDevBudget({ now = Date.now } = {}) {
+  const windows = [[60_000, 60, 30, 'minute'], [3600_000, 2000, 1000, 'hour'], [86400_000, 20000, 5000, 'day']];
+  const counters = new Map();
+  return ({ bulk = false } = {}) => {
+    const timestamp = now();
+    const checks = windows.flatMap(([duration, total, bulkLimit, period]) => {
+      const start = Math.floor(timestamp / duration) * duration;
+      return [['total', total], ...(bulk ? [['bulk', bulkLimit]] : [])].map(([kind, limit]) => {
+        const key = `${period}:${kind}`;
+        let count = counters.get(key);
+        if (!count || count.start !== start) { count = { start, count: 0 }; counters.set(key, count); }
+        return { count, limit, retryAt: start + duration, reason: `${kind}-${period}` };
+      });
+    });
+    const blocked = checks.filter(check => check.count.count >= check.limit).sort((a, b) => b.retryAt - a.retryAt)[0];
+    if (blocked) {
+      const error = new Error(`Local Midgard ${blocked.reason} request budget reached; saved progress will resume later`);
+      Object.assign(error, { code: 'MIDGARD_BUDGET_DEFERRED', name: 'MidgardBudgetDeferredError', skipProvider: true,
+        retryAt: new Date(blocked.retryAt).toISOString(), blockedUntil: new Date(blocked.retryAt).toISOString(),
+        retryAfterSeconds: Math.ceil((blocked.retryAt - timestamp) / 1000), budgetReason: blocked.reason });
+      throw error;
+    }
+    for (const check of checks) check.count.count++;
+  };
+}
+
+const devMidgardBudget = createFinancialsDevBudget();
+
+export function createFinancialsDevRequest(transport = requestFromProviders, { budget = devMidgardBudget, bulk = false } = {}) {
   return (url) => {
     const base = [FINANCIALS_MIDGARD, FINANCIALS_RPC].find(candidate => url.startsWith(`${candidate}/`));
     if (!base) throw new Error('Financials provider is not allowlisted');
+    if (base === FINANCIALS_MIDGARD) budget({ bulk: bulk || url.startsWith(`${base}/actions`) });
     return transport({ bases: base === FINANCIALS_RPC ? RPC_PUBLIC_URLS : [base], path: url.slice(base.length),
-      timeoutMs: 60_000, providerMinIntervalMs: base === FINANCIALS_RPC ? 650 : 0,
+      timeoutMs: 60_000, providerMinIntervalMs: base === FINANCIALS_RPC ? 650 : 1000,
       headers: { Accept: 'application/json', 'x-client-id': 'BooneTools-Financials' } });
+  };
+}
+
+export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevRequest(undefined, { bulk: true }), now = Date.now } = {}) {
+  const days = new Map();
+  let stopped = false;
+  async function acquireDay(day, entry) {
+    entry.running = true;
+    try {
+      for (let index = 0; index < 10 && !stopped && now() - entry.requestedAt < FINANCIAL_DAY_VISITOR_LEASE_MS; index++) {
+        const result = await advanceFinancialDay(day, entry.state, route => requestJson(`${FINANCIALS_MIDGARD}${route}`), now());
+        entry.state = result.state;
+        if (result.payload) { entry.payload = result.payload; entry.retryAt = now() + FINANCIAL_DAY_REFRESH_MS; break; }
+      }
+      if (entry.state?.phase !== 'done') entry.retryAt = now() + 5000;
+      entry.error = '';
+    } catch (failure) { entry.error = failure.message; entry.retryAt = financialDayRetryAt(failure, now()); }
+    finally { entry.running = false; }
+  }
+  return {
+    read(day) {
+      financialDetailDay(day, now());
+      const entry = days.get(day) || { state: null, payload: null, running: false, retryAt: 0, error: '' };
+      entry.requestedAt = now();
+      days.set(day, entry);
+      const complete = financialDaySnapshotComplete(day, entry.payload);
+      if (!entry.running && !complete && now() >= entry.retryAt) entry.work = acquireDay(day, entry);
+      return { day, ...entry.payload, loading: !entry.payload, refreshing: Boolean(entry.payload && entry.running && !complete),
+        retryAt: !complete && entry.error ? new Date(entry.retryAt).toISOString() : null,
+        deferred: Boolean(!complete && entry.error && entry.retryAt > now()), error: complete ? '' : entry.error,
+        progress: { phase: complete ? 'done' : entry.state?.phase || (entry.payload ? 'done' : 'queued'), pages: entry.state?.pages || 0 } };
+    },
+    async idle() { await Promise.all([...days.values()].map(entry => entry.work)); },
+    async stop() { stopped = true; await this.idle(); }
   };
 }
 
 export function createFinancialsDevPlugin() {
   let service;
-  const days = new Map();
-  let stopped = false;
-  const requestDay = createFinancialsDevRequest();
-  async function acquireDay(day, entry) {
-    entry.running = true;
-    try {
-      // Match the production request budget. Further browser polls resume the
-      // checkpoint rather than leaving abandoned development scans running.
-      for (let index = 0; index < 10 && !stopped; index++) {
-        const result = await advanceFinancialDay(day, entry.state, route => requestDay(`${FINANCIALS_MIDGARD}${route}`));
-        entry.state = result.state;
-        if (result.payload) { entry.payload = result.payload; entry.state = null; entry.retryAt = Date.now() + 15 * 60_000; break; }
-      }
-      if (!entry.payload) entry.retryAt = Date.now() + 5000;
-      entry.error = '';
-    } catch (failure) { entry.error = failure.message; entry.retryAt = Date.now() + 60_000; }
-    finally { entry.running = false; }
-  }
+  const days = createFinancialsDayDevQueue();
   return {
     name: 'financials-dev-data',
     apply: 'serve',
@@ -53,11 +102,7 @@ export function createFinancialsDevPlugin() {
         if (url.searchParams.has('day')) {
           const day = url.searchParams.get('day');
           try { financialDetailDay(day); } catch (failure) { res.statusCode = 400; res.end(JSON.stringify({ error: failure.message })); return; }
-          const entry = days.get(day) || { state: null, payload: null, running: false, retryAt: 0, error: '' };
-          days.set(day, entry);
-          if (!entry.running && !entry.payload?.finalized && Date.now() >= entry.retryAt) void acquireDay(day, entry);
-          res.end(JSON.stringify({ day, ...entry.payload, loading: !entry.payload, refreshing: Boolean(entry.payload && entry.running),
-            error: entry.error, progress: { phase: entry.state?.phase || (entry.payload ? 'done' : 'queued'), pages: entry.state?.pages || 0 } }));
+          res.end(JSON.stringify(days.read(day)));
           return;
         }
         const range = url.searchParams.get('range') || '30d';
@@ -66,6 +111,6 @@ export function createFinancialsDevPlugin() {
         catch (error) { res.statusCode = 502; res.end(JSON.stringify({ error: error.message })); }
       });
     },
-    async closeBundle() { stopped = true; await service?.stop(); }
+    async closeBundle() { await Promise.all([days.stop(), service?.stop()]); }
   };
 }

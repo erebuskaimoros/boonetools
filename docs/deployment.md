@@ -251,6 +251,30 @@ top-ten lists after collector completion. Invalid/future dates must return 400.
 Verify daily clicks open the tables, drags still zoom, and the amber line defaults
 to RUNE/USD with a working Bonding APR switch that preserves zoom.
 
+The October 18 request-efficiency follow-up adds migration 069's shared Midgard
+admission counters. Deploy backend first, preserving migration 068's saved payloads
+and cursors. Completed closed-day snapshots must return `refreshing=false` even
+with pending exclusions and must not reacquire data. Incomplete scans require a
+recent two-minute visitor lease, resume saved cursors, and honor budget/cooldown
+retry times. Today advances by new action intervals rather than rescanning its
+completed prefix. Exact completed pool days reuse Pool Analysis's existing rows.
+
+Production defaults enable `MIDGARD_REQUEST_BUDGET_ENABLED` and cap each provider
+at 60/minute, 2,000/hour and 20,000/UTC day overall; `/actions` and day-detail work
+share a bulk subset capped at 30/minute, 1,000/hour and 5,000/UTC day. Configuration
+names are in `backend/.env.example`. These are our safety caps, not a published
+Liquify quota. Do not clear provider cooldowns or request counters on deployment.
+No warmup, cold-date smoke scan, new timer or cache rebuild is required. Use saved
+completed days for provider-free verification, and inspect
+`midgard_request_budgets` plus the Financials minute acquisition log. A first
+uncached busy day can take tens of minutes under the shared bulk cap.
+
+After frontend activation, reload and verify completed/provisional snapshots stop
+polling, budget deferrals show a resume time with saved progress, and hidden/closed
+panels stop renewing their leases. If an incident temporarily held specific queue
+rows by `available_at`, release only those exact holds after the fixed collector
+is active; preserve any newer retry deadlines and all payload/state/cooldown data.
+
 ### Crosschain comparison stuck at a shared date
 
 Check the public `protocol-fee-comparison` endpoint's `errors` and the

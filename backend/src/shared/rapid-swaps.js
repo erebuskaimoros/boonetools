@@ -2,9 +2,9 @@ import { config } from '../lib/config.js';
 import { executeDuneQueryRows, formatDuneDateTime } from './dune.js';
 import { providerLifecycleHooks } from './provider-cooldown.js';
 import { configureRapidSwapProviderLifecycle } from '../../../shared/rapid-swaps/backend.js';
-import { thorchainProviderPool } from '../lib/provider-client.js';
+import { requestFromProviders, thorchainProviderPool } from '../lib/provider-client.js';
 
-configureRapidSwapProviderLifecycle({ ...providerLifecycleHooks(), providerPool: thorchainProviderPool,
+configureRapidSwapProviderLifecycle({ ...providerLifecycleHooks(), requestFromProviders, providerPool: thorchainProviderPool,
   providerMode: config.thorchainProviderBalancingEnabled ? undefined : 'fallback' });
 
 export {
