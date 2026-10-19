@@ -311,7 +311,10 @@ Check the public `protocol-fee-comparison` endpoint's `errors` and the
 An unknown Chainflip runtime or changed pinned code hash fails issuance closed,
 which holds all protocols at their last shared complete UTC day. Review the
 official source and deployed mint events before admitting a new runtime; see
-[the October 12 review](../knowledge/protocol-fee-comparison.md#september-30october-12-2026-runtime-review-gap).
+[the October 19 review](../knowledge/protocol-fee-comparison.md#october-1519-2026-runtime-20219-review).
+Runtime 20219 is admitted only for its verified deployed code hash; its source
+review and mint-event evidence cover the October 15 upgrade. Later runtimes
+and different code under the same version still require their own review.
 After deploying the reviewed backend, start the existing service if it is idle
 and let its saved acquisition cache fill the gaps. Do not reset the cache or
 run concurrent collectors. Verify `throughDay` advances, source errors clear,

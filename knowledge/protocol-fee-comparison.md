@@ -384,6 +384,84 @@ server-owned collector resumes from this cache. Do not start concurrent writers.
 
 ## Chainflip investigation
 
+### October 15–19, 2026 runtime 20219 review
+
+The comparison's shared cutoff stayed October 14 because runtime **20219**
+failed the issuance-review guard from October 15 onward. Chainflip revenue,
+THORChain earnings and NEAR observations already extended through October 18;
+missing Chainflip issuance, not a Midgard quota limit, prevented publication of
+the later common days. Keep the shared-complete-period rule and resume the
+existing durable cache without replacing missing subsidies with estimates.
+
+The October 19 focused source review compared reviewed 20218 commit
+`55a2d166db22a56045deacf575a9bcf4dbb0c462` with official
+[`chainflip-io/chainflip-backend` release/2.2 commit
+`14f8032692fbda7f42c07acff27c0c4500a22cbb`](https://github.com/chainflip-io/chainflip-backend/commit/14f8032692fbda7f42c07acff27c0c4500a22cbb).
+The latter declares `spec_version: 2_02_19`; the version-bump commit is
+[`9121199d47349d17afd9fdf924b20762dad7852e`](https://github.com/chainflip-io/chainflip-backend/commit/9121199d47349d17afd9fdf924b20762dad7852e).
+These paths have identical Git object IDs in all three commits:
+
+| Source path | Identical tree/blob ID |
+| --- | --- |
+| `state-chain/pallets/cf-emissions` | `b56b3bc0c49634338247a3e6452f66b34188bf6c` |
+| `state-chain/pallets/cf-flip` | `753cefcd75189fbdc7fd254e7b030176342b01e2` |
+| `state-chain/pallets/cf-validator/src/delegation.rs` | `bd439d8ae99978adc55a33caba9656ed3cf6c45d` |
+| `state-chain/runtime/src/configs.rs` | `3364188d90800ea70d24cb62687305d88b64f5b0` |
+| `state-chain/runtime/src/constants.rs` | `d2d8cb74911630c739e205efde688c53d0456023` |
+
+`runtime/src/lib.rs` changes only the spec version. Its
+[execution order](https://github.com/chainflip-io/chainflip-backend/blob/14f8032692fbda7f42c07acff27c0c4500a22cbb/state-chain/runtime/src/lib.rs#L323-L341)
+still runs Emissions before Authorship. The
+[emission hook](https://github.com/chainflip-io/chainflip-backend/blob/14f8032692fbda7f42c07acff27c0c4500a22cbb/state-chain/pallets/cf-emissions/src/lib.rs#L173-L194)
+refreshes every 150 blocks, and
+[authorship](https://github.com/chainflip-io/chainflip-backend/blob/14f8032692fbda7f42c07acff27c0c4500a22cbb/state-chain/pallets/cf-emissions/src/lib.rs#L343-L349)
+distributes that same-block stored budget. The unchanged
+[delegation arithmetic](https://github.com/chainflip-io/chainflip-backend/blob/14f8032692fbda7f42c07acff27c0c4500a22cbb/state-chain/pallets/cf-validator/src/delegation.rs#L218-L260)
+assigns rounding remainder to the operator; all nonzero allocations pass
+through `FlipIssuance::mint`, which emits `FlipMinted`. Validator rotation
+locks, operator-role checks, missing-settings handling and other runtime paths
+did change, but not this emission/distribution path or its configuration.
+
+Independently queried the public Chainflip archive and decoded all recipient
+`flip.FlipMinted` events at six boundary blocks using execution-time (parent
+block) metadata. Every sum equals `cf_authority_emission_per_block` from the
+same block exactly; backup emission was zero in every sample:
+
+| Block | Execution / post-state runtime | Mint events | Minted atomic FLIP |
+| --- | --- | --- | --- |
+| 15,257,357 | 20218 / 20218 | 59 | 657259775627543788 |
+| 15,257,358 | 20218 / 20219 | 1 | 657259775627543788 |
+| 15,257,359 | 20219 / 20219 | 32 | 657259775627543788 |
+| 15,314,099 | 20219 / 20219 | 39 | 656203358731408932 |
+| 15,314,100 | 20219 / 20219 | 25 | 656204087499135032 |
+| 15,314,101 | 20219 / 20219 | 59 | 656204087499135032 |
+
+The first 20219 post-state is block **15,257,358**, timestamp
+**2026-10-15 09:53:18 UTC**, hash
+`0x7daeeb7ffe0235fde9dcb032cdbfeb0faf067d22f8637d125f6a405ae33bad88`.
+The version-bump source commit is dated October 16, after that on-chain
+upgrade; this review does not claim a reproducible build or prove that the
+deployed binary was built from that commit. It is focused source-path review
+plus deployed-state/event reconciliation, not a full runtime audit.
+
+Admit 20219 only with the observed `state_getStorageHash(":code")` value
+`0x9643c0fc68dbecf366fb348422c66573c05eaf2e5019ee045ca154cd069ffb09`,
+verified at every sampled 20219 post-state. Preserve the earlier hash guards,
+unobserved 20217 rejection, future-version rejection and wrong-hash rejection.
+No issuance arithmetic changed. Tests first reproduced the rejected 20219
+day, then verified exact full-day totals, transitions within a day and the
+unchanged fail-closed guards. Block hashes, metadata digests, event sums and
+the read-only verification record are in
+[`chainflip-runtime-20219-verification.json`](chainflip-runtime-20219-verification.json).
+
+A read-only replay of the patched production reader for October 15 reused a
+copy of saved UTC boundaries and verified 99 emission checkpoints across
+14,369 blocks (15,251,453 inclusive to 15,265,822 exclusive). Both 20218 and
+20219 are present, including the upgrade and following block. The exact daily
+total is `9443868150355473777638` atomic FLIP. This validation did not write to
+the production cache; the normal collector persists the recovered days after
+the CI-verified backend release is deployed.
+
 ### September 30–October 12, 2026 runtime-review gap
 
 The six-hour collector kept running, but Chainflip upgraded beyond the reviewed

@@ -104,9 +104,9 @@ test('issuance arithmetic is exact beyond JS safe integers, inclusive start and 
 });
 
 function rpcFixture(specVersion = 20213, {
-  codeHash, backupRate = '0x0', authorityRate = height => 100n + BigInt(Math.floor(height / 150))
+  codeHash, startDay = '2026-09-17', backupRate = '0x0', authorityRate = height => 100n + BigInt(Math.floor(height / 150))
 } = {}) {
-  const startTime = Date.parse('2026-09-17');
+  const startTime = Date.parse(startDay);
   const calls = [];
   const runtimeAt = height => typeof specVersion === 'function' ? specVersion(height) : specVersion;
   const hash = (height) => `0x${height.toString(16).padStart(64, '0')}`;
@@ -141,7 +141,7 @@ test('archive reader finds exact UTC boundaries and sums every historical emissi
 });
 
 test('unreviewed Chainflip runtime fails closed rather than assuming continued or zero issuance', async () => {
-  for (const specVersion of [20217, 20219, 20300]) {
+  for (const specVersion of [20217, 20220, 20300]) {
     const fixture = rpcFixture(specVersion);
     await assert.rejects(createChainflipReader(fixture).issuance('2026-09-17'), {
       code: 'CHAINFLIP_RUNTIME_REVIEW', message: /needs issuance review; no subsidy estimate substituted/
@@ -150,7 +150,68 @@ test('unreviewed Chainflip runtime fails closed rather than assuming continued o
   }
 });
 
-for (const specVersion of [20215, 20216, 20218]) {
+test('October 15 Chainflip issuance accepts the observed 20219 code hash and verifies the full day', async () => {
+  // Observed through state_getStorageHash(:code) at finalized block 15,314,071.
+  const codeHash = '0x9643c0fc68dbecf366fb348422c66573c05eaf2e5019ee045ca154cd069ffb09';
+  const fixture = rpcFixture(20219, { codeHash, startDay: '2026-10-15' });
+  const row = await createChainflipReader(fixture).issuance('2026-10-15');
+  let expected = 0n;
+  for (let height = 1000; height < 15400; height++) expected += 100n + BigInt(Math.floor(height / 150));
+  assert.equal(row.atomic, expected.toString());
+  assert.equal(CHAINFLIP_REVIEWED_CODE_HASHES[20219], codeHash);
+  assert.deepEqual(row.runtimes, [20219]);
+  assert.equal(row.start.height, 1000);
+  assert.equal(row.end.height, 15400);
+  assert.equal(row.method, 'historical-onchain-emission-segments-v1');
+  assert.ok(fixture.calls.includes('state_getStorageHash'));
+  assert.ok(!fixture.calls.includes('cf_flip_supply'));
+});
+
+test('20219 issuance recovery advances the common chart cutoff without replacing other saved sources', async () => {
+  const raw = {
+    earnings: { liquidityFees: '10000000000', blockRewards: '0', runePriceUSD: '2' },
+    wallets: { frontend_near: 1, other_near: 3, source: 'fastnear-transfers-v1' },
+    nearRevenue: 100, nearPrice: 2, nearNetIssuanceAtomic: '200000000000000000000000000',
+    nearNetIssuanceMethod: 'onchain-utc-net-supply-v1', chainflipRevenue: 30, flipPrice: .5
+  };
+  const cache = emptyComparisonCache();
+  cache.days['2026-10-14'] = { ...structuredClone(raw), flipIssuance: { atomic: '1000000000000000000' } };
+  cache.days['2026-10-15'] = structuredClone(raw);
+  const options = { now: Date.parse('2026-10-16T11:00:00Z'), startDay: '2026-10-14' };
+  assert.equal(buildComparisonPayload(cache, options).throughDay, '2026-10-14');
+  cache.days['2026-10-15'].flipIssuance = await createChainflipReader(rpcFixture(20219, {
+    startDay: '2026-10-15'
+  })).issuance('2026-10-15');
+  const payload = buildComparisonPayload(cache, options);
+  assert.equal(payload.throughDay, '2026-10-15');
+  assert.equal(payload.stale, false);
+  assert.equal(payload.daily.at(-1).chainflip.netUsd,
+    30 - Number(BigInt(cache.days['2026-10-15'].flipIssuance.atomic)) / 1e18 * .5);
+  const { flipIssuance, ...preserved } = cache.days['2026-10-15'];
+  assert.deepEqual(preserved, raw);
+});
+
+test('20219 deployed mint-event evidence reconciles the upgrade and compounding boundary exactly', async () => {
+  const proof = JSON.parse(await readFile(new URL('../../knowledge/chainflip-runtime-20219-verification.json', import.meta.url), 'utf8'));
+  assert.equal(proof.deployedCodeHash, CHAINFLIP_REVIEWED_CODE_HASHES[20219]);
+  assert.equal(proof.upgradeHeight, 15257358);
+  assert.equal(proof.compoundHeight, 15314100);
+  assert.deepEqual(proof.observations.map(row => row.height), [15257357, 15257358, 15257359, 15314099, 15314100, 15314101]);
+  for (const row of proof.observations) {
+    assert.equal(row.codeHash, CHAINFLIP_REVIEWED_CODE_HASHES[row.postVersion]);
+    assert.equal(row.mintedAmountsAtomic.length, row.mintedEventCount);
+    const minted = row.mintedAmountsAtomic.reduce((sum, amount) => sum + BigInt(amount), 0n);
+    assert.equal(minted.toString(), row.mintedAtomic);
+    assert.equal(minted.toString(), row.authorityEmissionAtomic);
+    assert.equal(row.backupEmissionAtomic, '0');
+  }
+  assert.equal(proof.observations[1].executionVersion, 20218);
+  assert.equal(proof.observations[2].executionVersion, 20219);
+  assert.notEqual(proof.observations[3].mintedAtomic, proof.observations[4].mintedAtomic);
+  assert.equal(proof.observations[4].mintedAtomic, proof.observations[5].mintedAtomic);
+});
+
+for (const specVersion of [20215, 20216, 20218, 20219]) {
   test(`post-September-29 Chainflip runtime ${specVersion} collects exact daily issuance`, async () => {
     assert.match(CHAINFLIP_REVIEWED_CODE_HASHES[specVersion], /^0x[0-9a-f]{64}$/);
     const fixture = rpcFixture(specVersion);
@@ -172,15 +233,15 @@ for (const specVersion of [20215, 20216, 20218]) {
 }
 
 test('reviewed Chainflip runtime upgrades preserve exact emission segments within a UTC day', async () => {
-  const runtimeAt = height => height < 4099 ? 20214 : height < 8199 ? 20215 : height < 12199 ? 20216 : 20218;
+  const runtimeAt = height => height < 4099 ? 20214 : height < 8199 ? 20215 : height < 12199 ? 20216 : height < 14199 ? 20218 : 20219;
   const authorityRate = height => 100n + BigInt(Math.floor(height / 150)) + BigInt(runtimeAt(height)) * 1000n;
   const fixture = rpcFixture(runtimeAt, { authorityRate });
   const row = await createChainflipReader(fixture).issuance('2026-09-17');
   let expected = 0n;
   for (let height = 1000; height < 15400; height++) expected += authorityRate(height);
   assert.equal(row.atomic, expected.toString());
-  assert.deepEqual([...row.runtimes].sort(), [20214, 20215, 20216, 20218]);
-  for (const height of [4099, 4100, 8199, 8200, 12199, 12200]) {
+  assert.deepEqual([...row.runtimes].sort(), [20214, 20215, 20216, 20218, 20219]);
+  for (const height of [4099, 4100, 8199, 8200, 12199, 12200, 14199, 14200]) {
     assert.deepEqual(row.checkpoints.find(point => point.height === height), { height, amount: authorityRate(height).toString() });
   }
   assert.equal(row.method, 'historical-onchain-emission-segments-v1');
