@@ -17,6 +17,23 @@ export {
 
 export function requestFromProviders(options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const secrets = (Array.isArray(options.bases) ? options.bases : [options.bases])
+    .filter(Boolean).flatMap(base => {
+      try { return [new URL(base).pathname.match(/^\/api=([^/]+)/i)?.[1]].filter(Boolean); }
+      catch { return []; }
+    });
+  const redact = value => secrets.reduce((text, secret) => text.split(secret).join('[redacted]'), String(value));
+  const redactError = (error, seen = new Set()) => {
+    if (!secrets.length || !error || typeof error !== 'object' || seen.has(error)) return error;
+    seen.add(error);
+    for (const field of ['message', 'body', 'url', 'provider', 'statusText', 'stack']) {
+      if (typeof error[field] === 'string' && redact(error[field]) !== error[field]) {
+        Object.defineProperty(error, field, { value: redact(error[field]), configurable: true, writable: true });
+      }
+    }
+    redactError(error.cause, seen);
+    return error;
+  };
   const budget = options.midgardBudget === undefined ? midgardRequestBudget : options.midgardBudget;
   const localBudgetError = (error) => isMidgardBudgetDeferred(error) || error?.code === 'MIDGARD_BUDGET_ABORTED';
   return transport({ ...options,
@@ -49,11 +66,14 @@ export function requestFromProviders(options = {}) {
         return response;
       } catch (error) { recordProviderMetric(url, 'failed'); throw error; }
     }, onProviderError: async (error, context) => {
+      // Gateway error bodies can echo the full credential URL. Sanitize before
+      // durable breaker writes or callers publish source errors in read models.
+      redactError(error);
       if (localBudgetError(error)) return;
       if (/cooldown/i.test(error?.name || '') || error?.code === 'PROVIDER_COOLDOWN') recordProviderMetric(context.url, 'cooldown_skipped');
       await options.onProviderError?.(error, context);
     }, shouldStop: (error, context) => {
       return localBudgetError(error) || options.shouldStop?.(error, context);
     }
-  });
+  }).catch(error => { throw redactError(error); });
 }

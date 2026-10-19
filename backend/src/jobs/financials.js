@@ -20,11 +20,11 @@ import { acquisitionMetrics } from '../lib/acquisition-metrics.js';
 // Older days stay unavailable; a signed Midgard residual is not a fallback.
 const REWARD_HISTORY_FROM = Date.parse('2026-10-07T00:00:00Z') / 1000;
 
-export function createFinancialsProviderRequest(client, { transport = requestFromProviders } = {}) {
+export function createFinancialsProviderRequest(client, { transport = requestFromProviders, midgardBases = config.midgardUrls } = {}) {
   return (url, { lane = 'history', midgardBudgetClass } = {}) => {
     const base = [FINANCIALS_MIDGARD, FINANCIALS_RPC].find((candidate) => url.startsWith(`${candidate}/`));
     if (!base) throw new Error('Financials provider is not allowlisted');
-    return transport({ bases: base === FINANCIALS_RPC ? config.rpcRestUrls : [base], path: url.slice(base.length), timeoutMs: 60_000,
+    return transport({ bases: base === FINANCIALS_RPC ? config.rpcRestUrls : midgardBases, path: url.slice(base.length), timeoutMs: 60_000,
       // Preserve the existing 650ms start-rate limit separately on each RPC
       // provider, instead of serializing both behind the Midgard queue.
       providerMinIntervalMs: base === FINANCIALS_RPC ? 650 : 0,

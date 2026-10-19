@@ -82,6 +82,25 @@ data acquisition. Routine deployment does not populate a cold database or prove
 historical completeness; provision/bootstrap new features deliberately. See
 [backend operations](./boonetools-backend-hetzner.md) for feature-specific jobs.
 
+### Dedicated Midgard endpoint
+
+Keep Liquify Portal credentials only in the protected server environment. Append
+`/v2` to its supplied HTTPS endpoint and set `MIDGARD_URL`, `MIDGARD_URLS`,
+`RUJIRA_BASE_FEES_MIDGARD_URLS`, and `RUJIRA_RESERVE_PAYMENTS_MIDGARD_URLS`
+consistently; explicit list overrides otherwise retain their previous providers.
+Financials (including day rankings) and Protocol Comparison resolve their public
+service identifiers through these backend settings. Runtime-neutral modules and
+browser bundles must not receive the key; standalone browser lookups stay public.
+
+Back up the environment with its protected permissions, validate one bounded
+health read, then restart affected persistent collectors under the release
+workflow. Scheduled jobs load settings on their next run; let active jobs finish.
+Do not reset historical caches, cursors, request budgets, or public-provider
+cooldowns. Dedicated requests retain the shared admission limits and existing
+dedicated breaker scope, independent of public-gateway throttling. Error messages,
+gateway bodies, URLs and nested causes are redacted before persistence or public
+source-error publication. RPC and WebSocket settings are separate and unchanged.
+
 ### NEAR net-supply methodology rollout
 
 Deploy the backend before the frontend. The comparison's existing raw cache is
