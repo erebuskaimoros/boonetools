@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { config } from './config.js';
 
 const WINDOWS = ['minute', 'hour', 'day'];
+const MAX_PACING_WAIT_MS = 5_000;
+const MAX_PACING_RETRIES = 50;
+
+// node-postgres returns timestamptz as Date; Date.parse(Date) first stringifies
+// it and drops milliseconds, which would defeat subsecond pacing.
+const timestampMs = (value) => value instanceof Date ? value.getTime() : Date.parse(value);
 
 function normalizedBase(value) {
   try {
@@ -39,9 +46,13 @@ export function midgardBudgetContext(url, options = {}) {
     || configured.some((candidate) => normalizedBase(candidate) === identity);
   if (!known) return null;
   const path = String(url).slice(String(base).replace(/\/+$/, '').length);
+  const portal = Boolean(configuredBase) && parsed.protocol === 'https:'
+    && parsed.hostname.toLowerCase() === 'gateway.liquify.com'
+    && /^\/api=[^/]+(?:\/v\d+)?\/?$/i.test(new URL(configuredBase).pathname);
   return {
     base, path,
     providerKey: `midgard:${parsed.hostname.toLowerCase()}:${createHash('sha256').update(identity).digest('hex').slice(0, 32)}`,
+    budgetProfile: portal ? 'liquify-portal' : 'default',
     budgetClass: options.midgardBudgetClass === 'bulk' || /^\/(?:v\d+\/)?actions\/?(?:[?#]|$)/.test(path) ? 'bulk' : 'live'
   };
 }
@@ -74,35 +85,61 @@ function normalizedLimits(limits) {
 
 /** Explicit client injection is mandatory here: tests never silently fall back
  * to the production database. Only the production singleton below loads it. */
-export function createMidgardRequestBudget({ client, total, bulk, now } = {}) {
+export function createMidgardRequestBudget({ client, total, bulk, portal, now,
+  wait = (ms, { signal }) => delay(ms, undefined, { signal }) } = {}) {
   if (typeof client?.query !== 'function') throw new Error('Midgard budget requires an explicit database client');
   const totals = normalizedLimits(total), bulks = normalizedLimits(bulk);
   if (bulks.some((value, index) => value > totals[index])) throw new Error('Midgard bulk budget cannot exceed total budget');
+  const portalTotals = portal ? normalizedLimits(portal.total) : null;
+  const portalBulks = portal ? normalizedLimits(portal.bulk) : null;
+  if (portalBulks?.some((value, index) => value > portalTotals[index])) throw new Error('Midgard Portal bulk budget cannot exceed total budget');
+  if (portal && (!Number.isSafeInteger(portal.minIntervalMs) || portal.minIntervalMs < 1 || portal.minIntervalMs > 60_000)) {
+    throw new Error('Invalid Midgard Portal pacing interval');
+  }
   return {
-    async claim({ providerKey, budgetClass = 'live', signal }) {
+    async claim({ providerKey, budgetClass = 'live', budgetProfile = 'default', signal }) {
       signal?.throwIfAborted();
-      const testNow = now ? new Date(now()).toISOString() : null;
       const failureNow = () => now ? Number(now()) : Date.now();
+      const paced = Boolean(portal && budgetProfile === 'liquify-portal');
+      const startedAt = performance.now();
+      let waitedMs = 0, pacingRetries = 0;
       let row;
-      try {
-        ({ rows: [row] } = await client.query(
-          'select * from claim_midgard_request_budget($1, $2, $3::integer[], $4::integer[], $5::timestamptz)',
-          [providerKey, budgetClass === 'bulk', totals, bulks, testNow]
-        ));
-        if (!row || typeof row.allowed !== 'boolean'
-          || !Number.isFinite(Date.parse(row.allowed ? row.reserved_at : row.retry_at))) {
-          throw new Error('Midgard budget returned an invalid reservation');
+      while (true) {
+        signal?.throwIfAborted();
+        try {
+          const values = [providerKey, budgetClass === 'bulk', paced ? portalTotals : totals,
+            paced ? portalBulks : bulks, now ? new Date(now()).toISOString() : null];
+          if (paced) values.push(portal.minIntervalMs);
+          ({ rows: [row] } = await client.query(paced
+            ? 'select * from claim_midgard_request_budget_paced($1, $2, $3::integer[], $4::integer[], $5::timestamptz, $6::integer)'
+            : 'select * from claim_midgard_request_budget($1, $2, $3::integer[], $4::integer[], $5::timestamptz)', values));
+          if (!row || typeof row.allowed !== 'boolean'
+            || !Number.isFinite(timestampMs(row.allowed ? row.reserved_at : row.retry_at))) {
+            throw new Error('Midgard budget returned an invalid reservation');
+          }
+        } catch (cause) {
+          signal?.throwIfAborted();
+          const timestamp = failureNow();
+          throw new MidgardBudgetDeferredError({ providerKey, reason: 'storage-unavailable',
+            retryAt: new Date(timestamp + 60_000).toISOString(), now: timestamp, cause });
         }
-      } catch (cause) {
+        if (row.allowed) break;
         signal?.throwIfAborted();
         const timestamp = failureNow();
-        throw new MidgardBudgetDeferredError({ providerKey, reason: 'storage-unavailable',
-          retryAt: new Date(timestamp + 60_000).toISOString(), now: timestamp, cause });
-      }
-      if (!row.allowed) {
-        signal?.throwIfAborted();
+        const waitMs = Math.max(1, timestampMs(row.retry_at) - timestamp);
+        const remainingWaitMs = MAX_PACING_WAIT_MS - Math.max(waitedMs, performance.now() - startedAt);
+        // Pacing denials never spend quota. Retry them briefly in-process, but
+        // defer real quota exhaustion immediately so collectors retain cursors.
+        // Independent bounds protect against clock skew and non-advancing test
+        // clocks, even when the caller did not provide an AbortSignal.
+        if (paced && row.reason === 'pacing' && waitMs <= remainingWaitMs && pacingRetries < MAX_PACING_RETRIES) {
+          waitedMs += waitMs;
+          pacingRetries++;
+          await wait(waitMs, { signal });
+          continue;
+        }
         throw new MidgardBudgetDeferredError({ providerKey, reason: row.reason,
-          retryAt: new Date(row.retry_at).toISOString(), now: failureNow() });
+          retryAt: new Date(row.retry_at).toISOString(), now: timestamp });
       }
       let canceled = false;
       const receipt = {
@@ -131,5 +168,10 @@ export const midgardRequestBudget = config.midgardRequestBudgetEnabled
       return pool.query({ text, values, query_timeout: 3_000 });
     } },
     total: config.midgardRequestBudgetTotal,
-    bulk: config.midgardRequestBudgetBulk
+    bulk: config.midgardRequestBudgetBulk,
+    portal: {
+      total: config.midgardPortalRequestBudgetTotal,
+      bulk: config.midgardPortalRequestBudgetBulk,
+      minIntervalMs: config.midgardPortalRequestMinIntervalMs
+    }
   }) : null;

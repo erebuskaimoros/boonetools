@@ -288,15 +288,36 @@ recent two-minute visitor lease, resume saved cursors, and honor budget/cooldown
 retry times. Today advances by new action intervals rather than rescanning its
 completed prefix. Exact completed pool days reuse Pool Analysis's existing rows.
 
-Production defaults enable `MIDGARD_REQUEST_BUDGET_ENABLED` and cap each provider
-at 60/minute, 2,000/hour and 20,000/UTC day overall; `/actions` and day-detail work
-share a bulk subset capped at 30/minute, 1,000/hour and 5,000/UTC day. Configuration
-names are in `backend/.env.example`. These are our safety caps, not a published
-Liquify quota. Do not clear provider cooldowns or request counters on deployment.
+Production defaults enable `MIDGARD_REQUEST_BUDGET_ENABLED`. Public/default
+providers are capped at 60/minute, 2,000/hour and 20,000/UTC day overall;
+`/actions` and day-detail work share a bulk subset capped at 30/minute,
+1,000/hour and 5,000/UTC day. Configured HTTPS Liquify Portal Midgard credentials
+use 180/minute overall and 60/minute bulk, with the same hourly/daily ceilings.
+The Portal long-window defaults inherit explicit `MIDGARD_REQUEST_BUDGET_*`
+settings unless separately overridden. Configuration names are in
+`backend/.env.example`. These are our safety caps, not a published Liquify quota.
+Do not clear provider cooldowns or request counters on deployment.
 No warmup, cold-date smoke scan, new timer or cache rebuild is required. Use saved
 completed days for provider-free verification, and inspect
 `midgard_request_budgets` plus the Financials minute acquisition log. A first
 uncached busy day can take tens of minutes under the shared bulk cap.
+
+Migration 070 adds a durable, per-credential start-time gate for Portal requests:
+200ms between admissions across all backend processes (5/s, below the observed
+Free plan's 10/s ceiling). Short pacing waits are abortable and bounded; waiting
+does not spend quota or record a provider failure. Hour/day/minute exhaustion
+still defers work with its reset time. Existing counter identities, totals,
+cooldowns, saved observations and cursors survive the migration. Public-provider
+admission and the old migration-069 function remain compatible with rollback.
+
+This is a burst-only adjustment for the 44-pool sweep competing with other jobs,
+not an increase to sustained hourly/daily allowances or permission to use a paid
+plan. The account's October 19 current-plan display reported 100,000/day,
+300,000/month and 10/s; the public pricing table differed on the daily allowance.
+The portal aggregate also included historical RPC usage, so do not treat that
+total as current Midgard-key traffic. These per-key minute/hour/day counters do
+not certify remaining account-wide monthly quota. See
+`knowledge/midgard-portal-limits-2026-10-20.md` for evidence and verification.
 
 After frontend activation, reload and verify completed/provisional snapshots stop
 polling, budget deferrals show a resume time with saved progress, and hidden/closed

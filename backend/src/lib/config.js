@@ -93,6 +93,20 @@ export const config = Object.freeze({
     hour: readInt('MIDGARD_REQUEST_BUDGET_BULK_HOUR', 1000),
     day: readInt('MIDGARD_REQUEST_BUDGET_BULK_DAY', 5000)
   }),
+  // Dedicated Liquify Portal credentials have room for a larger short burst.
+  // Preserve existing operator long-window caps unless explicitly overridden;
+  // these ceilings are not a promise of remaining account/monthly allowance.
+  midgardPortalRequestBudgetTotal: Object.freeze({
+    minute: readInt('MIDGARD_PORTAL_REQUEST_BUDGET_TOTAL_MINUTE', 180),
+    hour: readInt('MIDGARD_PORTAL_REQUEST_BUDGET_TOTAL_HOUR', readInt('MIDGARD_REQUEST_BUDGET_TOTAL_HOUR', 2000)),
+    day: readInt('MIDGARD_PORTAL_REQUEST_BUDGET_TOTAL_DAY', readInt('MIDGARD_REQUEST_BUDGET_TOTAL_DAY', 20000))
+  }),
+  midgardPortalRequestBudgetBulk: Object.freeze({
+    minute: readInt('MIDGARD_PORTAL_REQUEST_BUDGET_BULK_MINUTE', 60),
+    hour: readInt('MIDGARD_PORTAL_REQUEST_BUDGET_BULK_HOUR', readInt('MIDGARD_REQUEST_BUDGET_BULK_HOUR', 1000)),
+    day: readInt('MIDGARD_PORTAL_REQUEST_BUDGET_BULK_DAY', readInt('MIDGARD_REQUEST_BUDGET_BULK_DAY', 5000))
+  }),
+  midgardPortalRequestMinIntervalMs: readInt('MIDGARD_PORTAL_REQUEST_MIN_INTERVAL_MS', 200),
   rpcRestUrl,
   rpcArchiveRestUrl,
   rpcRestUrls: readList('RPC_REST_URLS', [
