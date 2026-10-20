@@ -7,7 +7,8 @@ const day = (seconds) => new Date(seconds * 1000).toISOString().slice(0, 10);
 const iso = (seconds) => new Date(seconds * 1000).toISOString();
 const midnight = (seconds) => Math.floor(seconds / DAY) * DAY;
 const zero = (asset, seconds) => ({ asset, day: day(seconds), interval_start: iso(seconds), interval_end: iso(seconds),
-  volume_rune_e8: '0', volume_usd_e2: '0', fees_rune_e8: '0', rune_price_usd: '0', partial: true });
+  volume_rune_e8: '0', volume_usd_e2: '0', fees_rune_e8: '0', rune_price_usd: '0', partial: true,
+  source: 'liquify-midgard-swaps' });
 const amountKeys = ['volume_rune_e8', 'volume_usd_e2', 'fees_rune_e8'];
 const valid = (row) => row && amountKeys.every((key) => nonNegativeBaseString(row[key]) !== null)
   && (String(row.fees_rune_e8) === '0' || Number(row.rune_price_usd) > 0);

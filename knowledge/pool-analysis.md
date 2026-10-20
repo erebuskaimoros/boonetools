@@ -52,3 +52,29 @@ override for history from 2021-04-01.
 Depth acquisition is independent of successful fee writes, with its own
 error/stat fields. Public GETs only join stored data and never fetch providers. See
 [backend deployment](../docs/boonetools-backend-hetzner.md) for backfill commands.
+
+## Reused snapshot provenance — October 20, 2026
+
+Repeating a refresh in the same quarter-hour previously reconstructed a cached
+head without its `source`. The daily upsert explicitly included that missing
+field as null, violating the database constraint and marking valid saved rolling
+data stale. The synthetic zero-length UTC-midnight head had the same omission.
+
+Both constructors now carry the existing `liquify-midgard-swaps` provenance.
+The intraday table is exclusively the swap-prefix ledger; a cache hit retains
+that provenance and exact amounts without another swap-history request. A
+midnight zero is a derived empty prefix, not evidence that a daily history row
+is complete. It stays partial with no completion marker.
+
+No migration, schema relaxation, generic upsert fallback, historical repair,
+cache clearing, request-limit change or timer change is needed. Root regression
+tests cover cached persistence, midnight persistence and the collector's
+same-window error path. The optional PostgreSQL companion uses an isolated
+schema and actual migrations to verify reruns, restart reuse, exact integers
+and completed-row preservation. All seven targeted regression/PostgreSQL tests
+pass without skips against the disposable local database.
+
+After the normal backend release, verify two sequential ordinary refreshes in
+the same non-midnight window: the second must reuse saved prefixes, retain their
+amounts and provenance, and leave no source-constraint errors or newly stale
+pools. Do not run the historical backfill to validate this fix.

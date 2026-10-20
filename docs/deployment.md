@@ -127,6 +127,22 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### Pool Analysis same-window refresh
+
+Cached quarter-hour heads and derived midnight zero heads retain swap-source
+provenance before the daily upsert. This fixes repeat refreshes failing the
+`pool_analysis_daily.source` non-null constraint and falsely marking saved
+rolling observations stale. Deploy backend only through the normal release
+guard; no SQL migration, cache reset, historical backfill or timer/configuration
+change is required. Existing completed days remain immutable.
+
+Verify two ordinary Pool Analysis refreshes within the same quarter-hour source
+window. The second should reuse saved prefixes without new live swap-history
+requests, keep the public response fresh, and report no source-field errors.
+Bounded recovery of genuine missing historical days may still make requests;
+do not mistake those for refetching the current prefix. See
+`knowledge/pool-analysis.md#reused-snapshot-provenance--october-20-2026`.
+
 ### NativeSwap HTTP fallback
 
 Deploy backend before frontend. No migration, cache reset, or backfill is

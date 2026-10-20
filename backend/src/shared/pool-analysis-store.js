@@ -299,9 +299,11 @@ export async function loadPoolAnalysisRollingEdges(client, asset, cutoff) {
      from pool_analysis_intraday_snapshots where asset = $1 and bucket_end = $2`,
     [asset, new Date(cutoff * 1000).toISOString()]);
   const row = rows[0];
+  // This ledger contains only Midgard swap prefixes, including the empty midnight prefix.
   return row ? { asset, cutoff, head: { ...row, day: new Date(cutoff * 1000).toISOString().slice(0, 10),
     interval_start: new Date(Math.floor(cutoff / 86400) * 86400000).toISOString(),
-    interval_end: new Date(cutoff * 1000).toISOString(), partial: true } } : null;
+    interval_end: new Date(cutoff * 1000).toISOString(), partial: true,
+    source: 'liquify-midgard-swaps' } } : null;
 }
 
 export async function savePoolAnalysisIntradaySnapshot(client, head) {
