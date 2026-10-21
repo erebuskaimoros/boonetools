@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { fade, slide } from 'svelte/transition';
   import { cubicInOut } from 'svelte/easing';
+  import { STO_WIDGET_API_KEY, swapOpen } from './swap/sto-widget.js';
 
   const emojis = ['🫡', '✍️', '💪', '🧙‍♂️', '🕺', '🏃‍♂️‍➡️', '🦅', '🐋', '🐉', '⚡️', '🌊', '🍷', '🍻', '🏄‍♂️', '🏆', '🎸', '🚀', '🗿', '🗽', '🏗️', '📠', '🔌', '🔮', '🔭', '💯', '🏴‍☠️', '🥷', '👑', '🪐', '🍦', '🍾', '🎯', '❤️', '☑️', '🆒'];
 
@@ -40,8 +41,6 @@
           { href: "https://github.com/erebuskaimoros/boonetools", text: "Source" },
           { text: " by " },
           { href: "https://x.com/boonew", text: "boonew" },
-          { text: " | " },
-          { href: "https://thordex.eth.limo/?ref=boone", text: "Swap on THORDEX 📈" },
           { text: " | Tip Jar 🫙: " },
           { text: "thor194zytw9em6950gym75psq5qt6f2mt2le2nnnt8", clipboard: "thor194zytw9em6950gym75psq5qt6f2mt2le2nnnt8" }
         ]
@@ -240,6 +239,19 @@
       </div>
     {/key}
   </div>
+  {#if STO_WIDGET_API_KEY}
+    <button
+      id="swap-launcher"
+      class="swap-launcher"
+      class:active={$swapOpen}
+      aria-expanded={$swapOpen}
+      aria-controls="swap-panel"
+      aria-keyshortcuts="S"
+      on:click={() => swapOpen.update((open) => !open)}
+    >
+      <span class="bracket">[</span><span class="key">S</span><span class="bracket">]</span> swap
+    </button>
+  {/if}
   {#if clipboardToast}
     <div class="clipboard-toast" transition:fade={{ duration: 150 }}>Address copied!</div>
   {/if}
@@ -251,9 +263,8 @@
     background: rgba(44, 44, 44, 0.85);
     backdrop-filter: blur(10px);
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.75rem;
     user-select: none;
     touch-action: pan-x pan-y;
     position: fixed;
@@ -267,7 +278,8 @@
 
   .page-container {
     position: relative;
-    width: 100%;
+    flex: 1;
+    min-width: 0;
     display: flex;
     justify-content: center;
     overflow: hidden;
@@ -332,9 +344,53 @@
     }
   }
 
+  /* Terminal bracket button (DESIGN.md) that opens the sitewide swap panel. */
+  .swap-launcher {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border: 1px solid #1a1a1a;
+    background: #0a0a0a;
+    color: #d8d8d8;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 16px;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+
+  .swap-launcher * {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .swap-launcher .bracket {
+    color: #787878;
+  }
+
+  .swap-launcher .key {
+    color: #00cc66;
+    font-weight: 700;
+  }
+
+  .swap-launcher:hover,
+  .swap-launcher:focus-visible,
+  .swap-launcher.active {
+    border-color: #00cc66;
+    color: #00cc66;
+    outline: none;
+  }
+
   @media (max-width: 600px) {
     footer {
       padding: 0.25rem 1rem;
+      gap: 0.5rem;
+    }
+
+    .swap-launcher {
+      padding: 1px 8px;
+      font-size: 11px;
     }
 
     .page {

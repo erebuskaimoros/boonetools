@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Footer from './lib/Footer.svelte';
+  import SwapPanel from './lib/swap/SwapPanel.svelte';
   import Snow from './lib/Snow.svelte';
   import Banner from './lib/Banner.svelte';
   import { trackFirstPartyPageView } from './lib/page-view-analytics.js';
@@ -558,6 +559,8 @@
 
   {#if !isDesktopApp}
   <Footer />
+  <!-- Outside the routed component so an open swap survives dashboard changes. -->
+  <SwapPanel />
   {/if}
 </main>
 
