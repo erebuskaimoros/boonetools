@@ -249,7 +249,9 @@
       aria-keyshortcuts="S"
       on:click={() => swapOpen.update((open) => !open)}
     >
-      <span class="bracket">[</span><span class="key">S</span><span class="bracket">]</span> swap
+      <span class="swap-key" aria-hidden="true"><span class="bracket">[</span><span class="key">s</span><span class="bracket">]</span></span>
+      <span class="prompt" aria-hidden="true">&gt;</span>
+      <span class="swap-label">swap on THORChain</span>
     </button>
   {/if}
   {#if clipboardToast}
@@ -344,42 +346,61 @@
     }
   }
 
-  /* Terminal bracket button (DESIGN.md) that opens the sitewide swap panel. */
+  /* Terminal bracket button (DESIGN.md) that opens the sitewide swap panel:
+     `[s] > swap on THORChain`. */
   .swap-launcher {
     flex: none;
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 3px 10px;
-    border: 1px solid #1a1a1a;
+    gap: 7px;
+    height: 26px;
+    padding: 0 11px;
+    border: 1px solid rgba(0, 204, 102, 0.45);
     background: #0a0a0a;
-    color: #d8d8d8;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    line-height: 16px;
     cursor: pointer;
-    transition: border-color 0.15s ease, color 0.15s ease;
+    white-space: nowrap;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
   }
 
   .swap-launcher * {
     font-family: 'JetBrains Mono', monospace;
   }
 
+  /* Scoped under the button to outrank the footer's own `footer span` colour. */
+  .swap-launcher span {
+    font-size: 12px;
+    line-height: 1;
+  }
+
   .swap-launcher .bracket {
     color: #787878;
   }
 
-  .swap-launcher .key {
+  .swap-launcher .key,
+  .swap-launcher .prompt {
     color: #00cc66;
     font-weight: 700;
   }
 
+  .swap-launcher .swap-label {
+    color: #e8e8e8;
+    font-weight: 600;
+  }
+
   .swap-launcher:hover,
-  .swap-launcher:focus-visible,
   .swap-launcher.active {
     border-color: #00cc66;
+    background: #09180f;
+  }
+
+  .swap-launcher:hover .swap-label,
+  .swap-launcher.active .swap-label {
     color: #00cc66;
-    outline: none;
+  }
+
+  .swap-launcher:focus-visible {
+    outline: 1px solid #f5f5f5;
+    outline-offset: 2px;
   }
 
   @media (max-width: 600px) {
@@ -389,7 +410,12 @@
     }
 
     .swap-launcher {
-      padding: 1px 8px;
+      height: 24px; /* minimum touch target */
+      gap: 6px;
+      padding: 0 9px;
+    }
+
+    .swap-launcher span {
       font-size: 11px;
     }
 
@@ -403,6 +429,13 @@
       height: 20px;
     }
     
+  }
+
+  /* Touch screens have no S key to press. */
+  @media (hover: none) {
+    .swap-launcher .swap-key {
+      display: none;
+    }
   }
 
   @media (max-width: 400px) {

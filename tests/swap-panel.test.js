@@ -35,6 +35,7 @@ test('the footer launches the swap panel instead of linking to THORDEX', async (
   assert.doesNotMatch(footer, /thordex/i);
   assert.match(footer, /id="swap-launcher"[\s\S]*aria-controls="swap-panel"[\s\S]*aria-keyshortcuts="S"/);
   assert.match(footer, /\{#if STO_WIDGET_API_KEY\}/);
+  assert.match(footer, /<span class="swap-label">swap on THORChain<\/span>/);
   // Mounted beside the footer, outside the routed component, and never in the desktop app.
   assert.match(app, /\{#if !isDesktopApp\}\s*<Footer \/>[\s\S]*?<SwapPanel \/>\s*\{\/if\}/);
   assert.match(panel, /id="swap-panel"/);
