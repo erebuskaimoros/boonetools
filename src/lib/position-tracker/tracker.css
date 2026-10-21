@@ -1,0 +1,339 @@
+/* Position Tracker — terminal contract from DESIGN.md. Scoped under .ptrack / .ptrack-modal-backdrop. */
+
+.ptrack,
+.ptrack-modal-backdrop {
+  --pt-accent: #00cc66;
+  --pt-amber: #d4a017;
+  --pt-error: #e05260;
+  --pt-border: #1a1a1a;
+  --pt-border-faint: #111111;
+  --pt-surface: #0a0a0a;
+  --pt-hover: #0d0d0d;
+  --pt-inset: #060606;
+  --pt-text: #f5f5f5;
+  --pt-body: #e8e8e8;
+  --pt-muted: #c8c8c8;
+  --pt-dim: #b2b2b2;
+  --pt-dimmest: #a0a0a0;
+  --pt-mono: 'JetBrains Mono', monospace;
+  /* Allocation hues: the dark-surface chart set validated for the App Layer dashboard. */
+  --pt-series-bond: #00a755;
+  --pt-series-lp: #2f7fd6;
+  --pt-series-tcy: #b8860b;
+  /* Opaque mix of surface + accent-soft, so sticky cells hide what scrolls beneath them. */
+  --pt-focus-bg: #09180f;
+}
+
+.ptrack {
+  width: min(1240px, calc(100% - 24px));
+  margin: 0 auto;
+  padding: 24px 0 56px;
+  color: var(--pt-body);
+  font-family: 'DM Sans', -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ptrack h1, .ptrack h2, .ptrack h3, .ptrack p,
+.ptrack-modal-backdrop h3, .ptrack-modal-backdrop p { margin: 0; }
+
+.ptrack a, .ptrack-modal-backdrop a { color: var(--pt-accent); text-decoration: none; }
+.ptrack a:hover, .ptrack-modal-backdrop a:hover { text-decoration: underline; }
+
+/* ---------- head ---------- */
+.ptrack .head { margin-bottom: 18px; }
+.ptrack .head-top {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  font-family: var(--pt-mono); font-size: 11px; color: var(--pt-dim); margin-bottom: 14px;
+}
+.ptrack .head-left { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ptrack .head-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ptrack .prompt, .ptrack-modal-backdrop .prompt { color: var(--pt-accent); font-weight: 700; font-family: var(--pt-mono); }
+.ptrack .cmd { color: var(--pt-body); font-weight: 600; }
+.ptrack .arg { color: var(--pt-dim); }
+.ptrack .status { display: inline-flex; align-items: center; gap: 6px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--pt-dim); }
+.ptrack .dot { width: 6px; height: 6px; border-radius: 50%; background: #444; }
+.ptrack .dot.ok { background: var(--pt-accent); box-shadow: 0 0 6px rgba(0, 204, 102, 0.4); animation: pt-pulse 2s infinite; }
+.ptrack .dot.warn { background: var(--pt-amber); }
+.ptrack .sep { color: #787878; }
+@keyframes pt-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+.ptrack .title {
+  font-family: var(--pt-mono); font-size: 30px; font-weight: 800; color: var(--pt-text);
+  letter-spacing: 0.06em; line-height: 1.1; margin-bottom: 10px;
+}
+.ptrack .cursor { color: var(--pt-accent); animation: pt-blink 1s steps(1) infinite; margin-left: 4px; }
+@keyframes pt-blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+.ptrack .lede { color: var(--pt-muted); font-size: 14px; max-width: 72ch; }
+.ptrack .rule { height: 1px; background: linear-gradient(90deg, var(--pt-accent) 0%, var(--pt-border) 14%, var(--pt-border) 100%); margin-top: 16px; }
+
+/* ---------- buttons ---------- */
+.ptrack .bracket-btn, .ptrack-modal-backdrop .bracket-btn {
+  display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1px solid var(--pt-border);
+  padding: 5px 10px; color: var(--pt-muted); font-family: var(--pt-mono); font-size: 11px; cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease; text-transform: lowercase; white-space: nowrap;
+}
+.ptrack .bracket-btn:hover:not(:disabled), .ptrack-modal-backdrop .bracket-btn:hover:not(:disabled) { border-color: var(--pt-accent); color: var(--pt-accent); }
+.ptrack .bracket-btn:disabled, .ptrack-modal-backdrop .bracket-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.ptrack .bracket-btn.active { border-color: rgba(0, 204, 102, 0.4); color: var(--pt-accent); }
+.ptrack-modal-backdrop .bracket-btn.primary:not(:disabled) { border-color: rgba(0, 204, 102, 0.5); color: var(--pt-accent); background: rgba(0, 204, 102, 0.07); }
+.ptrack .bracket, .ptrack-modal-backdrop .bracket { color: #787878; }
+.ptrack .key, .ptrack-modal-backdrop .key { color: var(--pt-accent); font-weight: 700; text-transform: uppercase; }
+
+.ptrack .row-btn, .ptrack-modal-backdrop .row-btn {
+  background: transparent; border: 1px solid var(--pt-border); color: var(--pt-muted); font-family: var(--pt-mono);
+  font-size: 11px; padding: 2px 7px; cursor: pointer; margin-left: 4px; transition: border-color 0.15s ease, color 0.15s ease;
+}
+.ptrack .row-btn:hover:not(:disabled), .ptrack-modal-backdrop .row-btn:hover:not(:disabled) { border-color: var(--pt-accent); color: var(--pt-accent); }
+.ptrack .row-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* ---------- blocks ---------- */
+.ptrack .block { background: var(--pt-surface); border: 1px solid var(--pt-border); padding: 18px 20px 20px; margin-bottom: 16px; }
+.ptrack .block-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.ptrack .block-title { display: flex; align-items: center; gap: 8px; }
+.ptrack .title-marker { color: var(--pt-accent); font-size: 14px; }
+.ptrack .block-title h2 { font-family: var(--pt-mono); font-size: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--pt-text); }
+.ptrack .block-meta { font-family: var(--pt-mono); font-size: 11px; color: var(--pt-dim); }
+.ptrack .block-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ptrack .alerts { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.ptrack .hint, .ptrack-modal-backdrop .hint { font-size: 13px; color: var(--pt-dim); margin-top: 8px; }
+.ptrack .warn-text, .ptrack-modal-backdrop .warn-text { color: #e8c068; }
+.ptrack .err-text, .ptrack-modal-backdrop .err-text { color: #f08089; }
+.ptrack .loader { font-family: var(--pt-mono); font-size: 12px; color: var(--pt-dim); animation: pt-blink 1.2s steps(1) infinite; }
+.ptrack .mono-dim, .ptrack-modal-backdrop .mono-dim { font-family: var(--pt-mono); color: var(--pt-dim); }
+.ptrack .foot { font-size: 12px; color: var(--pt-dimmest); margin-top: 6px; }
+.ptrack .empty { text-align: left; }
+.ptrack .empty-line { font-family: var(--pt-mono); font-size: 13px; color: var(--pt-muted); }
+.ptrack .empty .bracket-btn { margin-top: 12px; }
+
+/* ---------- addresses ---------- */
+.ptrack .chip-chain, .ptrack-modal-backdrop .chip-chain {
+  font-family: var(--pt-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.12em; color: var(--pt-accent);
+  padding: 2px 6px; border: 1px solid var(--pt-border); min-width: 38px; text-align: center; box-sizing: border-box;
+}
+.ptrack-modal-backdrop .chip-x { background: none; border: 0; color: var(--pt-dim); cursor: pointer; padding: 4px 8px; font-size: 14px; line-height: 1; }
+.ptrack-modal-backdrop .chip-x:hover { color: var(--pt-error); }
+
+.ptrack .addr-wrap { margin-bottom: 10px; }
+.ptrack .addr-focus {
+  display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--pt-body); font-family: var(--pt-mono); font-size: 12px; text-align: left;
+}
+.ptrack .addr-focus b { color: var(--pt-text); font-weight: 700; }
+.ptrack .addr-focus .addr-text { color: var(--pt-dim); }
+.ptrack .addr-focus:hover .addr-text, .ptrack .addr-focus[aria-pressed='true'] .addr-text { color: var(--pt-accent); }
+.ptrack .table td.nil { color: #787878; }
+.ptrack .label-form { display: inline-flex; align-items: center; gap: 8px; }
+.ptrack .label-input {
+  background: transparent; border: 0; border-bottom: 1px solid var(--pt-accent); color: var(--pt-text);
+  font-family: var(--pt-mono); font-size: 12px; padding: 2px 0; width: 160px; outline: none;
+}
+.ptrack .row-btn.remove { font-size: 13px; line-height: 1; padding: 2px 7px; }
+.ptrack .row-btn.remove:hover:not(:disabled) { border-color: var(--pt-error); color: #f08089; }
+
+.ptrack .address-form { display: flex; align-items: center; gap: 8px; border: 1px solid var(--pt-border); background: var(--pt-inset); padding: 6px 8px 6px 12px; flex-wrap: wrap; }
+.ptrack .address-form:focus-within { border-color: rgba(0, 204, 102, 0.4); }
+.ptrack .address-input { flex: 1 1 180px; min-width: 0; background: transparent; border: 0; outline: none; color: var(--pt-text); font-family: var(--pt-mono); font-size: 12px; padding: 4px 0; }
+.ptrack .address-input::placeholder { color: #8a8a8a; }
+
+.ptrack .sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.ptrack button:focus-visible, .ptrack-modal-backdrop button:focus-visible { outline: 1px solid var(--pt-accent); outline-offset: 2px; }
+
+/* ---------- metrics ---------- */
+.ptrack .metric-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--pt-border); background: var(--pt-surface); margin-bottom: 16px; }
+.ptrack .metric-grid.compact { margin-bottom: 14px; background: var(--pt-inset); }
+.ptrack .metric { display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; min-height: 108px; border-right: 1px solid var(--pt-border); min-width: 0; transition: background 0.15s ease; }
+.ptrack .metric:nth-child(4) { border-right: 0; }
+.ptrack .metric:hover { background: var(--pt-hover); }
+.ptrack .metric-index { font-family: var(--pt-mono); font-size: 10px; font-weight: 700; color: var(--pt-accent); letter-spacing: 0.18em; }
+.ptrack .metric-label { font-family: var(--pt-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pt-muted); }
+.ptrack .metric-value { font-family: var(--pt-mono); font-size: 24px; font-weight: 800; color: var(--pt-text); line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ptrack .metric-grid.compact .metric-value { font-size: 20px; }
+.ptrack .metric-sub { font-family: var(--pt-mono); font-size: 11px; color: var(--pt-dim); }
+
+/* Allocation strip: the grid's closing row, splitting the total by position type. */
+.ptrack .alloc {
+  grid-column: 1 / -1; display: flex; align-items: center; gap: 18px; padding: 12px 18px;
+  border-top: 1px solid var(--pt-border); flex-wrap: wrap;
+}
+.ptrack .alloc-bar { flex: 1 1 320px; display: flex; gap: 2px; height: 8px; background: var(--pt-inset); min-width: 0; }
+.ptrack .alloc-seg { flex-basis: 0; min-width: 2px; }
+.ptrack .alloc-legend { list-style: none; margin: 0; padding: 0; display: flex; gap: 16px; font-family: var(--pt-mono); font-size: 11px; color: var(--pt-muted); }
+.ptrack .alloc-legend li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ptrack .alloc-legend li.zero { color: var(--pt-dimmest); }
+.ptrack .alloc-legend b { color: var(--pt-text); font-weight: 700; }
+.ptrack .alloc-legend li.zero b { color: var(--pt-dimmest); font-weight: 600; }
+.ptrack .alloc-key { width: 8px; height: 8px; }
+.ptrack .alloc-seg.bond, .ptrack .alloc-key.bond { background: var(--pt-series-bond); }
+.ptrack .alloc-seg.lp, .ptrack .alloc-key.lp { background: var(--pt-series-lp); }
+.ptrack .alloc-seg.tcy, .ptrack .alloc-key.tcy { background: var(--pt-series-tcy); }
+
+/* ---------- tabs ---------- */
+.ptrack .tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+.ptrack .tab {
+  display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 1px solid var(--pt-border);
+  padding: 7px 12px; color: var(--pt-muted); font-family: var(--pt-mono); font-size: 12px; cursor: pointer; text-transform: uppercase;
+  letter-spacing: 0.08em; transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.ptrack .tab:hover { border-color: rgba(0, 204, 102, 0.4); }
+.ptrack .tab.active { border-color: var(--pt-accent); color: var(--pt-text); background: rgba(0, 204, 102, 0.07); }
+.ptrack .tab-count { color: var(--pt-accent); font-weight: 700; margin-left: 4px; }
+.ptrack .tab-count.zero { color: var(--pt-dimmest); font-weight: 600; }
+.ptrack .tabs-meta { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-family: var(--pt-mono); font-size: 11px; color: var(--pt-dimmest); }
+.ptrack .focus-note { color: var(--pt-accent); }
+
+/* ---------- tables ---------- */
+.ptrack .table-wrap { overflow-x: auto; border: 1px solid var(--pt-border); }
+.ptrack .table { width: 100%; border-collapse: collapse; font-family: var(--pt-mono); font-size: 12px; }
+.ptrack .table th {
+  position: sticky; top: 0; background: var(--pt-surface); color: var(--pt-muted); font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.1em; text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--pt-border); white-space: nowrap;
+}
+.ptrack .table td { padding: 8px 10px; border-bottom: 1px solid var(--pt-border-faint); color: var(--pt-body); white-space: nowrap; }
+.ptrack .table tbody tr:hover { background: var(--pt-hover); }
+/* The first column names the row; keep it pinned while wide tables scroll sideways. */
+.ptrack .table th:first-child, .ptrack .table td:first-child { position: sticky; left: 0; z-index: 1; background: var(--pt-surface); }
+.ptrack .table th:first-child { z-index: 2; }
+.ptrack .table tbody tr:hover td:first-child { background: var(--pt-hover); }
+/* Focused address: the contract's highlighted-path treatment (green left edge, soft green fill). */
+.ptrack .addr-table tbody tr.focused td,
+.ptrack .addr-table tbody tr.focused:hover td:first-child { background: var(--pt-focus-bg); }
+.ptrack .addr-table tbody tr.focused td:first-child { box-shadow: inset 2px 0 0 var(--pt-accent); }
+.ptrack .table tbody tr:last-child td { border-bottom: 0; }
+.ptrack .right { text-align: right !important; }
+.ptrack .nowrap { white-space: nowrap; }
+.ptrack .accent { color: var(--pt-accent) !important; font-weight: 700; }
+.ptrack .strong { color: var(--pt-text); font-weight: 700; }
+.ptrack .pos { color: var(--pt-accent) !important; }
+.ptrack .neg { color: #f08089 !important; }
+.ptrack .tag { margin-left: 6px; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pt-amber); border: 1px solid rgba(212, 160, 23, 0.4); padding: 0 4px; }
+
+.ptrack .pill, .ptrack-modal-backdrop .pill {
+  display: inline-block; font-family: var(--pt-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em;
+  border: 1px solid var(--pt-border); color: var(--pt-muted); padding: 1px 7px; border-radius: 999px; margin-right: 4px;
+}
+.ptrack .pill.ok, .ptrack-modal-backdrop .pill.ok { color: var(--pt-accent); border-color: rgba(0, 204, 102, 0.4); }
+.ptrack .pill.warn, .ptrack-modal-backdrop .pill.warn { color: var(--pt-amber); border-color: rgba(212, 160, 23, 0.4); }
+.ptrack .pill.err, .ptrack-modal-backdrop .pill.err { color: #f08089; border-color: rgba(224, 82, 96, 0.4); }
+
+.ptrack .range-btn {
+  background: transparent; border: 1px solid var(--pt-border); color: var(--pt-dim); font-family: var(--pt-mono); font-size: 11px; padding: 3px 8px; cursor: pointer;
+}
+.ptrack .range-btn.active { color: var(--pt-accent); border-color: rgba(0, 204, 102, 0.5); }
+.ptrack .seg-group { display: inline-flex; gap: 4px; }
+.ptrack .chart-box { position: relative; height: 260px; margin-bottom: 14px; }
+
+/* ---------- bond history ---------- */
+.ptrack .history-chart { height: 340px; margin-bottom: 0; }
+.ptrack .history-chart canvas.hidden { display: none; }
+.ptrack .chart-note { position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%); margin: 0; text-align: center; }
+.ptrack .history-note { margin: 0 0 10px; }
+.ptrack .table td.bond-add, .ptrack .table td.bond-add a { color: #5588cc; }
+.ptrack .table td.bond-remove, .ptrack .table td.bond-remove a { color: #f08089; }
+.ptrack .table td.dim-cell { color: var(--pt-dim); }
+.ptrack .pager { display: flex; justify-content: center; align-items: center; gap: 4px; margin-top: 12px; flex-wrap: wrap; }
+.ptrack .pager .row-btn { margin-left: 0; min-width: 30px; }
+.ptrack .pager .row-btn.current { border-color: var(--pt-accent); color: var(--pt-accent); background: rgba(0, 204, 102, 0.07); }
+.ptrack .pager-gap { font-family: var(--pt-mono); color: var(--pt-dimmest); padding: 0 4px; }
+
+/* ---------- modals ---------- */
+.ptrack-modal-backdrop {
+  position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.72); display: flex; align-items: flex-start; justify-content: center;
+  padding: 72px 16px 24px; overflow-y: auto; font-family: 'DM Sans', -apple-system, sans-serif; color: var(--pt-body); font-size: 13px;
+}
+.ptrack-modal { width: min(520px, 100%); background: var(--pt-surface); border: 1px solid #2a2a2a; }
+.ptrack-modal.wide { width: min(640px, 100%); }
+.ptrack-modal .modal-head {
+  display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--pt-border);
+  font-family: var(--pt-mono); font-size: 12px; color: var(--pt-muted);
+}
+.ptrack-modal .modal-section { padding: 14px 16px; border-bottom: 1px solid var(--pt-border-faint); }
+.ptrack-modal .modal-label { font-family: var(--pt-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pt-muted); margin-bottom: 8px; display: block; }
+.ptrack-modal .modal-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 16px; flex-wrap: wrap; }
+.ptrack-modal .pad { padding: 0 16px 10px; }
+
+.ptrack-modal .wallet-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.ptrack-modal .wallet-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; background: var(--pt-inset); border: 1px solid var(--pt-border);
+  padding: 9px 12px; color: var(--pt-text); font-family: var(--pt-mono); font-size: 12px; cursor: pointer; transition: border-color 0.15s ease;
+}
+.ptrack-modal .wallet-btn:hover { border-color: var(--pt-accent); }
+.ptrack-modal .wallet-btn.unavailable b { color: var(--pt-dim); }
+.ptrack-modal .wallet-sub { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--pt-dim); }
+.ptrack-modal .wallet-group { border: 1px solid var(--pt-border); padding: 8px 10px; margin-bottom: 6px; background: var(--pt-inset); }
+.ptrack-modal .wallet-group-head { display: flex; justify-content: space-between; align-items: center; font-family: var(--pt-mono); font-size: 12px; margin-bottom: 6px; color: var(--pt-text); }
+.ptrack-modal .wallet-account { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 2px 0; }
+.ptrack-modal .wallet-account .chip-chain { border: 1px solid var(--pt-border); padding: 1px 6px; }
+
+.ptrack-modal .chain-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+.ptrack-modal .chain-opt {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--pt-border); padding: 4px 9px; cursor: pointer;
+  font-family: var(--pt-mono); font-size: 11px; color: var(--pt-muted);
+}
+.ptrack-modal .chain-opt.on { border-color: rgba(0, 204, 102, 0.5); color: var(--pt-accent); }
+.ptrack-modal .chain-opt input { accent-color: var(--pt-accent); margin: 0; }
+.ptrack-modal .phrase, .ptrack-modal .field-input {
+  width: 100%; box-sizing: border-box; background: var(--pt-inset); border: 1px solid var(--pt-border); color: var(--pt-text);
+  font-family: var(--pt-mono); font-size: 12px; padding: 8px 10px; outline: none; border-radius: 0;
+}
+.ptrack-modal .phrase:focus, .ptrack-modal .field-input:focus { border-color: rgba(0, 204, 102, 0.5); }
+.ptrack-modal .field-input.slim { padding: 3px 6px; width: auto; max-width: 100%; }
+.ptrack-modal select.field-input { appearance: auto; }
+
+.ptrack-modal .form-grid { display: flex; flex-direction: column; gap: 12px; }
+.ptrack-modal .field { display: flex; flex-direction: column; }
+.ptrack-modal .field-row { display: flex; gap: 6px; align-items: center; }
+.ptrack-modal .field-row .row-btn { margin-left: 0; padding: 7px 10px; }
+.ptrack-modal .seg { display: flex; gap: 4px; flex-wrap: wrap; }
+.ptrack-modal .seg-btn {
+  background: transparent; border: 1px solid var(--pt-border); color: var(--pt-muted); font-family: var(--pt-mono); font-size: 11px; padding: 5px 10px; cursor: pointer; text-transform: lowercase;
+}
+.ptrack-modal .seg-btn.active { border-color: var(--pt-accent); color: var(--pt-accent); background: rgba(0, 204, 102, 0.07); }
+.ptrack-modal .seg-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.ptrack-modal .range { width: 100%; accent-color: var(--pt-accent); margin: 4px 0 8px; }
+
+.ptrack-modal .review { border: 1px solid var(--pt-border); background: var(--pt-inset); padding: 10px 12px; margin-bottom: 8px; }
+.ptrack-modal .review-title { font-family: var(--pt-mono); font-size: 12px; color: var(--pt-text); font-weight: 600; margin-bottom: 8px; }
+.ptrack-modal .review-grid { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 5px 10px; margin: 0; font-size: 12px; }
+.ptrack-modal .review-grid dt { font-family: var(--pt-mono); font-size: 11px; color: var(--pt-dim); text-transform: uppercase; letter-spacing: 0.1em; }
+.ptrack-modal .review-grid dd { margin: 0; font-family: var(--pt-mono); color: var(--pt-body); word-break: break-all; }
+.ptrack-modal .inline-code { font-family: var(--pt-mono); background: var(--pt-border-faint); color: var(--pt-accent); border: 1px solid var(--pt-border); padding: 1px 5px; }
+
+@media (max-width: 860px) {
+  .ptrack .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ptrack .metric:nth-child(2) { border-right: 0; }
+  .ptrack .metric:nth-child(-n + 2) { border-bottom: 1px solid var(--pt-border); }
+  .ptrack .title { font-size: 24px; }
+}
+
+@media (max-width: 520px) {
+  .ptrack { width: calc(100% - 32px); padding-top: 16px; }
+  .ptrack .head-top { flex-direction: column; align-items: stretch; gap: 10px; }
+  /* Two even rows: currency + status, then the two actions side by side. */
+  .ptrack .head-right { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .ptrack .head-right .sep { display: none; }
+  .ptrack .head-right .status { justify-self: end; }
+  .ptrack .head-right .bracket-btn { justify-content: center; }
+  .ptrack .lede { font-size: 13px; }
+  .ptrack .block { padding: 14px 12px 16px; }
+  .ptrack .metric { padding: 12px; min-height: 0; }
+  .ptrack .metric-value { font-size: 18px; }
+  .ptrack .alloc { padding: 12px; gap: 10px; }
+  .ptrack .alloc-legend { gap: 12px; flex-wrap: wrap; }
+  .ptrack-modal .wallet-grid { grid-template-columns: 1fr; }
+  .ptrack .tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .ptrack .tab { justify-content: center; padding: 7px 4px; gap: 3px; }
+  .ptrack .tab .bracket { display: none; }
+  .ptrack .tabs-meta { grid-column: 1 / -1; margin-left: 0; }
+  .ptrack .address-form .prompt { display: none; }
+  .ptrack .history-chart { height: 240px; }
+  .ptrack .address-form { padding-left: 10px; }
+}
+
+/* App.svelte sets DM Sans on every element, so structural data opts back into mono. */
+.ptrack .table *, .ptrack .metric *, .ptrack .alloc *, .ptrack .tab *,
+.ptrack-modal .review *, .ptrack-modal .wallet-group *, .ptrack-modal .wallet-btn *, .ptrack-modal .modal-head * {
+  font-family: var(--pt-mono);
+}

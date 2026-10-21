@@ -7,6 +7,7 @@ import { AssetValue, Chain, USwap, WalletOption, FeeOption, ProviderName, getEIP
 import { EVMPlugin } from '@tcswap/plugins/evm';
 import { ThorchainPlugin } from '@tcswap/plugins/thorchain';
 import { SolanaPlugin } from '@tcswap/plugins/solana';
+import { cosmostationWallet } from '@tcswap/wallets/cosmostation';
 import { ctrlWallet } from '@tcswap/wallets/ctrl';
 import { evmWallet } from '@tcswap/wallets/evm-extensions';
 import { keplrWallet } from '@tcswap/wallets/keplr';
@@ -33,6 +34,7 @@ const defaultPlugins = {
 };
 
 const defaultWallets = {
+  ...cosmostationWallet,
   ...ctrlWallet,
   ...evmWallet,
   ...keplrWallet,
@@ -136,6 +138,8 @@ export const supportedChains = {
   [WalletOption.CTRL]: ctrlWallet.connectCtrl?.supportedChains || [],
   [WalletOption.METAMASK]: evmWallet.connectEVMWallet?.supportedChains || [],
   [WalletOption.KEPLR]: keplrWallet.connectKeplr?.supportedChains || [],
+  [WalletOption.LEAP]: keplrWallet.connectKeplr?.supportedChains || [],
+  [WalletOption.COSMOSTATION]: cosmostationWallet.connectCosmostation?.supportedChains || [],
   [WalletOption.KEYSTORE]: keystoreWallet.connectKeystore?.supportedChains || [],
   [WalletOption.LEDGER]: ledgerWallet.connectLedger?.supportedChains || [],
   [WalletOption.OKX]: okxWallet.connectOkx?.supportedChains || [],
@@ -150,6 +154,8 @@ export function isWalletAvailable(option) {
     case WalletOption.CTRL: return !!(window.xfi || window.ethereum?.__XDEFI);
     case WalletOption.METAMASK: return !!(window.ethereum && !window.ethereum?.isBraveWallet);
     case WalletOption.KEPLR: return !!window.keplr;
+    case WalletOption.LEAP: return !!window.leap;
+    case WalletOption.COSMOSTATION: return !!window.cosmostation;
     case WalletOption.PHANTOM: return !!window.phantom;
     case WalletOption.OKX: return !!window.okxwallet;
     case WalletOption.VULTISIG: return !!window.vultisig;
@@ -194,6 +200,12 @@ export async function connectWallet(option, chains, config) {
       break;
     case WalletOption.KEPLR:
       connected = await connectEach(c => uSwap.connectKeplr(c));
+      break;
+    case WalletOption.LEAP:
+      connected = await connectEach(c => uSwap.connectKeplr(c, WalletOption.LEAP));
+      break;
+    case WalletOption.COSMOSTATION:
+      connected = await connectEach(c => uSwap.connectCosmostation(c));
       break;
     case WalletOption.CTRL:
       connected = await connectEach(c => uSwap.connectCtrl(c));

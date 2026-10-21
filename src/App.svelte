@@ -110,12 +110,20 @@
     description: "Measure Wasm arb activity, liquidity fees, Rujira revenue, and value captured by THORChain"
   };
 
-  const bondTrackerApp = {
-    name: "Bond Tracker",
+  const positionTrackerApp = {
+    name: "Thorfolio",
+    component: () => import("./lib/PositionTracker.svelte"),
+    icon: "🔗",
+    path: "thorfolio",
+    description: "Track and manage bonds, LP positions, and TCY across multiple addresses"
+  };
+
+  const bondTrackerClassicApp = {
+    name: "Bond Tracker Classic",
     component: () => import("./lib/BondTrackerV2.svelte"),
     icon: "🔗",
-    path: "bond-tracker",
-    description: "Track your node bond, rewards, churn status, and performance"
+    path: "bond-tracker-classic",
+    description: "Single-address bond tracker with churn history"
   };
 
   const vaultExplorerApp = {
@@ -184,7 +192,7 @@
     polTvlApp,
     systemIncomePolApp,
     burnTrackerApp,
-    bondTrackerApp,
+    positionTrackerApp,
     vaultExplorerApp,
     treasuryTrackerApp,
     dynamicFeeApp,
@@ -194,13 +202,22 @@
     briefingsApp
   ];
   // Direct-route previews resolve normally but stay out of desktop/mobile nav.
-  const hiddenApps = [wasmArbEconomicsApp];
+  const hiddenApps = [wasmArbEconomicsApp, bondTrackerClassicApp];
+  // Retired paths that keep old links working; they resolve to the app and rewrite to its path.
+  const routeAliases = { "bond-tracker": positionTrackerApp.path };
 
   // The site has no homepage: unknown paths and `/` land on the status page.
   const defaultApp = statusApp;
 
   function getAvailableApp(path) {
-    return [...apps, ...hiddenApps].find(a => a.path === path) || null;
+    const target = routeAliases[path] || path;
+    return [...apps, ...hiddenApps].find(a => a.path === target) || null;
+  }
+
+  // Swap a retired path for the canonical one, keeping the query (bond_address, currency, …).
+  function canonicalizeAliasUrl(path, app) {
+    if (app.path === path) return;
+    history.replaceState(null, '', `${BASE_PATH}/${app.path}${window.location.search}${window.location.hash}`);
   }
 
   function getAppParams(app) {
@@ -212,7 +229,12 @@
       params.set('source', 'desktop-app');
     }
 
-    if (app.name === "Bond Tracker") {
+    if (app === positionTrackerApp) {
+      const addresses = urlParams.get("addresses");
+      if (addresses) params.set("addresses", addresses);
+    }
+
+    if (app === positionTrackerApp || app === bondTrackerClassicApp) {
       const bondAddress = urlParams.get("bond_address");
       const nodeAddress = urlParams.get("node_address");
       if (bondAddress) params.set("bond_address", bondAddress);
@@ -343,6 +365,7 @@
 
     const path = stripBase(window.location.pathname).slice(1).split('/')[0];
     const app = getAvailableApp(path) || defaultApp;
+    canonicalizeAliasUrl(path, app);
     selectedApp = app;
     await loadComponent(app);
     trackAppView(app);
@@ -361,6 +384,7 @@
     const path = stripBase(window.location.pathname).slice(1).split('/')[0];
     const app = getAvailableApp(path);
     if (app) {
+      canonicalizeAliasUrl(path, app);
       selectedApp = app;
       loadComponent(app);
       trackAppView(app);
