@@ -127,6 +127,27 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### Pool Analysis refresh alignment
+
+The timer runs at `:02`, `:17`, `:32`, and `:47` UTC: two minutes after each
+quarter-hour source boundary, with 30-second scheduling accuracy. The former
+activation-relative cadence could publish a thirteen-minute-old source window,
+which crossed the unchanged twenty-minute freshness limit before the next run.
+Calendar alignment leaves aggregation and ordinary job-runtime headroom without
+adding routine requests or relaxing freshness. Provider lag, failed acquisition,
+or unusually long jobs can still produce a truthful stale warning.
+
+Deploy backend only through the normal release guard; the changed systemd unit
+uses the coordinated activation path. No migration, environment/budget change,
+cache reset, backfill, or manual collector run is needed. Check the installed
+unit with `systemctl cat boonetools-pool-analysis.timer`, validate its calendar
+with `systemd-analyze calendar '*-*-* *:02,17,32,47:00 UTC'`, and confirm the
+timer's next trigger follows that grid. `Persistent=true` retains one missed
+calendar catch-up after downtime; there is no separate startup trigger.
+Let normal scheduled runs publish, then verify successful acquisition and fresh
+rolling `window_end` values through the following scheduled publication. Use
+the source-window timestamp as well as the read model's publication timestamp.
+
 ### Pool Analysis same-window refresh
 
 Cached quarter-hour heads and derived midnight zero heads retain swap-source

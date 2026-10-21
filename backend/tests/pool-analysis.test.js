@@ -393,7 +393,8 @@ test('migration, route, jobs, units, and performance gate encode Pool Analysis',
   assert.match(feeScopeMigration, /pool-generated liquidity fees/);
   assert.match(server, /pool-analysis-series/);
   assert.match(runJob, /pool-analysis-backfill/);
-  assert.match(timer, /OnUnitActiveSec=15min/);
+  assert.match(timer, /^OnCalendar=\*-\*-\* \*:02,17,32,47:00 UTC$/m);
+  assert.doesNotMatch(timer, /^On(?:Active|Boot|Startup|UnitActive|UnitInactive)Sec=/m);
   assert.match(service, /pool-analysis-scheduler/);
   assert.match(backfill, /pool-analysis-backfill/);
   assert.match(smoke, /name: 'pool-analysis'/);

@@ -1,9 +1,8 @@
 [Unit]
-Description=Refresh Pool Analysis every fifteen minutes
+Description=Refresh Pool Analysis two minutes after each UTC quarter-hour
 
 [Timer]
-OnActiveSec=90s
-OnUnitActiveSec=15min
+OnCalendar=*-*-* *:02,17,32,47:00 UTC
 AccuracySec=30s
 Persistent=true
 Unit=boonetools-pool-analysis.service

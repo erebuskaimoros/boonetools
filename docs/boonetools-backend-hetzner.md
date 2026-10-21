@@ -507,9 +507,11 @@ uses the same verified acquisition path; archive failures leave gaps to retry
 rather than recording current state as historical data. A deployment does not
 trigger a full historical rebuild or certify every existing row.
 
-Maintenance timers use `OnActiveSec` for their initial activation so restarting
-them on a long-running host always produces a next trigger; `OnBootSec` must
-not be used for deploy-restarted timers.
+Relative maintenance timers use `OnActiveSec` for their initial activation so
+restarting them on a long-running host always produces a next trigger;
+`OnBootSec` must not be used for deploy-restarted timers. Source-boundary-aligned
+timers such as Pool Analysis instead use `OnCalendar` without an additional
+relative startup trigger, retaining their wall-clock alignment across restarts.
 
 Scheduled jobs write one bounded JSON completion or failure record to the
 journal. Job return payloads can contain whole provider snapshots and must not
@@ -708,8 +710,15 @@ pool-generated liquidity fees, and per-asset sync state. Migration
 `052_pool_analysis_fee_scope.sql` removes the legacy downstream-earnings
 column, discards rows that contain no swap measures, and normalizes retained
 rows to swap-history provenance.
-`boonetools-pool-analysis.timer` refreshes today's swap totals every fifteen
-minutes, reuses the shared fresh pool snapshot for today's partial depth, and
+`boonetools-pool-analysis.timer` refreshes today's swap totals at `:02`, `:17`,
+`:32`, and `:47` UTC, two minutes after each quarter-hour with 30-second timer
+accuracy. This retains four scheduled runs per hour while allowing ordinary
+Midgard aggregation lag and job runtime before the previous source window
+crosses its unchanged twenty-minute freshness limit. Calendar alignment survives
+timer restarts; `Persistent=true` catches up one missed calendar activation after
+downtime, with no separate startup request. Slow or failed upstream acquisition
+can still leave data stale. See [rollout checks](deployment.md#pool-analysis-refresh-alignment).
+The job reuses the shared fresh pool snapshot for today's partial depth and
 publishes the compact `/pool-analysis` table model with rolling 24-hour, 7-day,
 30-day, 90-day, and 365-day volume and liquidity-fee windows, including coverage
 and annualized generated-fee rates. Current price, depth, and balances come from

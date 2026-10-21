@@ -78,3 +78,20 @@ After the normal backend release, verify two sequential ordinary refreshes in
 the same non-midnight window: the second must reuse saved prefixes, retain their
 amounts and provenance, and leave no source-constraint errors or newly stale
 pools. Do not run the historical backfill to validate this fix.
+
+## Quarter-hour refresh alignment — October 21, 2026
+
+The activation-relative fifteen-minute timer could drift to `:13/:28/:43/:58`.
+A successful `:43` run then published the `:30` source cutoff, which expired
+at `:50` under the twenty-minute source-window TTL, eight minutes before the
+next scheduled refresh. A fresh read-model publication did not make its older
+rolling cutoff fresh; this gap was independent of provider admission limits.
+
+The timer now uses `OnCalendar=*-*-* *:02,17,32,47:00 UTC`, with the existing
+30-second accuracy and persistent catch-up, and no relative startup trigger.
+It retains four ordinary runs per hour. Regression tests cover arbitrary
+activation times and continuity across UTC midnight: with up to 90 seconds of
+aggregation lag, 30 seconds of timer slack, and 90 seconds of job runtime, the
+previous cutoff is still under twenty minutes old at the next publication.
+Those are bounded healthy-runtime assumptions, not an outage guarantee.
+Freshness TTLs, provider budgets, collector logic, and saved history are unchanged.
