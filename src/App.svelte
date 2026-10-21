@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Footer from './lib/Footer.svelte';
+  import SwapPanel from './lib/swap/SwapPanel.svelte';
   import Snow from './lib/Snow.svelte';
   import Banner from './lib/Banner.svelte';
   import { trackFirstPartyPageView } from './lib/page-view-analytics.js';
@@ -110,12 +111,20 @@
     description: "Measure Wasm arb activity, liquidity fees, Rujira revenue, and value captured by THORChain"
   };
 
-  const bondTrackerApp = {
-    name: "Bond Tracker",
+  const positionTrackerApp = {
+    name: "Thorfolio",
+    component: () => import("./lib/PositionTracker.svelte"),
+    icon: "🔗",
+    path: "thorfolio",
+    description: "Track and manage bonds, LP positions, and TCY across multiple addresses"
+  };
+
+  const bondTrackerClassicApp = {
+    name: "Bond Tracker Classic",
     component: () => import("./lib/BondTrackerV2.svelte"),
     icon: "🔗",
-    path: "bond-tracker",
-    description: "Track your node bond, rewards, churn status, and performance"
+    path: "bond-tracker-classic",
+    description: "Single-address bond tracker with churn history"
   };
 
   const vaultExplorerApp = {
@@ -184,7 +193,7 @@
     polTvlApp,
     systemIncomePolApp,
     burnTrackerApp,
-    bondTrackerApp,
+    positionTrackerApp,
     vaultExplorerApp,
     treasuryTrackerApp,
     dynamicFeeApp,
@@ -194,13 +203,31 @@
     briefingsApp
   ];
   // Direct-route previews resolve normally but stay out of desktop/mobile nav.
-  const hiddenApps = [wasmArbEconomicsApp];
+  const hiddenApps = [wasmArbEconomicsApp, bondTrackerClassicApp];
+  // Retired paths that keep old links working; they resolve to the app and rewrite to its path.
+  const routeAliases = { "bond-tracker": positionTrackerApp.path };
 
   // The site has no homepage: unknown paths and `/` land on the status page.
   const defaultApp = statusApp;
 
   function getAvailableApp(path) {
-    return [...apps, ...hiddenApps].find(a => a.path === path) || null;
+    const target = routeAliases[path] || path;
+    return [...apps, ...hiddenApps].find(a => a.path === target) || null;
+  }
+
+  // Canonicalize retired routes and translate old bond links into an explicit Thorfolio portfolio.
+  function canonicalizeAliasUrl(path, app) {
+    if (app.path === path) return;
+    const params = new URLSearchParams(window.location.search);
+    if (path === 'bond-tracker' && app.path === positionTrackerApp.path) {
+      const bondAddress = params.get('bond_address');
+      if (!params.has('addresses') && bondAddress) params.set('addresses', bondAddress);
+      params.delete('bond_address');
+      params.delete('node_address');
+      if (!params.has('tab')) params.set('tab', 'bond');
+    }
+    const query = params.toString();
+    history.replaceState(null, '', `${BASE_PATH}/${app.path}${query ? `?${query}` : ''}${window.location.hash}`);
   }
 
   function getAppParams(app) {
@@ -212,7 +239,12 @@
       params.set('source', 'desktop-app');
     }
 
-    if (app.name === "Bond Tracker") {
+    if (app === positionTrackerApp) {
+      const addresses = urlParams.get("addresses");
+      if (addresses) params.set("addresses", addresses);
+    }
+
+    if (app === positionTrackerApp || app === bondTrackerClassicApp) {
       const bondAddress = urlParams.get("bond_address");
       const nodeAddress = urlParams.get("node_address");
       if (bondAddress) params.set("bond_address", bondAddress);
@@ -343,6 +375,7 @@
 
     const path = stripBase(window.location.pathname).slice(1).split('/')[0];
     const app = getAvailableApp(path) || defaultApp;
+    canonicalizeAliasUrl(path, app);
     selectedApp = app;
     await loadComponent(app);
     trackAppView(app);
@@ -361,6 +394,7 @@
     const path = stripBase(window.location.pathname).slice(1).split('/')[0];
     const app = getAvailableApp(path);
     if (app) {
+      canonicalizeAliasUrl(path, app);
       selectedApp = app;
       loadComponent(app);
       trackAppView(app);
@@ -534,6 +568,8 @@
 
   {#if !isDesktopApp}
   <Footer />
+  <!-- Outside the routed component so an open swap survives dashboard changes. -->
+  <SwapPanel />
   {/if}
 </main>
 
@@ -559,6 +595,8 @@
   }
 
   main {
+    /* The footer starts where the sidebar ends, continuing its status row. */
+    --footer-inset: var(--sidebar-width);
     text-align: left;
     background-color: var(--background-color);
     min-height: 100vh;
@@ -828,18 +866,21 @@
     color: #00cc66;
   }
 
+  /* Same height as the footer, so the two read as one status line. */
   .side-status {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 14px;
+    box-sizing: border-box;
+    height: var(--footer-height);
+    padding: 0 14px;
     border-top: 1px solid #141414;
     flex-shrink: 0;
   }
 
   .sidebar.collapsed .side-status {
     justify-content: center;
-    padding: 12px 0;
+    padding: 0;
   }
 
   /* ---- MOBILE / DESKTOP-APP TOP BAR ---- */
@@ -977,6 +1018,10 @@
     margin-left: var(--sidebar-width-collapsed);
   }
 
+  main.collapsed {
+    --footer-inset: var(--sidebar-width-collapsed);
+  }
+
   .app-loading {
     max-width: 650px;
     margin: 48px auto 0;
@@ -1044,6 +1089,11 @@
 
     main.collapsed .content {
       margin-left: 0;
+    }
+
+    main,
+    main.collapsed {
+      --footer-inset: 0px;
     }
   }
 

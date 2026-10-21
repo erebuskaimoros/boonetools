@@ -41,6 +41,20 @@ canonical workspace:
 /Users/boonewheeler/Desktop/Projects/THORChain/scripts/audit-workspace.sh --project boonetools-website
 ```
 
+## Committing session records
+
+`knowledge/sessions/` is intentionally ignored. When a session record is meant
+to accompany an authorized commit, stage the exact record and index separately
+from the code paths, substituting the actual date and session number:
+
+```bash
+git add -f -- knowledge/sessions/YYYY-MM-DD/session-N.md knowledge/sessions/_index.md
+```
+
+An ordinary `git add` that includes these paths can report the ignored directory
+and exit nonzero, even when the index file is already tracked. Keep force-staging
+limited to the intended record and index; stage code with ordinary explicit paths.
+
 ## Provider boundaries
 
 `npm run check:boundaries` also checks outbound acquisition boundaries with a
@@ -83,6 +97,11 @@ Verify the public release and hashed assets, then explicitly reload the browser
 before checking changed UI. A navigation may reuse an older HTML document.
 Wait for the actual chart/data controls to finish loading before interacting;
 loading-message reflow can move controls during a click.
+
+For local chart-option changes, reload once after Vite hot reload before final
+visual verification. An existing Chart.js instance can retain old options even
+when Vite serves the updated component. Then switch date ranges and units to
+verify the chart updates from the current configuration.
 
 ## SSH and shell diagnostics
 
