@@ -1,3 +1,4 @@
+import { loadChurnOperatorFee } from './bond-operator-fees.js';
 import { calculateBondHistoryRow, hasBondHistoryValue } from './bond-history.js';
 import { acquisitionSourceKey, acquireCached, loadAcquisition, saveAcquisition } from './acquisition-cache.js';
 import {
@@ -78,6 +79,13 @@ export async function processChurn(bondAddress, nodeAddresses, churnHeight, chur
     churnTimestamp,
     ratesJson
   });
+  if (hasBondHistoryValue(row)) {
+    try {
+      row.operator_fee = await loadChurnOperatorFee(bondAddress, nodes, churnHeight, options);
+    } catch {
+      row.operator_fee = null; // Preserve bond history when payout events are unavailable.
+    }
+  }
   if (!hasBondHistoryValue(row)) {
     await (options.saveAcquisition || saveAcquisition)(options.client, {
       namespace, identity, payload: {

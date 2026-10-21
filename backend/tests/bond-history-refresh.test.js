@@ -112,7 +112,7 @@ test('runBondHistoryRefreshQueue processes a claimed job under its address lock'
 
   assert.equal(result.claimed, 1);
   assert.equal(result.completed, 1);
-  assert.deepEqual(completed[0].response, { status: 200, total: 4, fetched: 2 });
+  assert.deepEqual(completed[0].response, { status: 200, total: 4, fetched: 2, continuing: false });
 });
 
 test('failBondHistoryRefresh schedules bounded exponential retry', async () => {
@@ -188,4 +188,18 @@ test('runBondHistoryRefreshQueue retries stale partial success responses', async
   assert.equal(result.completed, 0);
   assert.equal(result.failed, 1);
   assert.match(failed[0].error.message, /provider unavailable/);
+});
+
+test('a bounded operator-fee backfill continues without consuming failure attempts', async () => {
+  const result = await completeBondHistoryRefresh({ bond_address: 'thor1bond', scope: 'current',
+    requested_at: '2026-10-21T00:00:00Z', started_at: '2026-10-21T00:01:00Z' }, { continuing: true }, {
+    query: async (sql, params) => {
+      assert.equal(params[4], true);
+      assert.match(sql, /when requested_at > \$3::timestamptz or \$5::boolean then 'pending'/);
+      assert.match(sql, /attempts = 0/);
+      return { rows: [{ status: 'pending', attempts: 0 }] };
+    }
+  });
+  assert.equal(result.status, 'pending');
+  assert.equal(result.attempts, 0);
 });

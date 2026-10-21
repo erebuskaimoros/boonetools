@@ -572,6 +572,7 @@
       {#if bondedAddresses.length}
         <BondHistory
           addresses={bondedAddresses}
+          hasOperator={view.bondRows.some((row) => row.isOperator)}
           scope={bondedAddresses.length === 1 ? labels[bondedAddresses[0]] || shortAddr(bondedAddresses[0]) : `${bondedAddresses.length} addresses combined`}
           fileTag={bondedAddresses.length === 1 ? bondedAddresses[0].slice(-4) : 'portfolio'}
           refreshKey={requestId}

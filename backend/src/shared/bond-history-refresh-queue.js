@@ -135,21 +135,21 @@ export async function completeBondHistoryRefresh(job, result = {}, dependencies 
   const { rows = [] } = await runQuery(
     `update bond_history_refresh_queue
      set status = case
-           when requested_at > $3::timestamptz then 'pending'
+           when requested_at > $3::timestamptz or $5::boolean then 'pending'
            else 'completed'
          end,
          attempts = 0,
          include_bond_txs = case
-           when requested_at > $3::timestamptz then include_bond_txs
+           when requested_at > $3::timestamptz or $5::boolean then include_bond_txs
            else false
          end,
          available_at = case
-           when requested_at > $3::timestamptz then now()
+           when requested_at > $3::timestamptz or $5::boolean then now()
            else available_at
          end,
          started_at = null,
          completed_at = case
-           when requested_at > $3::timestamptz then null
+           when requested_at > $3::timestamptz or $5::boolean then null
            else now()
          end,
          last_error = null,
@@ -157,7 +157,7 @@ export async function completeBondHistoryRefresh(job, result = {}, dependencies 
      where bond_address = $1 and scope = $2
        and started_at = $4::timestamptz
      returning status, attempts, requested_at, available_at`,
-    [job.bond_address, job.scope, claimedRequestedAt, claimStartedAt]
+    [job.bond_address, job.scope, claimedRequestedAt, claimStartedAt, Boolean(result.continuing)]
   );
   return {
     ...job,

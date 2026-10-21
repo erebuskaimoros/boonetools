@@ -1,3 +1,4 @@
+import { backfillOperatorFees } from '../shared/bond-operator-fees.js';
 import { getClient, query } from '../db/pool.js';
 import { upsertRows } from '../db/sql.js';
 import { error, isValidThorAddress, json } from '../lib/http.js';
@@ -343,7 +344,8 @@ function normalizeHistoryRows(rows) {
     rune_stack: Number(row.rune_stack),
     user_bond: row.user_bond == null ? null : Number(row.user_bond),
     rune_price: Number(row.rune_price),
-    rates_json: row.rates_json || null
+    rates_json: row.rates_json || null,
+    operator_fee: row.operator_fee == null ? null : Number(row.operator_fee)
   }));
 }
 
@@ -397,6 +399,7 @@ function cachedHistoryResponse({
   stale = false,
   warning = '',
   refreshStatus = '',
+  operatorFeeBackfillPending = false,
   headers = {}
 }) {
   const filtered = filterCachedHistoryRows(cachedRows, minHeight);
@@ -405,7 +408,8 @@ function cachedHistoryResponse({
     history: normalizeHistoryRows(filtered),
     has_historical: hasHistorical,
     fetched: 0,
-    total: filtered.length
+    total: filtered.length,
+    operator_fee_backfill_pending: operatorFeeBackfillPending
   };
 
   if (includeBondTxs) {
@@ -442,7 +446,7 @@ export async function handleBondHistory(request, url) {
   }
 
   const cachedResult = await query(
-    `select churn_height, churn_timestamp, rune_stack, user_bond, rune_price, rates_json
+    `select churn_height, churn_timestamp, rune_stack, user_bond, rune_price, rates_json, operator_fee
      from bond_history
      where bond_address = $1
        and scope = $2
@@ -450,7 +454,7 @@ export async function handleBondHistory(request, url) {
     [bondAddress, scope]
   );
   const legacyResult = await query(
-    `select churn_height, churn_timestamp, rune_stack, user_bond, rune_price, rates_json
+    `select churn_height, churn_timestamp, rune_stack, user_bond, rune_price, rates_json, operator_fee
      from bond_history
      where bond_address = $1
        and scope = $2
@@ -460,7 +464,7 @@ export async function handleBondHistory(request, url) {
   const historicalResult = scope === BOND_HISTORY_SCOPE_HISTORICAL
     ? { rows: cachedResult.rows || [] }
     : await query(
-      `select churn_height, churn_timestamp, rune_stack, user_bond, rune_price, rates_json
+      `select churn_height, churn_timestamp, rune_stack, user_bond, rune_price, rates_json, operator_fee
        from bond_history
        where bond_address = $1
          and scope = $2
@@ -470,7 +474,7 @@ export async function handleBondHistory(request, url) {
   const currentResult = scope === BOND_HISTORY_SCOPE_CURRENT
     ? { rows: cachedResult.rows || [] }
     : await query(
-      `select churn_height, churn_timestamp, rune_stack, user_bond, rune_price, rates_json
+      `select churn_height, churn_timestamp, rune_stack, user_bond, rune_price, rates_json, operator_fee
        from bond_history
        where bond_address = $1
          and scope = $2
@@ -624,6 +628,18 @@ export async function handleBondHistory(request, url) {
     return error('No active bonds found for this address', 404);
   }
 
+  const feeBackfill = await backfillOperatorFees(bondAddress, nodeAddresses, cached);
+  if (feeBackfill.updated.length) {
+    const dbClient = await getClient();
+    try {
+      await upsertRows(dbClient, 'bond_history', feeBackfill.updated.map((row) => ({
+        bond_address: bondAddress, scope, ...row
+      })), { conflictColumns: ['bond_address', 'scope', 'churn_height'], updateColumns: ['operator_fee'], jsonColumns: ['rates_json'] });
+    } finally {
+      dbClient.release();
+    }
+  }
+
   let allChurns = [];
   try {
     allChurns = await fetchChurns();
@@ -660,15 +676,17 @@ export async function handleBondHistory(request, url) {
       minHeight: 0,
       bondTxEvents,
       includeBondTxs,
-      stale: !discoveryComplete,
-      warning: discoveryComplete ? '' : `Bond action discovery remains incomplete: ${discoveryError}`
+      operatorFeeBackfillPending: feeBackfill.continuing,
+      stale: !discoveryComplete || (!feeBackfill.complete && !feeBackfill.continuing),
+      warning: !discoveryComplete ? `Bond action discovery remains incomplete: ${discoveryError}`
+        : feeBackfill.complete || feeBackfill.continuing ? '' : 'Operator-fee history backfill is incomplete'
     });
   }
 
   uncached.sort((left, right) => right.height - left.height);
   const zeroThreshold = includeHistorical ? 5 : 2;
   const newRows = [];
-  let refreshPartial = !discoveryComplete;
+  let refreshPartial = !discoveryComplete || (!feeBackfill.complete && !feeBackfill.continuing);
   let consecutiveZero = 0;
   const ratesJson = await fetchRatesJson();
 
@@ -692,6 +710,7 @@ export async function handleBondHistory(request, url) {
       consecutiveZero = 0;
     }
 
+    if (result.operator_fee == null) refreshPartial = true;
     newRows.push({
       bond_address: bondAddress,
       scope,
@@ -719,7 +738,8 @@ export async function handleBondHistory(request, url) {
       rune_stack: row.rune_stack,
       user_bond: row.user_bond,
       rune_price: row.rune_price,
-      rates_json: row.rates_json
+      rates_json: row.rates_json,
+      operator_fee: row.operator_fee
     }))
   ];
 
@@ -748,13 +768,14 @@ export async function handleBondHistory(request, url) {
     history,
     has_historical: responseHasHistorical,
     fetched: newRows.length,
-    total: history.length
+    total: history.length,
+    operator_fee_backfill_pending: feeBackfill.continuing
   };
 
   if (refreshPartial) {
     payload.stale = true;
     payload.partial = true;
-    payload.warning = discoveryComplete ? 'Historical refresh stopped after an upstream failure'
+    payload.warning = discoveryComplete ? 'Historical refresh or operator-fee backfill is incomplete'
       : `Bond action discovery remains incomplete: ${discoveryError}`;
   }
 

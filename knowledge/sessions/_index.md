@@ -18,8 +18,8 @@
 
 | Date | Focus | Summary | Link |
 |------|-------|---------|------|
+| 2026-10-21 #6 | Thorfolio operator fees | Actual operator payouts per churn, conditional table/export column, migration and resumable enrichment; tested and authorized for production rollout | [Session](2026-10-21/session-6.md) |
 | 2026-10-21 #5 | Thorfolio release preparation | Legacy URL forwarding, card navigation, footer refinements, unavailable TCY balances, and hidden swap launcher; 99 focused tests pass | [Session](2026-10-21/session-5.md) |
 | 2026-10-21 #4 | Thorfolio design, route, footer swap and coffee panels | Design pass, multi-address bond history, `/thorfolio`, STO swap panel and RUNE tip panel on `feat/thorfolio`; 713 tests and checks pass, wallet signing untested | [Session](2026-10-21/session-4.md) |
 | 2026-10-21 #3 | Thorfolio TCY APR and payouts | Corrected upstream APR inflation, added lifetime payout totals and fitted cumulative axes; 75 tests pass and two papercuts resolved | [Session](2026-10-21/session-3.md) |
 | 2026-10-21 #2 | Thorfolio wrap-up | Resolved session-record staging friction, verified Svelte checks, and recorded the bounded papercut review; 79 entries remain open | [Session](2026-10-21/session-2.md) |
-| 2026-10-21 #1 | Thorfolio bonds and wallet holdings | Restored Bond Tracker controls, added gated 3.21 payout management and held RUNE totals; 65 tests, static checks and build passed | [Session](2026-10-21/session-1.md) |

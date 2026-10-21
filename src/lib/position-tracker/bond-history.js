@@ -71,7 +71,8 @@ export function buildChurnHistory(rows) {
     userBond: row.user_bond != null ? row.user_bond : null,
     usdValue: (row.rune_stack / 1e8) * row.rune_price,
     runePrice: row.rune_price,
-    ratesJson: row.rates_json || null
+    ratesJson: row.rates_json || null,
+    operatorFee: row.operator_fee == null ? null : Number(row.operator_fee)
   }));
 
   return results.map((entry, index) => {
@@ -107,6 +108,8 @@ export function combineChurnHistories(histories) {
     let runeStack = 0;
     let reward = 0;
     let bondChange = 0;
+    let operatorFee = 0;
+    let feeUnavailable = false;
     /** @type {ReturnType<typeof buildChurnHistory>[number] | null} */
     let sample = null;
 
@@ -117,7 +120,12 @@ export function combineChurnHistories(histories) {
       if (index < 0) return;
       const row = rows[index];
       runeStack += row.runeStack;
-      if (row.height !== height) return;
+      if (row.height !== height) {
+        feeUnavailable = true; // A missing payout is not another copy of the last one.
+        return;
+      }
+      if (row.operatorFee == null) feeUnavailable = true;
+      else operatorFee += row.operatorFee;
       sample = sample || row;
       if (index > 0) {
         reward += row.reward;
@@ -136,7 +144,8 @@ export function combineChurnHistories(histories) {
       userBond: null,
       usdValue: (runeStack / 1e8) * sample.runePrice,
       runePrice: sample.runePrice,
-      ratesJson: sample.ratesJson
+      ratesJson: sample.ratesJson,
+      operatorFee: feeUnavailable ? null : operatorFee
     };
     const prev = combined[combined.length - 1];
     combined.push(prev
@@ -157,10 +166,11 @@ export function mergeBondTxMaps(maps) {
   return merged;
 }
 
-export function churnCsvRows(history) {
+export function churnCsvRows(history, includeOperatorFee = history.some((row) => row.operatorFee > 0)) {
   return [...history].reverse().map((churn) => ({
     date: churn.date.toISOString().slice(0, 10),
     reward_rune: (churn.reward / 1e8).toFixed(4),
+    ...(includeOperatorFee ? { operator_fee_rune: churn.operatorFee == null ? '' : (churn.operatorFee / 1e8).toFixed(4) } : {}),
     bond_change_rune: (churn.bondChange / 1e8).toFixed(4),
     apy_pct: (churn.apy * 100).toFixed(2),
     stack_rune: (churn.runeStack / 1e8).toFixed(4),
