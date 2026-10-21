@@ -127,6 +127,24 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### Pool Analysis short-history coverage
+
+Coverage starts at the earliest durable sync/refresh tracking day, not the first
+row still present in a selected window. A new pool with every expected day
+recorded therefore no longer triggers the missing-history warning merely
+because it has fewer than thirty days of history. Earlier tracked days,
+internal/trailing gaps, unknown anchors, sync errors and stale sources remain
+visible. Exact rolling windows, amounts and annualization rules are unchanged.
+
+Deploy backend only. No migration, backfill, provider request or history reset
+is required for this read-model correction. After the next ordinary publication
+(or a provider-free read-model rebuild under the existing Pool Analysis lock),
+check that ZEC reports nineteen observed/expected completed days with zero
+missing days, while retaining `requested_days=30`, its exact amounts and source
+cutoff. `coverage.short_history` and `history_start_day` disclose why the
+expected span is shorter. Existing frontend coverage handling removes both the
+summary warning and the per-row missing-history highlight without a UI release.
+
 ### Pool Analysis refresh alignment
 
 The timer runs at `:02`, `:17`, `:32`, and `:47` UTC: two minutes after each

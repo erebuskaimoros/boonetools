@@ -95,3 +95,26 @@ aggregation lag, 30 seconds of timer slack, and 90 seconds of job runtime, the
 previous cutoff is still under twenty minutes old at the next publication.
 Those are bounded healthy-runtime assumptions, not an outage guarantee.
 Freshness TTLs, provider budgets, collector logic, and saved history are unchanged.
+
+## Short history is not missing history — October 21, 2026
+
+ZEC's recorded history begins October 2, so its October 21 completed-day
+fallback contains nineteen days. The former thirty-day coverage check counted
+September 21–October 1 as eleven missing observations even though the pool's
+tracked history had not begun. Its daily series and recent rolling windows had
+no gaps.
+
+The read model now bounds expected completed days by the earliest durable
+`pool_analysis_sync_state.first_day` and refresh-state `first_tracked_day`.
+The latter prevents failed initial acquisition days from disappearing when the
+first successful observation arrives later. This is a tracked-history boundary,
+not a newly inferred on-chain creation timestamp. A selected window's first or
+last observed row never moves that boundary forward. Invalid/unknown anchors
+and contradictory older observations retain conservative full-window coverage.
+
+Coverage exposes `requested_days`, `history_start_day` and `short_history`;
+the requested period, source bounds, exact amounts, annualization and rolling
+snapshot requirements are unchanged. Genuine missing days after tracking began
+still warn, independently of source-staleness and sync-error warnings. No
+schema change, provider acquisition, cache clearing or historical rewrite is
+needed; the existing UI consumes the corrected missing/incomplete flags.

@@ -197,10 +197,15 @@ export async function loadPoolAnalysisPendingDays(client, { assets, startDate, t
 
 export async function loadPoolAnalysisSyncStates(client) {
   const { rows } = await client.query(
-    `select asset, first_day, last_day, last_completed_day, last_error,
-            stats_json, updated_at
-     from pool_analysis_sync_state
-     order by asset`
+    `select sync.asset, sync.first_day, sync.last_day, sync.last_completed_day, sync.last_error,
+            sync.stats_json, sync.updated_at,
+            least(sync.first_day, tracked.first_tracked_day) as history_start_day
+     from pool_analysis_sync_state sync
+     left join (
+       select asset, min(first_tracked_day) as first_tracked_day
+       from pool_analysis_refresh_state group by asset
+     ) tracked on tracked.asset = sync.asset
+     order by sync.asset`
   );
   return rows;
 }

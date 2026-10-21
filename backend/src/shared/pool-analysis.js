@@ -137,12 +137,58 @@ function sourceTime(...values) {
   return timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : null;
 }
 
+function validHistoryDay(value) {
+  const day = dayString(value);
+  const timestamp = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === day ? day : '';
+}
+
+function historyStartByAsset(syncStates) {
+  return new Map(syncStates.map((state) => {
+    const supplied = [state.first_day, state.history_start_day].filter((value) => value !== null && value !== undefined && value !== '');
+    const days = supplied.map(validHistoryDay);
+    // Unknown or malformed anchors must not turn a collection gap into youth.
+    const start = days.length && days.every(Boolean) ? days.sort()[0] : '';
+    return [assetIdentity(state.asset).asset, start];
+  }));
+}
+
+function periodCoverage(aggregate, period, coveredDays, historyStart, assetAggregates) {
+  let expectedDays = period.days;
+  const end = Date.parse(aggregate.window_end);
+  const start = Date.parse(aggregate.window_start);
+  const history = Date.parse(`${historyStart}T00:00:00Z`);
+  // Exact rolling snapshots already require a complete full-length window.
+  // Only the completed-day fallback can legitimately be shorter for a new pool.
+  const olderEvidence = [...assetAggregates.values()].some((row) => row.window_mode !== 'rolling'
+    && validHistoryDay(row.first_day) && validHistoryDay(row.first_day) < historyStart);
+  if (historyStart && !olderEvidence && (aggregate.window_mode || 'completed-days') === 'completed-days'
+    && Number.isFinite(end) && end % DAY_MS === 0 && end - start === period.days * DAY_MS
+    && history > start && history <= end) {
+    const availableDays = (end - history) / DAY_MS;
+    if (coveredDays <= availableDays) expectedDays = availableDays;
+  }
+  const shortHistory = expectedDays < period.days;
+  return {
+    first_day: dayString(aggregate.first_day),
+    last_day: dayString(aggregate.last_day),
+    observed_days: coveredDays,
+    expected_days: expectedDays,
+    missing_days: Math.max(0, expectedDays - coveredDays),
+    requested_days: period.days,
+    history_start_day: historyStart || null,
+    short_history: shortHistory
+  };
+}
+
 export function buildPoolAnalysisRows({
   pools = [],
   oraclePayload = {},
   networkPayload = {},
-  aggregates = []
+  aggregates = [],
+  syncStates = []
 } = {}) {
+  const historyStarts = historyStartByAsset(syncStates);
   const aggregatesByAsset = new Map();
   for (const aggregate of aggregates) {
     const asset = assetIdentity(aggregate.asset).asset;
@@ -178,6 +224,7 @@ export function buildPoolAnalysisRows({
         const volumeRune = nonNegativeBaseString(aggregate.volume_rune_e8, null);
         const feesRune = nonNegativeBaseString(aggregate.fees_rune_e8, null);
         const coveredDays = Math.max(0, Number(aggregate.observed_days) || 0);
+        const coverage = periodCoverage(aggregate, period, coveredDays, historyStarts.get(identity.asset), assetAggregates);
         const annualizedFeesRune = annualize(
           feesRune === null ? null : Number(feesRune) / 1e8,
           coveredDays,
@@ -192,7 +239,7 @@ export function buildPoolAnalysisRows({
           snapshot_ready: Boolean(aggregate.snapshot_ready),
           snapshot_resolution_seconds: 900,
           stale: aggregate.stale ?? false,
-          incomplete: aggregate.incomplete ?? coveredDays < period.days,
+          incomplete: coverage.short_history ? coverage.missing_days > 0 : aggregate.incomplete ?? coveredDays < period.days,
           usd_fee_estimate: true,
           volume_rune_e8: volumeRune,
           volume_usd: finite(aggregate.volume_usd),
@@ -208,13 +255,7 @@ export function buildPoolAnalysisRows({
           annualized_fee_rate_percent: annualizedFeesRune === null || balanceRune === null
             ? null
             : divideBase(annualizedFeesRune, (Number(balanceRune) / 1e8) * 2, 100),
-          coverage: {
-            first_day: dayString(aggregate.first_day),
-            last_day: dayString(aggregate.last_day),
-            observed_days: coveredDays,
-            expected_days: period.days,
-            missing_days: Math.max(0, period.days - coveredDays)
-          }
+          coverage
         }];
       }));
       const defaultMetrics = periodMetrics['30d'];
@@ -280,7 +321,7 @@ export async function buildPoolAnalysisReadModel(client, options = {}) {
     : networkRunePriceUsd !== null
       ? 'network'
       : null;
-  const rows = buildPoolAnalysisRows({ pools, oraclePayload, networkPayload, aggregates });
+  const rows = buildPoolAnalysisRows({ pools, oraclePayload, networkPayload, aggregates, syncStates });
   if (!rows.length) throw new Error('Pool Analysis found no Available or Staged pools');
   const warnings = [];
   if (isThorNodeCoreSnapshotStale(core, ['pools', runePriceSource || 'oracle_prices'])) {
@@ -292,7 +333,7 @@ export async function buildPoolAnalysisReadModel(client, options = {}) {
   const syncErrors = syncStates.filter((row) => row.last_error);
   if (syncErrors.length) warnings.push(`${syncErrors.length} pool history sync(s) reported an error`);
   const incomplete = rows.filter((row) => (
-    row.period_metrics['30d'].coverage.observed_days < POOL_ANALYSIS_PERIOD_DAYS
+    row.period_metrics['30d'].coverage.missing_days > 0
   )).length;
   if (incomplete) warnings.push(`${incomplete} pool(s) have incomplete 30-day history coverage`);
   const currentAssets = new Set(rows.map((row) => row.asset));
