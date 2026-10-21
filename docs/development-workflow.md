@@ -41,6 +41,20 @@ canonical workspace:
 /Users/boonewheeler/Desktop/Projects/THORChain/scripts/audit-workspace.sh --project boonetools-website
 ```
 
+## Committing session records
+
+`knowledge/sessions/` is intentionally ignored. When a session record is meant
+to accompany an authorized commit, stage the exact record and index separately
+from the code paths, substituting the actual date and session number:
+
+```bash
+git add -f -- knowledge/sessions/YYYY-MM-DD/session-N.md knowledge/sessions/_index.md
+```
+
+An ordinary `git add` that includes these paths can report the ignored directory
+and exit nonzero, even when the index file is already tracked. Keep force-staging
+limited to the intended record and index; stage code with ordinary explicit paths.
+
 ## Provider boundaries
 
 `npm run check:boundaries` also checks outbound acquisition boundaries with a
