@@ -63,7 +63,16 @@ export async function proxyThorNodeRequest(req, res, upstreams, prefix) {
   } catch (error) {
     res.statusCode = error.status || 502
     res.setHeader('Content-Type', 'application/json')
-    res.end(JSON.stringify({ error: error.message || `Failed to proxy ${upstreamPath}` }))
+    // Preserve the provider's bounded error body: protocol absence (for example
+    // an address without a TCY stake) must remain distinct from a failed route.
+    const detail = typeof error.body === 'string' ? error.body.slice(0, 240) : ''
+    let payload
+    try {
+      payload = JSON.parse(detail)
+    } catch {
+      payload = { error: detail || error.message || `Failed to proxy ${upstreamPath}` }
+    }
+    res.end(JSON.stringify(payload))
   }
   return true
 }

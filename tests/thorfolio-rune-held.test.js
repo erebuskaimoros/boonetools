@@ -59,7 +59,7 @@ const dataSource = readFileSync(new URL('../src/lib/position-tracker/data.js', i
 function createLoader(client) {
   return runInNewContext(`${dataSource}\n({ loadTcy })`, {
     isThorAddress, buildTcyRows, buildTcyClaimRows,
-    thornode: { fetch: async () => null, ...client },
+    thornode: { fetch: async () => ({ amount: '0' }), ...client },
     midgard: { getTCYDistribution: async () => ({ distributions: [] }) }
   });
 }
@@ -84,7 +84,7 @@ test('bank pagination cannot hide RUNE behind other denominations', async () => 
   const loader = createLoader({
     getBalance: async () => ({ balances: [{ denom: 'btc/btc', amount: '100000000' }], pagination: { next_key: 'a+/=' } }),
     fetch: async (route, options) => {
-      if (route.startsWith('/thorchain/')) return null;
+      if (route.startsWith('/thorchain/')) return { amount: '0' };
       calls.push({ route, options });
       return bank('12300000000');
     }

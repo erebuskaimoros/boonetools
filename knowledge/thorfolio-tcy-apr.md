@@ -64,3 +64,14 @@ The cumulative right axis fits the visible values with 5% padding; daily bars
 retain a zero baseline on the left axis. Both axes update when the domain or
 unit changes. `tests/thorfolio-tcy-cumulative.test.js` covers lifetime carry-in,
 address filtering, unordered input, historical value totals, and immutability.
+
+## Unavailable balances
+
+A failed TCY-staker request is unavailable, not a zero stake. The loader validates
+base-unit amounts and only treats the explicit `TCYStaker doesn't exist` protocol
+error as a known absence. The development proxy preserves this protocol detail.
+Failed bank reads likewise leave liquid TCY unavailable. Unknown positions remain
+visible even without payout history, and portfolio/address totals are marked partial.
+Any unknown stake makes the combined APR unavailable; known payout history remains
+visible. Regression tests cover failures, malformed responses, known zeroes and
+refresh recovery in `tests/thorfolio-tcy-availability.test.js`.

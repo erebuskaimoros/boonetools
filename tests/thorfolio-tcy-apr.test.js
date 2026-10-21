@@ -127,3 +127,14 @@ test('TCY panel labels the basis and renders missing APR as unavailable while pr
   const measuredZero = await renderPanel([buildRow({ distributions: { [A]: { distributions: [] } } })]);
   assert.equal((measuredZero.match(/0\.00%/g) || []).length, 2);
 });
+
+test('TCY panel renders failed stake and wallet balances as unavailable while retaining payout history', async () => {
+  const unavailable = await renderPanel([buildRow({ stakers: { [A]: null }, balances: { [A]: null } })]);
+  const stakeCard = unavailable.split('>staked</span>')[1]?.split('</div>')[0];
+  assert.ok(stakeCard, 'staked card must be present');
+  assert.match(stakeCard, /class="metric-value"[^>]*>—<\/strong>/);
+  assert.match(unavailable, /stake unavailable/i);
+  assert.match(unavailable, /wallet balance unavailable/i);
+  assert.match(unavailable, /2 ᚱ/, 'known payouts remain visible');
+  assert.doesNotMatch(unavailable, />0 unstaked in wallet/);
+});

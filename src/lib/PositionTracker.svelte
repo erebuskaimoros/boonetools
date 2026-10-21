@@ -31,7 +31,7 @@
 
   const TABS = [
     { id: 'bond', key: '1', label: 'bond' },
-    { id: 'lp', key: '2', label: 'liquidity' },
+    { id: 'lp', key: '2', label: 'lp' },
     { id: 'tcy', key: '3', label: 'tcy' }
   ];
   const TAB_KEY = 'position_tracker_tab';
@@ -349,7 +349,7 @@
         <span class="metric-label">{focusAddress ? 'address total' : 'total tracked'}</span>
         <strong class="metric-value">{loadedOnce ? money(totals.totalUsd) : '—'}</strong>
         <span class="metric-sub">RUNE ${fmtAmount(market.runePriceUsd, 3)} · TCY ${fmtAmount(market.tcyPriceUsd, 4)}</span>
-        {#if loadedOnce && totals.runeBalanceMissing}<span class="metric-sub warn-text">Partial · wallet balances unavailable</span>{/if}
+        {#if loadedOnce && (totals.runeBalanceMissing || totals.tcyBalanceMissing)}<span class="metric-sub warn-text">Partial · {totals.runeBalanceMissing ? 'wallet balances' : 'TCY balances'} unavailable</span>{/if}
       </div>
       <div class="metric">
         <span class="metric-index">02</span>
@@ -364,20 +364,21 @@
         <strong class="metric-value">{loadedOnce ? money(totals.bondUsd) : '—'}</strong>
         <span class="metric-sub">{fmtAmount(totals.bondRune, 0)} ᚱ · +{fmtAmount(totals.pendingRewardRune, 2)} ᚱ pending</span>
       </div>
-      <div class="metric">
+      <button class="metric metric-action" type="button" aria-label="Show LP tab" aria-pressed={activeTab === 'lp'} on:click={() => selectTab('lp')}>
         <span class="metric-index">04</span>
         <span class="metric-label">liquidity</span>
         <strong class="metric-value">{loadedOnce ? money(totals.lpUsd) : '—'}</strong>
         <span class="metric-sub" class:pos={totals.lpGainUsd > 0} class:neg={totals.lpGainUsd < 0}>
           {view.lpRows.length} position{view.lpRows.length === 1 ? '' : 's'} · {totals.lpGainUsd >= 0 ? '+' : ''}{money(totals.lpGainUsd)} vs deposit
         </span>
-      </div>
-      <div class="metric">
+      </button>
+      <button class="metric metric-action" type="button" aria-label="Show TCY tab" aria-pressed={activeTab === 'tcy'} on:click={() => selectTab('tcy')}>
         <span class="metric-index">05</span>
         <span class="metric-label">tcy</span>
-        <strong class="metric-value">{loadedOnce ? money(totals.tcyUsd) : '—'}</strong>
-        <span class="metric-sub">{fmtAmount(totals.tcyStaked, 0)} TCY · {fmtAmount(totals.tcyPayoutRune, 2)} ᚱ paid out</span>
-      </div>
+        <strong class="metric-value">{loadedOnce && !totals.tcyBalanceMissing ? money(totals.tcyUsd) : '—'}</strong>
+        <span class="metric-sub">{totals.tcyStakeMissing ? 'Stake unavailable' : `${fmtAmount(totals.tcyStaked, 0)} TCY`} · {fmtAmount(totals.tcyPayoutRune, 2)} ᚱ paid out</span>
+        {#if loadedOnce && totals.tcyBalanceMissing}<span class="metric-sub warn-text">{totals.tcyUsd > 0 ? `Partial · ${money(totals.tcyUsd)} known` : 'Balance unavailable'}</span>{/if}
+      </button>
       <div class="alloc">
         <div class="alloc-bar" role="img" aria-label={allocation.map((part) => `${part.label} ${fmtPct(part.share * 100, 1)}`).join(', ')}>
           {#each allocation as part (part.id)}
@@ -450,9 +451,9 @@
                     {loadedOnce && isThorAddress(row.address) && !row.runeBalanceMissing ? money(row.runeUsd) : '—'}
                   </td>
                   {#each ['bondUsd', 'lpUsd', 'tcyUsd'] as key}
-                    <td class="right" class:nil={!row[key]}>{loadedOnce && row[key] ? money(row[key]) : '—'}</td>
+                    <td class="right" class:nil={!row[key]} title={key === 'tcyUsd' && row.tcyBalanceMissing ? 'TCY balance unavailable' : undefined}>{loadedOnce && row[key] && !(key === 'tcyUsd' && row.tcyBalanceMissing) ? money(row[key]) : '—'}</td>
                   {/each}
-                  <td class="right strong">{loadedOnce ? money(row.totalUsd) : '—'}{#if loadedOnce && row.runeBalanceMissing}<span class="tag">partial</span>{/if}</td>
+                  <td class="right strong">{loadedOnce ? money(row.totalUsd) : '—'}{#if loadedOnce && (row.runeBalanceMissing || row.tcyBalanceMissing)}<span class="tag">partial</span>{/if}</td>
                   <td class="right">{loadedOnce && portfolioUsd > 0 ? fmtPct((row.totalUsd / portfolioUsd) * 100, 1) : '—'}</td>
                   <td class="right nowrap">
                     <button class="row-btn" aria-label="Label {row.address}" on:click={() => startLabel(row)}>label</button>
@@ -628,6 +629,18 @@
   .portfolio-metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .portfolio-metrics .metric { border-right: 1px solid var(--pt-border); border-bottom: 0; }
   .portfolio-metrics .metric:nth-child(5) { border-right: 0; }
+  .metric-action {
+    border-top: 0;
+    border-left: 0;
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .metric-action:hover .metric-label { color: var(--pt-accent); }
+  .portfolio-metrics .metric-action:focus-visible { outline: 1px solid var(--pt-accent); outline-offset: -2px; }
   @container portfolio-summary (max-width: 1000px) {
     .portfolio-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .portfolio-metrics .metric:first-child { grid-column: 1 / -1; border-right: 0; }

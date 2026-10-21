@@ -207,6 +207,7 @@ function tcyPayoutApr({ entries, stakedUsd, runePriceUsd, nowSec }) {
 
 /** A missing APR for any staked position makes the combined APR unavailable. */
 export function weightedTcyPayoutApr(rows = []) {
+  if (rows.some((row) => row.stakeKnown === false || row.staked === null)) return null;
   const stakedRows = rows.filter((row) => row.staked > 0);
   if (!stakedRows.length || stakedRows.some((row) => !Number.isFinite(row.apr))) return null;
   const staked = stakedRows.reduce((sum, row) => sum + row.staked, 0);
@@ -222,8 +223,11 @@ export function weightedTcyPayoutApr(rows = []) {
 export function buildTcyRows({ addresses, stakers = {}, balances = {}, distributions = {}, tcyPriceUsd = 0, runePriceUsd = 0, nowSec = Date.now() / 1000 }) {
   const rows = [];
   for (const address of addresses || []) {
-    const staked = units(stakers[address]?.amount);
-    const liquid = units(balances[address]);
+    const stakeKnown = /^\d+$/.test(String(stakers[address]?.amount)) && Number.isFinite(Number(stakers[address]?.amount));
+    const liquidKnown = /^\d+$/.test(String(balances[address])) && Number.isFinite(Number(balances[address]));
+    const staked = stakeKnown ? units(stakers[address].amount) : null;
+    const liquid = liquidKnown ? units(balances[address]) : null;
+    const stakedUsd = stakeKnown ? staked * num(tcyPriceUsd) : null;
     const entries = distributions[address]?.distributions;
     const payouts = (Array.isArray(entries) ? entries : [])
       .filter(validPayout)
@@ -235,14 +239,16 @@ export function buildTcyRows({ addresses, stakers = {}, balances = {}, distribut
       .sort((a, b) => b.date - a.date);
     const totalRune = payouts.reduce((sum, entry) => sum + entry.rune, 0);
 
-    if (staked <= 0 && liquid <= 0 && payouts.length === 0) continue;
+    if (stakeKnown && liquidKnown && staked <= 0 && liquid <= 0 && payouts.length === 0) continue;
     rows.push({
       address,
+      stakeKnown,
+      liquidKnown,
       staked,
       liquid,
-      stakedUsd: staked * num(tcyPriceUsd),
-      liquidUsd: liquid * num(tcyPriceUsd),
-      apr: tcyPayoutApr({ entries, stakedUsd: staked * num(tcyPriceUsd), runePriceUsd: num(runePriceUsd), nowSec }),
+      stakedUsd,
+      liquidUsd: liquidKnown ? liquid * num(tcyPriceUsd) : null,
+      apr: tcyPayoutApr({ entries, stakedUsd, runePriceUsd: num(runePriceUsd), nowSec }),
       payouts,
       totalPayoutRune: totalRune,
       totalPayoutUsdAtPayout: payouts.reduce((sum, entry) => sum + entry.usdAtPayout, 0),
@@ -317,7 +323,7 @@ export function buildRuneRows({ addresses = [], walletBalances = {}, runePriceUs
 export function summarize({ bondRows = [], lpRows = [], tcyRows = [], claimRows = [], runeRows = [] }) {
   const bondUsd = bondRows.reduce((sum, row) => sum + row.bondUsd, 0);
   const lpUsd = lpRows.reduce((sum, row) => sum + row.valueUsd, 0);
-  const tcyUsd = tcyRows.reduce((sum, row) => sum + row.stakedUsd + row.liquidUsd, 0);
+  const tcyUsd = tcyRows.reduce((sum, row) => sum + num(row.stakedUsd) + num(row.liquidUsd), 0);
   const runeUsd = runeRows.reduce((sum, row) => sum + num(row.valueUsd), 0);
   return {
     runeUsd,
@@ -330,7 +336,9 @@ export function summarize({ bondRows = [], lpRows = [], tcyRows = [], claimRows 
     lpUsd,
     lpGainUsd: lpRows.reduce((sum, row) => sum + row.gainUsd, 0),
     tcyUsd,
-    tcyStaked: tcyRows.reduce((sum, row) => sum + row.staked, 0),
+    tcyBalanceMissing: tcyRows.filter((row) => row.stakeKnown === false || row.liquidKnown === false).length,
+    tcyStakeMissing: tcyRows.filter((row) => row.stakeKnown === false).length,
+    tcyStaked: tcyRows.reduce((sum, row) => sum + num(row.staked), 0),
     tcyPayoutRune: tcyRows.reduce((sum, row) => sum + row.totalPayoutRune, 0),
     tcyPayoutUsd: tcyRows.reduce((sum, row) => sum + row.totalPayoutUsdAtPayout, 0),
     claimableTcy: claimRows.reduce((sum, row) => sum + row.amount, 0),
@@ -352,12 +360,12 @@ export function rowsFor(rows, address) {
 /** Value split per tracked address, in the order given. */
 export function summarizeByAddress({ addresses = [], bondRows = [], lpRows = [], tcyRows = [], runeRows = [] }) {
   return addresses.map((address) => {
-    const { bondUsd, lpUsd, tcyUsd, runeUsd, runeHeld, runeBalanceMissing, totalUsd } = summarize({
+    const { bondUsd, lpUsd, tcyUsd, tcyBalanceMissing, runeUsd, runeHeld, runeBalanceMissing, totalUsd } = summarize({
       bondRows: rowsFor(bondRows, address),
       lpRows: rowsFor(lpRows, address),
       tcyRows: rowsFor(tcyRows, address),
       runeRows: rowsFor(runeRows, address)
     });
-    return { address, bondUsd, lpUsd, tcyUsd, runeUsd, runeHeld, runeBalanceMissing, totalUsd };
+    return { address, bondUsd, lpUsd, tcyUsd, tcyBalanceMissing, runeUsd, runeHeld, runeBalanceMissing, totalUsd };
   });
 }

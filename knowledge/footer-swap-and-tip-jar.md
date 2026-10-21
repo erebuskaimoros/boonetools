@@ -16,10 +16,11 @@ panels that open above it; only one is open at a time.
   `DESIGN.md`; use static framing instead.
 - `/widget` sends no `X-Frame-Options` or CSP. Its only parent messaging is
   theme (`ready` out, `theme` in); it ignores everything else.
-- The key comes from `VITE_STO_WIDGET_API_KEY`. Empty hides the launcher.
-  Production builds do not read `.env`, so export it when building a release.
-  The `.env.example` placeholder makes STO return "No Valid Quotes"; with no
-  key at all the widget quotes normally but earns nothing.
+- The key comes from `VITE_STO_WIDGET_API_KEY`. The launcher, panel and shortcut
+  are disabled by `STO_WIDGET_ENABLED = false` until the real affiliate key is
+  issued. After the key is ready, enable that flag and export the key when
+  building a release; production deployment does not copy local `.env` files.
+  Empty keys also hide the launcher. Do not configure a placeholder key.
 - The iframe loads on first open and stays mounted, so closing the panel or
   changing dashboards keeps a swap in progress.
 
@@ -46,9 +47,11 @@ through the affiliate program after review. The memoless API
 
 ## "buy me a coffee?" panel (`src/lib/tip-jar/`)
 
-- Clicking the footer label or address opens a docked panel (lazy-loaded) that
+- Clicking the footer address opens a docked panel (lazy-loaded) that
   sends RUNE to the tip jar with the shared wallet connection
   (`limit-orders/store.js`, Thorfolio's `WalletModal`).
+- The "buy me a coffee?" label is plain text; on narrow screens it hides while
+  the address remains clickable.
 - It is a plain `MsgSend` with no memo: `planSendRune` builds a `thor-send`
   plan and `executePlan` calls `uSwap.transfer`, reusing Thorfolio's
   reconnect-on-sign and provider selection.

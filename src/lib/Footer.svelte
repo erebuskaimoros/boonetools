@@ -1,6 +1,6 @@
 <script>
   import { tick } from 'svelte';
-  import { STO_WIDGET_API_KEY, swapOpen } from './swap/sto-widget.js';
+  import { STO_WIDGET_API_KEY, STO_WIDGET_ENABLED, swapOpen } from './swap/sto-widget.js';
   import { TIP_JAR_ADDRESS } from './tip-jar/tip-jar.js';
 
   const SOURCE_URL = 'https://github.com/erebuskaimoros/boonetools';
@@ -45,21 +45,23 @@
     <span class="sep footer-source" aria-hidden="true">│</span>
     <span class="footer-by">by <a href={AUTHOR_URL} target="_blank" rel="noopener noreferrer" on:click={() => trackFooterClick('boonew')}>@boonew</a></span>
     <span class="sep" aria-hidden="true">│</span>
-    <button
-      class="tip"
-      class:active={tipOpen}
-      bind:this={tipButton}
-      aria-expanded={tipOpen}
-      aria-controls="tip-panel"
-      title="Send RUNE to boonew's tip jar"
-      on:click={toggleTipJar}
-    >
+    <span class="tip-group">
       <span class="tip-label">buy me a coffee?</span>
-      <span class="tip-address">{TIP_JAR_ADDRESS}</span>
-    </button>
+      <button
+        class="tip"
+        class:active={tipOpen}
+        bind:this={tipButton}
+        aria-expanded={tipOpen}
+        aria-controls="tip-panel"
+        title="Send RUNE to boonew's tip jar"
+        on:click={toggleTipJar}
+      >
+        <span class="tip-address">{TIP_JAR_ADDRESS}</span>
+      </button>
+    </span>
   </nav>
 
-  {#if STO_WIDGET_API_KEY}
+  {#if STO_WIDGET_ENABLED && STO_WIDGET_API_KEY}
     <button
       id="swap-launcher"
       class="swap-launcher"
@@ -137,10 +139,15 @@
     color: #787878;
   }
 
-  .tip {
+  .tip-group {
     display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+  }
+
+  .tip {
+    display: flex;
     min-width: 0;
     padding: 0;
     border: 0;
@@ -152,13 +159,6 @@
   .tip-label {
     flex: none;
     color: var(--term-text-3);
-    transition: color var(--term-transition);
-  }
-
-  .tip:hover .tip-label,
-  .tip:focus-visible .tip-label,
-  .tip.active .tip-label {
-    color: var(--term-accent);
   }
 
   .tip-address {
@@ -170,7 +170,8 @@
   }
 
   .tip:hover .tip-address,
-  .tip:focus-visible .tip-address {
+  .tip:focus-visible .tip-address,
+  .tip.active .tip-address {
     color: var(--term-accent);
   }
 
@@ -183,11 +184,11 @@
     gap: 7px;
     height: 26px;
     padding: 0 11px;
-    border: 1px solid rgba(0, 204, 102, 0.45);
+    border: 0;
     background: #0a0a0a;
     cursor: pointer;
     white-space: nowrap;
-    transition: border-color 0.15s ease, background-color 0.15s ease;
+    transition: background-color 0.15s ease;
   }
 
   .swap-launcher span {
@@ -212,7 +213,6 @@
 
   .swap-launcher:hover,
   .swap-launcher.active {
-    border-color: #00cc66;
     background: #09180f;
   }
 
@@ -232,8 +232,8 @@
       padding: 0 8px 0 12px;
     }
 
-    /* The label alone still opens the send modal on narrow screens. */
-    .tip-address {
+    /* Keep the address action available when the explanatory label won't fit. */
+    .tip-label {
       display: none;
     }
 

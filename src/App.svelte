@@ -215,10 +215,19 @@
     return [...apps, ...hiddenApps].find(a => a.path === target) || null;
   }
 
-  // Swap a retired path for the canonical one, keeping the query (bond_address, currency, …).
+  // Canonicalize retired routes and translate old bond links into an explicit Thorfolio portfolio.
   function canonicalizeAliasUrl(path, app) {
     if (app.path === path) return;
-    history.replaceState(null, '', `${BASE_PATH}/${app.path}${window.location.search}${window.location.hash}`);
+    const params = new URLSearchParams(window.location.search);
+    if (path === 'bond-tracker' && app.path === positionTrackerApp.path) {
+      const bondAddress = params.get('bond_address');
+      if (!params.has('addresses') && bondAddress) params.set('addresses', bondAddress);
+      params.delete('bond_address');
+      params.delete('node_address');
+      if (!params.has('tab')) params.set('tab', 'bond');
+    }
+    const query = params.toString();
+    history.replaceState(null, '', `${BASE_PATH}/${app.path}${query ? `?${query}` : ''}${window.location.hash}`);
   }
 
   function getAppParams(app) {

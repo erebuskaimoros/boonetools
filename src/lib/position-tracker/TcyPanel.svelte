@@ -33,6 +33,8 @@
   $: visible = buildPayoutChartSeries(series, cutoff);
   $: staked = rows.reduce((sum, row) => sum + row.staked, 0);
   $: liquid = rows.reduce((sum, row) => sum + row.liquid, 0);
+  $: stakeMissing = rows.some((row) => row.stakeKnown === false);
+  $: liquidMissing = rows.some((row) => row.liquidKnown === false);
   $: payoutRune = rows.reduce((sum, row) => sum + row.totalPayoutRune, 0);
   $: payoutUsd = rows.reduce((sum, row) => sum + row.totalPayoutUsdAtPayout, 0);
   $: weightedApr = weightedTcyPayoutApr(rows);
@@ -162,8 +164,9 @@
       <div class="metric">
         <span class="metric-index">T1</span>
         <span class="metric-label">staked</span>
-        <strong class="metric-value">{fmtAmount(staked, 0)}</strong>
-        <span class="metric-sub">{money(staked * tcyPriceUsd)} · {fmtAmount(liquid, 0)} unstaked in wallet</span>
+        <strong class="metric-value">{stakeMissing ? '—' : fmtAmount(staked, 0)}</strong>
+        <span class="metric-sub">{stakeMissing ? 'Stake unavailable' : money(staked * tcyPriceUsd)} · {liquidMissing ? 'Wallet balance unavailable' : `${fmtAmount(liquid, 0)} unstaked in wallet`}</span>
+        {#if stakeMissing && staked > 0}<span class="metric-sub warn-text">Partial · {fmtAmount(staked, 0)} TCY known</span>{/if}
       </div>
       <div class="metric">
         <span class="metric-index">T2</span>
@@ -205,16 +208,16 @@
             {#each rows as row (row.address)}
               <tr>
                 <td title={row.address}>{labels[row.address] || shortAddr(row.address)}</td>
-                <td class="right accent">{fmtAmount(row.staked, 2)}</td>
-                <td class="right">{fmtAmount(row.liquid, 2)}</td>
-                <td class="right">{money(row.stakedUsd + row.liquidUsd)}</td>
+                <td class="right accent" title={row.stakeKnown === false ? 'Stake unavailable' : undefined}>{row.stakeKnown === false ? '—' : fmtAmount(row.staked, 2)}</td>
+                <td class="right" title={row.liquidKnown === false ? 'Wallet balance unavailable' : undefined}>{row.liquidKnown === false ? '—' : fmtAmount(row.liquid, 2)}</td>
+                <td class="right" title={row.stakeKnown === false || row.liquidKnown === false ? 'TCY balance unavailable' : undefined}>{row.stakeKnown === false || row.liquidKnown === false ? '—' : money(row.stakedUsd + row.liquidUsd)}</td>
                 <td class="right" title={Number.isFinite(row.apr) ? APR_BASIS : APR_UNAVAILABLE}>{Number.isFinite(row.apr) ? fmtPct(row.apr, 2) : '—'}</td>
                 <td class="right nowrap">{row.lastPayout ? `${fmtAmount(row.lastPayout.rune, 4)} · ${fmtDate(row.lastPayout.date)}` : '--'}</td>
                 <td class="right">{fmtAmount(row.totalPayoutRune, 2)}</td>
                 <td class="right">{money(row.totalPayoutUsdAtPayout)}</td>
                 <td class="right nowrap">
-                  <button class="row-btn" aria-label="Stake TCY from {labels[row.address] || shortAddr(row.address)}" disabled={gates.tcyStakingHalted || row.liquid <= 0} on:click={() => dispatch('action', { kind: 'tcy-stake', owner: row.address, max: row.liquid })}>+stake</button>
-                  <button class="row-btn" aria-label="Unstake TCY from {labels[row.address] || shortAddr(row.address)}" disabled={gates.tcyUnstakingHalted || row.staked <= 0} on:click={() => dispatch('action', { kind: 'tcy-unstake', owner: row.address, max: row.staked })}>−unstake</button>
+                  <button class="row-btn" aria-label="Stake TCY from {labels[row.address] || shortAddr(row.address)}" disabled={gates.tcyStakingHalted || row.liquidKnown === false || row.liquid <= 0} on:click={() => dispatch('action', { kind: 'tcy-stake', owner: row.address, max: row.liquid })}>+stake</button>
+                  <button class="row-btn" aria-label="Unstake TCY from {labels[row.address] || shortAddr(row.address)}" disabled={gates.tcyUnstakingHalted || row.stakeKnown === false || row.staked <= 0} on:click={() => dispatch('action', { kind: 'tcy-unstake', owner: row.address, max: row.staked })}>−unstake</button>
                 </td>
               </tr>
             {/each}

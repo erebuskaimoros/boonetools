@@ -1,8 +1,8 @@
 <script>
   import { tick } from 'svelte';
-  import { STO_WIDGET_API_KEY, STO_WIDGET_ORIGIN, isSwapShortcut, stoWidgetUrl, swapOpen } from './sto-widget.js';
+  import { STO_WIDGET_API_KEY, STO_WIDGET_ENABLED, STO_WIDGET_ORIGIN, isSwapShortcut, stoWidgetUrl, swapOpen } from './sto-widget.js';
 
-  const widgetUrl = STO_WIDGET_API_KEY ? stoWidgetUrl(STO_WIDGET_API_KEY) : '';
+  const widgetUrl = STO_WIDGET_ENABLED && STO_WIDGET_API_KEY ? stoWidgetUrl(STO_WIDGET_API_KEY) : '';
 
   let panel;
   // The iframe is created on first open and then kept, so closing the panel or

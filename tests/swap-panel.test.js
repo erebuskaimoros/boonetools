@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-import { STO_WIDGET_API_KEY, isSwapShortcut, stoWidgetUrl } from '../src/lib/swap/sto-widget.js';
+import { STO_WIDGET_API_KEY, STO_WIDGET_ENABLED, isSwapShortcut, stoWidgetUrl } from '../src/lib/swap/sto-widget.js';
 
 const key = (value, extra = {}) => ({ key: value, target: { tagName: 'BODY' }, ...extra });
 
@@ -13,6 +13,7 @@ test('frames the STO widget page with the affiliate key and a pinned dark theme'
 
 test('no configured key means no swap button (Node has no Vite env)', () => {
   assert.equal(STO_WIDGET_API_KEY, '');
+  assert.equal(STO_WIDGET_ENABLED, false);
 });
 
 test('a bare S toggles the panel except while typing or with a modifier', () => {
@@ -34,7 +35,8 @@ test('the footer launches the swap panel instead of linking to THORDEX', async (
   );
   assert.doesNotMatch(footer, /thordex/i);
   assert.match(footer, /id="swap-launcher"[\s\S]*aria-controls="swap-panel"[\s\S]*aria-keyshortcuts="S"/);
-  assert.match(footer, /\{#if STO_WIDGET_API_KEY\}/);
+  assert.match(footer, /\{#if STO_WIDGET_ENABLED && STO_WIDGET_API_KEY\}/);
+  assert.match(panel, /const widgetUrl = STO_WIDGET_ENABLED && STO_WIDGET_API_KEY \?/);
   assert.match(footer, /<span class="swap-label">swap on THORChain<\/span>/);
   // Mounted beside the footer, outside the routed component, and never in the desktop app.
   assert.match(app, /\{#if !isDesktopApp\}\s*<Footer \/>[\s\S]*?<SwapPanel \/>\s*\{\/if\}/);

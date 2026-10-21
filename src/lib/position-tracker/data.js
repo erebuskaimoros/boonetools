@@ -156,6 +156,29 @@ async function loadWalletBalance(address) {
   }
 }
 
+function isAbsentTcyStaker(error) {
+  const seen = new Set();
+  for (let cause = error; cause && !seen.has(cause); cause = cause.cause) {
+    seen.add(cause);
+    // A transport 404 alone says nothing about whether the address has a stake.
+    if (/\bTCYStaker doesn't exist\b/i.test(`${cause.message || ''} ${typeof cause.body === 'string' ? cause.body : JSON.stringify(cause.body || '')}`)) return true;
+  }
+  return false;
+}
+
+async function loadTcyStaker(address) {
+  try {
+    const staker = await thornode.fetch(`/thorchain/tcy_staker/${address}`, { cache: false });
+    if (!/^\d+$/.test(String(staker?.amount)) || !Number.isFinite(Number(staker.amount))) {
+      throw new Error('Invalid TCY stake response');
+    }
+    return staker;
+  } catch (error) {
+    if (isAbsentTcyStaker(error)) return { amount: '0' };
+    throw error;
+  }
+}
+
 /** TCY positions and shared native wallet balances for tracked THOR addresses. */
 export async function loadTcy(addresses, market) {
   const thorAddresses = addresses.filter(isThorAddress);
@@ -169,17 +192,20 @@ export async function loadTcy(addresses, market) {
 
   await mapLimited(thorAddresses, LOOKUP_CONCURRENCY, async (address) => {
     const [staker, balance, distribution] = await Promise.all([
-      thornode.fetch(`/thorchain/tcy_staker/${address}`, { cache: false }).catch(() => null),
+      loadTcyStaker(address).catch(() => {
+        errors.push(`TCY stake for …${address.slice(-4)} is unavailable`);
+        return null;
+      }),
       loadWalletBalance(address).catch(() => {
         errors.push(`wallet balance for …${address.slice(-4)} is unavailable`);
         return null;
       }),
       midgard.getTCYDistribution(address, { cache: false }).catch(() => null)
     ]);
-    if (staker) stakers[address] = staker;
+    stakers[address] = staker;
     walletBalances[address] = balance;
     const tcy = (balance?.balances || []).find((coin) => coin.denom === 'tcy');
-    if (tcy) balances[address] = tcy.amount;
+    balances[address] = balance ? (tcy?.amount ?? '0') : null;
     if (distribution) distributions[address] = distribution;
   });
 

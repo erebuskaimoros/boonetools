@@ -18,6 +18,9 @@ export const STO_WIDGET_ORIGIN = 'https://swap.thorchain.org';
  */
 export const STO_WIDGET_API_KEY = String(runtimeEnv.VITE_STO_WIDGET_API_KEY || '').trim();
 
+// Keep the widget hidden until the issued STO affiliate key is ready for production.
+export const STO_WIDGET_ENABLED = false;
+
 /** Whether the footer swap panel is open; shared by the footer launcher and the panel. */
 export const swapOpen = writable(false);
 

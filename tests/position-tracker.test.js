@@ -168,8 +168,8 @@ test('LP rows prefer live THORNode redeem values and classify position type', ()
 test('TCY rows value stakes and payouts at payout-time prices', () => {
   const rows = buildTcyRows({
     addresses: [THOR_A, THOR_B],
-    stakers: { [THOR_A]: { amount: String(1000e8) } },
-    balances: { [THOR_A]: String(10e8) },
+    stakers: { [THOR_A]: { amount: String(1000e8) }, [THOR_B]: { amount: '0' } },
+    balances: { [THOR_A]: String(10e8), [THOR_B]: '0' },
     distributions: {
       [THOR_A]: { apr: '0.085', distributions: [
         { date: '86400', amount: String(2e8), price: String(0.5e8) },
