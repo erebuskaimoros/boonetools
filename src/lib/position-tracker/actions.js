@@ -55,6 +55,11 @@ export async function executePlan(plan, signer, { onStatus = () => {} } = {}) {
         onStatus('Waiting for wallet signature…');
         return uSwap.thorchain.depositToPool({ assetValue, memo: plan.memo, feeOptionKey: FeeOption.Fast });
       }
+      case 'thor-send': {
+        const assetValue = await assetValueFor(plan.asset, plan.amount);
+        onStatus('Waiting for wallet signature…');
+        return uSwap.transfer({ assetValue, recipient: plan.recipient, memo: plan.memo, feeOptionKey: FeeOption.Fast });
+      }
       case 'inbound-dust': {
         onStatus('Waiting for wallet signature…');
         if (plan.action === 'tcy-claim') {

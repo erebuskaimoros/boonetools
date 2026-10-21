@@ -104,7 +104,8 @@
                     <div class="manage-buttons">
                       <button class="row-btn manage-btn bond-btn" aria-label="Bond more RUNE to node {shortAddr(row.nodeAddress, 4, 4)}" on:click={() => dispatch('action', { kind: 'bond', nodeAddress: row.nodeAddress, owner: row.address })}>+bond</button>
                       <button class="row-btn manage-btn" aria-label="Unbond RUNE from node {shortAddr(row.nodeAddress, 4, 4)}" on:click={() => dispatch('action', { kind: 'unbond', nodeAddress: row.nodeAddress, owner: row.address, max: row.bond, nodeStatus: row.status })}>−unbond</button>
-                      <button class="row-btn manage-btn" disabled={!BOND_YIELD_STATUSES.has(row.status)} aria-label="Manage bond yield payouts for node {shortAddr(row.nodeAddress, 4, 4)}" on:click={() => dispatch('action', { kind: 'bond-yield', nodeAddress: row.nodeAddress, owner: row.address, nodeStatus: row.status, bondYield: row.bondYield })}>payout</button>
+                      <!-- Greyed out until bond yield is live (THORChain 3.21 and network activation). -->
+                      <button class="row-btn manage-btn" disabled={!gates.bondYieldEnabled || !BOND_YIELD_STATUSES.has(row.status)} title={gates.bondYieldEnabled ? null : gates.bondYieldReason || 'Checking whether bond yield is live…'} aria-label="Manage bond yield payouts for node {shortAddr(row.nodeAddress, 4, 4)}" on:click={() => dispatch('action', { kind: 'bond-yield', nodeAddress: row.nodeAddress, owner: row.address, nodeStatus: row.status, bondYield: row.bondYield })}>payout</button>
                     </div>
                   </td>
                 </tr>
@@ -155,6 +156,13 @@
     background: color-mix(in srgb, var(--pt-accent) 18%, var(--pt-surface));
     border-color: var(--pt-accent);
     color: var(--pt-text);
+  }
+  .manage-buttons .manage-btn:disabled {
+    background: var(--pt-surface);
+    border-color: var(--pt-border);
+    color: var(--pt-dim);
+    opacity: 0.5;
+    cursor: not-allowed;
   }
   .manage-buttons .manage-btn:active:not(:disabled) { background: color-mix(in srgb, var(--pt-accent) 28%, var(--pt-surface)); }
   .manage-buttons .manage-btn:focus-visible { outline: 2px solid var(--pt-accent); outline-offset: 2px; }

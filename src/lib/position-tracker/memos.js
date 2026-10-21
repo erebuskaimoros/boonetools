@@ -15,6 +15,7 @@
  *     memo,
  *     route             // 'thor-deposit' (MsgDeposit) | 'inbound' (L1 send to vault)
  *                       // | 'inbound-dust' (minimum L1 send, sized by the signer)
+ *                       // | 'thor-send' (MsgSend to `recipient`, no memo)
  *   }
  */
 
@@ -215,6 +216,26 @@ export function planClaimTcy({ chain, thorAddress }) {
     amount: '0',
     memo: `TCY:${destination}`,
     route: sourceChain === 'THOR' ? 'thor-deposit' : 'inbound-dust'
+  };
+}
+
+// ============================================
+// Send
+// ============================================
+
+/** Plain RUNE send to a thor1 address (MsgSend). No memo, so THORChain treats it as a transfer, not an action. */
+export function planSendRune({ amount, recipient }) {
+  const value = parseAmount(amount, 'RUNE amount');
+  const to = requireThorAddress(recipient, 'Recipient');
+  return {
+    action: 'send',
+    title: `Send ${value} RUNE to …${to.slice(-4)}`,
+    chain: 'THOR',
+    asset: 'THOR.RUNE',
+    amount: value,
+    recipient: to,
+    memo: '',
+    route: 'thor-send'
   };
 }
 

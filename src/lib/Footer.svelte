@@ -1,244 +1,64 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
-  import { fade, slide } from 'svelte/transition';
-  import { cubicInOut } from 'svelte/easing';
+  import { tick } from 'svelte';
   import { STO_WIDGET_API_KEY, swapOpen } from './swap/sto-widget.js';
+  import { TIP_JAR_ADDRESS } from './tip-jar/tip-jar.js';
 
-  const emojis = ['🫡', '✍️', '💪', '🧙‍♂️', '🕺', '🏃‍♂️‍➡️', '🦅', '🐋', '🐉', '⚡️', '🌊', '🍷', '🍻', '🏄‍♂️', '🏆', '🎸', '🚀', '🗿', '🗽', '🏗️', '📠', '🔌', '🔮', '🔭', '💯', '🏴‍☠️', '🥷', '👑', '🪐', '🍦', '🍾', '🎯', '❤️', '☑️', '🆒'];
+  const SOURCE_URL = 'https://github.com/erebuskaimoros/boonetools';
+  const AUTHOR_URL = 'https://x.com/boonew';
 
-  function getRandomEmoji() {
-    return emojis[Math.floor(Math.random() * emojis.length)];
-  }
+  // The send-RUNE panel and its wallet code load on first click, keeping every page's footer light.
+  let TipJarModal = null;
+  let tipOpen = false;
+  let tipButton;
 
-  let clipboardToast = false;
-  let clipboardTimer;
-  async function copyToClipboard(text) {
-    try {
-      await navigator.clipboard.writeText(text);
-      clipboardToast = true;
-      clearTimeout(clipboardTimer);
-      clipboardTimer = setTimeout(() => { clipboardToast = false; }, 2000);
-    } catch (_) {}
-  }
+  // One docked panel at a time: opening swap closes the coffee panel, and vice versa.
+  $: if ($swapOpen) tipOpen = false;
 
-  let randomEmoji;
-  let currentPage = 0;
-  let startX = 0;
-  let startY = 0;
-  let isDragging = false;
-  let totalPages = 1;
-  let autoScrollTimer;
-  let isUserInteracting = false;
-
-  const FIRST_PAGE_DURATION = 15000;  // 15 seconds
-  const OTHER_PAGE_DURATION = 10000;  // 10 seconds
-
-  const pages = [
-    {
-      content: {
-        type: 'links',
-        elements: [
-          { href: "https://github.com/erebuskaimoros/boonetools", text: "Source" },
-          { text: " by " },
-          { href: "https://x.com/boonew", text: "boonew" },
-          { text: " | Tip Jar 🫙: " },
-          { text: "thor194zytw9em6950gym75psq5qt6f2mt2le2nnnt8", clipboard: "thor194zytw9em6950gym75psq5qt6f2mt2le2nnnt8" }
-        ]
-      }
+  async function toggleTipJar() {
+    if (tipOpen) {
+      closeTipJar();
+      return;
     }
-  ];
-
-  totalPages = pages.length;
-
-  function startAutoScroll() {
-    clearTimeout(autoScrollTimer);
-    const duration = currentPage === 0 ? FIRST_PAGE_DURATION : OTHER_PAGE_DURATION;
-    
-    autoScrollTimer = setTimeout(() => {
-      if (!isUserInteracting) {
-        if (currentPage < totalPages - 1) {
-          currentPage++;
-          startAutoScroll(); // Schedule next scroll
-        } else {
-          currentPage = 0; // Reset to first page
-          startAutoScroll(); // Restart cycle
-        }
-      }
-    }, duration);
+    trackFooterClick('Tip jar');
+    TipJarModal ??= (await import('./tip-jar/TipJarModal.svelte')).default;
+    swapOpen.set(false);
+    tipOpen = true;
   }
 
-  function handleUserInteraction() {
-    isUserInteracting = true;
-    clearTimeout(autoScrollTimer);
-    
-    // Reset auto-scroll after 30 seconds of no interaction
-    setTimeout(() => {
-      isUserInteracting = false;
-      startAutoScroll();
-    }, 30000);
-  }
-
-  function handleTouchStart(e) {
-    startX = e.touches[0].clientX;
-    startY = e.touches[0].clientY;
-    isDragging = true;
-    handleUserInteraction();
-  }
-
-  function handleTouchMove(e) {
-    if (!isDragging) return;
-    
-    const currentX = e.touches[0].clientX;
-    const currentY = e.touches[0].clientY;
-    const diffX = startX - currentX;
-    const diffY = startY - currentY;
-    
-    // If horizontal movement is greater than vertical, handle as horizontal swipe
-    if (Math.abs(diffX) > Math.abs(diffY)) {
-      if (Math.abs(diffX) > 20) {
-        if (diffX > 0) {
-          // Swipe left - next page
-          currentPage = (currentPage + 1) % totalPages;
-          isDragging = false;
-        } else {
-          // Swipe right - previous page
-          currentPage = currentPage === 0 ? totalPages - 1 : currentPage - 1;
-          isDragging = false;
-        }
-      }
-    } else if (Math.abs(diffY) > 20) {
-      // Handle vertical swipe as before
-      if (diffY > 0) {
-        currentPage = (currentPage + 1) % totalPages;
-        isDragging = false;
-      } else if (diffY < 0) {
-        currentPage = currentPage === 0 ? totalPages - 1 : currentPage - 1;
-        isDragging = false;
-      }
-    }
-  }
-
-  function handleTouchEnd() {
-    isDragging = false;
-  }
-
-  function handleWheel(e) {
-    handleUserInteraction();
-    if (Math.abs(e.deltaY) > 10) {
-      if (e.deltaY > 0) {
-        currentPage = (currentPage + 1) % totalPages;
-      } else if (e.deltaY < 0) {
-        currentPage = currentPage === 0 ? totalPages - 1 : currentPage - 1;
-      }
-    }
-  }
-
-  // Add keyboard navigation
-  function handleKeydown(e) {
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      handleUserInteraction();
-      if (e.key === 'ArrowDown') {
-        currentPage = (currentPage + 1) % totalPages;
-      } else {
-        currentPage = currentPage === 0 ? totalPages - 1 : currentPage - 1;
-      }
-    }
+  async function closeTipJar() {
+    tipOpen = false;
+    await tick();
+    tipButton?.focus();
   }
 
   function trackFooterClick(elementName) {
     if (typeof gtag !== 'undefined') {
-      gtag('event', 'footer_click', {
-        element_name: elementName
-      });
+      gtag('event', 'footer_click', { element_name: elementName });
     }
   }
-
-  onMount(() => {
-    randomEmoji = getRandomEmoji();
-    startAutoScroll();
-  });
-
-  onDestroy(() => {
-    clearTimeout(autoScrollTimer);
-  });
 </script>
 
-<footer>
-  <div
-    class="page-container"
-    role="button"
-    tabindex="0"
-    on:touchstart={handleTouchStart}
-    on:touchmove={handleTouchMove}
-    on:touchend={handleTouchEnd}
-    on:wheel={handleWheel}
-    on:mouseenter={handleUserInteraction}
-    on:keydown={handleKeydown}
-    on:click={() => {
-      currentPage = (currentPage + 1) % totalPages;
-      handleUserInteraction();
-    }}
-    aria-label="Navigate footer pages"
-  >
-    {#key currentPage}
-      <div 
-        class="page"
-        in:slide={{ 
-          duration: 300,
-          easing: cubicInOut,
-          axis: 'y'
-        }}
-      >
-        {#if pages[currentPage].content.type === 'links'}
-          <span>
-            {#each pages[currentPage].content.elements as element}
-              {#if element.href}
-                <a 
-                  href={element.href} 
-                  target="_blank" 
-                  class="source-link"
-                  on:click|stopPropagation={() => trackFooterClick(element.text)}
-                >
-                  {element.text}
-                </a>
-              {:else if element.emoji}
-                <span class="emoji-wrapper">
-                  {getRandomEmoji()}
-                </span>
-              {:else if element.clipboard}
-                <button
-                  class="clipboard-btn"
-                  on:click|stopPropagation={() => copyToClipboard(element.clipboard)}
-                  title="Click to copy"
-                >
-                  {element.text}
-                </button>
-              {:else if element.onClick}
-                <button
-                  class="clickable-text"
-                  on:click|stopPropagation={element.onClick}
-                >
-                  {element.text}
-                </button>
-              {:else}
-                {element.text}
-              {/if}
-            {/each}
-          </span>
-        {:else if pages[currentPage].content.type === 'desktop-app'}
-          <span>
-            <a 
-              href={pages[currentPage].content.href}
-              class="source-link desktop-link"
-              on:click|stopPropagation={() => trackFooterClick(pages[currentPage].content.text)}
-            >
-              {pages[currentPage].content.text}
-            </a>
-          </span>
-        {/if}
-      </div>
-    {/key}
-  </div>
+<!-- Status line continuing the sidebar's bottom row: about links on the left, swap on the right. -->
+<footer class="site-footer">
+  <nav class="footer-links" aria-label="About BooneTools">
+    <a class="footer-source" href={SOURCE_URL} target="_blank" rel="noopener noreferrer" on:click={() => trackFooterClick('Source')}>source</a>
+    <span class="sep footer-source" aria-hidden="true">│</span>
+    <span class="footer-by">by <a href={AUTHOR_URL} target="_blank" rel="noopener noreferrer" on:click={() => trackFooterClick('boonew')}>@boonew</a></span>
+    <span class="sep" aria-hidden="true">│</span>
+    <button
+      class="tip"
+      class:active={tipOpen}
+      bind:this={tipButton}
+      aria-expanded={tipOpen}
+      aria-controls="tip-panel"
+      title="Send RUNE to boonew's tip jar"
+      on:click={toggleTipJar}
+    >
+      <span class="tip-label">buy me a coffee?</span>
+      <span class="tip-address">{TIP_JAR_ADDRESS}</span>
+    </button>
+  </nav>
+
   {#if STO_WIDGET_API_KEY}
     <button
       id="swap-launcher"
@@ -254,96 +74,104 @@
       <span class="swap-label">swap on THORChain</span>
     </button>
   {/if}
-  {#if clipboardToast}
-    <div class="clipboard-toast" transition:fade={{ duration: 150 }}>Address copied!</div>
-  {/if}
 </footer>
 
+<!-- Outside the fixed footer, so the panel layers like the swap panel rather than inside the footer's stacking context. -->
+{#if tipOpen && TipJarModal}
+  <svelte:component this={TipJarModal} on:close={closeTipJar} />
+{/if}
+
 <style>
-  footer {
-    padding: 0.5rem 1.5rem;
-    background: rgba(44, 44, 44, 0.85);
-    backdrop-filter: blur(10px);
+  .site-footer {
+    position: fixed;
+    left: var(--footer-inset, 0px);
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    box-sizing: border-box;
+    height: var(--footer-height, 41px);
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    user-select: none;
-    touch-action: pan-x pan-y;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    min-height: 32px;
-    z-index: 100;
-    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    gap: 16px;
+    padding: 0 12px 0 16px;
+    background: var(--term-surface);
+    border-top: 1px solid var(--term-border-soft);
+    color: var(--term-text-5);
+    font-family: var(--term-font-mono);
+    font-size: var(--term-type-label);
+    line-height: 1;
   }
 
-  .page-container {
-    position: relative;
+  .site-footer * {
+    font-family: var(--term-font-mono);
+  }
+
+  .footer-links {
     flex: 1;
     min-width: 0;
     display: flex;
-    justify-content: center;
-    overflow: hidden;
-    height: 24px;
-    margin-top: 0;
-    cursor: pointer;
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-    color: inherit;
-  }
-
-  .page {
-    width: 100%;
-    text-align: center;
-    font-size: 0.95rem;
-    font-weight: 400;
-    line-height: 24px;
+    align-items: center;
+    gap: 10px;
     white-space: nowrap;
     overflow: hidden;
-    color: rgba(255, 255, 255, 0.8);
-    padding-right: 1.5rem;
   }
 
-  footer span {
-    color: rgba(255, 255, 255, 0.8);
-  }
-
-  .source-link,
-  .source-link:visited,
-  .source-link:active,
-  .source-link:link {
-    color: #31FD9D;
+  .footer-links a {
+    color: var(--term-text-3);
     text-decoration: none;
-    font-weight: 600;
-    transition: all 0.2s ease;
-    opacity: 0.95;
+    transition: color var(--term-transition);
   }
 
-  .source-link:hover {
-    opacity: 1;
-    text-shadow: 0 0 8px rgba(49, 253, 157, 0.3);
+  .footer-links a:hover,
+  .footer-links a:focus-visible {
+    color: var(--term-accent);
   }
 
-  .desktop-link {
-    color: #ffd700 !important;
-    font-weight: 700;
-    animation: gold-glow 2s infinite alternate;
+  .footer-links a:focus-visible,
+  .tip:focus-visible {
+    outline: 1px solid var(--term-accent);
+    outline-offset: 3px;
   }
 
-  .desktop-link:hover {
-    text-shadow: 0 0 12px rgba(255, 215, 0, 0.6) !important;
+  .sep {
+    color: #787878;
   }
 
-  @keyframes gold-glow {
-    from {
-      text-shadow: 0 0 5px rgba(255, 215, 0, 0.3);
-    }
-    to {
-      text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
-    }
+  .tip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    font-size: var(--term-type-label);
+  }
+
+  .tip-label {
+    flex: none;
+    color: var(--term-text-3);
+    transition: color var(--term-transition);
+  }
+
+  .tip:hover .tip-label,
+  .tip:focus-visible .tip-label,
+  .tip.active .tip-label {
+    color: var(--term-accent);
+  }
+
+  .tip-address {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--term-text-3);
+    transition: color var(--term-transition);
+  }
+
+  .tip:hover .tip-address,
+  .tip:focus-visible .tip-address {
+    color: var(--term-accent);
   }
 
   /* Terminal bracket button (DESIGN.md) that opens the sitewide swap panel:
@@ -362,11 +190,6 @@
     transition: border-color 0.15s ease, background-color 0.15s ease;
   }
 
-  .swap-launcher * {
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  /* Scoped under the button to outrank the footer's own `footer span` colour. */
   .swap-launcher span {
     font-size: 12px;
     line-height: 1;
@@ -404,9 +227,14 @@
   }
 
   @media (max-width: 600px) {
-    footer {
-      padding: 0.25rem 1rem;
-      gap: 0.5rem;
+    .site-footer {
+      gap: 10px;
+      padding: 0 8px 0 12px;
+    }
+
+    /* The label alone still opens the send modal on narrow screens. */
+    .tip-address {
+      display: none;
     }
 
     .swap-launcher {
@@ -418,17 +246,12 @@
     .swap-launcher span {
       font-size: 11px;
     }
+  }
 
-    .page {
-      font-size: 0.8rem;
-      padding-right: 1rem;
-      line-height: 20px;
+  @media (max-width: 400px) {
+    .footer-source {
+      display: none;
     }
-    
-    .page-container {
-      height: 20px;
-    }
-    
   }
 
   /* Touch screens have no S key to press. */
@@ -436,68 +259,5 @@
     .swap-launcher .swap-key {
       display: none;
     }
-  }
-
-  @media (max-width: 400px) {
-    .page {
-      font-size: 0.75rem;
-      padding-right: 0.75rem;
-    }
-    
-  }
-
-  .emoji-wrapper {
-    padding: 0 0.5rem;
-    opacity: 0.9;
-    transition: all 0.2s ease;
-    display: inline;
-  }
-
-  .emoji-wrapper:hover {
-    opacity: 1;
-    transform: scale(1.1);
-  }
-
-  .clickable-text {
-    cursor: pointer;
-    color: #31FD9D;
-    font-weight: 600;
-    transition: all 0.2s ease;
-    opacity: 0.95;
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-  }
-
-  .clickable-text:hover {
-    opacity: 1;
-    text-shadow: 0 0 8px rgba(49, 253, 157, 0.3);
-  }
-
-  .clipboard-btn {
-    cursor: pointer;
-    color: inherit;
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-    text-decoration: none;
-  }
-  .clipboard-btn:hover {
-    color: #31FD9D;
-  }
-
-  .clipboard-toast {
-    position: absolute;
-    bottom: 100%;
-    margin-bottom: 6px;
-    background: #00cc66;
-    color: #000;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 4px 12px;
-    border-radius: 4px;
-    pointer-events: none;
   }
 </style>

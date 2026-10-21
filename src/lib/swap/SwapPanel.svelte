@@ -29,7 +29,7 @@
     if (event.key === 'Escape' && $swapOpen && !document.querySelector('[aria-modal="true"]')) {
       event.stopPropagation();
       close();
-    } else if (isSwapShortcut(event)) {
+    } else if (isSwapShortcut(event) && !document.querySelector('[aria-modal="true"]')) {
       event.preventDefault();
       if ($swapOpen) close();
       else swapOpen.set(true);

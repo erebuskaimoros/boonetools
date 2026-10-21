@@ -586,6 +586,8 @@
   }
 
   main {
+    /* The footer starts where the sidebar ends, continuing its status row. */
+    --footer-inset: var(--sidebar-width);
     text-align: left;
     background-color: var(--background-color);
     min-height: 100vh;
@@ -855,18 +857,21 @@
     color: #00cc66;
   }
 
+  /* Same height as the footer, so the two read as one status line. */
   .side-status {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 14px;
+    box-sizing: border-box;
+    height: var(--footer-height);
+    padding: 0 14px;
     border-top: 1px solid #141414;
     flex-shrink: 0;
   }
 
   .sidebar.collapsed .side-status {
     justify-content: center;
-    padding: 12px 0;
+    padding: 0;
   }
 
   /* ---- MOBILE / DESKTOP-APP TOP BAR ---- */
@@ -1004,6 +1009,10 @@
     margin-left: var(--sidebar-width-collapsed);
   }
 
+  main.collapsed {
+    --footer-inset: var(--sidebar-width-collapsed);
+  }
+
   .app-loading {
     max-width: 650px;
     margin: 48px auto 0;
@@ -1071,6 +1080,11 @@
 
     main.collapsed .content {
       margin-left: 0;
+    }
+
+    main,
+    main.collapsed {
+      --footer-inset: 0px;
     }
   }
 

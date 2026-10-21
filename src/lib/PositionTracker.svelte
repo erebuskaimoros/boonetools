@@ -262,7 +262,8 @@
   }
 
   function handleKeydown(event) {
-    if (walletOpen || actionSpec) return;
+    // Any open dialog (including the footer's coffee modal) keeps the keyboard.
+    if (walletOpen || actionSpec || document.querySelector('[aria-modal="true"]')) return;
     const target = event.target;
     if (target instanceof HTMLElement && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
     const key = event.key.toLowerCase();
