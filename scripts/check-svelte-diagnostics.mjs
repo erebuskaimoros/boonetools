@@ -10,11 +10,15 @@ const baseline = JSON.parse(
   await readFile(path.join(repoRoot, 'scripts/svelte-check-baseline.json'), 'utf8')
 );
 const binary = path.join(repoRoot, 'node_modules/.bin/svelte-check');
+// Pin the format: svelte-check otherwise emits machine output under CLAUDECODE=1
+// (sveltejs/language-tools#2868), which omits the summary line parsed below.
 const result = spawnSync(binary, [
   '--tsconfig',
   './jsconfig.production.json',
   '--threshold',
-  'error'
+  'error',
+  '--output',
+  'human-verbose'
 ], {
   cwd: repoRoot,
   encoding: 'utf8',

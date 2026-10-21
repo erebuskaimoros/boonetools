@@ -21,6 +21,7 @@ This directory contains website/backend-specific protocol notes and session hist
 - [bond-tracker-apy-investigation-2026-09-20.md](./bond-tracker-apy-investigation-2026-09-20.md) — current-churn annualization correction, verified historical samples, and RPC height safeguards.
 - [Thorfolio Bond Yield management](../docs/thorfolio-bond-yield.md) — 3.21 payout configuration, activation checks, destination semantics, and wallet review.
 - [Thorfolio TCY payout APR](./thorfolio-tcy-apr.md) — upstream unordered-history annualization bug and the independent trailing-30-day payout calculation.
+- [footer-swap-and-tip-jar.md](./footer-swap-and-tip-jar.md) — footer swap panel framing STO's widget, the ThorKit affiliate key, wallet-sharing limits, and the "buy me a coffee?" RUNE send panel.
 - [protocol-fee-comparison.md](./protocol-fee-comparison.md) — monthly THORChain / NEAR Intents / Chainflip subsidy-adjusted swap income, historical FLIP issuance verification, and scheduled acquisition.
 - [tc-fee-dash.md](./tc-fee-dash.md) — `/tc-fee-dash` historical fee-capture metrics plus its live Mimir/default system-income allocation and Sankey flow contract.
 - [slow-block-consensus-wasm-report-2026-08-06.md](./slow-block-consensus-wasm-report-2026-08-06.md) — three-window analysis of >10-second block intervals, scheduled proposer failures, final commit behavior, and Wasm/FIN activity.
