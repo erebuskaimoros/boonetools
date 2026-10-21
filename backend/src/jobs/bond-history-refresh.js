@@ -73,7 +73,8 @@ export async function runBondHistoryRefreshQueue(options = {}) {
       const completed = await complete(job, {
         status: outcome?.status || 200,
         total: Number(outcome?.body?.total || 0),
-        fetched: Number(outcome?.body?.fetched || 0)
+        fetched: Number(outcome?.body?.fetched || 0),
+        continuing: outcome?.body?.operator_fee_backfill_pending === true
       });
       if (completed.status === 'completed') {
         stats.completed += 1;

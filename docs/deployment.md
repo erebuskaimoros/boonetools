@@ -391,3 +391,24 @@ ssh root@boone.tools 'journalctl -u boonetools-api --since "10 min ago"'
 
 After a frontend change, hard refresh to load new hashed assets. If routing itself
 is unhealthy, inspect Caddy independently rather than changing it in an app deploy.
+
+### Thorfolio operator-fee churn column
+
+Deploy the backend (including migration `071_bond_operator_fees.sql`) before the
+frontend. `bond_history.operator_fee` is nullable RUNE base units, independent of
+bond rewards and stack. It comes from the operator's empty-transaction
+`bond_returned` event paired with that node's `bond_reward` in the churn block;
+historical node ownership and a nonzero operator fee are checked before attribution.
+It is never reconstructed using today's fee rate. Ordinary unbonds and subsequent
+provider yield returns are excluded. Missing/pruned or ambiguous event evidence
+stays unavailable rather than becoming zero.
+
+The existing bond-history worker enriches at most 25 cached rows per pass, newest
+first, updating only `operator_fee`. Successful bounded passes requeue without
+consuming failure attempts. RPC failures use the existing retry/cooldown policy.
+Compact, height-verified payout observations are shared across addresses in the
+immutable acquisition cache. No history deletion, timer change, new credentials,
+or manual full-history rebuild is needed. Until enrichment completes the frontend
+shows a dash for unverified fees; zero is shown only after a verified churn scan.
+Current node operators and addresses with historical operator payouts receive the
+column (and matching CSV/XLS field); provider-only views omit it.

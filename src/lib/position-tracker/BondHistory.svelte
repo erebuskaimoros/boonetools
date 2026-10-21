@@ -20,6 +20,8 @@
 
   /** Bonded THOR addresses in view; several merge into one portfolio history. */
   export let addresses = [];
+  export let hasOperator = false;
+  $: showOperatorFee = hasOperator || history.some((row) => row.operatorFee > 0);
   /** Who the history covers, for the block header and download names. */
   export let scope = '';
   export let fileTag = 'portfolio';
@@ -54,7 +56,7 @@
   let shareUrl = '';
   let copyRequestId = 0;
 
-  $: addressKey = [...addresses].sort().join(',');
+  $: addressKey = [...new Set(addresses)].sort().join(',');
   $: load(addressKey, includeHistorical, refreshKey);
   $: reversed = [...history].reverse();
   $: totalPages = Math.max(1, Math.ceil(reversed.length / PAGE_SIZE));
@@ -333,7 +335,7 @@
   // ---- downloads ----
 
   function download(separator, extension, mimeType) {
-    const rows = churnCsvRows(history);
+    const rows = churnCsvRows(history, showOperatorFee);
     const headers = Object.keys(rows[0]);
     const content = [headers.join(separator), ...rows.map((row) => headers.map((key) => row[key]).join(separator))].join('\n');
     const url = URL.createObjectURL(new Blob([content], { type: mimeType }));
@@ -457,6 +459,7 @@
           <tr>
             <th>date</th>
             <th class="right">reward ᚱ</th>
+            {#if showOperatorFee}<th class="right" title="Operator fees paid to the wallet at this churn, separate from bond rewards and stack. A dash means the payout has not been verified.">operator fee ᚱ</th>{/if}
             <th class="right">bond ±</th>
             <th class="right">{$currentCurrency}</th>
             <th class="right">apy</th>
@@ -471,6 +474,9 @@
             <tr>
               <td class="nowrap">{churn.date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</td>
               <td class="right" class:accent={churn.reward > 0}>{churn.reward > 0 ? '+' : ''}{formatNumber(fromBaseUnit(churn.reward), { maximumFractionDigits: 2 })}</td>
+              {#if showOperatorFee}
+                <td class="right" class:accent={churn.operatorFee > 0} title={churn.operatorFee == null ? 'Payout not yet verified' : 'Paid to the operator wallet; excluded from reward and stack'}>{churn.operatorFee == null ? '—' : `${churn.operatorFee > 0 ? '+' : ''}${formatNumber(fromBaseUnit(churn.operatorFee), { maximumFractionDigits: 2 })}`}</td>
+              {/if}
               <td class="right" class:bond-add={event && churn.bondChange > 0} class:bond-remove={event && churn.bondChange < 0} class:nil={!event}>
                 {#if !event}--{:else if txMap[churn.height]?.length}<a href="https://thorchain.net/tx/{txMap[churn.height][0]}" target="_blank" rel="noopener noreferrer">{change}</a>{:else}{change}{/if}
               </td>
