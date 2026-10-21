@@ -185,18 +185,48 @@ export function buildLpRows({ memberPools, providers = {}, addresses, prices = {
 // TCY
 // ============================================
 
+const TCY_APR_WINDOW_DAYS = 30;
+const validPayout = (entry) => entry != null
+  && /^\d+$/.test(String(entry.date)) && Number(entry.date) > 0 && Number.isFinite(Number(entry.date))
+  && /^\d+$/.test(String(entry.amount)) && Number.isFinite(Number(entry.amount));
+
+/** Fixed trailing-window payout ratio, not a time-weighted return on changing stakes. */
+function tcyPayoutApr({ entries, stakedUsd, runePriceUsd, nowSec }) {
+  if (!Array.isArray(entries) || !entries.every(validPayout)
+    || !Number.isFinite(stakedUsd) || !(stakedUsd > 0) || !(runePriceUsd > 0) || !Number.isFinite(nowSec) || nowSec <= 0) return null;
+  const cutoff = nowSec - TCY_APR_WINDOW_DAYS * 86400;
+  const rune = entries.reduce((sum, entry) => {
+    const date = Number(entry.date);
+    return sum + (date >= cutoff && date <= nowSec ? units(entry.amount) : 0);
+  }, 0);
+  // Midgard's scalar APR can depend on the arbitrary first row of an unordered
+  // history. Use explicit timestamps and the same full window for every account.
+  const apr = rune * runePriceUsd / stakedUsd * (365 / TCY_APR_WINDOW_DAYS) * 100;
+  return Number.isFinite(apr) ? apr : null;
+}
+
+/** A missing APR for any staked position makes the combined APR unavailable. */
+export function weightedTcyPayoutApr(rows = []) {
+  const stakedRows = rows.filter((row) => row.staked > 0);
+  if (!stakedRows.length || stakedRows.some((row) => !Number.isFinite(row.apr))) return null;
+  const staked = stakedRows.reduce((sum, row) => sum + row.staked, 0);
+  const apr = stakedRows.reduce((sum, row) => sum + row.apr * row.staked, 0) / staked;
+  return Number.isFinite(apr) ? apr : null;
+}
+
 /**
  * `stakers`: address → { amount } (base units), `balances`: address → TCY
  * base units in the wallet, `distributions`: address → Midgard payload,
  * `claims`: array of { l1_address, asset, amount } (base units).
  */
-export function buildTcyRows({ addresses, stakers = {}, balances = {}, distributions = {}, tcyPriceUsd = 0, runePriceUsd = 0 }) {
+export function buildTcyRows({ addresses, stakers = {}, balances = {}, distributions = {}, tcyPriceUsd = 0, runePriceUsd = 0, nowSec = Date.now() / 1000 }) {
   const rows = [];
   for (const address of addresses || []) {
     const staked = units(stakers[address]?.amount);
     const liquid = units(balances[address]);
-    const payload = distributions[address] || {};
-    const payouts = (payload.distributions || [])
+    const entries = distributions[address]?.distributions;
+    const payouts = (Array.isArray(entries) ? entries : [])
+      .filter(validPayout)
       .map((entry) => {
         const rune = units(entry.amount);
         const priceAtPayout = entry.price ? units(entry.price) : num(runePriceUsd);
@@ -212,7 +242,7 @@ export function buildTcyRows({ addresses, stakers = {}, balances = {}, distribut
       liquid,
       stakedUsd: staked * num(tcyPriceUsd),
       liquidUsd: liquid * num(tcyPriceUsd),
-      apr: num(payload.apr) * 100,
+      apr: tcyPayoutApr({ entries, stakedUsd: staked * num(tcyPriceUsd), runePriceUsd: num(runePriceUsd), nowSec }),
       payouts,
       totalPayoutRune: totalRune,
       totalPayoutUsdAtPayout: payouts.reduce((sum, entry) => sum + entry.usdAtPayout, 0),
@@ -249,6 +279,20 @@ export function mergePayoutSeries(tcyRows) {
     }
   }
   return [...byDay.values()].sort((a, b) => a.date - b.date);
+}
+
+/** Total payouts through each day include history before the selected chart range. */
+export function buildPayoutChartSeries(series = [], cutoff = 0) {
+  let cumulativeRune = 0;
+  let cumulativeUsdAtPayout = 0;
+  return [...series]
+    .sort((a, b) => a.date - b.date)
+    .map((day) => {
+      cumulativeRune += day.rune;
+      cumulativeUsdAtPayout += day.usdAtPayout;
+      return { ...day, cumulativeRune, cumulativeUsdAtPayout };
+    })
+    .filter((day) => day.date >= cutoff);
 }
 
 // ============================================

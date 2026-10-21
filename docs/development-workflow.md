@@ -98,6 +98,11 @@ before checking changed UI. A navigation may reuse an older HTML document.
 Wait for the actual chart/data controls to finish loading before interacting;
 loading-message reflow can move controls during a click.
 
+For local chart-option changes, reload once after Vite hot reload before final
+visual verification. An existing Chart.js instance can retain old options even
+when Vite serves the updated component. Then switch date ranges and units to
+verify the chart updates from the current configuration.
+
 ## SSH and shell diagnostics
 
 Reuse an existing authenticated connection and short per-host control socket.

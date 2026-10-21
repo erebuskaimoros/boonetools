@@ -177,7 +177,8 @@ test('TCY rows value stakes and payouts at payout-time prices', () => {
       ] }
     },
     tcyPriceUsd: 0.2,
-    runePriceUsd: 2
+    runePriceUsd: 2,
+    nowSec: 172800
   });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].stakedUsd, 200);
@@ -185,7 +186,7 @@ test('TCY rows value stakes and payouts at payout-time prices', () => {
   assert.equal(rows[0].totalPayoutUsdAtPayout, 4);
   assert.equal(rows[0].totalPayoutUsdNow, 10);
   assert.equal(rows[0].lastPayout.date, 172800);
-  assert.ok(Math.abs(rows[0].apr - 8.5) < 1e-9);
+  assert.ok(Math.abs(rows[0].apr - (10 / 200 * 365 / 30 * 100)) < 1e-9);
   assert.deepEqual(mergePayoutSeries(rows).map((day) => day.rune), [2, 3]);
 
   const claims = buildTcyClaimRows([{ l1_address: BTC, asset: 'BTC.BTC', amount: String(50e8) }], 0.2);

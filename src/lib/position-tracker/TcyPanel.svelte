@@ -1,8 +1,9 @@
 <script>
   import { createEventDispatcher, onDestroy } from 'svelte';
   import Chart from 'chart.js/auto';
+  import SeriesLegend from '../charts/SeriesLegend.svelte';
   import { TERMINAL_CHART_PALETTE as P, terminalChartFont } from '../charts/terminal.js';
-  import { mergePayoutSeries } from './model.js';
+  import { buildPayoutChartSeries, mergePayoutSeries, weightedTcyPayoutApr } from './model.js';
   import { fmtAmount, fmtDate, fmtPct, shortAddr } from './format.js';
 
   export let rows = [];
@@ -19,6 +20,8 @@
   const dispatch = createEventDispatcher();
   const RANGES = [30, 90, 365, 0];
   const UNITS = [['rune', 'rune'], ['value', 'value at payout']];
+  const APR_BASIS = 'Trailing 30-day RUNE payouts at current prices ÷ current staked TCY value × 365/30. The window stays 30 days even for new stakes; stake changes affect this ratio.';
+  const APR_UNAVAILABLE = 'Unavailable: payout history, positive current stake and current RUNE/TCY prices are required.';
 
   let range = 90;
   let unit = 'rune';
@@ -27,19 +30,19 @@
 
   $: series = mergePayoutSeries(rows);
   $: cutoff = range ? Date.now() / 1000 - range * 86400 : 0;
-  $: visible = series.filter((day) => day.date >= cutoff);
+  $: visible = buildPayoutChartSeries(series, cutoff);
   $: staked = rows.reduce((sum, row) => sum + row.staked, 0);
   $: liquid = rows.reduce((sum, row) => sum + row.liquid, 0);
   $: payoutRune = rows.reduce((sum, row) => sum + row.totalPayoutRune, 0);
   $: payoutUsd = rows.reduce((sum, row) => sum + row.totalPayoutUsdAtPayout, 0);
-  $: weightedApr = staked > 0 ? rows.reduce((sum, row) => sum + row.apr * row.staked, 0) / staked : 0;
+  $: weightedApr = weightedTcyPayoutApr(rows);
   $: recent = rows
     .flatMap((row) => row.payouts.map((payout) => ({ ...payout, address: row.address })))
     .sort((a, b) => b.date - a.date)
     .slice(0, 12);
   $: if (canvas) drawChart(visible, unit, money);
 
-  // One measure per chart: the unit toggle swaps the bars, the tooltip always carries both.
+  // Daily bars and total-paid-out line share a unit, with separate scales.
   function drawChart(points, currentUnit, formatMoney) {
     if (chart && chart.canvas !== canvas) {
       chart.destroy();
@@ -51,11 +54,27 @@
       labels: points.map((day) => new Date(day.date * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })),
       datasets: [{
         type: 'bar',
-        label: inRune ? 'RUNE paid' : 'Value at payout',
+        label: inRune ? 'Daily RUNE' : 'Daily value at payout',
         data: points.map((day) => (inRune ? day.rune : day.usdAtPayout)),
+        yAxisID: 'y',
+        order: 1,
         backgroundColor: 'rgba(0, 204, 102, 0.55)',
         hoverBackgroundColor: P.accent,
         borderWidth: 0
+      }, {
+        type: 'line',
+        label: inRune ? 'Total paid out RUNE' : 'Total paid out value at payout',
+        data: points.map((day) => (inRune ? day.cumulativeRune : day.cumulativeUsdAtPayout)),
+        yAxisID: 'cumulative',
+        order: 0,
+        borderColor: P.amber,
+        backgroundColor: P.amber,
+        borderWidth: 2,
+        pointRadius: points.length === 1 ? 3 : 0,
+        pointHoverRadius: 3,
+        pointHitRadius: 8,
+        tension: 0,
+        fill: false
       }]
     };
     /** @type {any} */
@@ -75,7 +94,11 @@
           callbacks: {
             label: (item) => {
               const day = points[item.dataIndex];
-              return day ? [` ${fmtAmount(day.rune, 4)} RUNE`, ` ${formatMoney(day.usdAtPayout)} at payout`] : '';
+              if (!day) return '';
+              const cumulative = item.dataset.yAxisID === 'cumulative';
+              return cumulative
+                ? [` Total paid out: ${fmtAmount(day.cumulativeRune, 4)} RUNE`, ` ${formatMoney(day.cumulativeUsdAtPayout)} at payout · all time through this date`]
+                : [` Daily: ${fmtAmount(day.rune, 4)} RUNE`, ` ${formatMoney(day.usdAtPayout)} at payout`];
             }
           }
         }
@@ -83,8 +106,20 @@
       scales: {
         x: { ticks: { color: P.muted, font: terminalChartFont(11), maxTicksLimit: 10 }, grid: { display: false } },
         y: {
+          beginAtZero: true,
+          title: { display: true, text: inRune ? 'Daily RUNE' : 'Daily value', color: P.muted, font: terminalChartFont(11) },
           ticks: { color: P.muted, font: terminalChartFont(11), callback: (value) => (inRune ? fmtAmount(value, 2) : formatMoney(value)) },
           grid: { color: P.grid },
+          border: { display: false }
+        },
+        cumulative: {
+          type: 'linear',
+          position: 'right',
+          beginAtZero: false,
+          grace: '5%',
+          title: { display: true, text: inRune ? 'Total paid out RUNE' : 'Total paid out value', color: P.amber, font: terminalChartFont(11) },
+          ticks: { color: P.amber, font: terminalChartFont(11), callback: (value) => (inRune ? fmtAmount(value, 2) : formatMoney(value)) },
+          grid: { drawOnChartArea: false },
           border: { display: false }
         }
       }
@@ -136,11 +171,11 @@
         <strong class="metric-value">{fmtAmount(payoutRune, 2)} ᚱ</strong>
         <span class="metric-sub">{money(payoutUsd)} at payout · {money(payoutRune * runePriceUsd)} today</span>
       </div>
-      <div class="metric">
+      <div class="metric" title={APR_BASIS}>
         <span class="metric-index">T3</span>
-        <span class="metric-label">apr</span>
-        <strong class="metric-value">{fmtPct(weightedApr, 2)}</strong>
-        <span class="metric-sub">stake-weighted, Midgard</span>
+        <span class="metric-label">30d payout APR</span>
+        <strong class="metric-value" title={weightedApr === null ? APR_UNAVAILABLE : APR_BASIS}>{weightedApr === null ? '—' : fmtPct(weightedApr, 2)}</strong>
+        <span class="metric-sub">current stake &amp; prices</span>
       </div>
       <div class="metric">
         <span class="metric-index">T4</span>
@@ -159,7 +194,7 @@
               <th class="right">staked</th>
               <th class="right">in wallet</th>
               <th class="right">value</th>
-              <th class="right">apr</th>
+              <th class="right" title={APR_BASIS}>30d payout APR</th>
               <th class="right">last payout</th>
               <th class="right">total paid ᚱ</th>
               <th class="right">paid value</th>
@@ -173,7 +208,7 @@
                 <td class="right accent">{fmtAmount(row.staked, 2)}</td>
                 <td class="right">{fmtAmount(row.liquid, 2)}</td>
                 <td class="right">{money(row.stakedUsd + row.liquidUsd)}</td>
-                <td class="right">{fmtPct(row.apr, 2)}</td>
+                <td class="right" title={Number.isFinite(row.apr) ? APR_BASIS : APR_UNAVAILABLE}>{Number.isFinite(row.apr) ? fmtPct(row.apr, 2) : '—'}</td>
                 <td class="right nowrap">{row.lastPayout ? `${fmtAmount(row.lastPayout.rune, 4)} · ${fmtDate(row.lastPayout.date)}` : '--'}</td>
                 <td class="right">{fmtAmount(row.totalPayoutRune, 2)}</td>
                 <td class="right">{money(row.totalPayoutUsdAtPayout)}</td>
@@ -236,7 +271,11 @@
         </div>
       </div>
     </div>
-    <div class="chart-box"><canvas bind:this={canvas}></canvas></div>
+    <SeriesLegend series={[
+      { id: 'daily', label: 'Daily payouts', mark: 'bar', color: P.accent },
+      { id: 'cumulative', label: 'Total paid out', mark: 'line', color: P.amber }
+    ]} />
+    <div class="chart-box"><canvas bind:this={canvas} aria-label="Daily payouts and total paid out through each date, including payouts before the selected date range"></canvas></div>
     {#if recent.length}
       <div class="table-wrap">
         <table class="table">
