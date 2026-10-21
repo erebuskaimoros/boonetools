@@ -5,6 +5,7 @@
 
 import { booneToolsApi, midgard, thornode } from '../api/index.js';
 import { getChurnState, getLeaveStatus, getNodes } from '../utils/nodes.js';
+import { selectReusableBondNode } from '../bond-tracker/shared-nodes.js';
 import { fromBaseUnit } from '../utils/blockchain.js';
 import { isThorAddress } from './addresses.js';
 import {
@@ -15,6 +16,7 @@ import {
   buildTcyRows
 } from './model.js';
 import { buildChurnHistory } from './bond-history.js';
+import { loadBondYieldGate } from './bond-yield.js';
 
 const MIDGARD_MEMBER_BATCH = 10;
 const LOOKUP_CONCURRENCY = 6;
@@ -38,10 +40,29 @@ function isNotFound(error) {
   return status === 404 || status === 400 || /\b(404|400)\b|doesn't exist|not found/i.test(message);
 }
 
-async function loadNodes() {
+function reusableSnapshotNode(node, meta) {
+  const providers = node?.bond_providers?.providers;
+  if (!node?.node_address || (providers !== null && !Array.isArray(providers))) return false;
+  if ((providers || []).some((provider) => !provider?.bond_address || !/^\d+$/.test(String(provider.bond ?? '')))) return false;
+  // Empty provider lists are legitimate (including THORNode's null lists).
+  // They have no position to price, so missing award/fee fields are irrelevant.
+  const observation = providers?.length ? node : {
+    ...node,
+    current_award: node.current_award ?? '0',
+    bond_providers: { ...node.bond_providers, providers: [], node_operator_fee: node.bond_providers.node_operator_fee ?? '0' }
+  };
+  return !!selectReusableBondNode([observation], node.node_address, meta);
+}
+
+export async function loadNodes({ fresh = false } = {}) {
+  if (fresh) return thornode.fetch('/thorchain/nodes', { cache: false, coreSnapshot: false });
   try {
     const snapshot = await booneToolsApi.get('/network-snapshot', { query: { field: 'nodes', include_meta: 'true' } });
-    if (Array.isArray(snapshot?.value) && snapshot.value.length) return snapshot.value;
+    const nodes = snapshot?.value;
+    if (!snapshot?.stale && Array.isArray(nodes) && nodes.length
+      && nodes.every((node) => reusableSnapshotNode(node, snapshot.field_meta))) {
+      return nodes;
+    }
   } catch {
     // fall through to THORNode
   }
@@ -66,10 +87,10 @@ export async function loadMarket() {
   };
 }
 
-export async function loadBonds(addresses, market) {
+export async function loadBonds(addresses, market, { fresh = false } = {}) {
   const thorAddresses = addresses.filter(isThorAddress);
   if (thorAddresses.length === 0) return { rows: [], nodes: [] };
-  const nodes = await loadNodes();
+  const nodes = await loadNodes({ fresh });
   return {
     nodes,
     rows: buildBondRows({
@@ -116,6 +137,26 @@ export async function loadLiquidity(addresses, market) {
   };
 }
 
+// Share the bank lookup between liquid TCY and native RUNE holdings. Follow
+// pagination so synth/trade denominations cannot hide either native balance.
+async function loadWalletBalance(address) {
+  let page = await thornode.getBalance(address, { cache: false });
+  const balances = [];
+  const seen = new Set();
+  while (true) {
+    if (!Array.isArray(page?.balances) || page.balances.some((coin) => !coin?.denom || !/^\d+$/.test(String(coin.amount)))) {
+      throw new Error('Invalid wallet balance response');
+    }
+    balances.push(...page.balances);
+    const key = page.pagination?.next_key;
+    if (!key) return { balances };
+    if (seen.has(key)) throw new Error('Wallet balance pagination did not advance');
+    seen.add(key);
+    page = await thornode.fetch(`/cosmos/bank/v1beta1/balances/${address}?pagination.key=${encodeURIComponent(key)}`, { cache: false });
+  }
+}
+
+/** TCY positions and shared native wallet balances for tracked THOR addresses. */
 export async function loadTcy(addresses, market) {
   const thorAddresses = addresses.filter(isThorAddress);
   const otherAddresses = addresses.filter((address) => !isThorAddress(address));
@@ -123,14 +164,20 @@ export async function loadTcy(addresses, market) {
   const balances = {};
   const distributions = {};
   const claims = [];
+  const walletBalances = {};
+  const errors = [];
 
   await mapLimited(thorAddresses, LOOKUP_CONCURRENCY, async (address) => {
     const [staker, balance, distribution] = await Promise.all([
       thornode.fetch(`/thorchain/tcy_staker/${address}`, { cache: false }).catch(() => null),
-      thornode.getBalance(address, { cache: false }).catch(() => null),
+      loadWalletBalance(address).catch(() => {
+        errors.push(`wallet balance for …${address.slice(-4)} is unavailable`);
+        return null;
+      }),
       midgard.getTCYDistribution(address, { cache: false }).catch(() => null)
     ]);
     if (staker) stakers[address] = staker;
+    walletBalances[address] = balance;
     const tcy = (balance?.balances || []).find((coin) => coin.denom === 'tcy');
     if (tcy) balances[address] = tcy.amount;
     if (distribution) distributions[address] = distribution;
@@ -146,6 +193,8 @@ export async function loadTcy(addresses, market) {
   });
 
   return {
+    walletBalances,
+    errors,
     rows: buildTcyRows({
       addresses: thorAddresses,
       stakers,
@@ -205,10 +254,14 @@ export function loadBondHistory(address, { includeHistorical = false, fresh = fa
 
 /** Halt flags that gate management actions. */
 export async function loadActionGates() {
-  const mimir = await thornode.getAllMimir({ cache: false }).catch(() => ({}));
+  const [mimir, yieldGate] = await Promise.all([
+    thornode.getAllMimir({ cache: false }).catch(() => ({})),
+    loadBondYieldGate(thornode)
+  ]);
   const flag = (key) => Number(mimir?.[key]) >= 1;
   return {
-    globalHalt: flag('HALTCHAINGLOBAL') || flag('HALTTHORCHAIN'),
+    ...yieldGate,
+    globalHalt: yieldGate.globalHalt || flag('HALTCHAINGLOBAL') || flag('HALTTHORCHAIN'),
     lpPaused: flag('PAUSELP'),
     tcyStakingHalted: flag('TCYSTAKINGHALT'),
     tcyUnstakingHalted: flag('TCYUNSTAKINGHALT'),

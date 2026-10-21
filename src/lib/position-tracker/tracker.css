@@ -160,7 +160,7 @@
 }
 .ptrack .alloc-bar { flex: 1 1 320px; display: flex; gap: 2px; height: 8px; background: var(--pt-inset); min-width: 0; }
 .ptrack .alloc-seg { flex-basis: 0; min-width: 2px; }
-.ptrack .alloc-legend { list-style: none; margin: 0; padding: 0; display: flex; gap: 16px; font-family: var(--pt-mono); font-size: 11px; color: var(--pt-muted); }
+.ptrack .alloc-legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 16px; font-family: var(--pt-mono); font-size: 11px; color: var(--pt-muted); }
 .ptrack .alloc-legend li { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .ptrack .alloc-legend li.zero { color: var(--pt-dimmest); }
 .ptrack .alloc-legend b { color: var(--pt-text); font-weight: 700; }
@@ -169,6 +169,7 @@
 .ptrack .alloc-seg.bond, .ptrack .alloc-key.bond { background: var(--pt-series-bond); }
 .ptrack .alloc-seg.lp, .ptrack .alloc-key.lp { background: var(--pt-series-lp); }
 .ptrack .alloc-seg.tcy, .ptrack .alloc-key.tcy { background: var(--pt-series-tcy); }
+.ptrack .alloc-seg.rune, .ptrack .alloc-key.rune { background: var(--pt-muted); }
 
 /* ---------- tabs ---------- */
 .ptrack .tabs { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }

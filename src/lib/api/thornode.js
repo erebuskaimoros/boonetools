@@ -72,6 +72,7 @@ class ThorNodeClient {
       blockHeight,
       parseJson = true,
       realtime = true,
+      coreSnapshot = true,
       timeoutMs = 10000,
       fetchImpl = globalThis.fetch,
       headers = {},
@@ -103,7 +104,7 @@ class ThorNodeClient {
       requestPath += `${separator}height=${encodeURIComponent(blockHeight)}`;
     }
 
-    if (!blockHeight && String(fetchOptions.method || 'GET').toUpperCase() === 'GET') {
+    if (coreSnapshot && !blockHeight && String(fetchOptions.method || 'GET').toUpperCase() === 'GET') {
       try {
         const core = await resolveCoreSnapshotPath(path, { blockHeight });
         if (core.handled) {

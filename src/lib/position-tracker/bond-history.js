@@ -12,6 +12,50 @@ export const BOND_EVENT_MIN = 1e7;
 
 export const isBondEvent = (bondChange) => Math.abs(bondChange || 0) >= BOND_EVENT_MIN;
 
+/**
+ * The classic Bond Tracker's cards for one or several providers. Live bond
+ * rows use whole RUNE; churn snapshots use THORChain's 1e8 base units.
+ */
+export function summarizeBondMetrics(rows = [], history = []) {
+  const number = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
+  const bondRune = rows.reduce((total, row) => total + number(row.bond), 0);
+  const pendingRewardRune = rows.reduce((total, row) => total + number(row.pendingReward), 0);
+  const weightedApr = rows.reduce((total, row) => {
+    // Compound the portfolio once, after combining rewards/principal. Averaging
+    // already compounded node APYs overstates yield when their rewards differ.
+    // Older rows that only contain APY can recover the same daily-compounded APR.
+    const rowApy = number(row.apy);
+    const rowApr = row.apr != null && Number.isFinite(Number(row.apr))
+      ? Number(row.apr)
+      : rowApy > -1 ? 365 * Math.expm1(Math.log1p(rowApy) / 365) : 0;
+    return total + number(row.bond) * rowApr;
+  }, 0);
+  const apr = bondRune > 0 ? weightedApr / bondRune : 0;
+  const apy = number(calculateAPY(apr));
+  const nodes = [...new Set(rows.map((row) => row.nodeAddress).filter(Boolean))];
+  const node = nodes.length === 1 ? rows.find((row) => row.nodeAddress === nodes[0]) : null;
+  const netBondChange = history.reduce((total, entry) => total + (isBondEvent(entry.bondChange) ? number(entry.bondChange) : 0), 0);
+  const firstStack = number(history[0]?.runeStack);
+  const totalRewards = history.length >= 2 ? number(history.at(-1).runeStack) - firstStack - netBondChange : 0;
+
+  return {
+    bondRune,
+    pendingRewardRune,
+    apr,
+    apy,
+    annualRewardRune: bondRune * apy,
+    nodeCount: nodes.length,
+    nodeFee: node ? number(node.operatorFee) : null,
+    nodeAddress: node?.nodeAddress || '',
+    totalRewardsRune: totalRewards / 1e8,
+    totalRewardsUsd: history.length >= 2
+      ? history.reduce((total, entry) => total + (number(entry.reward) / 1e8) * number(entry.runePrice), 0)
+      : 0,
+    netBondChangeRune: netBondChange / 1e8,
+    rewardPercent: firstStack > 0 ? (totalRewards / firstStack) * 100 : 0
+  };
+}
+
 function withYield(entry, prev, reward) {
   const apr = prev.runeStack > 0 ? calculateAPR(reward, prev.runeStack, entry.timestampSec - prev.timestampSec) : 0;
   return calculateAPY(apr);

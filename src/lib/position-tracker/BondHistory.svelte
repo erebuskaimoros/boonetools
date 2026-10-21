@@ -1,7 +1,8 @@
 <script>
-  import { onDestroy } from 'svelte';
+  import { createEventDispatcher, onDestroy } from 'svelte';
   import Chart from 'chart.js/auto';
-  import { INTERACTIVE_CHART_LEGEND } from '../charts/terminal.js';
+  import EventTimeSeriesChart from '../charts/EventTimeSeriesChart.svelte';
+  import CurrencySelector from '../components/CurrencySelector.svelte';
   import {
     currentCurrency,
     exchangeRates,
@@ -15,63 +16,148 @@
   import { fromBaseUnit } from '../utils/blockchain.js';
   import { loadBondHistory } from './data.js';
   import { churnCsvRows, combineChurnHistories, isBondEvent, mergeBondTxMaps } from './bond-history.js';
+  import { addressUrl, shortAddr } from './format.js';
 
   /** Bonded THOR addresses in view; several merge into one portfolio history. */
   export let addresses = [];
   /** Who the history covers, for the block header and download names. */
   export let scope = '';
   export let fileTag = 'portfolio';
+  export let refreshKey = 0;
+  export let refreshing = false;
+  /** Bind the exact displayed history into the Bond tab's summary cards. */
+  export let history = [];
+  export let loading = false;
+  export let loaded = false;
+  export let error = '';
 
   const PAGE_SIZE = 20;
+  const dispatch = createEventDispatcher();
   const ADD_COLOR = '#5588cc';
   const REMOVE_COLOR = '#cc4444';
 
   let includeHistorical = false;
-  let history = [];
   let txMap = {};
   let hasHistorical = false;
-  let loading = false;
-  let loaded = false;
-  let error = '';
   let requestId = 0;
+  let requestedScope = '';
+  let requestedAddressKey = '';
+  let requestedRefreshKey;
 
   let canvas;
   let chart;
   /** currency → fetched rate points; replaced (not mutated) so the chart and table redraw. */
   let historicalRates = {};
   let page = 1;
+  let historyHidden = [];
+  let copyState = '';
+  let shareUrl = '';
+  let copyRequestId = 0;
 
   $: addressKey = [...addresses].sort().join(',');
-  $: load(addressKey, includeHistorical);
+  $: load(addressKey, includeHistorical, refreshKey);
   $: reversed = [...history].reverse();
   $: totalPages = Math.max(1, Math.ceil(reversed.length / PAGE_SIZE));
   $: if (page > totalPages) page = 1;
   $: paged = reversed.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  $: if (loaded && $currentCurrency !== 'USD') loadHistoricalRates($currentCurrency);
-  $: if (canvas && history.length) drawChart(history, $currentCurrency, $exchangeRates, historicalRates);
+  $: if (loaded && history.length && $currentCurrency !== 'USD' && !historicalRates[$currentCurrency]) loadHistoricalRates($currentCurrency);
+  $: drawChart(canvas, history, $currentCurrency, $exchangeRates, historicalRates);
   $: decimals = (currencyConfig[$currentCurrency] || {}).decimals || 0;
+  $: calendarRows = history.map((entry) => ({
+    time: entry.date.toISOString(),
+    rune: fromBaseUnit(entry.runeStack),
+    value: convertChurnValue(entry.usdValue, entry, $currentCurrency, $exchangeRates, historicalRates)
+  }));
+  $: calendarMetrics = [
+    {
+      id: 'rune', label: 'RUNE STACK', color: '#00cc66', value: (row) => row.rune,
+      reduce: 'last', aggregate: 'last',
+      format: (value) => `${simplifyNumber(value)} ᚱ`,
+      tooltipFormat: (value) => `${formatNumber(value, { maximumFractionDigits: 2 })} RUNE`
+    },
+    {
+      id: 'value', label: `${$currentCurrency} VALUE`, color: '#d4a017', value: (row) => row.value,
+      reduce: 'last', aggregate: 'last',
+      format: (value) => formatCurrencyCompact(value, $currentCurrency),
+      // Values already use each churn's historical rate; formatting must not convert again.
+      tooltipFormat: (value) => getCurrencySymbol($currentCurrency) + formatNumber(value, {
+        minimumFractionDigits: (currencyConfig[$currentCurrency] || currencyConfig.USD).preciseDecimals,
+        maximumFractionDigits: (currencyConfig[$currentCurrency] || currencyConfig.USD).preciseDecimals
+      })
+    }
+  ];
+  $: if (chart) {
+    chart.setDatasetVisibility(0, !historyHidden.includes('rune'));
+    chart.setDatasetVisibility(1, !historyHidden.includes('value'));
+    chart.update('none');
+  }
 
-  async function load(key, historical) {
+  async function load(key, historical, refreshTrigger) {
     const id = ++requestId;
+    const nextScope = `${key}|${historical}`;
+    // Remounts and scope changes can reuse the cache. A refresh of this
+    // already-visible scope explicitly requests a new backend snapshot.
+    const fresh = requestedScope === nextScope && requestedRefreshKey !== undefined && requestedRefreshKey !== refreshTrigger;
+    requestedRefreshKey = refreshTrigger;
+    if (requestedScope !== nextScope) {
+      history = [];
+      txMap = {};
+      loaded = false;
+      historicalRates = {};
+      page = 1;
+      copyState = '';
+      shareUrl = '';
+      copyRequestId += 1;
+      requestedScope = nextScope;
+    }
+    if (requestedAddressKey !== key) {
+      hasHistorical = false;
+      requestedAddressKey = key;
+    }
+    error = '';
     const list = key ? key.split(',') : [];
     if (!list.length) {
       history = [];
       loaded = false;
+      loading = false;
+      hasHistorical = false;
       return;
     }
     loading = true;
-    error = '';
-    const settled = await Promise.allSettled(list.map((address) => loadBondHistory(address, { includeHistorical: historical })));
+    const settled = await Promise.allSettled(list.map((address) => loadBondHistory(address, { includeHistorical: historical, fresh })));
     if (id !== requestId) return;
     const results = settled.filter((item) => item.status === 'fulfilled').map((item) => item.value);
     const failed = settled.flatMap((item, index) => (item.status === 'rejected' ? [`…${list[index].slice(-4)}: ${item.reason?.message || item.reason}`] : []));
-    history = combineChurnHistories(results.map((result) => result.history));
-    txMap = mergeBondTxMaps(results.map((result) => result.txMap));
-    hasHistorical = results.some((result) => result.hasHistorical);
-    historicalRates = {};
-    error = failed.length ? `history unavailable for ${failed.join('; ')}` : '';
+    if (results.length || !history.length) {
+      history = combineChurnHistories(results.map((result) => result.history));
+      txMap = mergeBondTxMaps(results.map((result) => result.txMap));
+      historicalRates = {};
+    }
+    hasHistorical = results.some((result) => result.hasHistorical) || (failed.length > 0 && hasHistorical);
+    error = failed.length
+      ? `${results.length === 0 && history.length ? 'history refresh failed' : 'history unavailable'} for ${failed.join('; ')}${results.length === 0 && history.length ? '; showing previous history' : ''}`
+      : '';
     loading = false;
     loaded = true;
+  }
+
+  async function copyLink() {
+    const id = ++copyRequestId;
+    const url = new URL(window.location.href);
+    url.search = '';
+    url.hash = '';
+    url.searchParams.set('addresses', addresses.join(','));
+    url.searchParams.set('tab', 'bond');
+    if ($currentCurrency !== 'USD') url.searchParams.set('currency', $currentCurrency);
+    shareUrl = url.toString();
+    copyState = 'copying';
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
+      await navigator.clipboard.writeText(shareUrl);
+      if (id === copyRequestId) copyState = 'copied';
+    } catch {
+      if (id === copyRequestId) copyState = 'failed';
+    }
   }
 
   // ---- currency conversion (same precedence as the classic Bond Tracker) ----
@@ -114,8 +200,10 @@
 
   // ---- chart ----
 
-  function drawChart(entries, currency, rates, rateHistory) {
+  function drawChart(element, entries, currency, rates, rateHistory) {
     chart?.destroy();
+    chart = null;
+    if (!element || !entries.length) return;
     const config = currencyConfig[currency] || currencyConfig.USD;
     const sym = getCurrencySymbol(currency);
     const bondEvents = entries.map((entry) => (isBondEvent(entry.bondChange) ? entry.bondChange : 0));
@@ -128,7 +216,7 @@
         const { ctx } = instance;
         instance.data.datasets.forEach((dataset, index) => {
           const point = instance.getDatasetMeta(index).data.at(-1);
-          if (!point) return;
+          if (!point || !instance.isDatasetVisible(index)) return;
           const value = dataset.data.at(-1);
           const isRune = dataset.yAxisID === 'y';
           const text = isRune
@@ -145,7 +233,7 @@
     };
     const mono = (size, weight) => ({ family: "'JetBrains Mono', monospace", size, ...(weight ? { weight } : {}) });
 
-    chart = new Chart(canvas, {
+    chart = new Chart(element, {
       type: 'line',
       plugins: [lastPointLabel],
       data: {
@@ -215,10 +303,7 @@
           }
         },
         plugins: {
-          legend: {
-            ...INTERACTIVE_CHART_LEGEND,
-            labels: { color: '#e8e8e8', font: mono(11, 600), boxWidth: 12, boxHeight: 2, padding: 16 }
-          },
+          legend: { display: false },
           tooltip: {
             backgroundColor: '#1a1a1a',
             borderColor: '#333',
@@ -269,6 +354,7 @@
 
   onDestroy(() => {
     requestId += 1;
+    copyRequestId += 1;
     chart?.destroy();
   });
 </script>
@@ -278,7 +364,7 @@
     <div class="block-title"><span class="title-marker">▌</span><h2>bond history</h2></div>
     <div class="block-actions">
       <span class="block-meta">[{scope}{loaded && history.length ? ` · last ${history.length} churns` : ''}]</span>
-      {#if hasHistorical}
+      {#if hasHistorical || includeHistorical}
         <button
           class="range-btn"
           class:active={includeHistorical}
@@ -287,19 +373,66 @@
           on:click={() => (includeHistorical = !includeHistorical)}
         >past nodes</button>
       {/if}
+      <CurrencySelector />
+      <button class="row-btn" on:click={() => dispatch('refresh')} disabled={refreshing || loading} title="Refresh bonds and history">{refreshing || loading ? 'refreshing' : 'refresh'}</button>
+      {#if addresses.length}
+        <button class="row-btn" on:click={copyLink} disabled={copyState === 'copying'} title="Copy a link to these addresses and currency">{copyState === 'copied' ? 'copied' : 'copy link'}</button>
+        {#if addresses.length === 1}
+          <a class="row-btn" href={addressUrl(addresses[0])} target="_blank" rel="noopener noreferrer" title="View address in THORChain explorer">explorer ↗</a>
+        {:else}
+          <details class="explorer-menu">
+            <summary class="row-btn">explorers ↗</summary>
+            <div class="explorer-links">
+              {#each addresses as address}
+                <a href={addressUrl(address)} target="_blank" rel="noopener noreferrer" title={address}>{shortAddr(address)} ↗</a>
+              {/each}
+            </div>
+          </details>
+        {/if}
+      {/if}
     </div>
   </div>
 
+  {#if copyState === 'copied'}<p class="hint history-note" role="status">Link copied.</p>
+  {:else if copyState === 'failed'}
+    <label class="copy-fallback">Could not copy automatically. Select and copy this link:
+      <input readonly value={shareUrl} aria-label="Share link" on:focus={(event) => event.currentTarget.select()} />
+    </label>
+  {/if}
   {#if error}<p class="hint warn-text history-note">{error}</p>{/if}
-  <div class="chart-box history-chart">
-    {#if loading}
+  {#if history.length}
+    {#if loading}<p class="loader history-note" role="status">▓░░░░ refreshing bond history</p>{/if}
+    <EventTimeSeriesChart events={calendarRows} metrics={calendarMetrics} bind:hidden={historyHidden}
+      ariaLabel="Bond history calendar closing observations">
+      <div class="chart-box history-chart">
+        <canvas bind:this={canvas} aria-label="Bond history by churn"></canvas>
+      </div>
+    </EventTimeSeriesChart>
+  {:else}
+    <div class="chart-box history-chart">
+    {#if loading || !loaded && addresses.length}
       <p class="loader chart-note">▓░░░░ loading bond history</p>
-    {:else if loaded && !history.length && !error}
+    {:else if error}
+      <p class="hint chart-note">Bond history unavailable.</p>
+    {:else}
       <p class="hint chart-note">No bond history found.</p>
     {/if}
-    <canvas bind:this={canvas} class:hidden={loading || !history.length}></canvas>
-  </div>
+    </div>
+  {/if}
 </section>
+
+<style>
+  .explorer-menu { position: relative; }
+  .explorer-links {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 4;
+    display: grid; gap: 8px; padding: 12px; border: 1px solid var(--pt-border);
+    background: var(--pt-surface); min-width: max-content;
+  }
+  .explorer-links a { font: 11px var(--pt-mono); color: var(--pt-muted); }
+  .explorer-links a:hover { color: var(--pt-accent); }
+  .copy-fallback { display: grid; gap: 6px; margin-bottom: 12px; color: var(--pt-dim); font: 11px/1.6 var(--pt-mono); }
+  .copy-fallback input { width: 100%; padding: 6px 8px; border: 1px solid var(--pt-border); color: var(--pt-text); background: var(--pt-surface); font: inherit; }
+</style>
 
 <section class="block">
   <div class="block-head">

@@ -4,6 +4,7 @@
     planAddLiquidityAsset,
     planAddLiquidityRune,
     planBond,
+    planBondYield,
     planClaimTcy,
     planStakeTcy,
     planUnbond,
@@ -12,6 +13,8 @@
   } from './memos.js';
   import { pickSigner } from './actions-signer.js';
   import { fmtAmount, poolTicker, shortAddr, txUrl } from './format.js';
+  import { loadBondYieldReview } from './bond-yield.js';
+  import { thornode } from '../api/index.js';
 
   export let spec;
   export let accounts = [];
@@ -25,6 +28,7 @@
   const TITLES = {
     bond: 'bond rune',
     unbond: 'unbond rune',
+    'bond-yield': 'bond yield payouts',
     'lp-add': 'add liquidity',
     'lp-withdraw': 'withdraw liquidity',
     'tcy-stake': 'stake tcy',
@@ -65,6 +69,16 @@
   let withdrawTarget = '';
   let claimDestination = thorAddresses[0] || '';
   let signerKeys = {};
+  let payoutPercent = String((spec.bondYield?.bps ?? 0) / 100);
+  let payoutMode = spec.bondYield?.target ? 'custom' : 'provider';
+  let payoutTarget = spec.bondYield?.target || '';
+  let yieldCheckKey = '';
+  let yieldCheckedKey = '';
+  let yieldChecking = false;
+  let yieldCheckError = '';
+  let yieldDestination = null;
+  let yieldRequestId = 0;
+  let lastYieldKey = '';
 
   let phase = 'form'; // form | signing | done
   let results = [];
@@ -86,7 +100,7 @@
   $: {
     try {
       formError = '';
-      plans = buildPlans(kind, { nodeAddress, amount, assetAmount, percent, pool, lpMode, withdrawTarget, claimDestination, signerKeys, accounts });
+      plans = buildPlans(kind, { nodeAddress, amount, assetAmount, percent, pool, lpMode, withdrawTarget, claimDestination, signerKeys, accounts, payoutPercent, payoutMode, payoutTarget });
     } catch (error) {
       plans = [];
       formError = error.message;
@@ -107,6 +121,12 @@
       case 'unbond':
         if (!form.amount) return [];
         return [planUnbond({ nodeAddress: form.nodeAddress, amount: form.amount })];
+      case 'bond-yield':
+        if (Number(form.payoutPercent) > 0 && form.payoutMode === 'custom' && !form.payoutTarget.trim()) {
+          throw new Error('Enter the payout address or THORName, or choose the provider wallet.');
+        }
+        return [planBondYield({ nodeAddress: form.nodeAddress, percent: form.payoutPercent,
+          payoutTarget: form.payoutMode === 'provider' ? spec.owner : form.payoutTarget })];
       case 'lp-add': {
         if (!form.pool) return [];
         const thorSigner = signerFor({ chain: 'THOR' }, form.signerKeys, form.accounts);
@@ -142,6 +162,13 @@
   }
 
   // ---------- review checks ----------
+  $: yieldCheckKey = kind === 'bond-yield' && plans[0]
+    ? `${plans[0].memo}|${signerFor(plans[0], signerKeys, accounts)?.address || ''}` : '';
+  $: if (yieldCheckKey !== lastYieldKey) {
+    lastYieldKey = yieldCheckKey;
+    yieldDestination = null;
+    yieldCheckError = '';
+  }
   $: reviews = plans.map((plan) => {
     const signer = signerFor(plan, signerKeys, accounts);
     const options = accounts.filter((account) => account.network === plan.chain);
@@ -149,7 +176,7 @@
     const warnings = [];
     let blocked = '';
     if (!signer) blocked = `Connect a wallet with a ${plan.chain} account to sign this.`;
-    const mustOwn = ['unbond', 'lp-withdraw', 'tcy-unstake', 'tcy-claim'].includes(plan.action);
+    const mustOwn = ['unbond', 'bond-yield', 'lp-withdraw', 'tcy-unstake', 'tcy-claim'].includes(plan.action);
     if (signer && owner && signer.address.toLowerCase() !== owner.toLowerCase()) {
       if (mustOwn) blocked = `This position belongs to …${owner.slice(-4)}, but the connected ${plan.chain} account is …${signer.address.slice(-4)}.`;
       else warnings.push(`Signing from …${signer.address.slice(-4)}, not the tracked …${owner.slice(-4)}.`);
@@ -165,12 +192,41 @@
     if (plan.action === 'unbond' && spec.nodeStatus === 'Active') {
       warnings.push('The node is Active. THORChain only releases bond from Standby nodes, so this will likely be refunded until the node churns out.');
     }
+    if (plan.action === 'bond-yield' && !blocked) {
+      if (!yieldDestination || yieldCheckedKey !== yieldCheckKey) {
+        blocked = yieldChecking ? 'Checking payout settings…' : yieldCheckError || gates.bondYieldReason || 'Check payout settings before signing.';
+      }
+      warnings.push('This changes future reward payouts. Existing bond and already-accrued rewards stay bonded. Your wallet charges the normal RUNE network fee.');
+    }
     if (gates.globalHalt) blocked = 'THORChain is halted by mimir right now.';
     if (plan.action.startsWith('lp-') && gates.lpPaused) blocked = 'Liquidity actions are paused by mimir.';
     if (plan.route !== 'thor-deposit') warnings.push('Your wallet will add the network fee for this chain.');
     return { plan, signer, options, warnings, blocked };
   });
   $: canSign = phase === 'form' && reviews.length > 0 && reviews.every((review) => !review.blocked);
+
+  async function checkYield() {
+    const plan = plans[0];
+    const signer = plan && signerFor(plan, signerKeys, accounts);
+    if (!plan || !signer) return;
+    const id = ++yieldRequestId;
+    const key = yieldCheckKey;
+    yieldChecking = true;
+    yieldCheckError = '';
+    yieldCheckedKey = '';
+    yieldDestination = null;
+    try {
+      const result = await loadBondYieldReview(thornode, { plan, owner: spec.owner, signer: signer.address });
+      if (id === yieldRequestId && key === yieldCheckKey) {
+        yieldCheckedKey = key;
+        yieldDestination = result;
+      }
+    } catch (error) {
+      if (id === yieldRequestId && key === yieldCheckKey) yieldCheckError = error.message;
+    } finally {
+      if (id === yieldRequestId) yieldChecking = false;
+    }
+  }
 
   function selectSigner(chain, value) {
     signerKeys = { ...signerKeys, [chain]: value };
@@ -187,6 +243,8 @@
   }
 
   async function sign() {
+    if (!canSign) return;
+    const submittedReviews = [...reviews];
     phase = 'signing';
     signError = '';
     results = reviews.map((review) => ({ title: review.plan.title, status: 'queued', hash: '', note: '' }));
@@ -198,10 +256,14 @@
       phase = 'form';
       return;
     }
-    for (let index = 0; index < reviews.length; index += 1) {
-      const { plan, signer } = reviews[index];
+    for (let index = 0; index < submittedReviews.length; index += 1) {
+      const { plan, signer } = submittedReviews[index];
       results[index] = { ...results[index], status: 'signing', note: 'Preparing transaction…' };
       try {
+        if (plan.action === 'bond-yield') {
+          const current = await loadBondYieldReview(thornode, { plan, owner: spec.owner, signer: signer.address });
+          if (JSON.stringify(current) !== JSON.stringify(yieldDestination)) throw new Error('The payout destination changed. Reopen and check the settings again.');
+        }
         const hash = await actions.executePlan(plan, signer, {
           onStatus: (note) => { results[index] = { ...results[index], note }; }
         });
@@ -252,6 +314,44 @@
               {#if spec.max}<button class="row-btn" type="button" on:click={setMax}>max</button>{/if}
             </div>
           </label>
+        {/if}
+
+        {#if kind === 'bond-yield'}
+          <p class="hint">Choose how much of each future reward is paid out. The remainder is added to your bond. Existing bond and accrued rewards stay bonded. If a payout fails, that reward is rebonded.</p>
+          <p class="hint">Provider <span title={spec.owner}>{shortAddr(spec.owner, 4, 4)}</span> · node <span title={nodeAddress}>{shortAddr(nodeAddress, 4, 4)}</span> · currently {fmtAmount((spec.bondYield?.bps ?? 0) / 100, 2)}% payout.</p>
+          <label class="field">
+            <span class="modal-label">payout percentage</span>
+            <input class="field-input" bind:value={payoutPercent} inputmode="decimal" placeholder="0–100" />
+          </label>
+          <div class="seg">
+            {#each [0, 25, 50, 100] as value}
+              <button class="seg-btn" type="button" class:active={Number(payoutPercent) === value} on:click={() => payoutPercent = String(value)}>{value === 0 ? 'off' : `${value}%`}</button>
+            {/each}
+          </div>
+          {#if plans[0]}
+            <p class="hint">{plans[0].bps / 100}% paid out · {(10000 - plans[0].bps) / 100}% rebonded.</p>
+          {/if}
+          {#if Number(payoutPercent) > 0}
+            <label class="field">
+              <span class="modal-label">payout destination</span>
+              <select class="field-input" bind:value={payoutMode}>
+                <option value="provider">My bond provider wallet (RUNE)</option>
+                <option value="custom">Another THOR address or my THORName</option>
+              </select>
+            </label>
+            {#if payoutMode === 'custom'}
+              <label class="field">
+                <span class="modal-label">thor1 address or provider-owned thorname</span>
+                <input class="field-input" bind:value={payoutTarget} placeholder="thor1… or THORName" spellcheck="false" autocomplete="off" />
+              </label>
+              <p class="hint">THORNames must belong to this provider. A preferred asset uses the THORName’s affiliate collector; otherwise the THOR alias receives RUNE.</p>
+            {:else}
+              <p class="hint">RUNE goes directly to provider …{spec.owner.slice(-4)}, replacing any previously configured destination.</p>
+            {/if}
+          {:else if plans[0]}
+            <p class="hint">Turning payouts off rebonds all future rewards and clears the saved destination.</p>
+          {/if}
+          {#if !gates.bondYieldEnabled && !yieldDestination}<p class="hint warn-text">{gates.bondYieldReason || 'Checking network activation…'}</p>{/if}
         {/if}
 
         {#if kind === 'lp-add'}
@@ -374,6 +474,10 @@
                 <dd><code class="inline-code">{review.plan.memo}</code></dd>
                 <dt>route</dt>
                 <dd>{ROUTE_NOTE[review.plan.route]}</dd>
+                {#if review.plan.action === 'bond-yield' && yieldDestination}
+                  <dt>payout</dt>
+                  <dd>{review.plan.bps === 0 ? 'Disabled; all rewards rebond' : `${review.plan.bps / 100}% in ${yieldDestination.asset} → ${yieldDestination.destination}`}{yieldDestination.collector ? ' (via THORName collector)' : ''}</dd>
+                {/if}
               </dl>
               {#each review.warnings as warning}<p class="hint warn-text">⚠ {warning}</p>{/each}
               {#if review.blocked}<p class="hint err-text">✕ {review.blocked}</p>{/if}
@@ -383,6 +487,11 @@
       {/if}
 
       <div class="modal-actions">
+        {#if kind === 'bond-yield'}
+          <button class="bracket-btn" disabled={yieldChecking || !plans.length || !reviews[0]?.signer} on:click={checkYield}>
+            {yieldChecking ? 'checking…' : 'check payout settings'}
+          </button>
+        {/if}
         {#if !accounts.length || reviews.some((review) => !review.signer)}
           <button class="bracket-btn" on:click={() => dispatch('connect')}>
             <span class="bracket">[</span><span class="key">W</span><span class="bracket">]</span> connect wallet

@@ -3,7 +3,7 @@
  *
  * Every management action becomes a plan that the UI shows for review before
  * the connected wallet signs it. Formats follow ThorNode's memo parser
- * (x/thorchain/memo): BOND, UNBOND, +, -, TCY+, TCY-, TCY.
+ * (x/thorchain/memo): BOND, UNBOND, BONDYIELD, +, -, TCY+, TCY-, TCY.
  *
  * Plan shape:
  *   {
@@ -19,6 +19,7 @@
  */
 
 import { normalizeTrackedAddress, isThorAddress } from './addresses.js';
+import { bondYieldBps, bondYieldTarget, requireBondYieldAddress } from './bond-yield.js';
 
 const BASE = 1e8;
 export const MAX_BPS = 10000;
@@ -68,6 +69,20 @@ export function planBond({ nodeAddress, amount }) {
     amount: value,
     memo: `BOND:${node}`,
     route: 'thor-deposit'
+  };
+}
+
+export function planBondYield({ nodeAddress, percent, payoutTarget = '' }) {
+  const node = requireBondYieldAddress(nodeAddress, 'Node address');
+  const bps = bondYieldBps(percent);
+  const target = bps === 0 ? '' : bondYieldTarget(payoutTarget);
+  return {
+    action: 'bond-yield',
+    title: bps ? `Pay out ${bps / 100}% of future rewards from node …${node.slice(-4)}` : `Rebond all future rewards on node …${node.slice(-4)}`,
+    chain: 'THOR', asset: 'THOR.RUNE', amount: '0',
+    memo: `BONDYIELD:${node}:${bps}${target ? `:${target}` : ''}`,
+    route: 'thor-deposit',
+    nodeAddress: node, bps, payoutTarget: target
   };
 }
 

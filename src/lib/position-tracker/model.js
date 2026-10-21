@@ -4,6 +4,8 @@
  */
 
 import { estimateCurrentChurnYields } from '../bond-tracker/apy.js';
+import { readBondYieldConfig } from './bond-yield.js';
+import { isThorAddress } from './addresses.js';
 
 const BASE = 1e8;
 const num = (value) => {
@@ -78,7 +80,7 @@ export function buildBondRows({ nodes, addresses, runePriceUsd = 0, churnState =
       const netAward = isOperator
         ? award * (fee + (1 - fee) * share)
         : award * share * (1 - fee);
-      const apy = estimateCurrentChurnYields({ reward: netAward, principal: bond, ...estimate }).apy;
+      const { apr, apy } = estimateCurrentChurnYields({ reward: netAward, principal: bond, ...estimate });
 
       rows.push({
         key: `${address}:${node.node_address}`,
@@ -91,8 +93,10 @@ export function buildBondRows({ nodes, addresses, runePriceUsd = 0, churnState =
         bondUsd: units(bond) * num(runePriceUsd),
         share,
         operatorFee: fee,
+        bondYield: readBondYieldConfig(provider),
         pendingReward: units(netAward),
         pendingRewardUsd: units(netAward) * num(runePriceUsd),
+        apr: Number.isFinite(apr) ? apr : 0,
         apy: Number.isFinite(apy) ? apy : 0,
         requestedToLeave: !!node.requested_to_leave,
         forcedToLeave: !!node.forced_to_leave,
@@ -248,14 +252,33 @@ export function mergePayoutSeries(tcyRows) {
 }
 
 // ============================================
+// Native wallet holdings
+// ============================================
+
+/** Native bank balances only: bonded RUNE, LP positions and pending rewards are separate. */
+export function buildRuneRows({ addresses = [], walletBalances = {}, runePriceUsd = 0 }) {
+  return [...new Set(addresses.map(lower).filter(isThorAddress))].map((address) => {
+    const coins = walletBalances[address]?.balances;
+    const coin = Array.isArray(coins) ? coins.find((entry) => entry.denom === 'rune') : null;
+    const balanceKnown = Array.isArray(coins) && (!coin || /^\d+$/.test(String(coin.amount)));
+    const rune = balanceKnown ? units(coin?.amount) : null;
+    return { address, rune, valueUsd: balanceKnown ? rune * num(runePriceUsd) : null, balanceKnown };
+  });
+}
+
+// ============================================
 // Totals
 // ============================================
 
-export function summarize({ bondRows = [], lpRows = [], tcyRows = [], claimRows = [] }) {
+export function summarize({ bondRows = [], lpRows = [], tcyRows = [], claimRows = [], runeRows = [] }) {
   const bondUsd = bondRows.reduce((sum, row) => sum + row.bondUsd, 0);
   const lpUsd = lpRows.reduce((sum, row) => sum + row.valueUsd, 0);
   const tcyUsd = tcyRows.reduce((sum, row) => sum + row.stakedUsd + row.liquidUsd, 0);
+  const runeUsd = runeRows.reduce((sum, row) => sum + num(row.valueUsd), 0);
   return {
+    runeUsd,
+    runeHeld: runeRows.reduce((sum, row) => sum + num(row.rune), 0),
+    runeBalanceMissing: runeRows.filter((row) => !row.balanceKnown).length,
     bondUsd,
     bondRune: bondRows.reduce((sum, row) => sum + row.bond, 0),
     pendingRewardRune: bondRows.reduce((sum, row) => sum + row.pendingReward, 0),
@@ -267,7 +290,7 @@ export function summarize({ bondRows = [], lpRows = [], tcyRows = [], claimRows 
     tcyPayoutRune: tcyRows.reduce((sum, row) => sum + row.totalPayoutRune, 0),
     tcyPayoutUsd: tcyRows.reduce((sum, row) => sum + row.totalPayoutUsdAtPayout, 0),
     claimableTcy: claimRows.reduce((sum, row) => sum + row.amount, 0),
-    totalUsd: bondUsd + lpUsd + tcyUsd
+    totalUsd: bondUsd + lpUsd + tcyUsd + runeUsd
   };
 }
 
@@ -283,13 +306,14 @@ export function rowsFor(rows, address) {
 }
 
 /** Value split per tracked address, in the order given. */
-export function summarizeByAddress({ addresses = [], bondRows = [], lpRows = [], tcyRows = [] }) {
+export function summarizeByAddress({ addresses = [], bondRows = [], lpRows = [], tcyRows = [], runeRows = [] }) {
   return addresses.map((address) => {
-    const { bondUsd, lpUsd, tcyUsd, totalUsd } = summarize({
+    const { bondUsd, lpUsd, tcyUsd, runeUsd, runeHeld, runeBalanceMissing, totalUsd } = summarize({
       bondRows: rowsFor(bondRows, address),
       lpRows: rowsFor(lpRows, address),
-      tcyRows: rowsFor(tcyRows, address)
+      tcyRows: rowsFor(tcyRows, address),
+      runeRows: rowsFor(runeRows, address)
     });
-    return { address, bondUsd, lpUsd, tcyUsd, totalUsd };
+    return { address, bondUsd, lpUsd, tcyUsd, runeUsd, runeHeld, runeBalanceMissing, totalUsd };
   });
 }

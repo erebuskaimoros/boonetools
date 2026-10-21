@@ -49,6 +49,25 @@ export function isThorAddress(address) {
   return detectAddressChain(address) === 'THOR';
 }
 
+/** Pick a distinct funded bond provider, ignoring inactive nodes and dust. */
+export function pickRandomBondAddress(nodes, rng = Math.random) {
+  const providers = new Set();
+  for (const node of Array.isArray(nodes) ? nodes : []) {
+    if (node?.status !== 'Active') continue;
+    const entries = node.bond_providers?.providers;
+    for (const provider of Array.isArray(entries) ? entries : []) {
+      const address = normalizeTrackedAddress(provider?.bond_address);
+      const bond = Number(provider?.bond);
+      if (isThorAddress(address) && Number.isFinite(bond) && bond > 1e8) providers.add(address);
+    }
+  }
+  const candidates = [...providers];
+  if (!candidates.length) return '';
+  const draw = Number(rng());
+  const index = Number.isFinite(draw) ? Math.min(candidates.length - 1, Math.max(0, Math.floor(draw * candidates.length))) : 0;
+  return candidates[index];
+}
+
 /** Split free-form input (commas, whitespace, newlines) into candidate addresses. */
 export function splitAddressInput(input) {
   return String(input ?? '')
@@ -113,8 +132,9 @@ export function displayAddress(entry) {
 }
 
 /**
- * Load the saved list. Seeds from URL params (`addresses=a,b` or the legacy
- * `bond_address`) and from the legacy single-address Bond Tracker key.
+ * An explicit `addresses=a,b` URL defines the displayed portfolio, keeping
+ * matching saved labels. Otherwise seed saved addresses with a legacy
+ * `bond_address` param or the single-address Bond Tracker storage key.
  *
  * @param {{ storage?: Pick<Storage, 'getItem'> | null, search?: string }} [options]
  */
@@ -129,7 +149,13 @@ export function loadTrackedAddresses({ storage, search = '' } = {}) {
   list = (Array.isArray(list) ? list : []).map(normalizeEntry).filter(Boolean);
 
   const params = new URLSearchParams(search);
-  const fromUrl = [params.get('addresses'), params.get('bond_address')].filter(Boolean).join(',');
+  if (params.has('addresses')) {
+    const savedLabels = new Map(list.map((entry) => [entry.address, entry.label]));
+    return addAddresses([], params.get('addresses')).list.map((entry) => ({
+      ...entry, label: savedLabels.get(entry.address) || ''
+    }));
+  }
+  const fromUrl = params.get('bond_address');
   if (fromUrl) list = addAddresses(list, fromUrl).list;
 
   if (list.length === 0) {
