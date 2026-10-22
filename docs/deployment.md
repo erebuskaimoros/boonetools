@@ -61,6 +61,15 @@ staged file. Local `.env` files are not copied; the default API base is the
 same-origin `/functions/v1`. Export any intentional `VITE_*` build overrides
 explicitly. Server-owned backend secrets are never uploaded.
 
+The STO widget's browser-visible affiliate key is read over SSH from
+`/opt/boonetools-frontend/config/sto-widget-api-key` unless
+`VITE_STO_WIDGET_API_KEY` is explicitly exported. Store only the key in that file,
+owned by root with mode 0600 in a mode-0700 configuration directory; never commit
+its value. The loader from the selected commit exports only this setting and
+rejects missing/empty/whitespace-containing keys before building. It never sources
+server configuration as shell code. The built widget exposes the affiliate key
+to browsers by design; this file must not contain a backend credential.
+
 ## Production layout
 
 | Component | Location |

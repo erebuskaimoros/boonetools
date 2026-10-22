@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 
 import { STO_WIDGET_API_KEY, STO_WIDGET_ENABLED, isSwapShortcut, stoWidgetUrl } from '../src/lib/swap/sto-widget.js';
 
@@ -14,6 +15,23 @@ test('frames the STO widget page with the affiliate key and a pinned dark theme'
 test('no configured key means no swap button (Node has no Vite env)', () => {
   assert.equal(STO_WIDGET_API_KEY, '');
   assert.equal(STO_WIDGET_ENABLED, false);
+});
+
+test('a configured Vite key enables the swap UI while blank keys stay disabled', async () => {
+  const source = (await readFile(new URL('../src/lib/swap/sto-widget.js', import.meta.url), 'utf8'))
+    .replace("import { writable } from 'svelte/store';", '')
+    .replace('import.meta.env', 'testEnv')
+    .replace(/^export /gm, '');
+  for (const [configuredKey, expectedKey, enabled] of [
+    [' affiliate-test-key ', 'affiliate-test-key', true],
+    ['', '', false], ['  ', '', false]
+  ]) {
+    const config = runInNewContext(`${source}\n({ key: STO_WIDGET_API_KEY, enabled: STO_WIDGET_ENABLED })`, {
+      testEnv: { VITE_STO_WIDGET_API_KEY: configuredKey }, writable: () => ({})
+    });
+    assert.equal(config.key, expectedKey);
+    assert.equal(config.enabled, enabled);
+  }
 });
 
 test('a bare S toggles the panel except while typing or with a modifier', () => {
