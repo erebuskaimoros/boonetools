@@ -190,10 +190,31 @@ export function interpolateRate(points, timestamp, isFiat = false) {
 
 // ---- Currency Selection ----
 
+// The last explicit choice survives visits whose URL carries no ?currency=.
+const CURRENCY_STORAGE_KEY = 'boonetools_currency';
+
+function saveCurrency(currency) {
+  try {
+    window.localStorage?.setItem(CURRENCY_STORAGE_KEY, currency);
+  } catch {
+    // Storage blocked (private mode, disabled cookies): keep the URL-only behavior.
+  }
+}
+
+function readSavedCurrency() {
+  try {
+    const saved = window.localStorage?.getItem(CURRENCY_STORAGE_KEY);
+    return currencies.includes(saved) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
 export function setCurrency(currency) {
   if (currencies.includes(currency)) {
     currentCurrency.set(currency);
     updateCurrencyURL(currency);
+    saveCurrency(currency);
   }
 }
 
@@ -202,6 +223,7 @@ export function switchCurrency() {
     const idx = currencies.indexOf(curr);
     const next = currencies[(idx + 1) % currencies.length];
     updateCurrencyURL(next);
+    saveCurrency(next);
     return next;
   });
 }
@@ -218,18 +240,19 @@ function updateCurrencyURL(currency) {
 }
 
 function readCurrencyFromURL() {
-  if (typeof window === 'undefined') return 'USD';
+  if (typeof window === 'undefined') return null;
   const urlParams = new URLSearchParams(window.location.search);
   const urlCurrency = urlParams.get('currency');
   if (urlCurrency && currencies.includes(urlCurrency.toUpperCase())) {
     return urlCurrency.toUpperCase();
   }
-  return 'USD';
+  return null;
 }
 
+// A shared ?currency= link applies to that visit only; it never replaces the saved choice.
 export async function initCurrency() {
-  const urlCurrency = readCurrencyFromURL();
-  currentCurrency.set(urlCurrency);
+  const initial = readCurrencyFromURL() || readSavedCurrency() || 'USD';
+  currentCurrency.set(initial);
   await fetchExchangeRates();
 }
 

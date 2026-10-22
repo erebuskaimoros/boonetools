@@ -333,8 +333,57 @@
   .ptrack .address-form { padding-left: 10px; }
 }
 
+/* ---------- compact (phones) ----------
+   One screen: a single toolbar row, the view tabs, then the bond board. Title,
+   lede and command line are dropped; the totals live behind the portfolio tab. */
+.ptrack.compact { width: calc(100% - 24px); padding-top: 10px; }
+.ptrack .mbar { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-family: var(--pt-mono); font-size: 11px; }
+.ptrack .mbar .status { margin-right: auto; text-transform: none; letter-spacing: 0; white-space: nowrap; min-width: 0; }
+.ptrack .mbar .bracket-btn { min-height: 32px; padding: 5px 8px; }
+.ptrack .mbar .btn-label { margin-left: 3px; }
+.ptrack.compact .tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin-bottom: 10px; }
+.ptrack.compact .tab { justify-content: center; min-height: 36px; padding: 6px 2px; gap: 4px; font-size: 11px; letter-spacing: 0.04em; }
+.ptrack.compact .tab-count { margin-left: 0; }
+.ptrack.compact .block { padding: 12px; margin-bottom: 12px; }
+.ptrack.compact .metric-grid { margin-bottom: 12px; }
+.ptrack.compact .metric-index { display: none; }
+.ptrack.compact .metric { min-height: 0; padding: 10px 12px; gap: 2px; }
+.ptrack.compact .metric-value { font-size: 20px; }
+.ptrack.compact .alloc { padding: 10px 12px; gap: 10px; }
+.ptrack.compact .alloc-legend { gap: 6px 12px; }
+.ptrack.compact .foot { font-size: 11px; }
+
+.ptrack .scope { display: flex; gap: 4px; overflow-x: auto; margin-bottom: 8px; scrollbar-width: none; }
+.ptrack .scope::-webkit-scrollbar { display: none; }
+.ptrack .scope-btn {
+  flex: none; min-height: 30px; padding: 4px 10px; background: transparent; border: 1px solid var(--pt-border);
+  color: var(--pt-dim); font-family: var(--pt-mono); font-size: 11px; cursor: pointer; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ptrack .scope-btn[aria-pressed='true'] { border-color: var(--pt-accent); color: var(--pt-accent); background: rgba(0, 204, 102, 0.07); }
+.ptrack .focus-line { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-family: var(--pt-mono); font-size: 11px; }
+.ptrack .focus-line .row-btn { margin-left: 0; }
+
+.ptrack .addr-list { list-style: none; margin: 0 0 10px; padding: 0; border: 1px solid var(--pt-border); }
+.ptrack .addr-list li {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px;
+  padding: 7px 8px 7px 10px; border-bottom: 1px solid var(--pt-border-faint);
+}
+.ptrack .addr-list li:last-child { border-bottom: 0; }
+.ptrack .addr-list li.focused { background: var(--pt-focus-bg); box-shadow: inset 2px 0 0 var(--pt-accent); }
+.ptrack .addr-list .addr-focus { min-width: 0; min-height: 30px; }
+.ptrack .addr-list .addr-focus b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ptrack .addr-list .label-input { width: 100%; }
+.ptrack .addr-total { font-family: var(--pt-mono); font-size: 12px; font-weight: 700; color: var(--pt-text); white-space: nowrap; }
+.ptrack .addr-actions { display: inline-flex; gap: 4px; }
+.ptrack .addr-actions .row-btn { margin-left: 0; min-height: 30px; }
+
+@media (max-width: 360px) {
+  .ptrack .mbar .btn-label { display: none; }
+}
+
 /* App.svelte sets DM Sans on every element, so structural data opts back into mono. */
 .ptrack .table *, .ptrack .metric *, .ptrack .alloc *, .ptrack .tab *,
+.ptrack .bond-summary *, .ptrack .mbar *, .ptrack .node-list *, .ptrack .addr-list *,
 .ptrack-modal .review *, .ptrack-modal .wallet-group *, .ptrack-modal .wallet-btn *, .ptrack-modal .modal-head * {
   font-family: var(--pt-mono);
 }
