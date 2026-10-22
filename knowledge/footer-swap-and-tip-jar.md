@@ -16,11 +16,13 @@ panels that open above it; only one is open at a time.
   `DESIGN.md`; use static framing instead.
 - `/widget` sends no `X-Frame-Options` or CSP. Its only parent messaging is
   theme (`ready` out, `theme` in); it ignores everything else.
-- The key comes from `VITE_STO_WIDGET_API_KEY`. The launcher, panel and shortcut
-  are disabled by `STO_WIDGET_ENABLED = false` until the real affiliate key is
-  issued. After the key is ready, enable that flag and export the key when
-  building a release; production deployment does not copy local `.env` files.
-  Empty keys also hide the launcher. Do not configure a placeholder key.
+- The key comes from `VITE_STO_WIDGET_API_KEY`. A nonempty key enables the
+  launcher, panel and shortcut; empty development keys hide them. Production
+  deployment loads only this browser-visible value from the protected server file
+  `/opt/boonetools-frontend/config/sto-widget-api-key`, unless explicitly exported.
+  It rejects a missing/invalid key before building, so later releases cannot
+  silently hide the widget. Local `.env` files are never copied into a release.
+  Keep the real key out of Git and logs; do not configure a placeholder.
 - The iframe loads on first open and stays mounted, so closing the panel or
   changing dashboards keeps a swap in progress.
 

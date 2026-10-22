@@ -44,7 +44,9 @@ trap cleanup EXIT
 
 echo "==> Building frontend release $RELEASE_ID in an isolated temporary directory ..."
 git -C "$ROOT" archive "$BOONETOOLS_DEPLOY_COMMIT" | tar -xf - -C "$BUILD_DIR"
-# Export VITE_* settings explicitly when needed. Never copy a dirty local .env.
+# Use the selected commit's allowlisted configuration loader. Never copy a local .env.
+source "$BUILD_DIR/scripts/load-boonetools-frontend-env.sh"
+load_boonetools_frontend_env
 (cd "$BUILD_DIR" && npm ci && npm run build)
 if grep -Eq '(src|href)="\./assets/' "$BUILD_DIR/dist/index.html"; then
   echo "Deploy aborted: dist/index.html contains route-relative asset URLs." >&2
