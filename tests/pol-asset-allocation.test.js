@@ -12,6 +12,46 @@ const holding = (asset, valueUsdE8, amountE8 = '100000000') => ({
   asset, ticker: asset.split('.')[1].split('-')[0], valueUsdE8, amountE8
 });
 
+test('RUNE occupies the bottom semicircle regardless of inventory order', () => {
+  use([PieChart, TooltipComponent, SVGRenderer]);
+  for (const inventory of [
+    [holding('THOR.RUNE', '500000000'), holding('XRP.XRP', '300000000'), holding('ZEC.ZEC', '200000000')],
+    [holding('ZEC.ZEC', '200000000'), holding('XRP.XRP', '300000000'), holding('THOR.RUNE', '500000000')],
+    [holding('XRP.XRP', null), holding('BSC.BNB', '0'), holding('ZEC.ZEC', '500000000'), holding('THOR.RUNE', '500000000')]
+  ]) {
+    const allocation = buildPolAssetAllocation(inventory);
+    const original = structuredClone(allocation);
+    const chart = init(null, null, { renderer: 'svg', ssr: true, width: 360, height: 290 });
+    try {
+      const option = buildPolAssetAllocationOption(allocation);
+      chart.setOption(option);
+      const index = option.series[0].data.findIndex(item => item.id === 'THOR.RUNE');
+      const layout = chart.getModel().getSeriesByIndex(0).getData().getItemLayout(index);
+      const midpoint = (layout.startAngle + layout.endAngle) / 2;
+      assert.ok(Math.abs(Math.cos(midpoint)) < 1e-10, 'RUNE center is vertically aligned');
+      assert.ok(Math.sin(midpoint) > 0.999999, 'RUNE center points down');
+      assert.ok(Math.abs(layout.endAngle - layout.startAngle - Math.PI) < 1e-10, 'RUNE retains its true half-circle');
+      assert.deepEqual(allocation, original, 'chart rotation must not mutate holdings');
+      assert.deepEqual(option.series[0].data.map(item => item.id), inventory.filter(item => Number(item.valueUsdE8) > 0).map(item => item.asset));
+    } finally { chart.dispose(); }
+  }
+});
+
+test('bottom anchoring preserves actual RUNE share rather than forcing a half-circle', () => {
+  use([PieChart, TooltipComponent, SVGRenderer]);
+  const chart = init(null, null, { renderer: 'svg', ssr: true, width: 360, height: 290 });
+  try {
+    const option = buildPolAssetAllocationOption(buildPolAssetAllocation([
+      holding('XRP.XRP', '800000000'), holding('THOR.RUNE', '200000000')
+    ]));
+    chart.setOption(option);
+    const layout = chart.getModel().getSeriesByIndex(0).getData().getItemLayout(1);
+    assert.ok(Math.sin((layout.startAngle + layout.endAngle) / 2) > 0.999999);
+    assert.ok(Math.abs(layout.endAngle - layout.startAngle - 0.4 * Math.PI) < 1e-10);
+    assert.deepEqual(option.series[0].data.map(item => item.percent), [80, 20]);
+  } finally { chart.dispose(); }
+});
+
 test('POL allocation uses USD pool legs plus aggregate RUNE exactly once, not token counts', () => {
   const inventory = buildSystemIncomePolAssetInventory({ totalRuneHeldE8: '90000000000', totalRuneHeldUsdE8: '50000000000' }, [
     { asset: 'XRP.XRP', assetHeldE8: '99900000000', assetValueUsdE8: '30000000000', runeHeldE8: '80000000000' },
@@ -74,6 +114,7 @@ test('chain-specific stablecoins keep distinct labels/colors and tiny holdings r
   assert.equal(allocationShare(null), '—');
   assert.deepEqual(buildPolAssetAllocation(inventory.toReversed()).assets.map(item => item.color).toReversed(), allocation.assets.map(item => item.color));
   assert.equal(buildPolAssetAllocationOption(allocation).series[0].data.length, 2);
+  assert.equal(buildPolAssetAllocationOption(allocation).series[0].startAngle, 90, 'without priced RUNE, retain the default orientation');
 });
 
 test('pie tooltip escapes source labels', () => {

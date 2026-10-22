@@ -390,6 +390,8 @@ declare `rollingSeries` independently of primary plots and legend toggles.
 POL Tracker's current holdings use a USD-weighted ECharts pie with an always-visible
 asset/chain key, token amounts, dollar values, and allocation shares. Unpriced
 holdings remain listed but are excluded from the pie and its percentage denominator.
+Center the RUNE slice at six o'clock so its normal 50% share occupies the bottom
+semicircle. Rotate the pie, never force the data to a half share or reorder the key.
 The six headline cards use one row at 1320px of available content width, then
 reflow to three, two, or one column without shrinking away their labels.
 Both POL Tracker plots place range/zoom controls below the summary and shared

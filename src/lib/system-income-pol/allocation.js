@@ -40,6 +40,14 @@ export function buildPolAssetAllocation(inventory = []) {
 }
 
 export function buildPolAssetAllocationOption(allocation) {
+  const slices = allocation.assets.filter(item => item.value > 0);
+  const runeIndex = slices.findIndex(item => item.asset === 'THOR.RUNE');
+  const total = slices.reduce((sum, item) => sum + item.value, 0);
+  // Center RUNE at six o'clock without changing values or key/slice order.
+  // At its usual 50% share this places the entire semicircle below the center.
+  const beforeRune = slices.slice(0, runeIndex).reduce((sum, item) => sum + item.value, 0);
+  const startAngle = runeIndex < 0 ? 90
+    : (270 + 360 * (beforeRune + slices[runeIndex].value / 2) / total) % 360;
   return {
     animation: false,
     backgroundColor: 'transparent',
@@ -56,11 +64,12 @@ export function buildPolAssetAllocationOption(allocation) {
     },
     series: [{
       id: 'pol-asset-allocation', type: 'pie', radius: '88%', center: ['50%', '50%'],
+      startAngle, clockwise: true,
       // Keep true proportions: tiny positions are not enlarged to a minimum angle.
       minAngle: 0, stillShowZeroSum: false, selectedMode: false,
       label: { show: false }, labelLine: { show: false },
       emphasis: { scale: false, itemStyle: { borderColor: palette.text, borderWidth: 1 } },
-      data: allocation.assets.filter(item => item.value > 0).map(item => ({
+      data: slices.map(item => ({
         ...item, id: item.asset, name: item.label,
         itemStyle: { color: item.color, borderColor: palette.surface, borderWidth: 1 }
       }))
