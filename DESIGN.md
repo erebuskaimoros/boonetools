@@ -345,7 +345,7 @@ If you need something that doesn't fit one of these, copy from
 `AppLayerBaseLayerDashboard.svelte` first, then decide whether to abstract.
 
 Thorfolio defaults to its streamlined layout at viewport widths of 640px and below.
-On wider screens, a bracket button above the header switches between mobile and
+On wider screens, a bracket button inline with the top toolbar switches between mobile and
 desktop views. The mobile opt-in uses the same compact toolbar, four tabs and
 cards, centered at a maximum width of 640px. Remember the choice locally when
 storage is available; blocked storage must not prevent switching. Changing views

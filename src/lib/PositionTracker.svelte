@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
   import CurrencySelector from './components/CurrencySelector.svelte';
   import BondPanel from './position-tracker/BondPanel.svelte';
@@ -84,6 +84,7 @@
   let now = Date.now() / 1000;
   let viewportWidth = 1024;
   let layoutPreference = loadLayoutPreference();
+  let layoutToggleButton;
 
   // Whole units hide small payouts and LP drift, so values under 100 keep their decimals.
   $: money = (usd) => (Math.abs(usd) > 0 && Math.abs(usd) < 100 ? formatCurrencyWithDecimals : formatCurrency)($exchangeRates, usd, $currentCurrency);
@@ -290,9 +291,11 @@
     try { localStorage.setItem(TAB_KEY, id); } catch { /* storage unavailable */ }
   }
 
-  function toggleLayout() {
+  async function toggleLayout() {
     layoutPreference = layoutPreference === 'mobile' ? 'auto' : 'mobile';
     saveLayoutPreference(layoutPreference);
+    await tick();
+    layoutToggleButton?.focus();
   }
 
   function openAction(event) {
@@ -366,15 +369,6 @@
 <svelte:document on:visibilitychange={refreshIfStale} />
 
 <section class="ptrack" class:compact>
-  {#if viewportWidth > COMPACT_MAX_WIDTH}
-    <div class="layout-controls">
-      <button type="button" class="bracket-btn" on:click={toggleLayout} aria-label={compact ? 'Use desktop view' : 'Use mobile view'}>
-        <span class="bracket" aria-hidden="true">[</span>
-        {compact ? 'desktop view' : 'mobile view'}
-        <span class="bracket" aria-hidden="true">]</span>
-      </button>
-    </div>
-  {/if}
   {#if compact}
     <div class="mbar">
       <h1 class="sr-only">Thorfolio</h1>
@@ -388,6 +382,13 @@
       <button class="bracket-btn" class:active={$walletAccounts.length > 0} on:click={() => (walletOpen = true)} aria-label="Wallet">
         <span class="bracket">[</span><span class="key">W</span><span class="bracket">]</span><span class="btn-label">{$walletAccounts.length ? `wallet · ${$connectedWallets.length}` : 'wallet'}</span>
       </button>
+      {#if viewportWidth > COMPACT_MAX_WIDTH}
+        <button type="button" class="bracket-btn" bind:this={layoutToggleButton} on:click={toggleLayout} aria-label={compact ? 'Use desktop view' : 'Use mobile view'}>
+          <span class="bracket" aria-hidden="true">[</span>
+          desktop view
+          <span class="bracket" aria-hidden="true">]</span>
+        </button>
+      {/if}
       <CurrencySelector />
     </div>
   {:else}
@@ -405,14 +406,21 @@
           {statusLabel}
         </span>
         <span class="sep">│</span>
-        <button class="bracket-btn" class:active={$walletAccounts.length > 0} on:click={() => (walletOpen = true)}>
-          <span class="bracket">[</span><span class="key">W</span><span class="bracket">]</span>
-          {$walletAccounts.length ? `wallet · ${$connectedWallets.length}` : 'connect wallet'}
-        </button>
-        <button class="bracket-btn" on:click={refresh} disabled={loading || !tracked.length}>
-          <span class="bracket">[</span><span class="key">R</span><span class="bracket">]</span>
-          {loading ? 'refreshing' : 'refresh'}
-        </button>
+        <div class="head-actions">
+          <button class="bracket-btn" class:active={$walletAccounts.length > 0} on:click={() => (walletOpen = true)}>
+            <span class="bracket">[</span><span class="key">W</span><span class="bracket">]</span>
+            {$walletAccounts.length ? `wallet · ${$connectedWallets.length}` : 'connect wallet'}
+          </button>
+          <button class="bracket-btn" on:click={refresh} disabled={loading || !tracked.length}>
+            <span class="bracket">[</span><span class="key">R</span><span class="bracket">]</span>
+            {loading ? 'refreshing' : 'refresh'}
+          </button>
+          <button type="button" class="bracket-btn" bind:this={layoutToggleButton} on:click={toggleLayout} aria-label={compact ? 'Use desktop view' : 'Use mobile view'}>
+            <span class="bracket" aria-hidden="true">[</span>
+            mobile view
+            <span class="bracket" aria-hidden="true">]</span>
+          </button>
+        </div>
       </div>
     </div>
     <h1 class="title">THORFOLIO<span class="cursor">_</span></h1>

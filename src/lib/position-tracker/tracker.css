@@ -41,7 +41,6 @@
 .ptrack a:hover, .ptrack-modal-backdrop a:hover { text-decoration: underline; }
 
 /* ---------- head ---------- */
-.ptrack .layout-controls { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 .ptrack .head { margin-bottom: 18px; }
 .ptrack .head-top {
   display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -49,6 +48,7 @@
 }
 .ptrack .head-left { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .ptrack .head-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ptrack .head-actions { display: flex; align-items: center; gap: 10px; flex: none; }
 .ptrack .prompt, .ptrack-modal-backdrop .prompt { color: var(--pt-accent); font-weight: 700; font-family: var(--pt-mono); }
 .ptrack .cmd { color: var(--pt-body); font-weight: 600; }
 .ptrack .arg { color: var(--pt-dim); }

@@ -74,23 +74,46 @@ test('storage discovery is safe during SSR and when the browser blocks the stora
 const source = readFileSync(new URL('../src/lib/PositionTracker.svelte', import.meta.url), 'utf8');
 const ast = parse(source);
 
-test('the real toggle changes only layout and remains usable if persistence fails', () => {
+test('the real toggle changes only layout, restores focus and tolerates unavailable storage', async () => {
   const toggle = ast.instance.content.body.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'toggleLayout');
   assert.ok(toggle, 'tracker must provide its layout toggle');
   const storage = { setItem() { throw new Error('Storage denied'); } };
+  let focused = 0;
   const context = vm.createContext({
     layoutPreference: 'auto', activeTab: 'tcy', tracked: [{ address: 'unchanged' }],
-    focusAddress: 'unchanged', saveLayoutPreference: (value) => saveLayoutPreference(value, storage)
+    focusAddress: 'unchanged', saveLayoutPreference: (value) => saveLayoutPreference(value, storage),
+    tick: async () => {}, layoutToggleButton: { focus: () => focused++ }
   });
   vm.runInContext(source.slice(toggle.start, toggle.end), context);
   const tracked = context.tracked;
-  vm.runInContext('toggleLayout()', context);
+  await vm.runInContext('toggleLayout()', context);
   assert.equal(context.layoutPreference, 'mobile');
-  vm.runInContext('toggleLayout()', context);
+  await vm.runInContext('toggleLayout()', context);
   assert.equal(context.layoutPreference, 'auto');
   assert.equal(context.activeTab, 'tcy');
   assert.equal(context.focusAddress, 'unchanged');
   assert.equal(context.tracked, tracked);
+  assert.equal(focused, 2);
+});
+
+test('each layout keeps its view toggle in the existing toolbar, not a separate row', () => {
+  function descendants(node) {
+    if (!node || typeof node !== 'object') return [];
+    return [node, ...Object.values(node).flatMap((value) =>
+      Array.isArray(value) ? value.flatMap(descendants) : descendants(value))];
+  }
+  const elements = descendants(ast.html).filter((node) => node.type === 'Element');
+  for (const toolbarClass of ['mbar', 'head-right', 'head-actions']) {
+    const toolbar = elements.find((node) => node.attributes.some((attr) =>
+      attr.name === 'class' && attr.value?.some((value) => value.data === toolbarClass)));
+    assert.ok(toolbar, `${toolbarClass} must exist`);
+    const toggles = descendants(toolbar).filter((node) => node.type === 'Element' && node.name === 'button'
+      && node.attributes.some((attr) => attr.type === 'EventHandler' && attr.expression?.name === 'toggleLayout'));
+    assert.equal(toggles.length, 1, `${toolbarClass} must contain its view toggle`);
+    assert.ok(toggles[0].attributes.some((attr) => attr.type === 'Binding' && attr.name === 'this'
+      && attr.expression?.name === 'layoutToggleButton'), 'keep keyboard focus on the replacement button');
+  }
+  assert.doesNotMatch(source, /class="layout-controls"/);
 });
 
 test('the tracker initializes its preference and uses one existing compact layout', () => {
