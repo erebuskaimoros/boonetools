@@ -76,6 +76,9 @@ Defaults can be overridden with `SERVER`, `DEST`, and `KEEP_RELEASES` (minimum 2
 Frontend also accepts `VERIFY_URL` (HTTPS).
 Application deploys do not change or reload host-wide Caddy configuration.
 Do not bypass the release lock and rollback with a manual production rsync.
+Host Node updates are separate from application artifacts; see
+[security maintenance](security-maintenance.md) for the reviewed dependency
+baseline, residual SDK advisories, and runtime restart/verification requirements.
 
 A fresh backend installation still needs server-owned configuration and initial
 data acquisition. Routine deployment does not populate a cold database or prove

@@ -318,7 +318,8 @@ export default defineConfig({
   // assets keep direct nested routes (for example `/briefings/*`) loadable.
   base: '/',
   server: {
-    host: true,
+    // LAN access must be explicitly requested with Vite's --host option.
+    host: '127.0.0.1',
     proxy: {
       '/__thornode_primary': {
         target: THORNODE_PRIMARY,
