@@ -1,6 +1,7 @@
 /** Polls only our database-backed endpoint. Keep an actively viewed queue
  * lease alive without spinning on a provider/budget deferral. Hidden panels
- * do not call this endpoint; the collector then pauses at its next checkpoint. */
+ * do not call this endpoint; only untracked historical scans pause when their
+ * lease expires. Collector-owned daily rosters continue in the background. */
 export function financialDayPollDelay(detail, error, now = Date.now()) {
   if (detail?.deferred) {
     const retryAt = Date.parse(detail.retryAt || '');

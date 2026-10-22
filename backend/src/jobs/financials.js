@@ -73,7 +73,7 @@ export async function runFinancialsCollector(options = {}) {
     const log = options.log || ((message) => console.error(JSON.stringify({ type: 'financials', message })));
     const daySource = createFinancialDaySource({ client,
       getJson: route => createFinancialsProviderRequest(client)(route,
-        { lane: 'day-details', midgardBudgetClass: 'bulk' }) });
+        { lane: 'day-details', midgardBudgetClass: 'bulk', signal }) });
     let stopping;
     const stop = () => {
       controller.abort();

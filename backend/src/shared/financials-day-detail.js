@@ -3,6 +3,8 @@ import { midgardActionTimestampSeconds } from '../../../shared/dynamic-fees/affi
 const DAY = 86400;
 export const FINANCIAL_DAY_REFRESH_MS = 15 * 60_000;
 export const FINANCIAL_DAY_VISITOR_LEASE_MS = 2 * 60_000;
+export const FINANCIAL_DAY_ROSTER_HORIZON_SECONDS = 900;
+export const FINANCIAL_DAY_ROSTER_SOURCE_LAG_SECONDS = 180;
 const MAX_EXCLUSION_IDS = 512;
 const iso = seconds => new Date(seconds * 1000).toISOString();
 const positive = value => value !== null && value !== '' && Number.isFinite(Number(value)) && Number(value) > 0;
@@ -15,6 +17,21 @@ export function financialDetailDay(day, now = Date.now()) {
     throw new Error('Day must be a valid UTC date from 2021-04-13 through today');
   }
   return { day, from, to: from + DAY };
+}
+
+/** Let the quarter-hour Pool Analysis capture finish before using its exact
+ * saved prefix. Follow wall-clock boundaries rather than drifting by however
+ * long the previous action scan took. Visitor-only historical work is unchanged. */
+export function financialDayRefreshAt(now = Date.now(), { background = false } = {}) {
+  if (!background) return now + FINANCIAL_DAY_REFRESH_MS;
+  const interval = FINANCIAL_DAY_ROSTER_HORIZON_SECONDS * 1000;
+  const grace = FINANCIAL_DAY_ROSTER_SOURCE_LAG_SECONDS * 1000;
+  return (Math.floor((now - grace) / interval) + 1) * interval + grace;
+}
+
+export function financialDayRosterReadyAt(day, now = Date.now()) {
+  return Math.max(now, (financialDetailDay(day, now).from
+    + FINANCIAL_DAY_ROSTER_HORIZON_SECONDS + FINANCIAL_DAY_ROSTER_SOURCE_LAG_SECONDS) * 1000);
 }
 
 function rankedSwaps(actions, from, through) {
@@ -143,7 +160,7 @@ export function financialPoolVolume(payload, { from, through }, asset) {
 /** Each call advances one provider request; persist before continuing. No
  * incomplete scan is published as a full-day top ten. A fixed source horizon
  * and opaque descending cursor survive both provider errors and restarts. */
-export async function advanceFinancialDay(day, previous, getJson, now = Date.now()) {
+export async function advanceFinancialDay(day, previous, getJson, now = Date.now(), options = {}) {
   const bounds = financialDetailDay(day, now);
   let state = previous ? structuredClone(previous) : { ...bounds, phase: 'health', swaps: [], pools: [], poolRows: [], tokens: [], pages: 0, unpriced: 0, pending: 0 };
   if (state.phase === 'done') {
@@ -158,8 +175,14 @@ export async function advanceFinancialDay(day, previous, getJson, now = Date.now
     const health = await getJson('/health');
     const watermark = Number(health?.lastAggregated?.timestamp);
     if (health?.inSync !== true || !positive(watermark)) throw new Error('Midgard day-detail source is delayed');
-    state.through = Math.min(bounds.to, Math.floor(Math.min(watermark, now / 1000) / 300) * 300);
-    if (state.through <= bounds.from) throw new Error('Waiting for the first indexed five-minute bucket');
+    const horizon = options.background ? FINANCIAL_DAY_ROSTER_HORIZON_SECONDS : 300;
+    const grace = options.background ? FINANCIAL_DAY_ROSTER_SOURCE_LAG_SECONDS : 0;
+    state.through = Math.min(bounds.to, Math.floor(Math.min(watermark, now / 1000 - grace) / horizon) * horizon);
+    if (state.through <= bounds.from) {
+      const error = new Error(`Waiting for the first indexed ${options.background ? 'fifteen' : 'five'}-minute bucket`);
+      if (options.background) error.retryAt = new Date(Math.max(financialDayRosterReadyAt(day, now), financialDayRefreshAt(now, options))).toISOString();
+      throw error;
+    }
     if (state.actionFrom && state.through <= state.actionFrom) {
       // A delayed/unchanged watermark must neither regress the old snapshot
       // nor cause another pass over the same action pages.
@@ -168,8 +191,9 @@ export async function advanceFinancialDay(day, previous, getJson, now = Date.now
     }
     state.phase = 'earnings';
   } else if (state.phase === 'earnings') {
-    const params = new URLSearchParams(financialDetailHistoryQuery(state.from, state.through));
-    state.pools = [...new Set([...state.pools, ...poolsFromEarnings(await getJson(`/history/earnings?${params}`), state.from, state.through)])].sort();
+    const earningsFrom = state.actionFrom || state.from;
+    const params = new URLSearchParams(financialDetailHistoryQuery(earningsFrom, state.through));
+    state.pools = [...new Set([...state.pools, ...poolsFromEarnings(await getJson(`/history/earnings?${params}`), earningsFrom, state.through)])].sort();
     state.phase = 'actions';
   } else if (state.phase === 'actions') {
     // Midgard rejects timestamp + nextPageToken together. The first request
@@ -228,29 +252,61 @@ export async function readFinancialDay(day, options = {}) {
 }
 
 export async function refreshFinancialDayQueue(client, options = {}) {
-  const { rows } = await client.query(`select day::text, state_json, payload_json, requested_at from financials_day_details
-    where available_at <= now() and requested_at > now() - interval '2 minutes'
-      and (payload_json is null or (payload_json->>'through')::timestamptz < ((day + 1)::timestamp at time zone 'UTC'))
-    order by available_at, requested_at limit 1`);
-  const row = rows[0];
-  if (!row) return;
-  if (financialDaySnapshotComplete(row.day, row.payload_json)) return;
-  let requestedAt = row.requested_at ? new Date(row.requested_at).getTime() : options.now?.() ?? Date.now();
-  let state = row.state_json || financialDayStateFromSnapshot(row.day, row.payload_json, options.now?.() ?? Date.now());
-  try {
-    for (let index = 0; index < Math.max(1, Math.min(10, Number(options.maxRequests) || 10)) && !options.signal?.aborted; index++) {
-      if ((options.now?.() ?? Date.now()) - requestedAt >= FINANCIAL_DAY_VISITOR_LEASE_MS) return;
-      const result = await advanceFinancialDay(row.day, state, options.getJson, options.now?.() ?? Date.now());
-      state = result.state;
+  if (options.signal?.aborted) return;
+  const now = options.now?.() ?? Date.now();
+  const today = new Date(now).toISOString().slice(0, 10);
+  // Seed only today, not a historical backfill. An existing unfinished yesterday
+  // may have been opened under the old visitor-only policy; adopt its exact
+  // checkpoint without renewing the visitor lease or bypassing its cooldown.
+  await client.query(`insert into financials_day_details (day, background, available_at)
+    select $1::date, true, $2::timestamptz
+    union all select day, true, available_at from financials_day_details
+      where day = $1::date - 1 and not background
+        and (payload_json is null or (payload_json->>'through')::timestamptz < ((day + 1)::timestamp at time zone 'UTC'))
+    on conflict (day) do update set background = true where not financials_day_details.background`,
+  [today, new Date(financialDayRosterReadyAt(today, now)).toISOString()]);
+  // One candidate per lane gives current, closing and visitor work a share of
+  // the same request cap. Least-recently-worked ordering also rotates multiple
+  // tracked closing days after a long outage, and holds for one-step budgets.
+  const { rows } = await client.query(`select day::text, state_json, payload_json, requested_at, background from (
+      select *, row_number() over (partition by case when background and day = $1::date then 0 when background then 1 else 2 end
+        order by last_worked_at nulls first, available_at, requested_at, day) as lane_rank
+      from financials_day_details where available_at <= $2::timestamptz
+        and (background or requested_at > $2::timestamptz - interval '2 minutes')
+        and (payload_json is null or (payload_json->>'through')::timestamptz < ((day + 1)::timestamp at time zone 'UTC'))
+    ) candidates where lane_rank = 1
+    order by last_worked_at nulls first, available_at, requested_at, day limit 3`, [today, new Date(now).toISOString()]);
+  const jobs = rows.filter(row => !financialDaySnapshotComplete(row.day, row.payload_json)).map(row => ({
+    ...row, requestedAt: row.requested_at ? new Date(row.requested_at).getTime() : now,
+    state: row.state_json || financialDayStateFromSnapshot(row.day, row.payload_json, now)
+  }));
+  const maxRequests = Math.max(1, Math.min(10, Number(options.maxRequests) || 10));
+  let requests = 0;
+  while (jobs.length && requests < maxRequests && !options.signal?.aborted) {
+    const job = jobs.shift();
+    if (job.background && financialDayRosterReadyAt(job.day, options.now?.() ?? Date.now()) > (options.now?.() ?? Date.now())) continue;
+    if (!job.background && (options.now?.() ?? Date.now()) - job.requestedAt >= FINANCIAL_DAY_VISITOR_LEASE_MS) continue;
+    requests++;
+    try {
+      const result = await advanceFinancialDay(job.day, job.state, options.getJson, options.now?.() ?? Date.now(), { background: job.background });
+      const savedAt = options.now?.() ?? Date.now();
+      const availableAt = result.payload ? financialDayRefreshAt(savedAt, { background: job.background }) : savedAt;
       const saved = await client.query(`update financials_day_details set state_json = $2::jsonb,
-        payload_json = coalesce($3::jsonb, payload_json), updated_at = now(), last_error = null,
-        available_at = now() + ($4 * interval '1 millisecond') where day = $1::date returning requested_at`,
-      [row.day, JSON.stringify(state), result.payload ? JSON.stringify(result.payload) : null, result.payload ? FINANCIAL_DAY_REFRESH_MS : 0]);
-      if (saved.rows[0]?.requested_at) requestedAt = new Date(saved.rows[0].requested_at).getTime();
-      if (result.payload) return;
+        payload_json = coalesce($3::jsonb, payload_json), updated_at = $5::timestamptz, last_error = null,
+        available_at = $4::timestamptz, last_worked_at = $5::timestamptz where day = $1::date returning requested_at`,
+      [job.day, JSON.stringify(result.state), result.payload ? JSON.stringify(result.payload) : null,
+        new Date(availableAt).toISOString(), new Date(savedAt).toISOString()]);
+      job.state = result.state;
+      if (saved.rows[0]?.requested_at) job.requestedAt = new Date(saved.rows[0].requested_at).getTime();
+      if (!result.payload) jobs.push(job);
+    } catch (error) {
+      if (options.signal?.aborted) return;
+      const failedAt = options.now?.() ?? Date.now();
+      const retryAt = financialDayRetryAt(error, failedAt);
+      await client.query(`update financials_day_details set last_error = $2, available_at = $3::timestamptz,
+        last_worked_at = $4::timestamptz where day = $1::date`,
+      [job.day, error.message, new Date(retryAt).toISOString(), new Date(failedAt).toISOString()]);
+      if (error.code === 'MIDGARD_BUDGET_DEFERRED' || error.skipProvider) return;
     }
-  } catch (error) {
-    const retryAt = financialDayRetryAt(error, options.now?.() ?? Date.now());
-    await client.query(`update financials_day_details set last_error = $2, available_at = $3::timestamptz where day = $1::date`, [row.day, error.message, new Date(retryAt).toISOString()]);
   }
 }

@@ -350,8 +350,8 @@ to RUNE/USD with a working Bonding APR switch that preserves zoom.
 The October 18 request-efficiency follow-up adds migration 069's shared Midgard
 admission counters. Deploy backend first, preserving migration 068's saved payloads
 and cursors. Completed closed-day snapshots must return `refreshing=false` even
-with pending exclusions and must not reacquire data. Incomplete scans require a
-recent two-minute visitor lease, resume saved cursors, and honor budget/cooldown
+with pending exclusions and must not reacquire data. Untracked historical scans
+require a recent two-minute visitor lease, resume saved cursors, and honor budget/cooldown
 retry times. Today advances by new action intervals rather than rescanning its
 completed prefix. Exact completed pool days reuse Pool Analysis's existing rows.
 
@@ -368,6 +368,34 @@ No warmup, cold-date smoke scan, new timer or cache rebuild is required. Use sav
 completed days for provider-free verification, and inspect
 `midgard_request_budgets` plus the Financials minute acquisition log. A first
 uncached busy day can take tens of minutes under the shared bulk cap.
+
+#### Background daily rosters (October 22, 2026)
+
+Migration 072 adds durable background-maintenance metadata without deleting or
+rewriting existing day payloads, action cursors, or provider deadlines. Deploy
+backend before frontend. The existing Financials loop seeds today's UTC roster
+without a visitor, adopts an existing incomplete yesterday row, and finishes
+already tracked days after rollover. It does not enqueue the entire past or
+start a new historical backfill. Older untracked dates retain visitor leases.
+
+Background rosters reuse their saved top ten and scan only the next action
+interval after a complete prefix. Quarter-hour horizons have a three-minute
+settling allowance so Pool Analysis's normal `:02/:17/:32/:47` publication can
+supply the same exact UTC-day pool prefixes. A matching cached pool costs no
+provider request; misses use the unchanged budgeted provider. A midnight prefix
+belongs to the new day and is never substituted for yesterday's full-day total.
+Completed days stop acquisition permanently after the verified horizon reaches
+the next UTC midnight. Pending/unpriced exclusions remain visible: sealing the
+acquired window is not a claim that all late settlements were resolved.
+
+No new service/timer, rate-limit increase, budget reset, cache reset, or history
+rebuild is required. The initial current-day roster can still need a one-time
+scan and may wait on an existing quota deadline. Subsequent visits read the
+stored lists while background progress continues, including with no open tab.
+Validate migration 072, current-day background ownership, saved progress across
+collector restart, closing-day completion, and zero reacquisition of sealed
+days. Check `financials-pool-prefix` acquisition hits and the existing Midgard
+budget counters. Do not trigger cold historical dates as a deployment smoke test.
 
 Migration 070 adds a durable, per-credential start-time gate for Portal requests:
 200ms between admissions across all backend processes (5/s, below the observed

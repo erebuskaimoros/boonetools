@@ -173,12 +173,27 @@ test('Live publication continues while historical acquisition is blocked and shu
 test('Financials provider transport is allowlisted, bounded, and uses shared lifecycle hooks', async () => {
   let request;
   const get = createFinancialsProviderRequest({}, { transport: async (options) => { request = options; return {}; } });
-  await get('/health', { lane: 'live' });
+  const controller = new AbortController();
+  await get('/health', { lane: 'day-details', midgardBudgetClass: 'bulk', signal: controller.signal });
   assert.equal(request.timeoutMs, 60000);
   assert.equal(request.path, '/health');
   assert.equal(typeof request.beforeRequest, 'function');
   assert.equal(typeof request.onProviderError, 'function');
+  assert.equal(request.midgardBudgetClass, 'bulk');
+  assert.equal(request.request.signal, controller.signal);
   assert.throws(() => get('https://untrusted.example/health'), /service base/);
+});
+
+test('managed day maintenance starts independently and joins the collector shutdown signal', async () => {
+  const controller = new AbortController();
+  let dayOptions;
+  const service = { refreshHistory: async () => {}, refreshLive: async () => {},
+    getSnapshot: async range => ({ ...payload, range }), stop: async () => {} };
+  await runFinancialsCollector({ service, signal: controller.signal, lockRunner: async (_key, work) => work({}),
+    refreshDayDetails: async (_client, options) => { dayOptions = options; },
+    publish: async () => controller.abort() });
+  assert.equal(typeof dayOptions.getJson, 'function');
+  assert.equal(dayOptions.signal.aborted, true);
 });
 
 test('Reward archive repair and Reserve reconstruction run independently of live publication', async () => {

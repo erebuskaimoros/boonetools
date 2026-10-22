@@ -150,7 +150,8 @@ finality: the UI identifies exclusions and late settlements can change the true
 ranking. There is no automatic targeted settlement repair yet. This stops the old
 fifteen-minute full-day repeat triggered by a single unresolved action.
 
-Today's completed prefix refreshes at most every fifteen minutes while viewed.
+Before the October 22 background-roster update, today's completed prefix
+refreshed at most every fifteen minutes while viewed.
 It scans only the new action interval and merges the prior and new top tens;
 pool totals refresh for all discovered pools. Up to 512 unresolved transaction
 identities are retained to reconcile reappearing actions. Legacy count-only
@@ -158,7 +159,7 @@ exclusions and overflow stay explicitly provisional; rare stale duplicates outsi
 retained identities can conservatively overcount exclusions. Legacy in-progress cursors
 resume in place; subsequent completed prefixes use delta acquisition.
 
-Public reads renew a two-minute visitor lease; the worker checks that lease before
+For untracked historical dates, public reads renew a two-minute visitor lease; the worker checks that lease before
 each source step. Leaving/closing the panel or hiding the tab pauses unfinished
 work after the lease expires, preserving its checkpoint. Reopening resumes it.
 Provider and request-budget deferrals preserve state and honor the advertised
@@ -189,6 +190,34 @@ budget with these limits and one-second Midgard start spacing. Its day cache and
 counters do not survive Vite restart or share the production database. Production
 cursor/results and request counters survive service restarts and immutable releases
 in Postgres. No historical cache reset or provider warmup is needed.
+
+### Proactive daily rosters (October 22, 2026)
+
+Migration 072 separates collector-owned rosters from visitor-owned historical
+work. The collector creates today's UTC roster automatically, adopts an existing
+unfinished yesterday row, and retains background ownership after rollover until
+coverage is complete. It does not create an unbounded historical queue. Fair,
+bounded batches share the existing global bulk admission limits and preserve
+cooldown deadlines. Every successful step checkpoints state before continuing.
+
+A completed prefix keeps its compact top ten and scans only new action time.
+Background horizons use quarter-hour boundaries with three minutes of settling
+time; source lag cannot advance or regress a published watermark dishonestly.
+Pool ranking requests can now reuse `pool_analysis_intraday_snapshots` when
+asset, exact end time, observation time, and integer amounts match. These rows
+are midnight-to-cutoff prefixes, not interchangeable five-minute buckets.
+Missing/mismatched snapshots fall back through normal provider admission; a
+database failure does not cause an upstream request storm. Completed days still
+use the separately verified `pool_analysis_daily` cache.
+
+The final interval is acquired after midnight and source coverage, rather than
+freezing an incomplete roster at the wall-clock boundary. Once the day is fully
+acquired, future reads are cache-only. Pending/unpriced exclusions and their
+provisional warning remain; targeted late-settlement repair is not implemented.
+This moves first-view latency into bounded background work and removes repeated
+pool history fetches, not the unavoidable one-time scan of every action page.
+An initial bootstrap or an old uncached date can still be slow or quota-deferred.
+The Vite adapter mirrors scheduling but remains process-local, not durable.
 
 ## Historical state and acquisition
 

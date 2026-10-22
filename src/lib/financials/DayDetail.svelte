@@ -71,7 +71,7 @@
     </section>
   </div>
   <p class="basis">Swaps use input value once per route and Midgard’s action date. Pool volume counts each executed leg; cross-asset swaps touch two pools. All rankings are in USD.</p>
-  <p class="basis">Completed-day snapshots stay cached. Today adds newly indexed activity while this panel is open; leaving pauses unfinished scans.</p>
+  <p class="basis">Today’s roster adds newly indexed activity in the background and stays cached after the full UTC day is covered. Older, untracked days may need a one-time build while this panel is open.</p>
 </section>
 
 <style>

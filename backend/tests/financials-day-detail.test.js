@@ -88,7 +88,8 @@ test('day endpoint validates before enqueueing and public reads only use the dat
 
 test('queue bounds provider requests and persists every successful step for restart recovery', async () => {
   const writes = [];
-  const client = { query: async (sql, args) => sql.startsWith('select') ? { rows: [{ day, state_json: null }] } : (writes.push(args), { rows: [] }) };
+  const client = { query: async (sql, args) => sql.startsWith('select') ? { rows: [{ day, state_json: null }] }
+    : (sql.startsWith('update') && writes.push(args), { rows: [] }) };
   let requests = 0;
   await refreshFinancialDayQueue(client, { maxRequests: 2, now: () => now, getJson: async route => {
     requests++;
@@ -150,7 +151,7 @@ test('legacy count-only exclusions survive delta scans without claiming resolved
   for (let i = 0; i < 4; i++) {
     const result = await advanceFinancialDay(day, state, async route => route === '/health'
       ? { inSync: true, lastAggregated: { timestamp: to } }
-      : route.startsWith('/history/earnings') ? { intervals: [{ startTime: from, endTime: to, pools: [] }] }
+      : route.startsWith('/history/earnings') ? { intervals: [{ startTime: to - 300, endTime: to, pools: [] }] }
         : { actions: [] }, now);
     state = result.state; payload = result.payload;
   }
@@ -182,7 +183,7 @@ test('queue stops between requests when its visitor lease expires, preserving th
   let clock = now, calls = 0;
   const writes = [];
   const client = { query: async (sql, args) => sql.startsWith('select') ? { rows: [{ day, state_json: null, requested_at: new Date(now) }] }
-    : (writes.push(args), { rows: [{ requested_at: new Date(now) }] }) };
+    : (sql.startsWith('update') && writes.push(args), { rows: [{ requested_at: new Date(now) }] }) };
   await refreshFinancialDayQueue(client, { now: () => clock, getJson: async () => {
     calls++; clock += 120_001; return { inSync: true, lastAggregated: { timestamp: to } };
   } });
@@ -204,7 +205,7 @@ test('queue honors fresh visitor lease renewals while a bounded batch is in flig
 test('budget deferral persists its real retry horizon without replacing checkpoints or the last-good payload', async () => {
   const writes = [], retryAt = new Date(now + 6 * 3600_000).toISOString();
   const client = { query: async (sql, args) => sql.startsWith('select') ? { rows: [{ day, state_json: null }] }
-    : (writes.push({ sql, args }), { rows: [] }) };
+    : (sql.startsWith('update') && writes.push({ sql, args }), { rows: [] }) };
   await refreshFinancialDayQueue(client, { now: () => now, getJson: async () => {
     throw Object.assign(new Error('Midgard daily budget deferred'), { code: 'MIDGARD_BUDGET_DEFERRED', retryAt, skipProvider: true });
   } });
@@ -233,6 +234,10 @@ test('Postgres migration, cold enqueue, resumable worker, last-good errors and f
     await client.query(`create schema financial_day_test_${process.pid}`);
     await client.query(`set local search_path to financial_day_test_${process.pid}`);
     await client.query(await readFile(new URL('../migrations/068_financials_day_details.sql', import.meta.url), 'utf8'));
+    await client.query(await readFile(new URL('../migrations/072_financials_background_rosters.sql', import.meta.url), 'utf8'));
+    // This test isolates the visitor lane; the managed current day is cooling.
+    await client.query(`insert into financials_day_details (day, background, available_at)
+      values ((now() at time zone 'UTC')::date, true, now() + interval '1 day')`);
     assert.equal((await readFinancialDay(day, { client })).loading, true);
     let fail = false;
     // The real queue uses database wall-clock eligibility, so retry horizons
@@ -257,7 +262,7 @@ test('Postgres migration, cold enqueue, resumable worker, last-good errors and f
     await refreshFinancialDayQueue(client, { ...options, maxRequests: 4 });
     const result = await readFinancialDay(day, { client });
     assert.equal(result.loading, false); assert.equal(result.finalized, true); assert.deepEqual(result.swaps, []);
-    await client.query('update financials_day_details set available_at = now()');
+    await client.query('update financials_day_details set available_at = now() where day = $1', [day]);
     await refreshFinancialDayQueue(client, { getJson: () => { throw new Error('final cache must not reacquire'); } });
     assert.equal((await readFinancialDay(day, { client })).error, '');
   } finally { await client.query('rollback'); await client.end(); }
@@ -278,6 +283,9 @@ test('Postgres queue freezes provisional closed days, pauses abandoned scans and
     await client.query(`set local search_path to financial_day_budget_test_${process.pid}`);
     await client.query("set local time zone 'America/New_York'");
     await client.query(await readFile(new URL('../migrations/068_financials_day_details.sql', import.meta.url), 'utf8'));
+    await client.query(await readFile(new URL('../migrations/072_financials_background_rosters.sql', import.meta.url), 'utf8'));
+    await client.query(`insert into financials_day_details (day, background, available_at)
+      values ((now() at time zone 'UTC')::date, true, now() + interval '1 day')`);
     const complete = { day, through: new Date(to * 1000).toISOString(), observedAt: new Date(now).toISOString(),
       partial: false, finalized: false, pendingSwaps: 82, unpricedSwaps: 1, swaps: [], pools: [] };
     await client.query(`insert into financials_day_details(day, payload_json, last_error) values ($1, $2, 'Old rate limit')`, [day, complete]);

@@ -5,7 +5,7 @@ import { createFinancialsService } from '../backend/src/shared/financials-servic
 import { requestFromProviders } from '../shared/provider-client.js';
 import { createProviderServices } from '../shared/provider-services.js';
 import { advanceFinancialDay, financialDetailDay, financialDaySnapshotComplete, financialDayRetryAt,
-  FINANCIAL_DAY_REFRESH_MS, FINANCIAL_DAY_VISITOR_LEASE_MS } from '../backend/src/shared/financials-day-detail.js';
+  financialDayRefreshAt, financialDayRosterReadyAt, FINANCIAL_DAY_VISITOR_LEASE_MS } from '../backend/src/shared/financials-day-detail.js';
 
 // Local development does not share the production database/quota counters.
 // All Financials dev requests do share this process-local admission budget.
@@ -39,59 +39,107 @@ const devMidgardBudget = createFinancialsDevBudget();
 
 export function createFinancialsDevRequest(transport = requestFromProviders, { budget = devMidgardBudget, bulk = false } = {}) {
   const request = createProviderServices({ transport });
-  return (path, { service = 'midgard' } = {}) => {
+  return (path, { service = 'midgard', signal } = {}) => {
+    signal?.throwIfAborted();
     if (!['midgard', 'rpc'].includes(service)) throw new Error('Financials provider is not allowlisted');
     if (service === 'midgard') budget({ bulk: bulk || /^\/actions(?:[/?]|$)/.test(path) });
     return request(service, path, {
       timeoutMs: 60_000, providerMinIntervalMs: service === 'rpc' ? 650 : 1000,
+      request: { signal },
       headers: { Accept: 'application/json', 'x-client-id': 'BooneTools-Financials' } });
   };
 }
 
-export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevRequest(undefined, { bulk: true }), now = Date.now } = {}) {
+export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevRequest(undefined, { bulk: true }), now = Date.now,
+  maxRequests = 10, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   const days = new Map();
-  let stopped = false;
+  const controller = new AbortController();
+  const batchSize = Math.max(1, Math.min(10, Number(maxRequests) || 10));
+  let stopped = false, started = false, timer, active;
+  const utcDay = timestamp => new Date(timestamp).toISOString().slice(0, 10);
+  const leased = entry => entry.background || now() - entry.requestedAt < FINANCIAL_DAY_VISITOR_LEASE_MS;
+  function ensureDay(day, background = false) {
+    let entry = days.get(day);
+    if (!entry) {
+      entry = { state: null, payload: null, running: false, retryAt: background ? financialDayRosterReadyAt(day, now()) : 0,
+        requestedAt: 0, lastWorkedAt: now(), background, error: '' };
+      days.set(day, entry);
+    } else if (background) entry.background = true;
+    return entry;
+  }
   async function acquireDay(day, entry) {
     entry.running = true;
+    entry.lastWorkedAt = now();
     try {
-      for (let index = 0; index < 10 && !stopped && now() - entry.requestedAt < FINANCIAL_DAY_VISITOR_LEASE_MS; index++) {
-        const result = await advanceFinancialDay(day, entry.state, requestJson, now());
+      for (let index = 0; index < batchSize && !stopped && leased(entry); index++) {
+        const result = await advanceFinancialDay(day, entry.state,
+          (route, options) => requestJson(route, { ...options, signal: controller.signal }), now(), { background: entry.background });
         entry.state = result.state;
-        if (result.payload) { entry.payload = result.payload; entry.retryAt = now() + FINANCIAL_DAY_REFRESH_MS; break; }
+        if (result.payload) { entry.payload = result.payload; entry.retryAt = financialDayRefreshAt(now(), { background: entry.background }); break; }
       }
       if (entry.state?.phase !== 'done') entry.retryAt = now() + 5000;
       entry.error = '';
-    } catch (failure) { entry.error = failure.message; entry.retryAt = financialDayRetryAt(failure, now()); }
+    } catch (failure) {
+      if (!stopped) { entry.error = failure.message; entry.retryAt = financialDayRetryAt(failure, now()); }
+    }
     finally { entry.running = false; }
   }
-  return {
+  function run(day, entry) {
+    if (stopped || active || !leased(entry) || financialDaySnapshotComplete(day, entry.payload) || now() < entry.retryAt) return active;
+    active = acquireDay(day, entry).finally(() => { active = null; });
+    return active;
+  }
+  function schedule(delay) {
+    timer = setTimer(async () => {
+      timer = undefined;
+      try { await queue.tick(); }
+      finally { if (!stopped) schedule(5000); }
+    }, delay);
+    timer?.unref?.();
+  }
+  const queue = {
     read(day) {
       financialDetailDay(day, now());
-      const entry = days.get(day) || { state: null, payload: null, running: false, retryAt: 0, error: '' };
+      const entry = ensureDay(day, day === utcDay(now()));
       entry.requestedAt = now();
-      days.set(day, entry);
       const complete = financialDaySnapshotComplete(day, entry.payload);
-      if (!entry.running && !complete && now() >= entry.retryAt) entry.work = acquireDay(day, entry);
+      run(day, entry);
       return { day, ...entry.payload, loading: !entry.payload, refreshing: Boolean(entry.payload && entry.running && !complete),
         retryAt: !complete && entry.error ? new Date(entry.retryAt).toISOString() : null,
         deferred: Boolean(!complete && entry.error && entry.retryAt > now()), error: complete ? '' : entry.error,
         progress: { phase: complete ? 'done' : entry.state?.phase || (entry.payload ? 'done' : 'queued'), pages: entry.state?.pages || 0 } };
     },
-    async idle() { await Promise.all([...days.values()].map(entry => entry.work)); },
-    async stop() { stopped = true; await this.idle(); }
+    async tick() {
+      if (stopped) return;
+      ensureDay(utcDay(now()), true);
+      const yesterday = utcDay(now() - 86400_000);
+      if (days.has(yesterday) && !financialDaySnapshotComplete(yesterday, days.get(yesterday).payload)) ensureDay(yesterday, true);
+      if (active) return active;
+      // A single bounded batch at a time. Rotate eligible days by their last
+      // work time so cold visitor scans cannot starve the maintained roster.
+      const next = [...days].filter(([day, entry]) => leased(entry) && !financialDaySnapshotComplete(day, entry.payload) && now() >= entry.retryAt)
+        .sort(([dayA, a], [dayB, b]) => a.lastWorkedAt - b.lastWorkedAt || dayA.localeCompare(dayB))[0];
+      if (next) await run(...next);
+    },
+    start() { if (!started && !stopped) { started = true; schedule(0); } },
+    async idle() { await active; },
+    async stop() { stopped = true; clearTimer(timer); timer = undefined; controller.abort(); await queue.idle(); }
   };
+  return queue;
 }
 
-export function createFinancialsDevPlugin() {
-  let service;
-  const days = createFinancialsDayDevQueue();
+export function createFinancialsDevPlugin({ days = createFinancialsDayDevQueue(), createService = createFinancialsService } = {}) {
+  let service, stopping;
+  const stop = () => stopping ||= Promise.all([days.stop(), service?.stop()]);
   return {
     name: 'financials-dev-data',
     apply: 'serve',
     configureServer(server) {
       const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-      service = createFinancialsService({ cacheDir: path.join(root, 'node_modules/.cache/financials'),
+      service = createService({ cacheDir: path.join(root, 'node_modules/.cache/financials'),
         requestJson: createFinancialsDevRequest(), rpcConcurrency: 6 });
+      days.start();
+      server.httpServer?.once('close', stop);
       server.middlewares.use(async (req, res, next) => {
         const url = new URL(req.url, 'http://localhost');
         if (url.pathname !== '/__financials') return next();
@@ -110,6 +158,6 @@ export function createFinancialsDevPlugin() {
         catch (error) { res.statusCode = 502; res.end(JSON.stringify({ error: error.message })); }
       });
     },
-    async closeBundle() { await Promise.all([days.stop(), service?.stop()]); }
+    async closeBundle() { await stop(); }
   };
 }
