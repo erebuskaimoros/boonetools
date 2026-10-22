@@ -3,77 +3,73 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import test from 'node:test';
 import { parse } from 'svelte/compiler';
-import { loadTrackedAddresses, STORAGE_KEY } from '../src/lib/position-tracker/addresses.js';
 
 const A = 'thor12a6ggkqsmxdlwgqr9tfev2u32jc8x9pn4530hc';
 const B = 'thor1lhufh0mwasa0lk9udppdegmvnkgqt08f0m9p5g';
 const source = readFileSync(new URL('../src/App.svelte', import.meta.url), 'utf8');
-const handler = parse(source).instance.content.body.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'canonicalizeAliasUrl');
+const routing = parse(source).instance.content.body.filter((node) =>
+  (node.type === 'VariableDeclaration' && node.kind === 'const' && node.declarations.some(({ id }) =>
+    /App$/.test(id.name) || ['apps', 'hiddenApps', 'routeAliases'].includes(id.name))) ||
+  (node.type === 'FunctionDeclaration' && ['stripBase', 'getAvailableApp', 'canonicalizeAliasUrl'].includes(node.id.name))
+).map((node) => source.slice(node.start, node.end)).join('\n');
 
-// Exercise the same URL rewrite used on first load and browser back/forward.
-function redirect(href, { base = '', route = 'bond-tracker', destination = 'thorfolio' } = {}) {
+// Exercise the app registry and URL handling used by initial load and popstate.
+function resolve(href, { base = '' } = {}) {
   const location = new URL(href);
   const replacements = [];
   const history = { replaceState(_state, _title, next) {
     location.href = new URL(next, location).href;
     replacements.push(location.href);
   } };
-  const rewrite = runInNewContext(`${source.slice(handler.start, handler.end)}; canonicalizeAliasUrl`, {
-    BASE_PATH: base, URL, URLSearchParams, history,
-    positionTrackerApp: { path: 'thorfolio' },
-    window: { location, history }
+  const result = runInNewContext(`${routing}
+    const route = stripBase(window.location.pathname).slice(1).split('/')[0];
+    const app = getAvailableApp(route);
+    if (app) canonicalizeAliasUrl(route, app);
+    ({ app, visiblePaths: apps.map(app => app.path) });`, {
+    BASE_PATH: base, SHOW_LIMIT_ORDERS: false, SHOW_VOTE_TRACKER: true,
+    history, window: { location, history }
   });
-  rewrite(route, { path: destination });
-  return { location, replacements };
+  return { ...result, location, replacements };
 }
 
-test('old bond address links become an explicit Thorfolio address URL with currency and fragment intact', () => {
-  const { location, replacements } = redirect(`https://boone.tools/bond-tracker?bond_address=${A}&node_address=${B}&currency=EUR&source=desktop-app#history`);
-  assert.equal(location.pathname, '/thorfolio');
-  assert.equal(location.searchParams.get('addresses'), A);
-  assert.equal(location.searchParams.has('bond_address'), false);
-  assert.equal(location.searchParams.has('node_address'), false);
-  assert.equal(location.searchParams.get('tab'), 'bond');
-  assert.equal(location.searchParams.get('currency'), 'EUR');
-  assert.equal(location.searchParams.get('source'), 'desktop-app');
-  assert.equal(location.hash, '#history');
-  assert.equal(replacements.length, 1);
+test('old bond links open the standalone tracker without rewriting their address or options', () => {
+  const href = `https://boone.tools/bond-tracker?bond_address=${A}&node_address=${B}&currency=EUR&source=desktop-app#history`;
+  const { app, location, replacements } = resolve(href);
+  assert.equal(app.path, 'bond-tracker');
+  assert.match(app.component.toString(), /BondTrackerV2\.svelte/);
+  assert.equal(location.href, href);
+  assert.equal(replacements.length, 0);
 });
 
-test('the forwarded portfolio contains the linked address instead of merging a saved portfolio', () => {
-  const { location } = redirect(`https://boone.tools/bond-tracker?bond_address=${A}`);
-  const fullPortfolio = Array.from({ length: 25 }, (_, index) => ({ address: `0x${(index + 1).toString(16).padStart(40, '0')}` }));
-  for (const saved of [[{ address: B, label: 'saved' }], fullPortfolio]) {
-    const tracked = loadTrackedAddresses({
-      search: location.search,
-      storage: { getItem: (key) => key === STORAGE_KEY ? JSON.stringify(saved) : null }
-    });
-    assert.deepEqual(tracked.map((entry) => entry.address), [A]);
+test('the standalone tracker resolves without an address and under a base path', () => {
+  for (const base of ['', '/tools']) {
+    for (const search of ['', `?bond_address=${A}&currency=GBP`]) {
+      const href = `https://boone.tools${base}/bond-tracker${search}`;
+      const { app, location, replacements } = resolve(href, { base });
+      assert.equal(app.path, 'bond-tracker');
+      assert.equal(location.href, href);
+      assert.equal(replacements.length, 0);
+    }
   }
 });
 
-test('an explicit new address list and selected tab take precedence over legacy parameters', () => {
-  const { location } = redirect(`https://boone.tools/bond-tracker?addresses=${A}%2C${B}&bond_address=${B}&tab=tcy`);
-  assert.equal(location.searchParams.get('addresses'), `${A},${B}`);
-  assert.equal(location.searchParams.get('tab'), 'tcy');
-  assert.equal(location.searchParams.has('bond_address'), false);
-});
-
-test('legacy links work under the configured base path and without an address', () => {
-  const { location } = redirect(`https://boone.tools/tools/bond-tracker?bond_address=${A}`, { base: '/tools' });
-  assert.equal(location.pathname, '/tools/thorfolio');
-  assert.equal(location.searchParams.get('addresses'), A);
-  const empty = redirect('https://boone.tools/bond-tracker?currency=GBP').location;
-  assert.equal(empty.pathname, '/thorfolio');
-  assert.equal(empty.searchParams.has('addresses'), false);
-  assert.equal(empty.searchParams.get('currency'), 'GBP');
-});
-
-test('canonical and classic tracker routes are left untouched', () => {
-  for (const route of ['thorfolio', 'bond-tracker-classic']) {
-    const href = `https://boone.tools/${route}?bond_address=${A}&tab=tcy#history`;
-    const { location, replacements } = redirect(href, { route, destination: route });
-    assert.equal(location.href, href);
-    assert.equal(replacements.length, 0);
+test('the classic alias still opens the standalone tracker and preserves all URL state', () => {
+  for (const base of ['', '/tools']) {
+    const search = `?bond_address=${A}&node_address=${B}&currency=EUR&source=desktop-app`;
+    const { app, location, replacements } = resolve(`https://boone.tools${base}/bond-tracker-classic${search}#history`, { base });
+    assert.equal(app.path, 'bond-tracker');
+    assert.equal(location.href, `https://boone.tools${base}/bond-tracker${search}#history`);
+    assert.equal(replacements.length, 1);
   }
+});
+
+test('Thorfolio keeps its own multi-address URL and remains the only tracker in navigation', () => {
+  const href = `https://boone.tools/thorfolio?addresses=${A}%2C${B}&tab=tcy&currency=EUR#history`;
+  const { app, location, replacements, visiblePaths } = resolve(href);
+  assert.equal(app.path, 'thorfolio');
+  assert.match(app.component.toString(), /PositionTracker\.svelte/);
+  assert.equal(location.href, href);
+  assert.equal(replacements.length, 0);
+  assert.equal(visiblePaths.includes('thorfolio'), true);
+  assert.equal(visiblePaths.some(path => path.startsWith('bond-tracker')), false);
 });

@@ -213,14 +213,16 @@ test('per-address totals attribute each position to one owner', () => {
   assert.equal(split.reduce((sum, row) => sum + row.totalUsd, 0), summarize({ bondRows, lpRows, tcyRows }).totalUsd);
 });
 
-test('Thorfolio lives at /thorfolio and old /bond-tracker links still reach it', async () => {
+test('Thorfolio is visible in navigation while the standalone bond tracker is a hidden route', async () => {
   const appSource = await readFile(new URL('../src/App.svelte', import.meta.url), 'utf8');
   const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
   assert.match(appSource, /const positionTrackerApp = \{\s*name: "Thorfolio",[^}]*path: "thorfolio"/);
   assert.equal(visibleApps.includes('positionTrackerApp'), true);
-  assert.match(appSource, /routeAliases = \{ "bond-tracker": positionTrackerApp\.path \}/);
-  assert.match(appSource, /path: "bond-tracker-classic"/);
-  // Both entry points (first load and back/forward) rewrite a retired path in place.
+  assert.equal(visibleApps.includes('bondTrackerApp'), false);
+  assert.match(appSource, /const bondTrackerApp = \{\s*name: "Bond Tracker",[^}]*path: "bond-tracker"/);
+  assert.match(appSource, /hiddenApps = \[[^\]]*bondTrackerApp\]/);
+  assert.match(appSource, /routeAliases = \{ "bond-tracker-classic": bondTrackerApp\.path \}/);
+  // Both entry points (first load and back/forward) preserve alias support.
   assert.equal(appSource.match(/canonicalizeAliasUrl\(path, app\);/g)?.length, 2);
 });
 
