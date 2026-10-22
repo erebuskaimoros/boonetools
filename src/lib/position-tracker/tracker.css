@@ -41,6 +41,7 @@
 .ptrack a:hover, .ptrack-modal-backdrop a:hover { text-decoration: underline; }
 
 /* ---------- head ---------- */
+.ptrack .layout-controls { display: flex; justify-content: flex-end; margin-bottom: 10px; }
 .ptrack .head { margin-bottom: 18px; }
 .ptrack .head-top {
   display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -333,10 +334,10 @@
   .ptrack .address-form { padding-left: 10px; }
 }
 
-/* ---------- compact (phones) ----------
+/* ---------- compact (phones, or the saved desktop opt-in) ----------
    One screen: a single toolbar row, the view tabs, then the bond board. Title,
    lede and command line are dropped; the totals live behind the portfolio tab. */
-.ptrack.compact { width: calc(100% - 24px); padding-top: 10px; }
+.ptrack.compact { width: min(640px, calc(100% - 24px)); padding-top: 10px; }
 .ptrack .mbar { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; font-family: var(--pt-mono); font-size: 11px; }
 .ptrack .mbar .status { margin-right: auto; text-transform: none; letter-spacing: 0; white-space: nowrap; min-width: 0; }
 .ptrack .mbar .bracket-btn { min-height: 32px; padding: 5px 8px; }
@@ -345,7 +346,9 @@
 .ptrack.compact .tab { justify-content: center; min-height: 36px; padding: 6px 2px; gap: 4px; font-size: 11px; letter-spacing: 0.04em; }
 .ptrack.compact .tab-count { margin-left: 0; }
 .ptrack.compact .block { padding: 12px; margin-bottom: 12px; }
-.ptrack.compact .metric-grid { margin-bottom: 12px; }
+.ptrack.compact .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 12px; }
+.ptrack.compact .metric:nth-child(2) { border-right: 0; }
+.ptrack.compact .metric:nth-child(-n + 2) { border-bottom: 1px solid var(--pt-border); }
 .ptrack.compact .metric-index { display: none; }
 .ptrack.compact .metric { min-height: 0; padding: 10px 12px; gap: 2px; }
 .ptrack.compact .metric-value { font-size: 20px; }

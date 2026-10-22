@@ -23,6 +23,7 @@
     MAX_TRACKED_ADDRESSES
   } from './position-tracker/addresses.js';
   import { loadActionGates, loadBonds, loadLiquidity, loadMarket, loadNodes, loadTcy } from './position-tracker/data.js';
+  import { COMPACT_MAX_WIDTH, getTrackerStorage, isCompactLayout, loadLayoutPreference, saveLayoutPreference } from './position-tracker/layout.js';
   import { buildRuneRows, rowsFor, summarize, summarizeByAddress } from './position-tracker/model.js';
   import { fmtAmount, fmtPct, shortAddr } from './position-tracker/format.js';
   import { walletAccounts, connectedWallets } from './limit-orders/store.js';
@@ -34,9 +35,8 @@
     { id: 'lp', key: '2', label: 'lp' },
     { id: 'tcy', key: '3', label: 'tcy' }
   ];
-  // Phones move the totals and address list behind their own tab so the bond board fits on one screen.
+  // The compact view moves totals and addresses behind a tab so the bond board fits on one screen.
   const PORTFOLIO_TAB = { id: 'portfolio', key: '4', label: 'portfolio' };
-  const COMPACT_MAX_WIDTH = 640;
   const STALE_AFTER_MS = 5 * 60 * 1000;
   const TAB_KEY = 'position_tracker_tab';
   const ALLOCATION = [
@@ -83,6 +83,7 @@
   let clockTimer = null;
   let now = Date.now() / 1000;
   let viewportWidth = 1024;
+  let layoutPreference = loadLayoutPreference();
 
   // Whole units hide small payouts and LP drift, so values under 100 keep their decimals.
   $: money = (usd) => (Math.abs(usd) > 0 && Math.abs(usd) < 100 ? formatCurrencyWithDecimals : formatCurrency)($exchangeRates, usd, $currentCurrency);
@@ -120,9 +121,9 @@
   $: churnProgress = churnElapsed(market.churnState, now);
   $: tabCounts = { bond: view.bondRows.length, lp: view.lpRows.length, tcy: view.tcyRows.length + view.claimRows.length };
   $: statusLabel = loading ? 'SYNCING' : errors.length ? 'DEGRADED' : loadedOnce ? 'LIVE' : 'IDLE';
-  $: compact = viewportWidth <= COMPACT_MAX_WIDTH;
+  $: compact = isCompactLayout(viewportWidth, layoutPreference);
   $: tabs = compact ? [...TABS, PORTFOLIO_TAB] : TABS;
-  // Wider screens always show the portfolio block, so a portfolio tab saved on a phone opens bonds there.
+  // The desktop layout shows the portfolio block, so a saved portfolio tab opens bonds there.
   $: panel = !compact && activeTab === PORTFOLIO_TAB.id ? 'bond' : activeTab;
   $: showPortfolio = !compact || panel === PORTFOLIO_TAB.id || !tracked.length;
   $: bondOwners = [...new Set(bondRows.map((row) => row.address))];
@@ -155,7 +156,7 @@
   function persist(list) {
     tracked = list;
     if (!list.length) addressesExpanded = true;
-    saveTrackedAddresses(list, localStorage);
+    saveTrackedAddresses(list, getTrackerStorage());
     syncUrl();
   }
 
@@ -289,6 +290,11 @@
     try { localStorage.setItem(TAB_KEY, id); } catch { /* storage unavailable */ }
   }
 
+  function toggleLayout() {
+    layoutPreference = layoutPreference === 'mobile' ? 'auto' : 'mobile';
+    saveLayoutPreference(layoutPreference);
+  }
+
   function openAction(event) {
     actionSpec = event.detail;
   }
@@ -325,7 +331,7 @@
 
   onMount(() => {
     initCurrency();
-    tracked = loadTrackedAddresses({ storage: localStorage, search: window.location.search });
+    tracked = loadTrackedAddresses({ storage: getTrackerStorage(), search: window.location.search });
     addressesExpanded = tracked.length === 0;
     const params = new URLSearchParams(window.location.search);
     const legacyAddress = params.has('addresses') ? '' : normalizeTrackedAddress(params.get('bond_address'));
@@ -340,7 +346,7 @@
       } catch { /* storage unavailable */ }
     }
     if (tracked.length) {
-      saveTrackedAddresses(tracked, localStorage);
+      saveTrackedAddresses(tracked, getTrackerStorage());
       syncUrl();
       refresh();
     }
@@ -360,6 +366,15 @@
 <svelte:document on:visibilitychange={refreshIfStale} />
 
 <section class="ptrack" class:compact>
+  {#if viewportWidth > COMPACT_MAX_WIDTH}
+    <div class="layout-controls">
+      <button type="button" class="bracket-btn" on:click={toggleLayout} aria-label={compact ? 'Use desktop view' : 'Use mobile view'}>
+        <span class="bracket" aria-hidden="true">[</span>
+        {compact ? 'desktop view' : 'mobile view'}
+        <span class="bracket" aria-hidden="true">]</span>
+      </button>
+    </div>
+  {/if}
   {#if compact}
     <div class="mbar">
       <h1 class="sr-only">Thorfolio</h1>
