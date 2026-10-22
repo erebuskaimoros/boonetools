@@ -119,11 +119,11 @@
     description: "Track and manage bonds, LP positions, and TCY across multiple addresses"
   };
 
-  const bondTrackerClassicApp = {
-    name: "Bond Tracker Classic",
+  const bondTrackerApp = {
+    name: "Bond Tracker",
     component: () => import("./lib/BondTrackerV2.svelte"),
     icon: "🔗",
-    path: "bond-tracker-classic",
+    path: "bond-tracker",
     description: "Single-address bond tracker with churn history"
   };
 
@@ -202,10 +202,10 @@
     appLayerBaseLayerApp,
     briefingsApp
   ];
-  // Direct-route previews resolve normally but stay out of desktop/mobile nav.
-  const hiddenApps = [wasmArbEconomicsApp, bondTrackerClassicApp];
+  // Direct-only tools resolve normally but stay out of desktop/mobile nav.
+  const hiddenApps = [wasmArbEconomicsApp, bondTrackerApp];
   // Retired paths that keep old links working; they resolve to the app and rewrite to its path.
-  const routeAliases = { "bond-tracker": positionTrackerApp.path };
+  const routeAliases = { "bond-tracker-classic": bondTrackerApp.path };
 
   // The site has no homepage: unknown paths and `/` land on the status page.
   const defaultApp = statusApp;
@@ -215,19 +215,10 @@
     return [...apps, ...hiddenApps].find(a => a.path === target) || null;
   }
 
-  // Canonicalize retired routes and translate old bond links into an explicit Thorfolio portfolio.
+  // Canonicalize aliases while preserving the tool's query parameters and fragment.
   function canonicalizeAliasUrl(path, app) {
     if (app.path === path) return;
-    const params = new URLSearchParams(window.location.search);
-    if (path === 'bond-tracker' && app.path === positionTrackerApp.path) {
-      const bondAddress = params.get('bond_address');
-      if (!params.has('addresses') && bondAddress) params.set('addresses', bondAddress);
-      params.delete('bond_address');
-      params.delete('node_address');
-      if (!params.has('tab')) params.set('tab', 'bond');
-    }
-    const query = params.toString();
-    history.replaceState(null, '', `${BASE_PATH}/${app.path}${query ? `?${query}` : ''}${window.location.hash}`);
+    history.replaceState(null, '', `${BASE_PATH}/${app.path}${window.location.search}${window.location.hash}`);
   }
 
   function getAppParams(app) {
@@ -244,7 +235,7 @@
       if (addresses) params.set("addresses", addresses);
     }
 
-    if (app === positionTrackerApp || app === bondTrackerClassicApp) {
+    if (app === positionTrackerApp || app === bondTrackerApp) {
       const bondAddress = urlParams.get("bond_address");
       const nodeAddress = urlParams.get("node_address");
       if (bondAddress) params.set("bond_address", bondAddress);
