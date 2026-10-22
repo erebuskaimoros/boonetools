@@ -106,6 +106,16 @@ test('frontend deploy fails before upload when the widget key is missing or malf
   }
 });
 
+test('frontend rollback targets without a widget loader still build', (t) => {
+  const { root, run, git } = sourceFixture(t);
+  git('rm', 'scripts/load-boonetools-frontend-env.sh');
+  git('commit', '-m', 'release without widget configuration');
+  git('branch', '-f', 'production-main', 'HEAD');
+  const result = run('deploy-boonetools-frontend.sh', ['HEAD'], { EXPECTED_STO_KEY: '', TEST_STO_READ_FAIL: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(existsSync(join(root, 'read-widget-key')), false);
+});
+
 test('a commit argument is mandatory and the canonical origin is still enforced', (t) => {
   const { run, git } = sourceFixture(t);
   assert.equal(run('deploy-boonetools-backend.sh', []).status, 2);
