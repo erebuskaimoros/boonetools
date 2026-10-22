@@ -18,9 +18,10 @@ test('Burn Tracker is directly routable and visible in navigation', async () => 
     readFile(new URL('../src/lib/burn-tracker/charts.js', import.meta.url), 'utf8')
   ]);
   const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
+  const hiddenApps = appSource.match(/const hiddenApps = \[([\s\S]*?)\];/)?.[1] || '';
   assert.match(appSource, /path: "burn-tracker"/);
   assert.equal(visibleApps.includes('burnTrackerApp'), true);
-  assert.match(appSource, /const hiddenApps = \[wasmArbEconomicsApp, bondTrackerClassicApp\];/);
+  assert.equal(hiddenApps.includes('burnTrackerApp'), false);
   assert.match(trackerSource, />SYSTEM INCOME BURNED</);
   assert.match(trackerSource, />CURRENT RUNE SUPPLY</);
   assert.match(trackerSource, />CURRENT BURN RATE</);

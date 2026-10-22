@@ -189,9 +189,10 @@ test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the exclude
     readFile(new URL('../src/lib/pool-analysis/charts.js', import.meta.url), 'utf8')
   ]);
   const visibleApps = app.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
+  const hiddenApps = app.match(/const hiddenApps = \[([\s\S]*?)\];/)?.[1] || '';
   assert.match(app, /path: "pool-analysis"/);
   assert.equal(visibleApps.includes('poolAnalysisApp'), true);
-  assert.match(app, /const hiddenApps = \[wasmArbEconomicsApp, bondTrackerClassicApp\];/);
+  assert.equal(hiddenApps.includes('poolAnalysisApp'), false);
   assert.match(app, /return \[\.\.\.apps, \.\.\.hiddenApps\]\.find/);
   assert.match(component, /aria-expanded=/);
   assert.match(component, /aria-controls=/);
