@@ -34,6 +34,10 @@
     { id: 'lp', key: '2', label: 'lp' },
     { id: 'tcy', key: '3', label: 'tcy' }
   ];
+  // Phones move the totals and address list behind their own tab so the bond board fits on one screen.
+  const PORTFOLIO_TAB = { id: 'portfolio', key: '4', label: 'portfolio' };
+  const COMPACT_MAX_WIDTH = 640;
+  const STALE_AFTER_MS = 5 * 60 * 1000;
   const TAB_KEY = 'position_tracker_tab';
   const ALLOCATION = [
     { id: 'rune', label: 'held rune', key: 'runeUsd' },
@@ -78,6 +82,7 @@
   let refreshTimer = null;
   let clockTimer = null;
   let now = Date.now() / 1000;
+  let viewportWidth = 1024;
 
   // Whole units hide small payouts and LP drift, so values under 100 keep their decimals.
   $: money = (usd) => (Math.abs(usd) > 0 && Math.abs(usd) < 100 ? formatCurrencyWithDecimals : formatCurrency)($exchangeRates, usd, $currentCurrency);
@@ -112,8 +117,40 @@
   $: hasThor = focusAddress ? isThorAddress(focusAddress) : thorTracked.length > 0;
   $: connectedNew = $walletAccounts.filter((account) => !addresses.includes(account.address.toLowerCase()) && !addresses.includes(account.address));
   $: nextChurnIn = market.churnState?.nextChurnTimestamp ? formatCountdown(market.churnState.nextChurnTimestamp - now) : '';
+  $: churnProgress = churnElapsed(market.churnState, now);
   $: tabCounts = { bond: view.bondRows.length, lp: view.lpRows.length, tcy: view.tcyRows.length + view.claimRows.length };
   $: statusLabel = loading ? 'SYNCING' : errors.length ? 'DEGRADED' : loadedOnce ? 'LIVE' : 'IDLE';
+  $: compact = viewportWidth <= COMPACT_MAX_WIDTH;
+  $: tabs = compact ? [...TABS, PORTFOLIO_TAB] : TABS;
+  // Wider screens always show the portfolio block, so a portfolio tab saved on a phone opens bonds there.
+  $: panel = !compact && activeTab === PORTFOLIO_TAB.id ? 'bond' : activeTab;
+  $: showPortfolio = !compact || panel === PORTFOLIO_TAB.id || !tracked.length;
+  $: bondOwners = [...new Set(bondRows.map((row) => row.address))];
+  $: scopeOptions = [...new Set([...bondOwners, focusAddress].filter(Boolean))];
+  $: updatedAt = lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  $: bondMetricsProps = {
+    rows: view.bondRows,
+    history: bondHistory,
+    loading,
+    loadedOnce,
+    historyLoading: bondHistoryLoading,
+    loaded: bondedAddresses.length ? bondHistoryLoaded : loadedOnce,
+    error: bondHistoryError,
+    bondError: errors.find((message) => message.startsWith('bonds —') || message.startsWith('market data —')) || '',
+    runePriceUsd: market.runePriceUsd,
+    money,
+    nextChurnIn,
+    churnProgress,
+    churnHalted: !!market.churnState?.isHalted,
+    nodesExpanded
+  };
+
+  function churnElapsed(churnState, nowSec) {
+    const start = Number(churnState?.lastChurnTimestamp) || 0;
+    const end = Number(churnState?.nextChurnTimestamp) || 0;
+    if (!start || end <= start) return null;
+    return Math.min(1, Math.max(0, (nowSec - start) / (end - start)));
+  }
 
   function persist(list) {
     tracked = list;
@@ -271,9 +308,19 @@
     else if (key === 'r' && !loading) refresh();
     else if (key === 'w') walletOpen = true;
     else {
-      const tab = TABS.find((item) => item.key === key);
+      const tab = tabs.find((item) => item.key === key);
       if (tab) selectTab(tab.id);
     }
+  }
+
+  // A tab left open (often a phone's background tab) catches up when it is looked at again.
+  function refreshIfStale() {
+    if (document.visibilityState !== 'visible' || loading || !tracked.length || !lastUpdated) return;
+    if (Date.now() - lastUpdated.getTime() >= STALE_AFTER_MS) refresh();
+  }
+
+  function isKnownTab(id) {
+    return TABS.some((tab) => tab.id === id) || id === PORTFOLIO_TAB.id;
   }
 
   onMount(() => {
@@ -284,12 +331,12 @@
     const legacyAddress = params.has('addresses') ? '' : normalizeTrackedAddress(params.get('bond_address'));
     if (legacyAddress && tracked.some((entry) => entry.address === legacyAddress)) focusAddress = legacyAddress;
     const sharedTab = params.get('tab');
-    if (TABS.some((tab) => tab.id === sharedTab)) activeTab = sharedTab;
+    if (isKnownTab(sharedTab)) activeTab = sharedTab;
     else if (legacyAddress) activeTab = 'bond';
     else {
       try {
         const savedTab = localStorage.getItem(TAB_KEY);
-        if (TABS.some((tab) => tab.id === savedTab)) activeTab = savedTab;
+        if (isKnownTab(savedTab)) activeTab = savedTab;
       } catch { /* storage unavailable */ }
     }
     if (tracked.length) {
@@ -297,7 +344,10 @@
       syncUrl();
       refresh();
     }
-    clockTimer = setInterval(() => { now = Date.now() / 1000; }, 30000);
+    clockTimer = setInterval(() => {
+      now = Date.now() / 1000;
+      refreshIfStale();
+    }, 30000);
   });
 
   onDestroy(() => {
@@ -306,9 +356,26 @@
   });
 </script>
 
-<svelte:window on:keydown={handleKeydown} />
+<svelte:window on:keydown={handleKeydown} bind:innerWidth={viewportWidth} />
+<svelte:document on:visibilitychange={refreshIfStale} />
 
-<section class="ptrack">
+<section class="ptrack" class:compact>
+  {#if compact}
+    <div class="mbar">
+      <h1 class="sr-only">Thorfolio</h1>
+      <span class="status" title={statusLabel === 'LIVE' ? `Updated ${lastUpdated?.toLocaleTimeString()}` : statusLabel.toLowerCase()}>
+        <span class="dot" class:ok={statusLabel === 'LIVE'} class:warn={statusLabel === 'DEGRADED' || statusLabel === 'SYNCING'}></span>
+        {loading ? 'syncing' : updatedAt || statusLabel.toLowerCase()}
+      </span>
+      <button class="bracket-btn" on:click={refresh} disabled={loading || !tracked.length} aria-label="Refresh">
+        <span class="bracket">[</span><span class="key">R</span><span class="bracket">]</span><span class="btn-label">refresh</span>
+      </button>
+      <button class="bracket-btn" class:active={$walletAccounts.length > 0} on:click={() => (walletOpen = true)} aria-label="Wallet">
+        <span class="bracket">[</span><span class="key">W</span><span class="bracket">]</span><span class="btn-label">{$walletAccounts.length ? `wallet · ${$connectedWallets.length}` : 'wallet'}</span>
+      </button>
+      <CurrencySelector />
+    </div>
+  {:else}
   <div class="head">
     <div class="head-top">
       <div class="head-left">
@@ -340,8 +407,20 @@
     </p>
     <div class="rule"></div>
   </div>
+  {/if}
 
-  {#if tracked.length}
+  {#if compact && tracked.length}
+    <div class="tabs" role="tablist">
+      {#each tabs as tab}
+        <button class="tab" class:active={activeTab === tab.id} role="tab" aria-selected={activeTab === tab.id} on:click={() => selectTab(tab.id)}>
+          {tab.label}
+          {#if tab.id !== PORTFOLIO_TAB.id}<span class="tab-count" class:zero={loadedOnce && !tabCounts[tab.id]}>{loadedOnce ? tabCounts[tab.id] : '·'}</span>{/if}
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  {#if tracked.length && showPortfolio}
     <div class="portfolio-summary">
     <div class="metric-grid portfolio-metrics">
       <div class="metric">
@@ -395,6 +474,7 @@
     </div>
   {/if}
 
+  {#if showPortfolio}
   <section class="block">
     <div class="block-head" class:collapsed={!addressesExpanded}>
       <div class="block-title">
@@ -409,7 +489,38 @@
     </div>
 
     <div id="tracked-addresses-content" hidden={!addressesExpanded}>
-      {#if tracked.length}
+      {#if tracked.length && compact}
+        <ul class="addr-list">
+          {#each addressRows as row (row.address)}
+            <li class:focused={focusAddress === row.address}>
+              {#if editingLabel === row.address}
+                <form class="label-form" on:submit|preventDefault={saveLabel}>
+                  <span class="chip-chain">{row.chain}</span>
+                  <!-- svelte-ignore a11y_autofocus -->
+                  <input class="label-input" bind:value={labelDraft} maxlength="32" placeholder="label" aria-label="Label for {row.address}" autofocus on:blur={saveLabel} />
+                </form>
+              {:else}
+                <button
+                  class="addr-focus"
+                  aria-pressed={focusAddress === row.address}
+                  title={focusAddress === row.address ? 'Show all addresses' : `Show only ${row.address}`}
+                  on:click={() => toggleFocus(row.address)}
+                >
+                  <span class="chip-chain">{row.chain}</span>
+                  {#if row.label}<b>{row.label}</b><span class="addr-text">…{row.address.slice(-4)}</span>{:else}<span class="addr-text">{shortAddr(row.address, 8, 4)}</span>{/if}
+                </button>
+              {/if}
+              <span class="addr-total">
+                {loadedOnce ? money(row.totalUsd) : '—'}{#if loadedOnce && (row.runeBalanceMissing || row.tcyBalanceMissing)}<span class="tag">partial</span>{/if}
+              </span>
+              <span class="addr-actions">
+                <button class="row-btn" aria-label="Label {row.address}" on:click={() => startLabel(row)}>label</button>
+                <button class="row-btn remove" aria-label="Stop tracking {row.address}" title="Stop tracking" on:click={() => untrack(row.address)}>×</button>
+              </span>
+            </li>
+          {/each}
+        </ul>
+      {:else if tracked.length}
         <div class="table-wrap addr-wrap">
           <table class="table addr-table">
             <thead>
@@ -495,6 +606,7 @@
       </p>
     </div>
   </section>
+  {/if}
 
   {#if errors.length}
     <div class="alerts">
@@ -513,6 +625,7 @@
       </button>
     </section>
   {:else}
+    {#if !compact}
     <div class="tabs" role="tablist">
       {#each TABS as tab}
         <button
@@ -536,8 +649,25 @@
         {:else if lastUpdated}updated {lastUpdated.toLocaleTimeString()}{/if}
       </span>
     </div>
+    {:else if focusAddress && panel !== 'bond' && panel !== PORTFOLIO_TAB.id}
+      <p class="focus-line">
+        <span class="focus-note">only {labels[focusAddress] || shortAddr(focusAddress, 8, 4)}</span>
+        <button class="row-btn" on:click={() => (focusAddress = '')}>show all</button>
+      </p>
+    {/if}
 
-    {#if activeTab === 'bond'}
+    {#if panel === 'bond'}
+      {#if compact && tracked.length > 1 && (scopeOptions.length > 1 || focusAddress)}
+        <div class="scope" role="group" aria-label="Bond addresses shown">
+          <button class="scope-btn" aria-pressed={!focusAddress} on:click={() => (focusAddress = '')}>all</button>
+          {#each scopeOptions as address (address)}
+            <button class="scope-btn" aria-pressed={focusAddress === address} title={address} on:click={() => toggleFocus(address)}>{labels[address] || `…${address.slice(-4)}`}</button>
+          {/each}
+        </div>
+      {/if}
+      {#if compact && hasThor}
+        <BondMetrics compact {...bondMetricsProps} on:showNodes={() => (nodesExpanded = true)} />
+      {/if}
       <BondPanel
         {gates}
         rows={view.bondRows}
@@ -546,28 +676,14 @@
         {loading}
         {loadedOnce}
         {hasThor}
+        {compact}
         {nextChurnIn}
         churnHalted={!!market.churnState?.isHalted}
         bind:expanded={nodesExpanded}
         on:action={openAction}
       />
-      {#if hasThor}
-        <BondMetrics
-          rows={view.bondRows}
-          history={bondHistory}
-          {loading}
-          {loadedOnce}
-          historyLoading={bondHistoryLoading}
-          loaded={bondedAddresses.length ? bondHistoryLoaded : loadedOnce}
-          error={bondHistoryError}
-          bondError={errors.find((message) => message.startsWith('bonds —') || message.startsWith('market data —')) || ''}
-          runePriceUsd={market.runePriceUsd}
-          {money}
-          {nextChurnIn}
-          churnHalted={!!market.churnState?.isHalted}
-          {nodesExpanded}
-          on:showNodes={() => (nodesExpanded = true)}
-        />
+      {#if !compact && hasThor}
+        <BondMetrics {...bondMetricsProps} on:showNodes={() => (nodesExpanded = true)} />
       {/if}
       {#if bondedAddresses.length}
         <BondHistory
@@ -584,9 +700,9 @@
           bind:error={bondHistoryError}
         />
       {/if}
-    {:else if activeTab === 'lp'}
+    {:else if panel === 'lp'}
       <LpPanel rows={view.lpRows} {labels} {money} {loading} {loadedOnce} lpPaused={gates.lpPaused} on:action={openAction} />
-    {:else}
+    {:else if panel === 'tcy'}
       <TcyPanel
         rows={view.tcyRows}
         claimRows={view.claimRows}
@@ -647,11 +763,6 @@
     .portfolio-metrics .metric:first-child { grid-column: 1 / -1; border-right: 0; }
     .portfolio-metrics .metric:nth-child(3) { border-right: 0; }
     .portfolio-metrics .metric:nth-child(-n + 3) { border-bottom: 1px solid var(--pt-border); }
-  }
-  @container portfolio-summary (max-width: 420px) {
-    .portfolio-metrics { grid-template-columns: 1fr; }
-    .portfolio-metrics .metric { border-right: 0; }
-    .portfolio-metrics .metric:nth-child(4) { border-bottom: 1px solid var(--pt-border); }
   }
   .block-head.collapsed { margin-bottom: 0; }
   .address-toggle {

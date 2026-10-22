@@ -15,10 +15,13 @@
   export let money = (value) => String(value);
   export let nextChurnIn = '';
   export let churnHalted = false;
+  export let churnProgress = null;
   export let nodesExpanded = false;
+  export let compact = false;
 
   const dispatch = createEventDispatcher();
   $: summary = summarizeBondMetrics(rows, history);
+  $: churnPct = Math.round((churnProgress ?? 0) * 100);
   $: currentAvailable = loadedOnce && (!bondError || rows.length > 0);
   $: historyAvailable = loaded && (!error || history.length > 0);
   $: historyNote = error
@@ -26,21 +29,21 @@
     : historyLoading ? 'loading history' : loaded && !history.length ? 'no churn history' : '';
 </script>
 
-<section class="bond-summary" aria-label="Bond summary" aria-busy={loading || historyLoading}>
+<section class="bond-summary" class:compact aria-label="Bond summary" aria-busy={loading || historyLoading}>
   <div class="bond-metrics">
-    <div class="bond-metric">
+    <div class="bond-metric m-bond">
       <span class="bond-index">01</span>
       <span class="bond-label">bond ᚱ</span>
       <strong class="bond-value accent">{currentAvailable ? fmtAmount(summary.bondRune, 1) : '—'}</strong>
       <span class="bond-sub">{currentAvailable ? money(summary.bondRune * runePriceUsd) : loading ? 'loading bonds' : bondError ? 'bonds unavailable' : ''}</span>
     </div>
-    <div class="bond-metric">
+    <div class="bond-metric m-award">
       <span class="bond-index">02</span>
       <span class="bond-label">next award ᚱ</span>
       <strong class="bond-value">{currentAvailable ? fmtAmount(summary.pendingRewardRune, 1) : '—'}</strong>
       <span class="bond-sub">{currentAvailable ? money(summary.pendingRewardRune * runePriceUsd) : ''}</span>
     </div>
-    <div class="bond-metric" title="Rewards earned across the displayed churn history, excluding bond and unbond transactions">
+    <div class="bond-metric m-earned" title="Rewards earned across the displayed churn history, excluding bond and unbond transactions">
       <span class="bond-index">03</span>
       <span class="bond-label">total earned ᚱ</span>
       <strong class="bond-value amber" class:negative={summary.totalRewardsRune < 0}>{historyAvailable ? signed(fmtAmount(summary.totalRewardsRune, 1), summary.totalRewardsRune) : '—'}</strong>
@@ -49,7 +52,7 @@
         {#if historyNote}<span>{historyNote}</span>{/if}
       </span>
     </div>
-    <div class="bond-metric">
+    <div class="bond-metric m-net">
       <span class="bond-index">04</span>
       <span class="bond-label">net bond/unbond</span>
       <strong class="bond-value" class:added={summary.netBondChangeRune > 0} class:negative={summary.netBondChangeRune < 0}>{historyAvailable ? signed(fmtAmount(summary.netBondChangeRune, 1), summary.netBondChangeRune) : '—'}</strong>
@@ -58,24 +61,37 @@
         {#if historyNote}<span>{historyNote}</span>{/if}
       </span>
     </div>
-    <div class="bond-metric" title="APY projected from the combined rewards and bond across nodes, assuming all rewards are reinvested with daily compounding. Paid-out rewards do not compound in the bond.">
+    <div class="bond-metric m-apy" title="APY projected from the combined rewards and bond across nodes, assuming all rewards are reinvested with daily compounding. Paid-out rewards do not compound in the bond.">
       <span class="bond-index">05</span>
       <span class="bond-label">apy</span>
       <strong class="bond-value accent">{currentAvailable ? fmtPct(summary.apy * 100, 2) : '—'}</strong>
       <span class="bond-sub">{currentAvailable ? `${money(summary.annualRewardRune * runePriceUsd)}/yr` : ''}</span>
     </div>
-    <div class="bond-metric">
+    <div class="bond-metric m-price">
       <span class="bond-index">06</span>
       <span class="bond-label">rune price</span>
       <strong class="bond-value">{runePriceUsd > 0 ? money(runePriceUsd) : '—'}</strong>
     </div>
-    <div class="bond-metric">
+    <div class="bond-metric m-churn">
       <span class="bond-index">07</span>
       <span class="bond-label">next churn</span>
       <strong class="bond-value amber">{nextChurnIn || '—'}</strong>
       {#if churnHalted}<span class="bond-sub warning">HALTED</span>{/if}
+      <!-- The next award accrues across this cycle and pays out when it fills. -->
+      {#if churnProgress != null}
+        <span
+          class="churn-track"
+          class:halted={churnHalted}
+          role="progressbar"
+          aria-label="Churn cycle elapsed"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={churnPct}
+          title="{churnPct}% of this churn cycle elapsed"
+        ><span class="churn-fill" style="width: {churnPct}%"></span></span>
+      {/if}
     </div>
-    <div class="bond-metric">
+    <div class="bond-metric m-nodes">
       <span class="bond-index">08</span>
       {#if summary.nodeCount === 1}
         <span class="bond-label">node fee</span>
@@ -144,4 +160,29 @@
     .bond-metric:nth-last-child(-n+2) { border-bottom: 1px solid var(--term-border); }
     .bond-metric:last-child { border-bottom: 0; }
   }
+  .churn-track { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--term-border); }
+  .churn-fill { display: block; height: 100%; background: var(--term-amber); }
+  .churn-track.halted .churn-fill { background: var(--term-text-4); }
+
+  /* Phone board: the four numbers checked most fill the first two rows, the rest
+     follow at a smaller size. Grid gaps draw the rules so reordering keeps them intact. */
+  .compact { margin-bottom: 12px; }
+  .compact .bond-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; background: var(--term-border); }
+  .compact .bond-metric { min-height: 0; padding: 10px 12px 12px; gap: 3px; border: 0; background: var(--term-surface); }
+  .compact .bond-index { display: none; }
+  .compact .bond-label { padding-right: 0; font-size: 10px; letter-spacing: 0.08em; }
+  .compact .bond-value { font-size: clamp(18px, 6.4cqi, 26px); letter-spacing: -0.01em; }
+  .compact .bond-sub { font-size: 11px; line-height: 1.3; }
+  .compact .m-bond { order: 1; }
+  .compact .m-award { order: 2; }
+  .compact .m-apy { order: 3; }
+  .compact .m-churn { order: 4; }
+  .compact .m-earned { order: 5; }
+  .compact .m-net { order: 6; }
+  .compact .m-price { order: 7; }
+  .compact .m-nodes { order: 8; }
+  .compact .m-earned, .compact .m-net, .compact .m-price, .compact .m-nodes { padding: 8px 12px 9px; gap: 1px; background: var(--term-inset, #060606); }
+  .compact .m-earned .bond-value, .compact .m-net .bond-value, .compact .m-price .bond-value, .compact .m-nodes .bond-value { font-size: 15px; font-weight: 700; }
+  .compact .m-earned .bond-sub, .compact .m-net .bond-sub { font-size: 10px; }
+  .compact .churn-track { height: 4px; }
 </style>
