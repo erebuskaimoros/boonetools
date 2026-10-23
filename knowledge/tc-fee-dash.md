@@ -9,9 +9,9 @@ system-income allocation panel. The historical charts remain backed by the
 The additive `feeComposition` field uses only existing PostgreSQL caches: a
 daily row's `source_json.midgard.pools` earnings list first, then the
 `pool_analysis_daily.fees_rune_e8` history as a fallback. Read-model publication
-does not make new Midgard requests. The existing five-minute analytics timer
-publishes it with the other fee dashboard fields; browser refreshes consume
-the same compact snapshot.
+does not make new Midgard requests. The existing minute analytics timer
+publishes it with the other fee dashboard fields, retaining the fee model's
+five-minute minimum refresh interval; browser refreshes consume the same snapshot.
 
 Use `totalLiquidityFeesRune`, not pool earnings/rewards, block rewards or
 downstream income allocations. Reconcile the entire pool list in integer RUNE

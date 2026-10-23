@@ -144,8 +144,8 @@ No database migration or cache reset is required. See
 Deploy backend before frontend. The additive `feeComposition` field in the existing
 `tc-fee-dash:v1` read model is built from cached earnings pool lists and reconciled
 Pool Analysis daily fees. No migration, provider request, history reset or new
-timer is required. Allow the normal five-minute analytics publication to expose
-the new field. Verify that recent completed days have four bucket amounts summing
+timer is required. Allow normal analytics publication (with the fee model's
+five-minute minimum refresh interval) to expose the new field. Verify that recent completed days have four bucket amounts summing
 to `totalFeesUsd`, and that incomplete historical attribution remains unavailable
 rather than an estimated "other" share. See [the accounting note](../knowledge/tc-fee-dash.md#pool-fee-composition).
 
