@@ -93,7 +93,7 @@ test('grouped tooltip hook receives only its source bucket and visibility withou
   const html = grouped.tooltip.formatter([{ dataIndex: 1 }]);
   assert.match(html, /^Feature-owned detail/);
   assert.match(html, /7D AVG · FLOW: 10/);
-  assert.match(html, /Rolling overlays remain daily means/);
+  assert.match(html, /Rolling overlays use trailing daily observations/);
   assert.equal(calls, 1);
   const daily = builder(points, { groupedTooltip, analysis: { grain: 'day' } });
   assert.equal(daily.tooltip.formatter([{ dataIndex: 1 }]), '2024-01-02');

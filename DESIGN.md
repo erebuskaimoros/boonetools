@@ -384,6 +384,12 @@ RUNE/USD price, with a sliding RUNE Price / Bonding APR switch in the legend row
 Daily clicks expand top-swap and pool-volume tables below the chart; a UTC date
 picker provides keyboard access and day selection from weekly/monthly views.
 Drag-to-zoom never selects a day, and changing the line preserves the viewport.
+TC Fee Dash's pool-fee composition uses a fixed 0–100% stacked area plot for
+native BTC, native ETH, stablecoin pools across chains, and other pools. Its
+four summary cards and D/W/M or rolling shares are weighted by historical USD
+fees. Missing attribution stays a gap, never an "other" residual; hiding a
+category does not renormalize the remaining categories. Default to 90 days,
+with 30D, 90D, 1Y and ALL presets and inclusive UTC zoom.
 POL Tracker deposits retain only total and
 average in a two-column summary. Pool Analysis places
 its controls and legend below these cards, immediately before the plot.
@@ -434,8 +440,9 @@ fallback observations, corrected observations always take priority, and missing
 corrected days on or after the cutoff never fall back to the historical formula.
 `analytics.js` performs shared calendar mechanics using explicit feature reducers:
 sum flows, last stocks/cumulative, mean or a feature-owned weighted rate. Weeks
-start Monday; partial edges remain labeled. Rolling overlays remain daily means
-on W/M views and require consecutive observed daily windows.
+start Monday; partial edges remain labeled. Rolling overlays use trailing daily
+observations (feature-weighted for rates) on W/M views and require consecutive
+observed daily windows.
 `LegacyChartTools.svelte` bridges analytical Chart.js plots without replacing
 their interaction/accounting models. `EventTimeSeriesChart.svelte` preserves
 Native views and offers observed-calendar aggregation for timestamped events.

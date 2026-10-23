@@ -4,6 +4,50 @@
 system-income allocation panel. The historical charts remain backed by the
 `tc-fee-dash:v1` public read model.
 
+## Pool-fee composition
+
+The additive `feeComposition` field uses only existing PostgreSQL caches: a
+daily row's `source_json.midgard.pools` earnings list first, then the
+`pool_analysis_daily.fees_rune_e8` history as a fallback. Read-model publication
+does not make new Midgard requests. The existing five-minute analytics timer
+publishes it with the other fee dashboard fields; browser refreshes consume
+the same compact snapshot.
+
+Use `totalLiquidityFeesRune`, not pool earnings/rewards, block rewards or
+downstream income allocations. Reconcile the entire pool list in integer RUNE
+base units against the canonical daily `tc_fees_rune` before attribution. The
+maximum transport-rounding tolerance is one base unit per pool. Reject partial,
+missing, duplicate or invalid inputs; unaccounted fees are never assigned to
+"other". Full earnings lists preserve retired pools absent from Pool Analysis.
+Only fallback daily rows with `completed_at` and `partial=false` are usable.
+
+Four mutually exclusive buckets:
+
+- BTC: `BTC.BTC` only.
+- ETH: `ETH.ETH` only.
+- Stablecoins: existing shared symbol classification (`USDC`, `USDT`, `DAI`,
+  `GUSD`, `LUSD`, `USDP`, `BUSD`) across all chains, including retired BNB pools.
+- Other: every remaining pool, including wrapped BTC/ETH and other-chain ETH.
+
+Allocate the canonical daily USD total proportionally to the reconciled base
+units. D/W/M views, range summaries, and 7/30/90-day rolling shares divide summed
+bucket USD fees by summed total USD fees, not mean daily percentages. The
+chart's 0–100% scale and denominator remain fixed when categories are hidden.
+Missing dates are explicit gaps; zero-fee days have undefined percentages.
+Weekly/monthly buckets containing a missing day are unavailable, while summary
+cards use verified days and disclose their coverage count. Partial calendar-edge
+buckets are labeled and not extrapolated.
+
+At the October 22, 2026 validation, all 295 days of 2026 reconciled. Earlier
+years contain gaps because retired pools are not all retained in the daily pool
+cache. Keep these gaps honest; do not fetch history from the browser or fabricate
+a residual category. No schema migration, acquisition job, or backfill is needed.
+Deploy backend before frontend; the additive field appears after normal read-model
+publication. Unit tests cover reconciliation and grouping; a real ECharts SSR
+test verifies 100% stacking and area breaks at missing days.
+
+## System-income allocation
+
 The distribution cards read `/thorchain/mimir`, `/thorchain/constants`,
 `/thorchain/network` and `/thorchain/nodes`
 through BooneTools' shared `thornode-core:v1` browser adapter. The adapter is

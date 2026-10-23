@@ -1,4 +1,5 @@
 import { safeNumber } from '../lib/utils.js';
+import { buildTcFeeComposition } from './tc-fee-composition.js';
 
 const BILLION = 1_000_000_000;
 const BASIS_POINTS = 10_000;
@@ -122,18 +123,20 @@ export async function buildTcFeeDashPayload(client, options = {}) {
             daily_median_fees_per_billion_usd,
             daily_range_low_fees_per_billion_usd,
             daily_range_high_fees_per_billion_usd,
-            source_label, source_thread, updated_at
+            source_label, source_thread, updated_at,
+            source_json->'midgard'->'pools' as earnings_pools
      from tc_fee_dash_windows
      where period = (select period from selected_period)
      order by window_start asc, window_end asc`
   );
   const rows = result.rows.map(normalizeTcFeeDashRow);
+  const updatedAt = options.generatedAt || new Date().toISOString();
+  const composition = await buildTcFeeComposition(client, result.rows, { now: Date.parse(updatedAt) });
   const period = rows[0]?.period || 'weekly_seed';
   const sourceUpdatedAt = result.rows.reduce((latest, row) => {
     const value = Date.parse(row.updated_at || '');
     return Number.isFinite(value) && value > latest ? value : latest;
-  }, 0);
-  const updatedAt = options.generatedAt || new Date().toISOString();
+  }, Date.parse(composition.sourceUpdatedAt) || 0);
   return {
     payload: {
       meta: {
@@ -150,7 +153,13 @@ export async function buildTcFeeDashPayload(client, options = {}) {
         updatedAt,
         ...summarizeTcFeeDashRows(rows)
       },
-      rows
+      rows,
+      feeComposition: {
+        rows: composition.rows,
+        scope: 'Pool-generated liquidity fees; excludes block rewards and downstream distributions',
+        weighting: 'Historical USD fees; ratios are recomputed from sums, never averaged',
+        coverage: 'Only complete pool breakdowns reconciled to the daily TC fee total are shown'
+      }
     },
     generatedAt: updatedAt,
     sourceUpdatedAt: sourceUpdatedAt > 0 ? new Date(sourceUpdatedAt).toISOString() : null,

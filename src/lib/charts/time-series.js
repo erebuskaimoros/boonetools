@@ -58,7 +58,7 @@ export function buildTimeSeriesOption(rows, {
         grain: view.grain, hidden: analysis.hidden || []
       }) + (averages.length ? '<br>' + timeSeriesTooltip([
         ...averages.map(item => ({ ...item, text: `${item.label}: ${formatAnalysisValue(item, index)}` })),
-        'Rolling overlays remain daily means; missing windows are unavailable.'
+        'Rolling overlays use trailing daily observations; missing windows are unavailable.'
       ]) : '');
       return timeSeriesTooltip([
         `${row.fromDay} → ${row.throughDay} · ${calendar} ${view.grain.toUpperCase()}${row.partial ? ' · PARTIAL BUCKET' : ''}`,
@@ -66,7 +66,7 @@ export function buildTimeSeriesOption(rows, {
           ...item, text: `${item.label}: ${formatAnalysisValue(item, index)}`
         })),
         'Flows: sum · balances/cumulative: closing observation · rates: feature-weighted or labeled mean.',
-        ...(averages.length ? ['Rolling overlays remain daily means; missing windows are unavailable.'] : [])
+        ...(averages.length ? ['Rolling overlays use trailing daily observations; missing windows are unavailable.'] : [])
       ]);
     };
     function formatAnalysisValue(item, index) {

@@ -1,6 +1,7 @@
 <script>
   import LegacyChartTools from './charts/LegacyChartTools.svelte';
   import RangeSummary from './charts/RangeSummary.svelte';
+  import PoolFeeShareChart from './tc-fee-dash/PoolFeeShareChart.svelte';
   import { onDestroy, onMount, tick } from 'svelte';
   import { fetchTcFeeDash } from './tc-fee-dash/api.js';
   import { clearCoreSnapshotCache } from '$lib/api/core-snapshot.js';
@@ -786,6 +787,7 @@
       <div class="state">NO TC FEE WINDOWS FOUND</div>
     {/if}
   </section>
+  <PoolFeeShareChart rows={dashboard?.feeComposition?.rows || []} {loading} {error} />
 </div>
 
 <style>
