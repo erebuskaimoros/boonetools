@@ -55,38 +55,55 @@ export function feeShareSummary(rows) {
   };
 }
 
-function tooltip(rows, label, hidden = []) {
+function tooltip(rows, label) {
   const complete = rows.length && rows.every(row => row.complete);
   const total = rows.reduce((sum, row) => sum + (row.totalFeesUsd || 0), 0);
   return timeSeriesTooltip([
     label,
-    ...(complete ? FEE_SHARE_SERIES.filter(item => !hidden.includes(item.id)).map(item => ({ ...item,
+    ...(complete ? FEE_SHARE_SERIES.map(item => ({ ...item,
       text: `${item.label}: ${formatFeeShare(feeShare(rows, item.id))} · ${usd.format(rows.reduce((sum, row) => sum + row.fees[item.id], 0))}`
     })) : ['POOL FEE ATTRIBUTION INCOMPLETE — no estimated shares']),
     ...(complete && !total ? ['NO LIQUIDITY FEES — percentage shares are undefined'] : []),
-    `TC LIQUIDITY FEES: ${usd.format(total)}`,
-    'Shares always use all four buckets, including hidden series.'
+    ...(complete ? [`TC LIQUIDITY FEES: ${usd.format(total)}`] : []),
+    'Shares always use all four buckets.'
   ]);
 }
 
 /** @param {any[]} rows @param {any} options */
-export function buildFeeShareOption(rows, { hidden = [], ...options } = {}) {
+export function buildFeeShareOption(rows, { smoothingDays = 0, feeHistory = rows, ...options } = {}) {
+  const days = [7, 30].includes(smoothingDays) ? smoothingDays : 0;
+  // Visible observations take priority over cached lookback. Build from all
+  // available history before range/zoom selection, never shorten a window.
+  const history = days ? [...new Map([...feeHistory, ...rows].map(row => [row.day, row])).values()]
+    .sort((a, b) => a.day.localeCompare(b.day)) : [];
+  const windows = new Map(history.map((row, index) => {
+    const sample = history.slice(Math.max(0, index - days + 1), index + 1);
+    const consecutive = sample.length === days && sample.every((point, offset) =>
+      Date.parse(point.day) === Date.parse(row.day) - (days - offset - 1) * DAY);
+    return [row.day, consecutive ? sample : []];
+  }));
+  const sampleFor = row => days ? windows.get(row.day) || [] : [row];
+  const groupedSample = sample => days ? sampleFor(sample.at(-1)) : sample;
+  const trailingLabel = row => `${days}D TRAILING · ${new Date(Date.parse(row.day) - (days - 1) * DAY).toISOString().slice(0, 10)} → ${row.day} · UTC${sampleFor(row).some(point => point.partial) ? ' · PARTIAL DAY' : ''}`;
   const option = buildTimeSeriesOption(rows, {
-    ...options, hidden,
+    ...options, hidden: [],
+    // Composition replaces the primary stack as a whole. Never append generic
+    // single-series overlays or honor stale hidden-series selections here.
+    analysis: options.analysis ? { grain: options.analysis.grain, hidden: [], rolling: [] } : null,
     axes: [{ id: 'share', label: 'SHARE OF TC FEES · %', position: 'left', color: '#b2b2b2', min: 0, max: 100,
       format: value => `${value.toFixed(0)}%`, tooltipFormat: formatFeeShare }],
     series: FEE_SHARE_SERIES.map(item => ({ ...item, axis: 'share', mark: 'line', stack: 'fee-share', lineWidth: 1,
-      data: rows.map(row => feeShare([row], item.id)),
+      data: rows.map(row => feeShare(sampleFor(row), item.id)),
       aggregateData: rows.map(row => row.fees?.[item.id] ?? null),
-      rollingData: rows.map(row => row.fees?.[item.id] ?? null),
-      aggregate: sample => feeShare(sample, item.id), rollingReduce: sample => feeShare(sample, item.id)
+      rolling: false,
+      aggregate: sample => feeShare(groupedSample(sample), item.id)
     })),
-    tooltip: row => tooltip([row], `${row.day} · UTC${row.partial ? ' · PARTIAL DAY' : ''}`, options.analysis?.hidden || hidden),
-    groupedTooltip: (row, context) => tooltip(context.rows,
-      `${row.fromDay} → ${row.throughDay} · UTC ${context.grain.toUpperCase()}${row.partial ? ' · PARTIAL BUCKET' : ''}`, context.hidden)
+    tooltip: row => tooltip(sampleFor(row), days ? trailingLabel(row) : `${row.day} · UTC${row.partial ? ' · PARTIAL DAY' : ''}`),
+    groupedTooltip: (row, context) => tooltip(groupedSample(context.rows),
+      `${row.fromDay} → ${row.throughDay} · UTC ${context.grain.toUpperCase()}${row.partial ? ' · PARTIAL BUCKET' : ''}${days ? ` · ${trailingLabel(context.rows.at(-1))}` : ''}`)
   });
   // Calendar analysis clears source-specific axis bounds; percentage composition
-  // retains its universal 0–100% scale at every grain and with hidden series.
+  // retains its universal 0–100% scale at every grain and smoothing window.
   option.yAxis[0].min = 0;
   option.yAxis[0].max = 100;
   return option;

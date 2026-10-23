@@ -30,11 +30,17 @@ Four mutually exclusive buckets:
 - Other: every remaining pool, including wrapped BTC/ETH and other-chain ETH.
 
 Allocate the canonical daily USD total proportionally to the reconciled base
-units. D/W/M views, range summaries, and 7/30/90-day rolling shares divide summed
+units. D/W/M views, range summaries, and 7/30-day rolling shares divide summed
 bucket USD fees by summed total USD fees, not mean daily percentages. The
-chart's 0–100% scale and denominator remain fixed when categories are hidden.
+chart always retains four shaded areas and a static legend on a 0–100% scale.
+Its 7D and 30D rolling choices are exclusive, replace the regular series, and
+can be cleared to restore raw D/W/M shares. Lookback uses full cached daily
+history before range/zoom selection and requires consecutive observed days.
+Smoothed weekly/monthly points sample the trailing window ending on each bucket's
+last observed day, rather than aggregating overlapping rolling windows. Summary
+cards continue to show selected-range raw fee totals, explicitly labeled in the UI.
 Missing dates are explicit gaps; zero-fee days have undefined percentages.
-Weekly/monthly buckets containing a missing day are unavailable, while summary
+Raw weekly/monthly buckets containing a missing day are unavailable, while summary
 cards use verified days and disclose their coverage count. Partial calendar-edge
 buckets are labeled and not extrapolated.
 
@@ -44,7 +50,9 @@ cache. Keep these gaps honest; do not fetch history from the browser or fabricat
 a residual category. No schema migration, acquisition job, or backfill is needed.
 Deploy backend before frontend; the additive field appears after normal read-model
 publication. Unit tests cover reconciliation and grouping; a real ECharts SSR
-test verifies 100% stacking and area breaks at missing days.
+test verifies 100% stacking and area breaks at missing days, including switching
+raw/7D/30D modes without adding line overlays. This rolling-control follow-up is
+frontend-only; the read model and refresh schedule are unchanged.
 
 ## System-income allocation
 

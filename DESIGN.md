@@ -387,8 +387,12 @@ Drag-to-zoom never selects a day, and changing the line preserves the viewport.
 TC Fee Dash's pool-fee composition uses a fixed 0–100% stacked area plot for
 native BTC, native ETH, stablecoin pools across chains, and other pools. Its
 four summary cards and D/W/M or rolling shares are weighted by historical USD
-fees. Missing attribution stays a gap, never an "other" residual; hiding a
-category does not renormalize the remaining categories. Default to 90 days,
+fees. Its rolling menu offers only exclusive 7D and 30D choices, replacing all
+four primary areas together; clearing the selection restores regular series.
+Keep the legend static and all four buckets visible so valid points always fill
+100%. Weekly/monthly smoothed views sample the trailing window at each bucket's
+last observed day, never sum overlapping rolling windows. Missing attribution
+stays a gap, never an "other" residual. Default to 90 days,
 with 30D, 90D, 1Y and ALL presets and inclusive UTC zoom.
 POL Tracker deposits retain only total and
 average in a two-column summary. Pool Analysis places
@@ -420,6 +424,10 @@ Render summaries outside fixed-height plot containers so charts keep their space
 All time-series toolbars use `ChartTools.svelte`: click-to-hide legends, a
 multi-select 7/30/90-day rolling menu and D/W/M calendar buttons. Disclose and
 disable source resolutions that cannot be reconstructed (including native epochs).
+The fee-share composition is an explicit exception: `showRollingControls=false`
+and `interactiveLegend=false` retain shared calendar controls and a static key,
+with the feature's exclusive 7D/30D control in the `legend-extra` slot. Other
+charts keep the default multi-select overlays and interactive legends.
 Status Block Interval is native-only and omits this toolbar; keep its summary,
 per-block hover, drag-to-zoom and reset controls.
 Cross-chain Competitors instead hides unavailable calendar choices and the

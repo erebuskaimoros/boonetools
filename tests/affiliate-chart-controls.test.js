@@ -27,7 +27,8 @@ test('legacy chart forwards optional inline controls without changing default to
   assert.match(legacy, /inlineControls=\{Boolean\(\$\$slots.controls\)\}/);
   assert.match(legacy, /<svelte:fragment slot="controls"><slot name="controls" \/><\/svelte:fragment>/);
   assert.match(tools, /export let inlineControls = false/);
-  assert.match(tools, /<\/details>\s*<slot name="controls" \/>\s*<\/div>/);
+  assert.match(tools, /export let showRollingControls = true/);
+  assert.match(tools, /<\/details>\s*\{\/if\}\s*<slot name="controls" \/>\s*<\/div>/);
   assert.match(tools, /\.with-controls details \{ flex: 0 1 auto; \}/);
   for (const component of [legacy, tools]) assert.doesNotThrow(() => compile(component, { generate: 'server' }));
 });

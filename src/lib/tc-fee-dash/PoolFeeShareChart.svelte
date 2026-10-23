@@ -1,6 +1,7 @@
 <script>
   import RangeSummary from '../charts/RangeSummary.svelte';
   import TimeSeriesChart from '../charts/TimeSeriesChart.svelte';
+  import FeeShareRollingControl from './FeeShareRollingControl.svelte';
   import { buildFeeShareOption, feeShareSummary, normalizeFeeComposition, selectFeeCompositionRange } from './composition.js';
 
   export let rows = [];
@@ -8,12 +9,14 @@
   export let error = '';
   let range = 90;
   let zoomWindow = null;
+  let smoothingDays = 0;
   $: history = normalizeFeeComposition(rows);
   $: points = selectFeeCompositionRange(history, range);
   $: resetWindow = points.length ? { startDay: points[0].day, endDay: points.at(-1).day } : null;
   $: selected = zoomWindow ? points.filter(row => row.day >= zoomWindow.startDay && row.day <= zoomWindow.endDay) : points;
   $: summary = feeShareSummary(selected);
-  $: hasData = points.some(row => row.complete && row.totalFeesUsd > 0);
+  $: plotOptions = { smoothingDays, feeHistory: history };
+  $: hasData = buildFeeShareOption(points, plotOptions).series.some(series => series.data.some(value => value != null));
   function selectRange(value) { range = value; zoomWindow = null; }
 </script>
 
@@ -24,12 +27,14 @@
   </div>
   <p class="note">Share of liquidity fees from BTC.BTC, ETH.ETH, stablecoin pools across all chains, and other pools. Excludes block rewards and downstream income allocations.</p>
   <RangeSummary rows={selected} cards={summary.cards} {loading}
-    note={`${summary.verifiedDays} verified days · ${summary.missingDays} unavailable${selected.some(row => row.partial) ? ' · current day is partial' : ''}. Shares are weighted by historical USD fees; missing attribution is not counted as “other”.`} />
+    note={`${summary.verifiedDays} verified days · ${summary.missingDays} unavailable${selected.some(row => row.partial) ? ' · current day is partial' : ''}. Cards show selected-range totals${smoothingDays ? `; chart shows ${smoothingDays}D trailing shares` : ''}. Missing attribution is not counted as “other”.`} />
   <TimeSeriesChart {points} historyPoints={history} buildOption={buildFeeShareOption}
+    options={plotOptions} showRollingControls={false} interactiveLegend={false}
     {zoomWindow} {resetWindow} onZoom={value => zoomWindow = value} {loading} {error} {hasData}
     ariaLabel="Percentage of THORChain liquidity fees from BTC, ETH, stablecoin pools and other pools over time"
-    emptyText="No reconciled pool fee breakdown is available for this window."
+    emptyText={smoothingDays ? `No complete, positive-fee ${smoothingDays}-day window is available for this range.` : 'No reconciled pool fee breakdown is available for this window.'}
     loadingText="Loading cached pool fee shares…">
+    <FeeShareRollingControl slot="legend-extra" bind:value={smoothingDays} />
     <div class="range-controls" slot="controls" role="group" aria-label="Pool fee share time range">
       <span>{points[0]?.day || '—'} → {points.at(-1)?.day || '—'} UTC</span>
       {#each [{ value: 30, label: '30D' }, { value: 90, label: '90D' }, { value: 365, label: '1Y' }, { value: 'all', label: 'ALL' }] as preset}
@@ -37,7 +42,7 @@
       {/each}
     </div>
   </TimeSeriesChart>
-  <p class="note foot">Daily, weekly and monthly shares use summed fees, not averages of daily percentages. Gaps indicate incomplete attribution or days without fees. Hiding a category does not change the denominator.</p>
+  <p class="note foot">Shares use summed fees, not averages of daily percentages. {smoothingDays ? `${smoothingDays}D trailing shares replace the regular series; weekly/monthly views sample the trailing window at each bucket’s last day.` : 'Choose 7D or 30D to smooth all four categories together.'} All four areas stay visible and sum to 100%. Incomplete or zero-fee windows remain gaps.</p>
 </section>
 
 <style>

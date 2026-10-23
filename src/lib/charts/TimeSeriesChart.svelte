@@ -30,6 +30,8 @@
   export let initialGrain = null;
   export let hideUnavailableGrains = false;
   export let showSourceResolution = true;
+  export let showRollingControls = true;
+  export let interactiveLegend = true;
   let hidden = [], rolling = [], grain = 'day', previousHidden = '', previousSource = '';
   $: baseSpec = buildOption(points, { ...options, hidden: [] })._spec;
   $: historySpec = historyPoints.length ? buildOption(historyPoints, { ...options, hidden: [] })._spec : baseSpec;
@@ -85,7 +87,7 @@
 </script>
 
 {#if tools && baseSpec}
-  <ChartTools series={legend} rollingSeries={analysisRollingSeries(baseSpec)} {hidden} {rolling} {grain} {sourceGrain} {hideUnavailableGrains} {showSourceResolution} calendar={baseSpec.calendar || 'UTC'}
+  <ChartTools series={legend} rollingSeries={analysisRollingSeries(baseSpec)} {hidden} {rolling} {grain} {sourceGrain} {hideUnavailableGrains} {showSourceResolution} {showRollingControls} {interactiveLegend} calendar={baseSpec.calendar || 'UTC'}
     onHidden={changeHidden} onRolling={changeRolling} onGrain={changeGrain}>
     <slot name="legend-extra" slot="legend-extra" />
   </ChartTools>

@@ -11,6 +11,8 @@
   export let calendar = 'UTC';
   export let hideUnavailableGrains = false;
   export let showSourceResolution = true;
+  export let showRollingControls = true;
+  export let interactiveLegend = true;
   export let inlineControls = false;
   export let onHidden = (value) => {};
   export let onRolling = (value) => {};
@@ -36,8 +38,9 @@
         on:click={() => onGrain(value)}>[{value[0].toUpperCase()}]</button>
     {/each}
   </div>
-  <SeriesLegend series={legendSeries} {hidden} onToggle={(id) => onHidden(toggle(hidden, id))} />
+  <SeriesLegend series={legendSeries} {hidden} onToggle={interactiveLegend ? (id) => onHidden(toggle(hidden, id)) : null} />
   <slot name="legend-extra" />
+  {#if showRollingControls}
   <details bind:this={menu} bind:open>
     <summary bind:this={trigger}>[ROLLING AVGS{rolling.length ? ` · ${rolling.length}` : ''}]</summary>
     <div class="options">
@@ -52,6 +55,7 @@
       <p>{sourceGrain === 'day' ? 'Trailing daily averages (feature-weighted for rates where applicable), even on W/M views. Full observed windows required. Partial days are not extrapolated. 7D solid · 30D dashed · 90D dotted.' : `Only ${sourceGrain} source data is available; daily rolling averages cannot be reconstructed.`}</p>
     </div>
   </details>
+  {/if}
   <slot name="controls" />
 </div>
 {#if calendar !== 'UTC'}<p class="resolution">{calendar} buckets · source calendar retained</p>{/if}
