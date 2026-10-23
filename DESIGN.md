@@ -213,10 +213,16 @@ components but should NOT be used in new work).
 The canonical examples of the live style are:
 
 - `src/App.svelte` — terminal shell: collapsible left sidebar nav on desktop
-  (`sidebar`, `side-item`, `bracket-btn` classes), top bar + dropdown nav on
+  (`sidebar`, `bracket-btn` classes), top bar + dropdown nav on
   mobile and in desktop-app iframe mode. There is no homepage; `/` defaults
   to the status dashboard. This shell sets the entire visual language for
   the site.
+- `src/lib/navigation/ToolNavigation.svelte` — shared sidebar/mobile page list
+  with local fuzzy search. Names and paths rank ahead of description matches;
+  normal navigation order returns on clear. `/` (outside text fields) or
+  Ctrl/Cmd+K focuses search, arrows browse, Enter opens a result, and Escape
+  clears. Collapsed navigation keeps all numbered pages plus a search button.
+  Only public navigation entries are searchable; direct-only tools stay hidden.
 - `src/lib/BondTrackerV2.svelte` — a fully-built terminal tool with mono
   tables, green/amber Chart.js styling, and `#1a1a1a` borders.
 - `src/lib/AppLayerBaseLayerDashboard.svelte` — most recent dashboard built

@@ -1,10 +1,12 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import Footer from './lib/Footer.svelte';
   import SwapPanel from './lib/swap/SwapPanel.svelte';
   import Snow from './lib/Snow.svelte';
   import Banner from './lib/Banner.svelte';
   import { trackFirstPartyPageView } from './lib/page-view-analytics.js';
+  import ToolNavigation from './lib/navigation/ToolNavigation.svelte';
+  import { isNavigationSearchShortcut } from './lib/navigation/search.js';
   import './lib/styles/variables.css';
 
   const BASE_PATH = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
@@ -116,6 +118,7 @@
     component: () => import("./lib/PositionTracker.svelte"),
     icon: "🔗",
     path: "thorfolio",
+    keywords: ['portfolio', 'wallet', 'staking'],
     description: "Track and manage bonds, LP positions, and TCY across multiple addresses"
   };
 
@@ -349,6 +352,7 @@
 
     selectedApp = app;
     navOpen = false;
+    navQuery = '';
     const newUrl = `${BASE_PATH}/${app.path}${getAppParams(app)}`;
     if (replace) {
       history.replaceState(null, '', newUrl);
@@ -363,6 +367,7 @@
     // Re-check desktop app mode on navigation
     checkDesktopAppMode();
     navOpen = false;
+    navQuery = '';
 
     const path = stripBase(window.location.pathname).slice(1).split('/')[0];
     const app = getAvailableApp(path) || defaultApp;
@@ -401,6 +406,8 @@
 
   // Mobile dropdown nav
   let navOpen = false;
+  let navQuery = '';
+  let desktopNavigation, mobileNavigation, navToggle;
 
   // Collapsible sidebar (persisted)
   const NAV_COLLAPSED_KEY = 'boonetools-nav-collapsed';
@@ -411,8 +418,23 @@
     localStorage.setItem(NAV_COLLAPSED_KEY, navCollapsed ? '1' : '0');
   }
 
-  function padIndex(i) {
-    return String(i + 1).padStart(2, '0');
+  async function focusNavigationSearch() {
+    const mobile = isDesktopApp || window.matchMedia('(max-width: 768px)').matches;
+    if (mobile) navOpen = true;
+    else if (navCollapsed) toggleCollapsed();
+    await tick();
+    (mobile ? mobileNavigation : desktopNavigation)?.focusSearch();
+  }
+
+  function handleNavigationShortcut(event) {
+    if (!isNavigationSearchShortcut(event)) return;
+    event.preventDefault();
+    focusNavigationSearch();
+  }
+
+  function closeMobileNavigation() {
+    navOpen = false;
+    navToggle?.focus();
   }
 
   $: if (selectedApp) {
@@ -421,6 +443,8 @@
     document.title = "BOONE Tools";
   }
 </script>
+
+<svelte:window on:keydown={handleNavigationShortcut} />
 
 <svelte:head>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -468,24 +492,9 @@
       {/if}
     </div>
 
-    <nav class="side-nav">
-      {#each apps as app, i}
-        {@const isActive = selectedApp && selectedApp.path === app.path}
-        <button
-          class="side-item"
-          class:active={isActive}
-          on:click={() => selectApp(app)}
-          title={navCollapsed ? app.name : app.description}
-        >
-          {#if navCollapsed}
-            <span class="item-index">{padIndex(i)}</span>
-          {:else}
-            <span class="item-prompt">{isActive ? '$' : '>'}</span>
-            <span class="item-name">{app.path}</span>
-          {/if}
-        </button>
-      {/each}
-    </nav>
+    <ToolNavigation bind:this={desktopNavigation} {apps} activePath={selectedApp?.path}
+      bind:query={navQuery} compact={navCollapsed} onSelect={app => selectApp(app)}
+      onExpandSearch={focusNavigationSearch} />
 
     <div class="side-status">
       <span class="status-dot"></span>
@@ -508,6 +517,7 @@
         <span class="topbar-app">> {selectedApp.path}</span>
       {/if}
       <button
+        bind:this={navToggle}
         class="bracket-btn"
         on:click={() => navOpen = !navOpen}
         aria-expanded={navOpen}
@@ -519,17 +529,8 @@
   {#if navOpen}
     <button class="nav-backdrop" on:click={() => navOpen = false} aria-label="Close navigation menu"></button>
     <div class="nav-drop">
-      {#each apps as app}
-        {@const isActive = selectedApp && selectedApp.path === app.path}
-        <button
-          class="drop-item"
-          class:active={isActive}
-          on:click={() => selectApp(app)}
-        >
-          <span class="item-prompt">{isActive ? '$' : '>'}</span>
-          <span class="item-name">{app.path}</span>
-        </button>
-      {/each}
+      <ToolNavigation bind:this={mobileNavigation} {apps} activePath={selectedApp?.path}
+        bind:query={navQuery} mobile onSelect={app => selectApp(app)} onClose={closeMobileNavigation} />
       <div class="drop-status">
         <span class="status-dot"></span>
         <span class="status-text">THORCHAIN ONLINE</span>
@@ -680,38 +681,6 @@
     50% { opacity: 0.4; }
   }
 
-  .item-index {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--term-text-6);
-    min-width: 18px;
-    flex-shrink: 0;
-  }
-
-  .item-prompt {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--term-text-5);
-    width: 12px;
-    flex-shrink: 0;
-    transition: color 0.15s ease;
-  }
-
-  .item-name {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    line-height: var(--term-leading-compact);
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    flex: 0 1 auto;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-align: left;
-  }
-
   .status-text {
     font-family: 'JetBrains Mono', monospace;
     font-size: var(--term-type-label);
@@ -794,69 +763,6 @@
     color: var(--term-text-6);
   }
 
-  .side-nav {
-    flex: 1;
-    overflow-y: auto;
-    padding: 2px 0 8px;
-  }
-
-  .side-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 9px 14px 9px 12px;
-    background: transparent;
-    border: none;
-    border-left: 2px solid transparent;
-    color: var(--term-text-2);
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-  }
-
-  .side-item:hover {
-    background: #0d0d0d;
-    color: var(--term-text);
-  }
-
-  .side-item:hover .item-prompt {
-    color: #00cc66;
-  }
-
-  .side-item.active {
-    border-left-color: #00cc66;
-    background: rgba(0, 204, 102, 0.07);
-    color: #00cc66;
-  }
-
-  .side-item.active .item-index {
-    color: rgba(0, 204, 102, 0.55);
-  }
-
-  .side-item.active .item-prompt {
-    color: #00cc66;
-  }
-
-  .sidebar.collapsed .side-item {
-    justify-content: center;
-    padding: 9px 0;
-    gap: 0;
-  }
-
-  .sidebar.collapsed .item-index {
-    min-width: 0;
-    text-align: center;
-  }
-
-  .sidebar.collapsed .side-item:hover .item-index {
-    color: var(--term-text);
-  }
-
-  .sidebar.collapsed .side-item.active .item-index {
-    color: #00cc66;
-  }
-
   /* Same height as the footer, so the two read as one status line. */
   .side-status {
     display: flex;
@@ -929,46 +835,6 @@
     border-bottom: 1px solid #1a1a1a;
     max-height: calc(100vh - var(--topbar-height));
     overflow-y: auto;
-  }
-
-  .drop-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    padding: 13px 16px 13px 14px;
-    background: transparent;
-    border: none;
-    border-left: 2px solid transparent;
-    border-bottom: 1px solid #111;
-    color: var(--term-text-2);
-    cursor: pointer;
-    text-align: left;
-    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-  }
-
-  .drop-item .item-name,
-  .drop-item .item-prompt {
-    font-size: 13px;
-  }
-
-  .drop-item:hover {
-    background: #0d0d0d;
-    color: var(--term-text);
-  }
-
-  .drop-item:hover .item-prompt {
-    color: #00cc66;
-  }
-
-  .drop-item.active {
-    border-left-color: #00cc66;
-    background: rgba(0, 204, 102, 0.07);
-    color: #00cc66;
-  }
-
-  .drop-item.active .item-prompt {
-    color: #00cc66;
   }
 
   .drop-status {
