@@ -1,20 +1,20 @@
 import { applySystemIncomePolHead, reconcileSystemIncomePolSnapshot } from './model.js';
-import { mergePoolDeposits } from '../../../shared/system-income-pol/deposits.js';
 
 const MAX_RECENT_HEADS = 512;
 
-// The stream parser has already normalized recipient/amount aliases. Keep the
-// same exact pool flows as live accounting; never infer a pool from holdings.
+// POLReserveCycle deploys to at most one pool per block. The stream parser
+// normalizes aliases; keep that single recipient and amount without aggregation.
 export function buildSystemIncomePolDeploymentPulse(head) {
   const deployments = Array.isArray(head?.pol_reserve_deployments) ? head.pol_reserve_deployments : [];
-  const pools = mergePoolDeposits(deployments.filter(deployment => deployment?.asset))
-    .filter(pool => BigInt(pool.deployed_e8) > 0n)
-    .map(pool => ({ asset: pool.asset, label: pool.asset.split('-')[0], runeE8: pool.deployed_e8 }));
-  if (!pools.length) return null;
+  if (deployments.length !== 1) return null;
+  const asset = String(deployments[0]?.asset || '').trim();
+  const runeE8 = String(deployments[0]?.rune_e8 ?? '').trim();
+  if (!asset || !/^\d+$/.test(runeE8) || BigInt(runeE8) === 0n) return null;
   return {
     height: head.height,
-    runeE8: pools.reduce((sum, pool) => sum + BigInt(pool.runeE8), 0n).toString(),
-    pools
+    runeE8: BigInt(runeE8).toString(),
+    asset,
+    label: asset.split('-')[0]
   };
 }
 

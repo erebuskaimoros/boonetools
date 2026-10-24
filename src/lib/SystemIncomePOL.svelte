@@ -48,8 +48,8 @@
   let recentHeads = [];
   let deploymentPulse = null;
 
-  $: deploymentPulseDetails = deploymentPulse?.pools
-    .map(pool => `${formatE8Rune(pool.runeE8)} RUNE to ${pool.asset}`).join('; ') || '';
+  $: deploymentPulseDetails = deploymentPulse
+    ? `${formatE8Rune(deploymentPulse.runeE8)} RUNE to ${deploymentPulse.asset}` : '';
   $: dashboard = normalizeSystemIncomePolPayload(payload || {});
   $: chart = buildSystemIncomePolChart(dashboard.daily, { unit: chartUnit });
   $: rangeRows = selectSystemIncomePolRange(chart.points, rangeId);
@@ -262,7 +262,7 @@
             aria-live="polite"
             title={deploymentPulseDetails}
             aria-label={`New POL deployment: ${deploymentPulseDetails}`}
-          >+{formatE8Rune(deploymentPulse.runeE8)} RUNE → {deploymentPulse.pools.map(pool => pool.label).join(', ')}</span>
+          >+{formatE8Rune(deploymentPulse.runeE8)} RUNE → {deploymentPulse.label}</span>
         {/key}
       {:else}
         <small>TOTAL · EXACT BLOCK FLOW</small>
