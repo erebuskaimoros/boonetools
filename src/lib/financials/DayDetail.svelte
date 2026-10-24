@@ -51,7 +51,7 @@
     <section aria-labelledby="top-swaps-title"><h4 id="top-swaps-title">TOP 10 SWAPS <span>INPUT VALUE · USD</span></h4>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
       <div class="table-scroll" tabindex="0" role="region" aria-label="Top ten swaps">
-        <table><thead><tr><th scope="col">#</th><th scope="col">SWAP</th><th scope="col">VALUE</th><th scope="col">TX · UTC</th></tr></thead>
+        <table><thead><tr><th scope="col">#</th><th scope="col">SWAP</th><th scope="col" class="amount">VALUE</th><th scope="col">TX · UTC</th></tr></thead>
           <tbody>{#each detail?.swaps || [] as row, index (row.txId)}<tr><td>{String(index + 1).padStart(2, '0')}</td>
             <th scope="row" title={`${row.inputAsset} → ${row.outputAsset}`}>{assetLabel(row.inputAsset)} <span class="muted">→</span> {assetLabel(row.outputAsset)}{#if row.streaming}<small>STREAMING</small>{/if}</th>
             <td class="amount">{usd(row.volumeUsd)}</td><td><a href={`https://thorchain.net/tx/${encodeURIComponent(row.txId)}`} target="_blank" rel="noreferrer" title={row.txId}>{row.txId.slice(0, 6)}…{row.txId.slice(-4)} ↗</a><small>{time(row.timestamp)}</small></td>
@@ -63,7 +63,7 @@
     <section aria-labelledby="top-pools-title"><h4 id="top-pools-title">TOP 10 POOLS <span>EXECUTED VOLUME · USD</span></h4>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
       <div class="table-scroll" tabindex="0" role="region" aria-label="Top ten pools by volume">
-        <table><thead><tr><th scope="col">#</th><th scope="col">POOL</th><th scope="col">VOLUME</th></tr></thead>
+        <table><thead><tr><th scope="col">#</th><th scope="col">POOL</th><th scope="col" class="amount">VOLUME</th></tr></thead>
           <tbody>{#each detail?.pools || [] as row, index (row.asset)}<tr><td>{String(index + 1).padStart(2, '0')}</td><th scope="row" title={row.asset}>{assetLabel(row.asset)}</th><td class="amount">{usd(row.volumeUsd)}</td></tr>{/each}
           {#if !detail?.pools?.length}<tr><td colspan="3" class="empty">{loading || detail?.loading ? 'Waiting for complete pool coverage…' : error || detail?.error ? 'Pool ranking unavailable.' : 'No pool volume in this window.'}</td></tr>{/if}</tbody>
         </table>
@@ -93,7 +93,8 @@
   th, td { padding: 11px 8px; text-align: left; border-bottom: 1px solid var(--term-border); font-weight: 400; }
   thead th { font-size: 11px; color: var(--term-text-3); background: var(--term-surface); }
   td:first-child { color: var(--term-text-3); }
-  .amount { color: var(--term-accent); text-align: right; }
+  .amount { text-align: right; }
+  td.amount { color: var(--term-accent); }
   tr:hover { background: var(--term-surface-hover); }
   a { color: var(--term-text-2); text-underline-offset: 3px; } small { display: block; font-size: 11px; margin-top: 4px; }
   .empty { white-space: normal; color: var(--term-text-3); padding: 20px 8px; }
