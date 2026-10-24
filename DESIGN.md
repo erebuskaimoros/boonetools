@@ -417,6 +417,9 @@ Center the RUNE slice at six o'clock so its normal 50% share occupies the bottom
 semicircle. Rotate the pie, never force the data to a half share or reorder the key.
 The six headline cards use one row at 1320px of available content width, then
 reflow to three, two, or one column without shrinking away their labels.
+The per-block RUNE deposit flash includes all receiving pools as `CHAIN.TICKER`,
+with full asset identifiers and per-pool amounts in its title and accessible label.
+Use the existing live event breakdown; do not fetch or infer recipients from holdings.
 Both POL Tracker plots place range/zoom controls below the summary and shared
 legend, right-aligned immediately above the plot. Their denomination control
 uses the shared terminal `CurrencySwitch.svelte` with a sliding indicator,

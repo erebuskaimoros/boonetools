@@ -14,6 +14,7 @@
   import {
     acceptSystemIncomePolSnapshot,
     bufferSystemIncomePolHead,
+    buildSystemIncomePolDeploymentPulse,
     replaySystemIncomePolHeads
   } from './system-income-pol/live.js';
   import {
@@ -47,6 +48,8 @@
   let recentHeads = [];
   let deploymentPulse = null;
 
+  $: deploymentPulseDetails = deploymentPulse?.pools
+    .map(pool => `${formatE8Rune(pool.runeE8)} RUNE to ${pool.asset}`).join('; ') || '';
   $: dashboard = normalizeSystemIncomePolPayload(payload || {});
   $: chart = buildSystemIncomePolChart(dashboard.daily, { unit: chartUnit });
   $: rangeRows = selectSystemIncomePolRange(chart.points, rangeId);
@@ -88,18 +91,9 @@
     const buffered = bufferSystemIncomePolHead(snapshotPayload, recentHeads, head);
     snapshotPayload = buffered.snapshot;
     recentHeads = buffered.recentHeads;
-    const deployments = Array.isArray(head.pol_reserve_deployments)
-      ? head.pol_reserve_deployments
-      : [];
-    if (isNewHead && deployments.length) {
-      const runeE8 = deployments.reduce((total, deployment) => {
-        try {
-          return total + BigInt(deployment.rune_e8 || 0);
-        } catch {
-          return total;
-        }
-      }, 0n).toString();
-      deploymentPulse = { height: head.height, runeE8 };
+    const nextPulse = buildSystemIncomePolDeploymentPulse(head);
+    if (isNewHead && nextPulse) {
+      deploymentPulse = nextPulse;
       window.clearTimeout(deploymentPulseTimer);
       deploymentPulseTimer = window.setTimeout(() => {
         if (deploymentPulse?.height === head.height) deploymentPulse = null;
@@ -266,8 +260,9 @@
             class="deployment-pulse"
             role="status"
             aria-live="polite"
-            aria-label={`New POL deployment: ${formatE8Rune(deploymentPulse.runeE8)} RUNE added`}
-          >+{formatE8Rune(deploymentPulse.runeE8)} RUNE ADDED</span>
+            title={deploymentPulseDetails}
+            aria-label={`New POL deployment: ${deploymentPulseDetails}`}
+          >+{formatE8Rune(deploymentPulse.runeE8)} RUNE → {deploymentPulse.pools.map(pool => pool.label).join(', ')}</span>
         {/key}
       {:else}
         <small>TOTAL · EXACT BLOCK FLOW</small>
@@ -587,6 +582,7 @@
     font-size: 11px;
     font-weight: 700;
     letter-spacing: .04em;
+    overflow-wrap: anywhere;
     animation: deployment-flash 1s ease-out both;
   }
   @keyframes deployment-flash {
