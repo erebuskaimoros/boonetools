@@ -26,10 +26,11 @@ test('dev bulk requests share a bounded budget with history while reserving aggr
   await bulk(`${base}/health`); assert.equal(calls, 61);
 });
 
-test('dev queue never reacquires a completed historical snapshot with pending exclusions', async () => {
+test('dev queue only revisits retained pending IDs instead of reacquiring a completed historical snapshot', async () => {
   let clock = now, calls = 0;
+  const routes = [];
   const queue = createFinancialsDayDevQueue({ now: () => clock, requestJson: async url => {
-    calls++;
+    calls++; routes.push(url);
     if (url.endsWith('/health')) return { inSync: true, lastAggregated: { timestamp: to } };
     if (url.includes('/history/earnings')) return { intervals: [{ startTime: from, endTime: to, pools: [] }] };
     return { actions: [pendingAction, { ...pendingAction, date: String(BigInt(from - 1) * 1000000000n) }] };
@@ -38,10 +39,13 @@ test('dev queue never reacquires a completed historical snapshot with pending ex
   await queue.idle();
   const first = queue.read(day);
   assert.equal(first.pendingSwaps, 1); assert.equal(first.finalized, false); assert.equal(first.loading, false);
-  assert.equal(calls, 3);
+  assert.equal(calls, 4);
+  assert.match(routes[3], /[?&]txid=PENDING(?:&|$)/);
   clock += 3600_000;
   assert.equal(queue.read(day).refreshing, false);
-  await queue.idle(); assert.equal(calls, 3);
+  await queue.idle(); assert.equal(calls, 5);
+  assert.match(routes[4], /[?&]txid=PENDING(?:&|$)/);
+  assert.equal(routes.filter(route => route.endsWith('/health')).length, 1);
   await queue.stop();
 });
 

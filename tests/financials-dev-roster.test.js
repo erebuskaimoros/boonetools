@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createFinancialsDayDevQueue, createFinancialsDevPlugin, createFinancialsDevRequest } from '../scripts/dev-financials.mjs';
+import { financialDayStatus } from '../src/lib/financials/day-status.js';
 
 const midnight = Date.parse('2026-10-22T00:00:00Z');
 function emptySource(clock, requests) {
@@ -200,6 +201,12 @@ test('day detail explains maintained rosters without promising instant cold hist
   assert.match(source, /cached after the full UTC day is covered/);
   assert.match(source, /Older, untracked days may need a one-time build/);
   assert.doesNotMatch(source, /Today adds newly indexed activity while this panel is open|leaving pauses unfinished scans/);
-  assert.match(source, /Provisional snapshot/);
-  assert.match(source, /Late settlements are not automatically rescanned/);
+  assert.doesNotMatch(source, /Late settlements are not automatically rescanned/);
+  assert.match(source, /financialDayStatus\(detail\)/);
+  assert.match(source, /\{dayStatus.warning\}/);
+  assert.match(source, /\{dayStatus.settlement\}/);
+  const { warning, settlement } = financialDayStatus({ pendingSwaps: 1, settlement: { status: 'pending' } });
+  assert.match(warning, /Provisional snapshot/);
+  assert.match(warning, /saved Midgard status/);
+  assert.match(settlement, /Only saved pending IDs are rechecked; the day is not rescanned/);
 });

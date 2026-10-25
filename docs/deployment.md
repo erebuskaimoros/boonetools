@@ -360,7 +360,7 @@ to RUNE/USD with a working Bonding APR switch that preserves zoom.
 The October 18 request-efficiency follow-up adds migration 069's shared Midgard
 admission counters. Deploy backend first, preserving migration 068's saved payloads
 and cursors. Completed closed-day snapshots must return `refreshing=false` even
-with pending exclusions and must not reacquire data. Untracked historical scans
+with pending exclusions and must not reacquire the whole day. Untracked historical scans
 require a recent two-minute visitor lease, resume saved cursors, and honor budget/cooldown
 retry times. Today advances by new action intervals rather than rescanning its
 completed prefix. Exact completed pool days reuse Pool Analysis's existing rows.
@@ -375,7 +375,7 @@ settings unless separately overridden. Configuration names are in
 `backend/.env.example`. These are our safety caps, not a published Liquify quota.
 Do not clear provider cooldowns or request counters on deployment.
 No warmup, cold-date smoke scan, new timer or cache rebuild is required. Use saved
-completed days for provider-free verification, and inspect
+completed days for cached API verification, and inspect
 `midgard_request_budgets` plus the Financials minute acquisition log. A first
 uncached busy day can take tens of minutes under the shared bulk cap.
 
@@ -407,6 +407,26 @@ collector restart, closing-day completion, and zero reacquisition of sealed
 days. Check `financials-pool-prefix` acquisition hits and the existing Midgard
 budget counters. Do not trigger cold historical dates as a deployment smoke test.
 
+#### Targeted pending settlement (October 24, 2026)
+
+Deploy backend before frontend. No migration, new service, cache reset, quota
+change or historical backfill is required. Existing closed snapshots with saved
+pending transaction IDs enter a bounded settlement lane automatically. Each step
+queries only one retained ID, persists the updated ranking and cursor, and keeps
+the acquired horizon and pool totals unchanged. Normal provider cooldowns and
+the shared bulk budget remain authoritative; do not clear them to accelerate
+the initial pass. Still-unresolved passes back off by one hour, six hours, then
+24 hours. Completed snapshots with no actionable IDs make no source requests.
+
+Verify a known cached day through `financials?day=`: `settlement.status` should
+show pending while retained IDs remain, and `checkedAt` advances after a complete
+pass. Compare pool totals and `through` before/after, check cursor persistence
+across ordinary restart, and confirm lookups use `txid` rather than full-day
+pagination. Legacy count-only/overflow and unpriced exclusions remain provisional;
+do not describe them as settled or trigger a full scan to eliminate the warning.
+The frontend shows saved-status wording and polls only the cached API during
+settlement. Validate source/budget deferrals and resolved-day polling shutdown.
+
 Migration 070 adds a durable, per-credential start-time gate for Portal requests:
 200ms between admissions across all backend processes (5/s, below the observed
 Free plan's 10/s ceiling). Short pacing waits are abortable and bounded; waiting
@@ -424,8 +444,8 @@ total as current Midgard-key traffic. These per-key minute/hour/day counters do
 not certify remaining account-wide monthly quota. See
 `knowledge/midgard-portal-limits-2026-10-20.md` for evidence and verification.
 
-After frontend activation, reload and verify completed/provisional snapshots stop
-polling, budget deferrals show a resume time with saved progress, and hidden/closed
+After frontend activation, reload and verify closed snapshots without actionable
+settlement work stop polling, budget deferrals show a resume time with saved progress, and hidden/closed
 panels stop renewing their leases. If an incident temporarily held specific queue
 rows by `available_at`, release only those exact holds after the fixed collector
 is active; preserve any newer retry deadlines and all payload/state/cooldown data.

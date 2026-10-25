@@ -6,6 +6,7 @@ export const FINANCIAL_DAY_VISITOR_LEASE_MS = 2 * 60_000;
 export const FINANCIAL_DAY_ROSTER_HORIZON_SECONDS = 900;
 export const FINANCIAL_DAY_ROSTER_SOURCE_LAG_SECONDS = 180;
 const MAX_EXCLUSION_IDS = 512;
+const SETTLEMENT_BACKOFF_MS = [3600_000, 6 * 3600_000, 24 * 3600_000];
 const iso = seconds => new Date(seconds * 1000).toISOString();
 const positive = value => value !== null && value !== '' && Number.isFinite(Number(value)) && Number(value) > 0;
 const integer = value => /^\d+$/.test(String(value ?? ''));
@@ -89,6 +90,45 @@ export function financialDaySnapshotComplete(day, payload) {
   return Boolean(payload && Date.parse(payload.through) >= Date.parse(`${day}T00:00:00Z`) + DAY * 1000);
 }
 
+function pendingIds(exclusions) {
+  return [...new Set((Array.isArray(exclusions) ? exclusions : [])
+    .filter(row => row?.kind === 'pending' && typeof row.txId === 'string' && row.txId.trim())
+    .map(row => row.txId.trim().toUpperCase()))].slice(0, MAX_EXCLUSION_IDS);
+}
+
+const settlementPassCount = value => Number.isFinite(Number(value)) && Number(value) >= 0
+  ? Math.min(Number.MAX_SAFE_INTEGER, Math.floor(Number(value))) : 0;
+
+/** Settlement is separate from coverage: closed days only revisit retained IDs,
+ * never the day-wide actions cursor or already acquired pool totals. */
+export function financialDaySettlement(day, payload) {
+  if (!financialDaySnapshotComplete(day, payload)) return null;
+  const remaining = Math.max(0, Number(payload.pendingSwaps) || 0);
+  const actionable = pendingIds(payload.excludedSwaps).length > 0;
+  const status = actionable ? 'pending' : remaining || payload.exclusionsIncomplete ? 'unavailable' : 'complete';
+  return { status, checkedAt: payload.settlement?.checkedAt || null,
+    nextCheckAt: actionable ? payload.settlement?.nextCheckAt || null : null, remaining,
+    passCount: settlementPassCount(payload.settlement?.passCount ?? payload.settlement?.passes) };
+}
+
+export function financialDayNeedsWork(day, payload, now = Date.now()) {
+  if (!financialDaySnapshotComplete(day, payload)) return true;
+  const settlement = financialDaySettlement(day, payload);
+  return settlement.status === 'pending' && !(Date.parse(settlement.nextCheckAt) > now);
+}
+
+export function financialDayNextWorkAt(day, payload, now = Date.now(), options = {}) {
+  if (!payload) return now;
+  if (!financialDaySnapshotComplete(day, payload)) return financialDayRefreshAt(now, options);
+  const settlement = financialDaySettlement(day, payload);
+  return settlement.status === 'pending' ? Math.max(now, Date.parse(settlement.nextCheckAt) || now) : null;
+}
+
+export function financialDaySnapshotFinalized(day, payload, now = Date.now()) {
+  return financialDaySnapshotComplete(day, payload) && !payload.unpricedSwaps && !payload.pendingSwaps
+    && !payload.exclusionsIncomplete && now >= Date.parse(`${day}T00:00:00Z`) + 3 * DAY * 1000;
+}
+
 export function financialDayStateFromSnapshot(day, payload, now = Date.now()) {
   if (!payload) return null;
   return { ...financialDetailDay(day, now), through: Date.parse(payload.through) / 1000,
@@ -96,6 +136,8 @@ export function financialDayStateFromSnapshot(day, payload, now = Date.now()) {
     poolRows: payload.pools || [], pages: 0, tokens: [], unpriced: payload.unpricedSwaps || 0,
     pending: payload.pendingSwaps || 0, exclusions: payload.excludedSwaps || [],
     exclusionsIncomplete: payload.exclusionsIncomplete ?? Boolean((payload.unpricedSwaps || payload.pendingSwaps) && !payload.excludedSwaps),
+    settlement: payload.settlement ? { checkedAt: payload.settlement.checkedAt, nextCheckAt: payload.settlement.nextCheckAt,
+      passes: settlementPassCount(payload.settlement.passCount) } : undefined,
     observedAt: payload.observedAt };
 }
 
@@ -107,7 +149,7 @@ export function financialDayRetryAt(error, now = Date.now()) {
 }
 
 function dayPayload(day, state, now) {
-  return {
+  const payload = {
     day, through: iso(state.through), observedAt: state.observedAt || new Date(now).toISOString(),
     partial: state.through < state.to, unpricedSwaps: state.unpriced, pendingSwaps: state.pending,
     excludedSwaps: state.exclusions || [], exclusionsIncomplete: Boolean(state.exclusionsIncomplete),
@@ -115,6 +157,54 @@ function dayPayload(day, state, now) {
     swaps: state.swaps, pools: state.poolRows.filter(row => row.volumeUsd > 0).sort((a, b) => b.volumeUsd - a.volumeUsd || a.asset.localeCompare(b.asset)).slice(0, 10),
     swapVolumeBasis: 'input-notional-usd', poolVolumeBasis: 'executed-leg-usd', source: 'liquify-midgard'
   };
+  payload.settlement = financialDaySettlement(day, { ...payload, settlement: state.settlement });
+  return payload;
+}
+
+async function advanceSettlement(day, state, getJson, now) {
+  const ids = pendingIds(state.exclusions);
+  if (!ids.length || Date.parse(state.settlement?.nextCheckAt) > now) return { state, payload: dayPayload(day, state, now) };
+  const pass = state.settlement ||= {};
+  if (!Array.isArray(pass.ids) || pass.cursor >= pass.ids.length) {
+    pass.ids = ids;
+    pass.cursor = 0;
+    pass.nextCheckAt = null;
+  }
+  const txId = pass.ids[pass.cursor];
+  const response = await getJson(`/actions?${new URLSearchParams({ txid: txId, limit: '50' })}`);
+  if (!Array.isArray(response?.actions)) throw new Error('Invalid pending swap lookup');
+  // A txid search can include related actions. Only a successful action with
+  // this exact inbound ID is evidence that this saved exclusion has settled.
+  const related = response.actions.filter(action =>
+    ['swap', 'refund'].includes(action?.type)
+    && Array.isArray(action.in) && String(action.in.find(leg => leg?.txID)?.txID || '').trim().toUpperCase() === txId);
+  const matches = related.filter(action => action.status === 'success');
+  const action = matches.find(candidate => {
+    const seconds = midgardActionTimestampSeconds(candidate.date);
+    return candidate.type === 'swap' && seconds > 0 && Number.isFinite(seconds)
+      && Number.isFinite(new Date(seconds * 1000).getTime());
+  }) || (!related.some(candidate => candidate.type === 'swap')
+    && matches.find(candidate => candidate.type === 'refund'));
+  if (action) {
+    const previous = (state.exclusions || []).find(row => row.kind === 'pending' && String(row.txId).trim().toUpperCase() === txId);
+    if (previous) {
+      state.exclusions = state.exclusions.filter(row => row !== previous);
+      state.pending = Math.max(0, state.pending - 1);
+      // Source action dates can move on settlement. Remove the stale pending
+      // exclusion, but rank only an action whose updated date belongs here.
+      if (action.type === 'swap') mergeRankedSwaps(state, rankedSwaps([action], state.from, state.through));
+    }
+  }
+  pass.cursor++;
+  if (pass.cursor >= pass.ids.length) {
+    pass.passes = Math.min(Number.MAX_SAFE_INTEGER, settlementPassCount(pass.passes) + 1);
+    pass.checkedAt = new Date(now).toISOString();
+    pass.nextCheckAt = pendingIds(state.exclusions).length
+      ? new Date(now + SETTLEMENT_BACKOFF_MS[Math.min(pass.passes - 1, SETTLEMENT_BACKOFF_MS.length - 1)]).toISOString() : null;
+    delete pass.ids;
+    delete pass.cursor;
+  }
+  return { state, payload: dayPayload(day, state, now) };
 }
 
 function topSwaps(rows) {
@@ -164,7 +254,7 @@ export async function advanceFinancialDay(day, previous, getJson, now = Date.now
   const bounds = financialDetailDay(day, now);
   let state = previous ? structuredClone(previous) : { ...bounds, phase: 'health', swaps: [], pools: [], poolRows: [], tokens: [], pages: 0, unpriced: 0, pending: 0 };
   if (state.phase === 'done') {
-    if (state.through >= bounds.to) return { state, payload: dayPayload(day, state, now) };
+    if (state.through >= bounds.to) return advanceSettlement(day, state, getJson, now);
     // A completed prefix needs only the next disjoint action interval. Retain
     // all known pool assets and unresolved IDs; the top ten of a union is the
     // top ten of its partitions' top tens. Pool totals are refreshed in full.
@@ -237,46 +327,63 @@ export async function advanceFinancialDay(day, previous, getJson, now = Date.now
 }
 
 export async function readFinancialDay(day, options = {}) {
-  financialDetailDay(day, options.now?.() ?? Date.now());
+  const now = options.now?.() ?? Date.now();
+  financialDetailDay(day, now);
   const db = options.client || await import('../db/pool.js');
   const { rows } = await db.query(`insert into financials_day_details (day) values ($1::date)
     on conflict (day) do update set requested_at = now()
     returning payload_json, state_json->>'phase' as phase, state_json->>'pages' as pages, last_error, available_at`, [day]);
   const row = rows[0];
   const complete = financialDaySnapshotComplete(day, row?.payload_json);
+  const settlement = financialDaySettlement(day, row?.payload_json);
+  const working = !complete || settlement?.status === 'pending';
+  if (settlement?.status === 'pending') {
+    const eligibleAt = Math.max(Date.parse(settlement.nextCheckAt) || 0, new Date(row?.available_at).getTime() || 0);
+    if (eligibleAt > now) settlement.nextCheckAt = new Date(eligibleAt).toISOString();
+  }
   return { day, ...(row?.payload_json || {}), loading: !row?.payload_json,
-    refreshing: Boolean(row?.payload_json && !complete && new Date(row.available_at).getTime() <= (options.now?.() ?? Date.now())),
-    retryAt: !complete && row?.last_error ? new Date(row.available_at).toISOString() : null,
-    deferred: Boolean(!complete && row?.last_error && new Date(row.available_at).getTime() > (options.now?.() ?? Date.now())),
-    progress: { phase: complete ? 'done' : row?.phase || (row?.payload_json ? 'done' : 'queued'), pages: Number(row?.pages) || 0 }, error: complete ? '' : row?.last_error || '' };
+    ...(complete ? { finalized: financialDaySnapshotFinalized(day, row.payload_json, now), settlement } : {}),
+    refreshing: Boolean(row?.payload_json && !complete && new Date(row.available_at).getTime() <= now),
+    retryAt: working && row?.last_error ? new Date(row.available_at).toISOString() : null,
+    deferred: Boolean(working && row?.last_error && new Date(row.available_at).getTime() > now),
+    progress: { phase: settlement?.status === 'pending' ? 'settlement' : complete ? 'done' : row?.phase || (row?.payload_json ? 'done' : 'queued'), pages: Number(row?.pages) || 0 },
+    error: working ? row?.last_error || '' : '' };
 }
+
+// Eligibility examines retained IDs, never a bare count. CASE protects older
+// count-only rows and malformed/non-array JSON without reviving day-wide scans.
+const retainedPendingSql = `exists (select 1 from jsonb_array_elements(case
+  when jsonb_typeof(payload_json->'excludedSwaps') = 'array' then payload_json->'excludedSwaps' else '[]'::jsonb end) excluded
+  where excluded->>'kind' = 'pending' and jsonb_typeof(excluded->'txId') = 'string' and length(btrim(excluded->>'txId')) > 0)`;
+const incompleteDaySql = `(payload_json is null or (payload_json->>'through')::timestamptz < ((day + 1)::timestamp at time zone 'UTC'))`;
+const settlementDueSql = `(${retainedPendingSql} and coalesce((payload_json->'settlement'->>'nextCheckAt')::timestamptz, '-infinity'::timestamptz) <= $2::timestamptz)`;
 
 export async function refreshFinancialDayQueue(client, options = {}) {
   if (options.signal?.aborted) return;
   const now = options.now?.() ?? Date.now();
   const today = new Date(now).toISOString().slice(0, 10);
-  // Seed only today, not a historical backfill. An existing unfinished yesterday
-  // may have been opened under the old visitor-only policy; adopt its exact
-  // checkpoint without renewing the visitor lease or bypassing its cooldown.
+  // Adopt retained closed-day IDs as well as an unfinished yesterday. This does
+  // not seed historical scans, renew a viewer lease, or reset any cooldown.
   await client.query(`insert into financials_day_details (day, background, available_at)
     select $1::date, true, $2::timestamptz
     union all select day, true, available_at from financials_day_details
-      where day = $1::date - 1 and not background
-        and (payload_json is null or (payload_json->>'through')::timestamptz < ((day + 1)::timestamp at time zone 'UTC'))
+      where not background and ((day = $1::date - 1 and ${incompleteDaySql})
+        or (not ${incompleteDaySql} and ${retainedPendingSql}))
     on conflict (day) do update set background = true where not financials_day_details.background`,
   [today, new Date(financialDayRosterReadyAt(today, now)).toISOString()]);
-  // One candidate per lane gives current, closing and visitor work a share of
+  // One candidate per lane gives current, closing, visitor and settlement work a share of
   // the same request cap. Least-recently-worked ordering also rotates multiple
   // tracked closing days after a long outage, and holds for one-step budgets.
   const { rows } = await client.query(`select day::text, state_json, payload_json, requested_at, background from (
-      select *, row_number() over (partition by case when background and day = $1::date then 0 when background then 1 else 2 end
+      select *, row_number() over (partition by case when not ${incompleteDaySql} then 3
+        when background and day = $1::date then 0 when background then 1 else 2 end
         order by last_worked_at nulls first, available_at, requested_at, day) as lane_rank
       from financials_day_details where available_at <= $2::timestamptz
         and (background or requested_at > $2::timestamptz - interval '2 minutes')
-        and (payload_json is null or (payload_json->>'through')::timestamptz < ((day + 1)::timestamp at time zone 'UTC'))
+        and (${incompleteDaySql} or ${settlementDueSql})
     ) candidates where lane_rank = 1
-    order by last_worked_at nulls first, available_at, requested_at, day limit 3`, [today, new Date(now).toISOString()]);
-  const jobs = rows.filter(row => !financialDaySnapshotComplete(row.day, row.payload_json)).map(row => ({
+    order by last_worked_at nulls first, available_at, requested_at, day limit 4`, [today, new Date(now).toISOString()]);
+  const jobs = rows.filter(row => financialDayNeedsWork(row.day, row.payload_json, now)).map(row => ({
     ...row, requestedAt: row.requested_at ? new Date(row.requested_at).getTime() : now,
     state: row.state_json || financialDayStateFromSnapshot(row.day, row.payload_json, now)
   }));
@@ -290,7 +397,7 @@ export async function refreshFinancialDayQueue(client, options = {}) {
     try {
       const result = await advanceFinancialDay(job.day, job.state, options.getJson, options.now?.() ?? Date.now(), { background: job.background });
       const savedAt = options.now?.() ?? Date.now();
-      const availableAt = result.payload ? financialDayRefreshAt(savedAt, { background: job.background }) : savedAt;
+      const availableAt = financialDayNextWorkAt(job.day, result.payload, savedAt, { background: job.background }) ?? savedAt;
       const saved = await client.query(`update financials_day_details set state_json = $2::jsonb,
         payload_json = coalesce($3::jsonb, payload_json), updated_at = $5::timestamptz, last_error = null,
         available_at = $4::timestamptz, last_worked_at = $5::timestamptz where day = $1::date returning requested_at`,
@@ -298,7 +405,8 @@ export async function refreshFinancialDayQueue(client, options = {}) {
         new Date(availableAt).toISOString(), new Date(savedAt).toISOString()]);
       job.state = result.state;
       if (saved.rows[0]?.requested_at) job.requestedAt = new Date(saved.rows[0].requested_at).getTime();
-      if (!result.payload) jobs.push(job);
+      if (!result.payload || (financialDaySnapshotComplete(job.day, result.payload)
+        && financialDayNeedsWork(job.day, result.payload, savedAt))) jobs.push(job);
     } catch (error) {
       if (options.signal?.aborted) return;
       const failedAt = options.now?.() ?? Date.now();

@@ -2,10 +2,12 @@
   import { onMount, onDestroy } from 'svelte';
   import { fetchFinancialDay } from './api.js';
   import { financialDayPollDelay } from './day-poll.js';
+  import { financialDayStatus } from './day-status.js';
   import { formatFinancialAmount } from '../../../shared/financials/model.js';
   export let day;
   export let onClose = () => {};
   let detail = null, error = '', loading = true, request, timer, destroyed = false, sequence = 0;
+  $: dayStatus = financialDayStatus(detail);
   const usd = value => formatFinancialAmount(value, 'usd', false);
   const assetLabel = value => String(value || '—').split('-')[0];
   const time = value => new Date(value).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false });
@@ -40,13 +42,14 @@
     <button on:click={onClose} aria-label="Close day details">[×] close</button></header>
   <p class="progress" role="status">
     {#if !error && detail?.deferred}
-      Acquisition paused{detail.retryAt ? ` until ${new Date(detail.retryAt).toLocaleString('en-US', { timeZone: 'UTC', hour12: false })} UTC` : ''} · saved progress is preserved.
+      {dayStatus.pauseLabel}{detail.retryAt ? ` until ${new Date(detail.retryAt).toLocaleString('en-US', { timeZone: 'UTC', hour12: false })} UTC` : ''} · saved progress is preserved.
       <span class="deferred-reason">{detail.error}</span>
     {:else if error || detail?.error}{error || detail.error} <button on:click={load}>[R] retry</button>
     {:else if loading || detail?.loading}Loading the full day’s rankings{detail?.progress?.pages ? ` · ${detail.progress.pages} swap pages checked` : ''}…
     {:else}Through {detail?.through ? new Date(detail.through).toLocaleString('en-US', { timeZone: 'UTC', hour12: false }) : day} UTC{detail?.refreshing ? ' · refreshing' : ''}{/if}
   </p>
-  {#if detail?.unpricedSwaps || detail?.pendingSwaps || detail?.exclusionsIncomplete}<p class="warning">Provisional snapshot · {detail.unpricedSwaps || 0} unpriced and {detail.pendingSwaps || 0} unresolved pending swaps excluded. Late settlements are not automatically rescanned.</p>{/if}
+  {#if dayStatus.warning}<p class="warning">{dayStatus.warning}</p>{/if}
+  {#if dayStatus.settlement}<p class="basis">{dayStatus.settlement}</p>{/if}
   <div class="rankings">
     <section aria-labelledby="top-swaps-title"><h4 id="top-swaps-title">TOP 10 SWAPS <span>INPUT VALUE · USD</span></h4>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->

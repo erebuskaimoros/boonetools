@@ -5,7 +5,8 @@ import { createFinancialsService } from '../backend/src/shared/financials-servic
 import { requestFromProviders } from '../shared/provider-client.js';
 import { createProviderServices } from '../shared/provider-services.js';
 import { advanceFinancialDay, financialDetailDay, financialDaySnapshotComplete, financialDayRetryAt,
-  financialDayRefreshAt, financialDayRosterReadyAt, FINANCIAL_DAY_VISITOR_LEASE_MS } from '../backend/src/shared/financials-day-detail.js';
+  financialDayNextWorkAt, financialDayNeedsWork, financialDaySettlement, financialDaySnapshotFinalized,
+  financialDayRosterReadyAt, FINANCIAL_DAY_VISITOR_LEASE_MS } from '../backend/src/shared/financials-day-detail.js';
 
 // Local development does not share the production database/quota counters.
 // All Financials dev requests do share this process-local admission budget.
@@ -57,7 +58,8 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
   const batchSize = Math.max(1, Math.min(10, Number(maxRequests) || 10));
   let stopped = false, started = false, timer, active;
   const utcDay = timestamp => new Date(timestamp).toISOString().slice(0, 10);
-  const leased = entry => entry.background || now() - entry.requestedAt < FINANCIAL_DAY_VISITOR_LEASE_MS;
+  const leased = entry => entry.background || financialDaySettlement(entry.payload?.day, entry.payload)?.status === 'pending'
+    || now() - entry.requestedAt < FINANCIAL_DAY_VISITOR_LEASE_MS;
   function ensureDay(day, background = false) {
     let entry = days.get(day);
     if (!entry) {
@@ -75,9 +77,14 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
         const result = await advanceFinancialDay(day, entry.state,
           (route, options) => requestJson(route, { ...options, signal: controller.signal }), now(), { background: entry.background });
         entry.state = result.state;
-        if (result.payload) { entry.payload = result.payload; entry.retryAt = financialDayRefreshAt(now(), { background: entry.background }); break; }
+        if (result.payload) {
+          entry.payload = result.payload;
+          entry.retryAt = financialDayNextWorkAt(day, result.payload, now(), { background: entry.background }) ?? now();
+          if (!financialDaySnapshotComplete(day, result.payload) || !financialDayNeedsWork(day, result.payload, now())) break;
+        }
       }
-      if (entry.state?.phase !== 'done') entry.retryAt = now() + 5000;
+      if (entry.state?.phase !== 'done' || (financialDaySnapshotComplete(day, entry.payload)
+        && financialDayNeedsWork(day, entry.payload, now()))) entry.retryAt = now() + 5000;
       entry.error = '';
     } catch (failure) {
       if (!stopped) { entry.error = failure.message; entry.retryAt = financialDayRetryAt(failure, now()); }
@@ -85,7 +92,7 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
     finally { entry.running = false; }
   }
   function run(day, entry) {
-    if (stopped || active || !leased(entry) || financialDaySnapshotComplete(day, entry.payload) || now() < entry.retryAt) return active;
+    if (stopped || active || !leased(entry) || !financialDayNeedsWork(day, entry.payload, now()) || now() < entry.retryAt) return active;
     active = acquireDay(day, entry).finally(() => { active = null; });
     return active;
   }
@@ -104,20 +111,28 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
       entry.requestedAt = now();
       const complete = financialDaySnapshotComplete(day, entry.payload);
       run(day, entry);
+      const settlement = financialDaySettlement(day, entry.payload);
+      const working = !complete || settlement?.status === 'pending';
+      if (settlement?.status === 'pending') {
+        const eligibleAt = Math.max(Date.parse(settlement.nextCheckAt) || 0, entry.retryAt);
+        if (eligibleAt > now()) settlement.nextCheckAt = new Date(eligibleAt).toISOString();
+      }
       return { day, ...entry.payload, loading: !entry.payload, refreshing: Boolean(entry.payload && entry.running && !complete),
-        retryAt: !complete && entry.error ? new Date(entry.retryAt).toISOString() : null,
-        deferred: Boolean(!complete && entry.error && entry.retryAt > now()), error: complete ? '' : entry.error,
-        progress: { phase: complete ? 'done' : entry.state?.phase || (entry.payload ? 'done' : 'queued'), pages: entry.state?.pages || 0 } };
+        ...(complete ? { finalized: financialDaySnapshotFinalized(day, entry.payload, now()), settlement } : {}),
+        retryAt: working && entry.error ? new Date(entry.retryAt).toISOString() : null,
+        deferred: Boolean(working && entry.error && entry.retryAt > now()), error: working ? entry.error : '',
+        progress: { phase: settlement?.status === 'pending' ? 'settlement' : complete ? 'done' : entry.state?.phase || (entry.payload ? 'done' : 'queued'), pages: entry.state?.pages || 0 } };
     },
     async tick() {
       if (stopped) return;
       ensureDay(utcDay(now()), true);
       const yesterday = utcDay(now() - 86400_000);
       if (days.has(yesterday) && !financialDaySnapshotComplete(yesterday, days.get(yesterday).payload)) ensureDay(yesterday, true);
+      for (const [day, entry] of days) if (financialDaySettlement(day, entry.payload)?.status === 'pending') entry.background = true;
       if (active) return active;
       // A single bounded batch at a time. Rotate eligible days by their last
       // work time so cold visitor scans cannot starve the maintained roster.
-      const next = [...days].filter(([day, entry]) => leased(entry) && !financialDaySnapshotComplete(day, entry.payload) && now() >= entry.retryAt)
+      const next = [...days].filter(([day, entry]) => leased(entry) && financialDayNeedsWork(day, entry.payload, now()) && now() >= entry.retryAt)
         .sort(([dayA, a], [dayB, b]) => a.lastWorkedAt - b.lastWorkedAt || dayA.localeCompare(dayB))[0];
       if (next) await run(...next);
     },

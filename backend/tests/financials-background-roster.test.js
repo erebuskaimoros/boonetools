@@ -118,7 +118,7 @@ async function withRosterDatabase(name, run) {
 
 const postgres = { skip: !process.env.ACQUISITION_TEST_DATABASE_URL };
 
-test('Postgres startup, no-viewer progress, exact restart cursor, rollover and frozen close are durable', postgres, async () => {
+test('Postgres startup, no-viewer progress, exact restart cursor, rollover and targeted settlement are durable', postgres, async () => {
   await withRosterDatabase('lifecycle', async client => {
     let clock = (from + 5 * 60) * 1000;
     let calls = [];
@@ -171,14 +171,18 @@ test('Postgres startup, no-viewer progress, exact restart cursor, rollover and f
     assert.equal(stored.payload_json.finalized, false, 'acquisition completion must not claim settlement finality');
     assert.equal(stored.payload_json.pendingSwaps, 2);
     assert.equal(stored.payload_json.through, new Date((from + 86400) * 1000).toISOString());
-    assert.equal(calls.filter(route => route.startsWith('/actions')).length, 1);
+    const actionRoutes = calls.filter(route => route.startsWith('/actions'));
+    assert.equal(actionRoutes.filter(route => !new URL(route, 'https://example.test').searchParams.has('txid')).length, 1,
+      'only the disjoint closing interval is acquired, never the whole day again');
+    assert.deepEqual(actionRoutes.filter(route => new URL(route, 'https://example.test').searchParams.has('txid'))
+      .map(route => new URL(route, 'https://example.test').searchParams.get('txid')), ['PENDING-A', 'PENDING-B']);
     const next = (await client.query('select * from financials_day_details where day = $1::date + 1', [day])).rows[0];
     assert.equal(next.background, true); assert.equal(next.state_json, null); assert.equal(next.payload_json, null);
     assert.equal(next.available_at.getTime(), (from + 86400 + 18 * 60) * 1000);
     calls = [];
     await client.query('update financials_day_details set available_at = $2 where day = $1', [day, new Date(clock)]);
     await detail.refreshFinancialDayQueue(client, options);
-    assert.equal(calls.length, 0, 'closed provisional rankings stay frozen and new day waits until its first prefix');
+    assert.equal(calls.length, 0, 'closed-day IDs honor whole-pass backoff and new day waits until its first prefix');
     assert.deepEqual((await client.query('select payload_json from financials_day_details where day = $1', [day])).rows[0].payload_json, stored.payload_json);
   });
 });

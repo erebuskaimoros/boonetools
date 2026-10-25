@@ -9,6 +9,7 @@ export function financialDayPollDelay(detail, error, now = Date.now()) {
   }
   if (error || detail?.error) return 30_000;
   if (detail?.loading || detail?.refreshing) return 5000;
+  if (detail?.settlement?.status === 'pending') return 60_000;
   if (detail?.partial) return 60_000;
   return null;
 }

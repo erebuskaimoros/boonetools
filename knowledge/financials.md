@@ -147,8 +147,9 @@ complete scans finish.
 A completed UTC-day snapshot is retained without automatic rescanning, even when
 pending or unpriced actions remain. Acquisition completion is not financial
 finality: the UI identifies exclusions and late settlements can change the true
-ranking. There is no automatic targeted settlement repair yet. This stops the old
-fifteen-minute full-day repeat triggered by a single unresolved action.
+ranking. The October 24 targeted settlement pass below supersedes the original
+freeze of pending IDs, without restoring the old fifteen-minute full-day repeat
+triggered by a single unresolved action.
 
 Before the October 22 background-roster update, today's completed prefix
 refreshed at most every fifteen minutes while viewed.
@@ -213,11 +214,40 @@ use the separately verified `pool_analysis_daily` cache.
 The final interval is acquired after midnight and source coverage, rather than
 freezing an incomplete roster at the wall-clock boundary. Once the day is fully
 acquired, future reads are cache-only. Pending/unpriced exclusions and their
-provisional warning remain; targeted late-settlement repair is not implemented.
+provisional warning remain; saved pending IDs are now handled by the targeted
+settlement pass below.
 This moves first-view latency into bounded background work and removes repeated
 pool history fetches, not the unavoidable one-time scan of every action page.
 An initial bootstrap or an old uncached date can still be slow or quota-deferred.
 The Vite adapter mirrors scheduling but remains process-local, not durable.
+
+### Targeted pending settlement (October 24, 2026)
+
+A full-day acquisition horizon no longer freezes the status of saved pending
+swaps. The existing bounded queue checks only retained pending transaction IDs
+with Midgard `/actions?txid=...`. It does not repeat health, earnings, action-page
+or pool-history acquisition for a closed day. Each successful lookup checkpoints
+its cursor and updated top ten together; the saved pool totals and day horizon
+stay intact. Exact input-transaction identity and Midgard's action-date bounds
+still govern inclusion. A successful refund without a competing unresolved swap
+resolves an exclusion without becoming a ranked swap; ambiguous mixed responses
+stay provisional. Missing prices remain unpriced, never zero.
+
+Existing closed snapshots with retained IDs are eligible without an open viewer.
+The same request cap, provider admission, cooldowns and fair queue scheduling
+apply. Unresolved passes back off for one hour, then six hours, then at most one
+pass per day. A provider error preserves the current ID for retry; a valid but
+still-pending or absent action advances to the next saved ID. No cold historical
+dates are created for reconciliation. Legacy count-only exclusions and IDs lost
+to the 512-ID cap remain explicitly provisional rather than causing a rescan.
+
+The additive `settlement` metadata distinguishes pending checks, complete checks,
+and unavailable reconciliation, with the last completed pass and next scheduled
+pass. Exclusion counts describe saved source observations, not a live on-chain
+in-flight count. While checks are pending, an open panel polls only the cached
+backend result; source requests belong to the background queue. Fully resolved
+closed days cost no further provider requests. Unpriced-only exclusions are not
+automatically retried by this pending-ID repair.
 
 ## Historical state and acquisition
 

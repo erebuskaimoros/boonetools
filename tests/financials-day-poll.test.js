@@ -22,3 +22,22 @@ test('loading, incremental updates and ordinary errors have bounded independent 
   assert.equal(financialDayPollDelay({}, 'Connection unavailable'), 30_000);
   assert.equal(financialDayPollDelay({ error: 'Source unavailable' }), 30_000);
 });
+
+test('closed days poll cached settlement progress without treating it as a full-day rebuild', () => {
+  assert.equal(financialDayPollDelay({ loading: false, partial: false, pendingSwaps: 231,
+    settlement: { status: 'pending', remaining: 231 } }), 60_000);
+  assert.equal(financialDayPollDelay({ partial: false, pendingSwaps: 0,
+    settlement: { status: 'complete', remaining: 0 } }), null);
+  assert.equal(financialDayPollDelay({ partial: false, pendingSwaps: 82,
+    settlement: { status: 'unavailable', remaining: 0 } }), null);
+});
+
+test('settlement checks retain provider deferral cadence without fast acquisition polling', () => {
+  const now = Date.parse('2026-10-24T02:00:00Z');
+  const pending = { partial: false, refreshing: false, settlement: { status: 'pending' } };
+  assert.equal(financialDayPollDelay({ ...pending, error: 'Provider failed' }, '', now), 30_000);
+  assert.equal(financialDayPollDelay({ ...pending, deferred: true, error: 'Budget reached',
+    retryAt: new Date(now + 3600_000).toISOString() }, '', now), 60_000);
+  assert.equal(financialDayPollDelay({ ...pending, deferred: true,
+    retryAt: new Date(now + 12_000).toISOString() }, '', now), 12_000);
+});
