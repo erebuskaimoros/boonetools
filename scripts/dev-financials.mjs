@@ -1,11 +1,11 @@
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { financialsWindow } from '../shared/financials/model.js';
 import { createFinancialsService } from '../backend/src/shared/financials-service.js';
 import { createFinancialsHourlyService } from '../backend/src/shared/financials-hourly.js';
 import { financialHourlyWindow } from '../shared/financials/hourly.js';
 import { requestFromProviders } from '../shared/provider-client.js';
 import { createProviderServices } from '../shared/provider-services.js';
+import { createDevDataCache } from './dev-data-cache.mjs';
 import { advanceFinancialDay, financialDetailDay, financialDaySnapshotComplete, financialDayRetryAt,
   financialDayNextWorkAt, financialDayNeedsWork, financialDaySettlement, financialDaySnapshotFinalized,
   financialDayRosterReadyAt, FINANCIAL_DAY_VISITOR_LEASE_MS } from '../backend/src/shared/financials-day-detail.js';
@@ -145,19 +145,28 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
   return queue;
 }
 
-export function createFinancialsDevPlugin({ days = createFinancialsDayDevQueue(), createService = createFinancialsService,
-  createHourlyService = createFinancialsHourlyService } = {}) {
+const isRecord = value => value && typeof value === 'object' && !Array.isArray(value);
+
+// Observations live in the checkout's ignored .boonetools-cache, which `npm ci`
+// leaves alone; the first run migrates any history npm has not yet removed.
+export function createFinancialsDevPlugin({ root, cacheDir, days = createFinancialsDayDevQueue(),
+  createService = createFinancialsService, createHourlyService = createFinancialsHourlyService } = {}) {
+  const historyCache = createDevDataCache('financials/history-v1.json', { root,
+    validate: stored => stored?.version === 1 && [stored.swaps, stored.earnings, stored.bonds].every(isRecord) });
+  const hourlyCache = createDevDataCache('financials/hourly-v1.json', { root,
+    validate: stored => stored?.version === 1 && [stored.swaps, stored.earnings].every(isRecord) });
+  cacheDir ??= path.dirname(historyCache.file);
   let service, hourly, stopping;
   const stop = () => stopping ||= Promise.all([days.stop(), service?.stop(), hourly?.stop()]);
   return {
     name: 'financials-dev-data',
     apply: 'serve',
-    configureServer(server) {
-      const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-      service = createService({ cacheDir: path.join(root, 'node_modules/.cache/financials'),
-        requestJson: createFinancialsDevRequest(), rpcConcurrency: 6 });
-      hourly = createHourlyService({ cacheDir: path.join(root, 'node_modules/.cache/financials'),
-        requestJson: createFinancialsDevRequest() });
+    async configureServer(server) {
+      // Migrate, or refuse unusable observations, before any acquisition starts.
+      await historyCache.prepare(path.join(cacheDir, 'history-v1.json'));
+      await hourlyCache.prepare(path.join(cacheDir, 'hourly-v1.json'));
+      service = createService({ cacheDir, requestJson: createFinancialsDevRequest(), rpcConcurrency: 6 });
+      hourly = createHourlyService({ cacheDir, requestJson: createFinancialsDevRequest() });
       days.start();
       server.httpServer?.once('close', stop);
       server.middlewares.use(async (req, res, next) => {

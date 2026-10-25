@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, copyFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, copyFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync, execFileSync } from 'node:child_process';
+import { gunzipSync } from 'node:zlib';
 
 function sourceFixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'boonetools-source-'));
@@ -38,13 +39,43 @@ function sourceFixture(t) {
     [[ "\${TEST_STO_READ_FAIL:-}" != 1 ]] || exit 1
     printf '%s' "$TEST_STO_KEY"
   elif [[ "$*" == *'bash -s'* ]]; then /bin/cat > "$TEST_ROOT/executed-helper"; fi\n`);
-  putBin('npm', `test ! -e .env\ntest "$(cat backend/sentinel.txt)" = 'committed source'\ntest "$VITE_STO_WIDGET_API_KEY" = "$EXPECTED_STO_KEY"\nif [[ "$*" == 'run build' ]]; then mkdir dist; printf '<html>committed build</html>' > dist/index.html; fi\n`);
+  putBin('npm', `test ! -e .env\ntest "$(cat backend/sentinel.txt)" = 'committed source'\ntest "$VITE_STO_WIDGET_API_KEY" = "$EXPECTED_STO_KEY"\nif [[ "$*" == 'run build' ]]; then mkdir dist; printf '<html>committed build</html>' > dist/index.html; if [[ "\${TEST_ADD_XATTR:-0}" == 1 ]]; then /usr/bin/xattr -w com.boonetools.packaging-test metadata-must-not-ship dist/index.html; fi; fi\n`);
   const run = (script, args = [sha], env = {}) => spawnSync('bash', [join(root, 'scripts', script), ...args], {
     cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'bin')}:${process.env.PATH}`, TEST_ROOT: root, CI_RESULT: 'success',
       VITE_STO_WIDGET_API_KEY: '', TEST_STO_KEY: 'test-sto-key', EXPECTED_STO_KEY: 'test-sto-key', ...env }
   });
   return { root, git, sha, run };
 }
+
+function assertCleanFrontendArtifact(root) {
+  const archive = gunzipSync(readFileSync(join(root, 'upload.tar.gz'))).toString('latin1');
+  assert.equal(/LIBARCHIVE\.xattr|SCHILY\.xattr|metadata-must-not-ship|\.\/\._/.test(archive), false,
+    'Frontend artifact must not contain xattr headers, metadata, or AppleDouble entries');
+  const packed = execFileSync('tar', ['-xOzf', join(root, 'upload.tar.gz'), './index.html'], { encoding: 'utf8' });
+  assert.equal(packed, '<html>committed build</html>');
+}
+
+test('macOS frontend artifacts exclude extended attributes without losing built content', { skip: process.platform !== 'darwin' }, (t) => {
+  const { root, run } = sourceFixture(t);
+  const result = run('deploy-boonetools-frontend.sh', undefined, { TEST_ADD_XATTR: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  assertCleanFrontendArtifact(root);
+});
+
+test('frontend packaging remains compatible with GNU tar', (t) => {
+  const gnuTar = ['tar', 'gtar'].find((candidate) => {
+    const result = spawnSync(candidate, ['--version'], { encoding: 'utf8' });
+    return result.status === 0 && /GNU tar/.test(result.stdout);
+  });
+  if (!gnuTar) return t.skip('GNU tar is not installed');
+  const { root, run } = sourceFixture(t);
+  const tarBinary = execFileSync('which', [gnuTar], { encoding: 'utf8' }).trim();
+  symlinkSync(tarBinary, join(root, 'bin/tar'));
+  const result = run('deploy-boonetools-frontend.sh', undefined,
+    { TEST_ADD_XATTR: process.platform === 'darwin' ? '1' : '0' });
+  assert.equal(result.status, 0, result.stderr);
+  assertCleanFrontendArtifact(root);
+});
 
 for (const kind of ['backend', 'frontend']) {
   test(`${kind} deploy excludes dirty sources and executes the helper from the selected CI-passing SHA`, (t) => {

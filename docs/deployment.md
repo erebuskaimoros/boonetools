@@ -70,6 +70,12 @@ rejects missing/empty/whitespace-containing keys before building. It never sourc
 server configuration as shell code. The built widget exposes the affiliate key
 to browsers by design; this file must not contain a backend credential.
 
+Frontend packaging uses `COPYFILE_DISABLE=1` and `tar --no-xattrs` on both
+BSD/macOS and GNU/Linux tar. This excludes AppleDouble files and extended
+attribute headers without changing asset contents or suppressing extraction
+errors. The deployment-source tests exercise real macOS metadata and GNU tar
+when those implementations are available.
+
 ## Production layout
 
 | Component | Location |

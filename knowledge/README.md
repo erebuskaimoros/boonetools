@@ -5,6 +5,7 @@ This directory contains website/backend-specific protocol notes and session hist
 - Use the shared [reference base](../../../knowledge/reference-base.md) to locate authoritative Thornode/OpenAPI, Midgard, Rujira, deployment, client, and XMR sources. Open only the relevant section and source.
 - Primary local API references are [the Thornode API guide](../docs/thornode-api-reference.md), [the consumer OpenAPI snapshot](../docs/thornode-openapi.yaml), and [the Midgard Swagger snapshot](../docs/midgard-swagger.json).
 - Start with [sessions/_index.md](./sessions/_index.md) for the local execution trail.
+- [papercut-fixes-2026-09.md](./papercut-fixes-2026-09.md) — September papercut fixes recovered in October, deliberate omissions, and five fixes still missing from main.
 - [liquify-cooldowns-2026-09-02.md](./liquify-cooldowns-2026-09-02.md) — production cooldown evidence, regression fixes, resumable acquisition, and remaining provider-call budgets.
 - [api-limit-audit-2026-09-05.md](./api-limit-audit-2026-09-05.md) — measured provider traffic, current scanner throttling, and Pool Dislocation repair/lookup efficiency fixes awaiting deployment.
 - [sitewide-call-redundancy-2026-09-02.md](./sitewide-call-redundancy-2026-09-02.md) — follow-up audit of duplicate acquisition, completed history, visitor-driven provider calls, and internal polling.
@@ -21,8 +22,9 @@ This directory contains website/backend-specific protocol notes and session hist
 - [bond-tracker-apy-investigation-2026-09-20.md](./bond-tracker-apy-investigation-2026-09-20.md) — current-churn annualization correction, verified historical samples, and RPC height safeguards.
 - [Thorfolio Bond Yield management](../docs/thorfolio-bond-yield.md) — 3.21 payout configuration, activation checks, destination semantics, and wallet review.
 - [Thorfolio TCY payout APR](./thorfolio-tcy-apr.md) — upstream unordered-history annualization bug and the independent trailing-30-day payout calculation.
-- [footer-swap-and-tip-jar.md](./footer-swap-and-tip-jar.md) — footer swap panel framing STO's widget, the ThorKit affiliate key, wallet-sharing limits, and the "buy me a coffee?" RUNE send panel.
+- [footer-swap-and-tip-jar.md](./footer-swap-and-tip-jar.md) — footer swap panel framing STO's widget, the ThorKit affiliate key, wallet-sharing limits, the "buy me a coffee?" RUNE send panel, and the SwapKit alternative.
 - [protocol-fee-comparison.md](./protocol-fee-comparison.md) — monthly THORChain / NEAR Intents / Chainflip subsidy-adjusted swap income, historical FLIP issuance verification, and scheduled acquisition.
+- [near-revenue-reconciliation-2026-09-20.md](./near-revenue-reconciliation-2026-09-20.md) — BooneTools' NEAR swap income vs NEAR-reported monthly revenue: unresolved gap and the open accounting decision.
 - [tc-fee-dash.md](./tc-fee-dash.md) — `/tc-fee-dash` historical fee-capture metrics plus its live Mimir/default system-income allocation and Sankey flow contract.
 - [slow-block-consensus-wasm-report-2026-08-06.md](./slow-block-consensus-wasm-report-2026-08-06.md) — three-window analysis of >10-second block intervals, scheduled proposer failures, final commit behavior, and Wasm/FIN activity.
 - [architecture-consolidation.md](./architecture-consolidation.md) — runtime ownership, unified API/backend contract, canonical provenance, queued reads, archive policy, and CI ratchets.

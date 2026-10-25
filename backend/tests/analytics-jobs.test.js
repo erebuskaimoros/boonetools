@@ -242,7 +242,7 @@ test('job registry, systemd timers, and deploy keep provider lanes isolated and 
   assert.match(frontendDeployScript, /ARCHIVE_SHA256/);
   assert.match(
     frontendDeployScript,
-    /tar -C "\$BUILD_DIR\/dist" -czf "\$ARCHIVE" \./
+    /COPYFILE_DISABLE=1 tar --no-xattrs -C "\$BUILD_DIR\/dist" -czf "\$ARCHIVE" \./
   );
   assert.match(remoteFrontendDeployScript, /flock -n 9/);
   assert.match(remoteFrontendDeployScript, /atomic_point_current/);
