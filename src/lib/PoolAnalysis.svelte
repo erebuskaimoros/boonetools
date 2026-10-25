@@ -370,7 +370,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each filteredPools as pool (pool.asset)}
+            {#each filteredPools as pool, index (pool.asset)}
               <tr class="pool-row" class:expanded={selectedAsset === pool.asset}>
                 <td class="pool-cell" data-label="POOL">
                   <button
@@ -379,6 +379,7 @@
                     aria-controls={detailId(pool.asset)}
                     on:click={() => togglePool(pool.asset)}
                   >
+                    <span class="row-number">{String(index + 1).padStart(2, '0')}</span>
                     <span class="chevron">{selectedAsset === pool.asset ? '▾' : '▸'}</span>
                     <img src={poolLogo(pool.asset)} alt="" on:error={useFallbackLogo} />
                     <span class="pool-name">
@@ -572,7 +573,7 @@
   th { position: sticky; z-index: 3; padding: 0; border-right: 1px solid var(--term-border-faint, #111); border-bottom: 1px solid var(--term-border, #1a1a1a); background: var(--term-surface, #0a0a0a); color: var(--term-text-5, #444); font-size: 11px; white-space: nowrap; }
   .group-row th { top: 0; height: 27px; padding: 6px 12px; color: var(--term-text-6, #333); font-size: 10px; letter-spacing: .14em; text-align: center; }
   .column-row th { top: 27px; height: 39px; text-align: right; }
-  .group-row th:first-child, .column-row th:first-child { position: sticky; left: 0; z-index: 5; width: 160px; text-align: left; }
+  .group-row th:first-child, .column-row th:first-child { position: sticky; left: 0; z-index: 5; width: 190px; text-align: left; }
   .sort-button, .static-head { display: flex; align-items: center; justify-content: flex-end; gap: 6px; width: 100%; min-height: 39px; box-sizing: border-box; padding: 8px 11px; overflow: hidden; border: 0; background: none; color: inherit; font-size: inherit; letter-spacing: .06em; white-space: nowrap; }
   .sort-button span, .static-head { overflow: hidden; text-overflow: ellipsis; }
   .column-row th:first-child .sort-button { justify-content: flex-start; padding-left: 14px; }
@@ -584,7 +585,8 @@
   .pool-row:hover, .pool-row.expanded { background: var(--term-surface-hover, #0d0d0d); }
   .pool-row.expanded td:first-child { box-shadow: inset 2px 0 0 var(--term-accent, #00cc66); }
   .pool-cell { position: sticky; left: 0; z-index: 2; width: 220px; padding: 0; background: inherit; text-align: left; }
-  .pool-toggle { display: grid; grid-template-columns: 16px 25px minmax(0, 1fr) auto; align-items: center; gap: 7px; width: 100%; min-height: 54px; padding: 7px 11px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+  .pool-toggle { display: grid; grid-template-columns: 2ch 16px 25px minmax(0, 1fr) auto; align-items: center; gap: 7px; width: 100%; min-height: 54px; padding: 7px 11px; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+  .row-number { color: var(--term-text-3, #c8c8c8); font: 11px var(--term-font-mono, 'JetBrains Mono', monospace); font-variant-numeric: tabular-nums; text-align: right; }
   .pool-toggle:hover strong { color: var(--term-accent, #00cc66); }
   .pool-toggle img { width: 23px; height: 23px; object-fit: contain; }
   .chevron { color: var(--term-accent, #00cc66); }
@@ -670,7 +672,7 @@
     .period-picker { align-items: flex-start; flex-direction: column; }
     .period-control button, .status-control button, .range-buttons button, .zoom-buttons button { min-height: 40px; }
     .group-row th:first-child, .column-row th:first-child, .pool-cell { width: 146px; min-width: 146px; max-width: 146px; }
-    .pool-toggle { grid-template-columns: 13px 22px minmax(0, 1fr); padding-left: 7px; }
+    .pool-toggle { grid-template-columns: 2ch 13px 22px minmax(0, 1fr); padding-left: 7px; }
     .pool-toggle em { display: none; }
     .pool-toggle img { width: 20px; height: 20px; }
     .detail-heading { align-items: flex-start; flex-direction: column; }
