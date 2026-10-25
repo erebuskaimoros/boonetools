@@ -35,6 +35,7 @@ export function createChainEventBroker(options = {}) {
   let reconnectTimer = null;
   let heartbeatTimer = null;
   let latestHead = null;
+  let durablePoll = null;
   let stopped = true;
   let connecting = null;
 
@@ -60,9 +61,34 @@ export function createChainEventBroker(options = {}) {
   function publish(head) {
     const normalized = parseHead(head);
     if (!normalized) return false;
-    if (!latestHead || normalized.height >= latestHead.height) latestHead = normalized;
+    if (latestHead && normalized.height < latestHead.height) return false;
+    if (
+      latestHead
+      && normalized.height === latestHead.height
+      && JSON.stringify(normalized) === JSON.stringify(latestHead)
+    ) return false;
+    latestHead = normalized;
     broadcastFrame(formatChainHeadSse(normalized));
     return true;
+  }
+
+  async function pollLatestDurableHead() {
+    if (stopped || !listenerClient) return null;
+    if (durablePoll) return durablePoll;
+    const client = listenerClient;
+    durablePoll = (async () => {
+      try {
+        const latest = await loadLatest(client);
+        if (!stopped && listenerClient === client && latest) publish(latest);
+        return latest;
+      } catch (error) {
+        log(`Unable to poll latest durable chain head: ${error?.message || error}`);
+        return null;
+      } finally {
+        durablePoll = null;
+      }
+    })();
+    return durablePoll;
   }
 
   function releaseListenerClient(client = listenerClient) {
@@ -108,7 +134,7 @@ export function createChainEventBroker(options = {}) {
         await client.query(`listen ${CHAIN_HEAD_NOTIFY_CHANNEL}`);
         listenerClient = client;
         const latest = await loadLatest(client).catch(() => null);
-        if (latest) latestHead = parseHead(latest);
+        if (latest) publish(latest);
       } catch (error) {
         releaseListenerClient(client);
         log(`Unable to start chain event LISTEN connection: ${error?.message || error}`);
@@ -124,9 +150,10 @@ export function createChainEventBroker(options = {}) {
     if (!stopped) return;
     stopped = false;
     clearIntervalFn(heartbeatTimer);
-    heartbeatTimer = setIntervalFn(() => broadcastFrame(': keepalive\n\n'), (
-      Number(options.heartbeatMs) || DEFAULT_HEARTBEAT_MS
-    ));
+    heartbeatTimer = setIntervalFn(async () => {
+      broadcastFrame(': keepalive\n\n');
+      await pollLatestDurableHead();
+    }, Number(options.heartbeatMs) || DEFAULT_HEARTBEAT_MS);
     await connect();
   }
 

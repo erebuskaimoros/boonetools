@@ -354,9 +354,10 @@ test('chain event broker replays the latest durable head and fans out notificati
 
   const client = new FakeClient();
   const intervals = [];
+  let durableHead = { height: 100, time: '2026-08-05T12:00:00Z', interval_ms: 6000 };
   const broker = createChainEventBroker({
     getClient: async () => client,
-    loadLatest: async () => ({ height: 100, time: '2026-08-05T12:00:00Z', interval_ms: 6000 }),
+    loadLatest: async () => durableHead,
     setIntervalFn(callback, delay) {
       const timer = { callback, delay };
       intervals.push(timer);
@@ -385,7 +386,19 @@ test('chain event broker replays the latest durable head and fans out notificati
   });
   assert.match(response.frames.at(-1), /event: head/);
   assert.match(response.frames.at(-1), /"has_swap_events":true/);
-  intervals[0].callback();
+
+  durableHead = {
+    height: 102,
+    time: '2026-08-05T12:00:12Z',
+    interval_ms: 6000,
+    pol_reserve_deployments: [{ asset: 'TRON.USDT', rune_e8: '2500000' }]
+  };
+  await intervals[0].callback();
+  assert.match(response.frames.at(-1), /id: 102/);
+  assert.match(response.frames.at(-1), /"pol_reserve_deployments":\[\{"asset":"TRON.USDT","rune_e8":"2500000"\}\]/);
+  const frameCount = response.frames.length;
+  await intervals[0].callback();
+  assert.equal(response.frames.length, frameCount + 1);
   assert.equal(response.frames.at(-1), ': keepalive\n\n');
 
   request.emit('close');
