@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalDateTime, formatLocalTime } from './utils/datetime.js';
   import LegacyChartTools from './charts/LegacyChartTools.svelte';
   import RangeSummary from './charts/RangeSummary.svelte';
   import { selectIndexSummaryRows } from './charts/summary.js';
@@ -1079,21 +1080,12 @@
 
   function formatTime(date) {
     if (!date) return '--';
-    return new Intl.DateTimeFormat('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    }).format(date);
+    return formatLocalTime(date);
   }
 
   function formatTransactionTime(value) {
     if (!value) return '--';
-    return new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(new Date(value));
+    return formatLocalDateTime(value, { year: undefined, second: undefined });
   }
 
   function formatAssetAmount(value) {

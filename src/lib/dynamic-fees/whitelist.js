@@ -1,3 +1,5 @@
+import { formatLocalDateTime } from '../utils/datetime.js';
+
 const STATES = {
   active: { label: 'Whitelisted', color: '#00cc66' },
   monitor: { label: 'Monitor only', color: '#5588cc' },
@@ -57,7 +59,7 @@ export function positionWhitelistMarkers(events, points) {
 }
 
 export function whitelistEventText(event) {
-  return `${event.label} · ${event.time.replace('T', ' ').replace(/\.\d+Z$/, ' UTC')}${event.estimated ? ' · consensus estimate' : ''}`;
+  return `${event.label} · ${formatLocalDateTime(event.time)}${event.estimated ? ' · consensus estimate' : ''}`;
 }
 
 // Feature-local Chart.js overlay: no datasets, values, axes or accounting are

@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalDateTime } from '../utils/datetime.js';
   import RangeSummary from '../charts/RangeSummary.svelte';
   import { onDestroy, onMount } from 'svelte';
   import { createVisiblePoll } from '../utils/visible-poll.js';
@@ -229,16 +230,11 @@
 
   function formatTooltip(point) {
     const date = new Date(point.timestamp);
-    return `${date.toLocaleString('en-US')} · ${formatSeconds(point.seconds)} interval · block ${Number(point.height || 0).toLocaleString('en-US')}`;
+    return `${formatLocalDateTime(date)} · ${formatSeconds(point.seconds)} interval · block ${Number(point.height || 0).toLocaleString('en-US')}`;
   }
 
   function formatTooltipTime(point) {
-    return new Date(point.timestamp).toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit'
-    });
+    return formatLocalDateTime(point.timestamp, { year: undefined, second: undefined });
   }
 
   function pointerChartX(event) {

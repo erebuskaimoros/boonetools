@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalDateTime } from './utils/datetime.js';
   import { onMount } from 'svelte';
   import { fade } from 'svelte/transition';
   import { copyToClipboard as copyToClipboardUtil } from '$lib/utils/formatting';
@@ -475,7 +476,7 @@
               <div class="out-tx">
                 <div class="detail-item" on:click={() => copyToClipboard(action.date)}>
                   <span class="label">Date:</span>
-                  <span class="value">{new Date(Number(action.date) / 1000000).toLocaleString()}</span>
+                  <span class="value">{formatLocalDateTime(Number(action.date) / 1000000)}</span>
                 </div>
                 <div class="detail-item" on:click={() => copyToClipboard(action.height)}>
                   <span class="label">Height:</span>

@@ -1,5 +1,6 @@
 import Chart from 'chart.js/auto';
 import zoomPlugin from 'chartjs-plugin-zoom';
+import { formatLocalHour } from '../utils/datetime.js';
 
 import {
   INTERACTIVE_CHART_LEGEND,
@@ -25,21 +26,14 @@ function compactUsd(value) {
 
 function label(value, grainSeconds) {
   const date = new Date(value);
-  return date.toLocaleString('en-US', grainSeconds >= 24 * 60 * 60
-    ? {
+  return grainSeconds >= 24 * 60 * 60
+    ? date.toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
         year: '2-digit',
         timeZone: 'UTC'
-      }
-    : {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-        timeZone: 'UTC'
-      });
+      })
+    : formatLocalHour(value, { timeZoneName: 'short' });
 }
 
 function milestoneLabel(row) {

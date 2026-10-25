@@ -4,13 +4,14 @@
   import { financialDayPollDelay } from './day-poll.js';
   import { financialDayStatus } from './day-status.js';
   import { formatFinancialAmount } from '../../../shared/financials/model.js';
+  import { formatLocalDateTime, localTimeZone } from '../utils/datetime.js';
   export let day;
   export let onClose = () => {};
   let detail = null, error = '', loading = true, request, timer, destroyed = false, sequence = 0;
   $: dayStatus = financialDayStatus(detail);
   const usd = value => formatFinancialAmount(value, 'usd', false);
   const assetLabel = value => String(value || '—').split('-')[0];
-  const time = value => new Date(value).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false });
+  const time = value => formatLocalDateTime(value, { year: undefined });
   async function load() {
     const id = ++sequence;
     clearTimeout(timer);
@@ -42,11 +43,11 @@
     <button on:click={onClose} aria-label="Close day details">[×] close</button></header>
   <p class="progress" role="status">
     {#if !error && detail?.deferred}
-      {dayStatus.pauseLabel}{detail.retryAt ? ` until ${new Date(detail.retryAt).toLocaleString('en-US', { timeZone: 'UTC', hour12: false })} UTC` : ''} · saved progress is preserved.
+      {dayStatus.pauseLabel}{detail.retryAt ? ` until ${formatLocalDateTime(detail.retryAt)}` : ''} · saved progress is preserved.
       <span class="deferred-reason">{detail.error}</span>
     {:else if error || detail?.error}{error || detail.error} <button on:click={load}>[R] retry</button>
     {:else if loading || detail?.loading}Loading the full day’s rankings{detail?.progress?.pages ? ` · ${detail.progress.pages} swap pages checked` : ''}…
-    {:else}Through {detail?.through ? new Date(detail.through).toLocaleString('en-US', { timeZone: 'UTC', hour12: false }) : day} UTC{detail?.refreshing ? ' · refreshing' : ''}{/if}
+    {:else}Through {detail?.through ? formatLocalDateTime(detail.through) : `${day} UTC`}{detail?.refreshing ? ' · refreshing' : ''}{/if}
   </p>
   {#if dayStatus.warning}<p class="warning">{dayStatus.warning}</p>{/if}
   {#if dayStatus.settlement}<p class="basis">{dayStatus.settlement}</p>{/if}
@@ -54,7 +55,7 @@
     <section aria-labelledby="top-swaps-title"><h4 id="top-swaps-title">TOP 10 SWAPS <span>INPUT VALUE · USD</span></h4>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
       <div class="table-scroll" tabindex="0" role="region" aria-label="Top ten swaps">
-        <table><thead><tr><th scope="col">#</th><th scope="col">SWAP</th><th scope="col" class="amount">VALUE</th><th scope="col">TX · UTC</th></tr></thead>
+        <table><thead><tr><th scope="col">#</th><th scope="col">SWAP</th><th scope="col" class="amount">VALUE</th><th scope="col" title={localTimeZone()}>TX · LOCAL TIME</th></tr></thead>
           <tbody>{#each detail?.swaps || [] as row, index (row.txId)}<tr><td>{String(index + 1).padStart(2, '0')}</td>
             <th scope="row" title={`${row.inputAsset} → ${row.outputAsset}`}>{assetLabel(row.inputAsset)} <span class="muted">→</span> {assetLabel(row.outputAsset)}{#if row.streaming}<small>STREAMING</small>{/if}</th>
             <td class="amount">{usd(row.volumeUsd)}</td><td><a href={`https://thorchain.net/tx/${encodeURIComponent(row.txId)}`} target="_blank" rel="noreferrer" title={row.txId}>{row.txId.slice(0, 6)}…{row.txId.slice(-4)} ↗</a><small>{time(row.timestamp)}</small></td>

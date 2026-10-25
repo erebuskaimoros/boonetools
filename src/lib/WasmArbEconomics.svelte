@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalDateTime } from './utils/datetime.js';
   import LegacyChartTools from './charts/LegacyChartTools.svelte';
   import RangeSummary from './charts/RangeSummary.svelte';
   import { onDestroy, onMount, tick } from 'svelte';
@@ -184,18 +185,7 @@
   }
 
   function formatDateTime(value) {
-    if (!value) return '—';
-    const date = new Date(value);
-    if (!Number.isFinite(date.getTime())) return '—';
-    return `${date.toLocaleString('en-US', {
-      month: 'short',
-      day: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-      timeZone: 'UTC'
-    })} UTC`;
+    return formatLocalDateTime(value, { second: undefined });
   }
 
   function formatDuration(seconds) {

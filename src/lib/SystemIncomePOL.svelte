@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalDateTime } from './utils/datetime.js';
   import { onDestroy, onMount } from 'svelte';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
   import CurrencySwitch from './components/terminal/CurrencySwitch.svelte';
@@ -121,10 +122,7 @@
   function displayTimestamp(value, fallback = '—') {
     const parsed = Date.parse(value || '');
     if (!Number.isFinite(parsed)) return fallback;
-    return new Date(parsed).toLocaleString('en-US', {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-      second: '2-digit', hour12: false, timeZone: 'UTC'
-    }) + ' UTC';
+    return formatLocalDateTime(parsed, { year: undefined });
   }
 
   function displayDay(value) {

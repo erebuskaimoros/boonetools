@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalDateTime } from './utils/datetime.js';
   import { onMount } from 'svelte';
   import { fade, fly } from 'svelte/transition';
   import { getChurnState } from '$lib/utils/nodes';
@@ -360,7 +361,7 @@
         </div>
         <div class="cc-stat">
           <div class="cc-label">Last churn</div>
-          <div class="cc-value">{lastChurnTimestampSec ? new Date(lastChurnTimestampSec * 1000).toLocaleString() : '-'}</div>
+          <div class="cc-value">{lastChurnTimestampSec ? formatLocalDateTime(lastChurnTimestampSec * 1000) : '-'}</div>
         </div>
       </div>
 
@@ -379,7 +380,7 @@
                 </div>
                 <div class="row">
                   <span class="key">Time</span>
-                  <span class="val">{new Date(c.tsSec * 1000).toLocaleString()}</span>
+                  <span class="val">{formatLocalDateTime(c.tsSec * 1000)}</span>
                 </div>
                 {#if c.delta}
                 <div class="row">

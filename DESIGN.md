@@ -318,6 +318,22 @@ The aesthetic is flat and hard-edged.
   a faint glow:
   `inset 0 0 18px rgba(0, 204, 102, 0.04)`.
 
+## Time display
+
+Render instants (event timestamps, freshness, scheduled retries, and intraday
+chart labels) in the visitor's browser timezone via `src/lib/utils/datetime.js`.
+Use a timezone abbreviation on precise timestamps and the browser's IANA zone
+for intraday range labels. Apply the offset at the event's date, including DST.
+Hourly axes show the date on the first visible tick and when the local date
+changes; distinguish repeated DST clock hours by their timezone abbreviation.
+Keep full source timestamps as chart identities and zoom bounds.
+
+Date-only daily, weekly and monthly accounting buckets retain their source
+calendar and UTC labels. Do not shift a date-only key to the previous local day
+or silently reaggregate observations. UTC-aligned hourly buckets can begin at
+fractional local hours; display their actual starts. Backend caches, API keys,
+window boundaries and aggregation remain timezone-independent.
+
 ## Motion
 
 Motion is functional, not decorative.

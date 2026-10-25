@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalTime } from './utils/datetime.js';
   import { onMount } from 'svelte';
   import { createVisiblePoll } from './utils/visible-poll.js';
   import { slide } from 'svelte/transition';
@@ -81,11 +82,7 @@
 
   function formatLastUpdated(date) {
     if (!date) return '';
-    return date.toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    });
+    return formatLocalTime(date);
   }
 
   onMount(() => {

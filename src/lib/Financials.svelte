@@ -4,7 +4,8 @@
   import ProtocolComparison from './protocol-fee-comparison/Comparison.svelte';
   import DayDetail from './financials/DayDetail.svelte';
   import { fetchFinancials } from './financials/api.js';
-  import { FINANCIALS_HOURLY_RANGES, formatFinancialHour } from '../../shared/financials/hourly.js';
+  import { FINANCIALS_HOURLY_RANGES } from '../../shared/financials/hourly.js';
+  import { formatLocalDateTime, formatLocalTime, formatLocalHour, localTimeZone } from './utils/datetime.js';
   import {
     FINANCIALS_RANGES, formatFinancialAmount, formatFinancialDay,
     formatFinancialPercent, summarizeFinancials
@@ -167,7 +168,7 @@
     </div>
     <div class="source-state" class:stale={sourceDelayed || Boolean(error)} aria-live="polite">
       <span><i class:live={!loading && !sourceDelayed && !error}></i>{loading ? 'LOADING HISTORY' : error ? 'SOURCE ERROR' : sourceDelayed ? 'SOURCE DELAYED' : 'LIVE · 5 MIN BUCKETS'}</span>
-      <small>{payload?.live?.through ? `Updated through ${new Date(payload.live.through).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false })} UTC` : hourly ? 'Waiting for hourly observations' : 'Waiting for today’s first complete bucket'}</small>
+      <small>{payload?.live?.through ? `Updated through ${formatLocalTime(payload.live.through)}` : hourly ? 'Waiting for hourly observations' : 'Waiting for today’s first complete bucket'}</small>
     </div>
   </header>
 
@@ -175,7 +176,7 @@
     <TerminalAlert tone="err" tag="ERR">{error} <button class="inline-action" on:click={() => load()}>retry</button></TerminalAlert>
   {/if}
   {#if payload?.stale && (!hourly || payload.error || payload.asOf)}
-    <TerminalAlert tone="warn" tag="DATA">The history source is delayed. Last indexed: {payload.asOf ? new Date(payload.asOf).toLocaleString('en-US', { timeZone: 'UTC', hour12: false }) : 'unknown'} UTC. {payload.error}</TerminalAlert>
+    <TerminalAlert tone="warn" tag="DATA">The history source is delayed. Last indexed: {payload.asOf ? formatLocalDateTime(payload.asOf) : 'unknown'}. {payload.error}</TerminalAlert>
   {/if}
   {#if payload?.live?.stale && !hourly}
     <TerminalAlert tone="warn" tag="LIVE">Today’s feed is delayed; showing the last verified totals. {payload.live.error}</TerminalAlert>
@@ -233,7 +234,7 @@
       <div class="chart-loading" role="status">Loading chart renderer…</div>
     {/if}
     <div class="chart-footer">
-      <span>{(hourly ? formatFinancialHour : formatFinancialDay)(selectedPoints[0]?.day)} → {(hourly ? formatFinancialHour : formatFinancialDay)(selectedPoints.at(-1)?.day)} <span class="muted-text">· UTC{hourly ? ' · hour starts' : ''}</span></span>
+      <span>{(hourly ? formatLocalHour : formatFinancialDay)(selectedPoints[0]?.day)} → {(hourly ? formatLocalHour : formatFinancialDay)(selectedPoints.at(-1)?.day)} <span class="muted-text">· {hourly ? `${localTimeZone()} · hour starts` : 'UTC days'}</span></span>
       <span>Independent scales <span class="muted-text">·</span> Drag or pinch to zoom</span>
     </div>
     <div class="day-picker">
@@ -246,9 +247,9 @@
     {#if livePoint}
       <div class="live-note"><span>{hourly ? 'CURRENT HOUR' : 'TODAY'} · IN PROGRESS</span>
         {#if payload?.live?.through}
-          Through {new Date(payload.live.through).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false })} UTC{#if !hourly} · APR run rate {formatFinancialPercent(livePoint.bondingApr)}{/if}
+          Through {formatLocalDateTime(payload.live.through)}{#if !hourly} · APR run rate {formatFinancialPercent(livePoint.bondingApr)}{/if}
         {:else}Waiting for the first completed five-minute bucket.{/if}
-        <small>{hourly ? 'UTC hourly buckets include the current partial hour. Five-minute source intervals are not extrapolated; averages use completed hours only.' : 'Checks every 30 seconds. Today is included in totals; daily averages use completed days only.'}</small>
+        <small>{hourly ? 'Hour starts are shown in your timezone. UTC-aligned buckets include the current partial hour; averages use completed hours only.' : 'Checks every 30 seconds. The current UTC day is included in totals; daily averages use completed days only.'}</small>
       </div>
     {/if}
     {#if pending}
@@ -275,8 +276,8 @@
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the data table.) -->
       <div class="table-scroll" tabindex="0" role="region" aria-label={`${hourly ? 'Hourly' : 'Daily'} financials table`}>
         <table>
-          <thead><tr><th scope="col">{hourly ? 'HOUR' : 'DAY'} · UTC</th><th scope="col">VOLUME · {currency.toUpperCase()}</th><th scope="col">SYSTEM INCOME · {currency.toUpperCase()}</th><th scope="col">{hourly ? 'RUNE PRICE · USD' : 'BONDING APR'}</th></tr></thead>
-          <tbody>{#each tablePoints as row}<tr class:partial={row.partial}><th scope="row"><button class="inline-action" on:click={() => selectDay(row.day.slice(0, 10))} aria-label={`Show top swaps and pools for ${row.day.slice(0, 10)}`}>{hourly ? formatFinancialHour(row.day) : row.day}</button>{#if row.partial}<span class="partial-label">LIVE / PARTIAL</span>{/if}</th><td>{amount(currency === 'usd' ? row.volumeUsd : row.volumeRune, false)}</td><td>{amount(currency === 'usd' ? row.incomeUsd : row.incomeRune, false)}</td><td class="apr-value">{hourly ? formatFinancialAmount(row.runePriceUsd, 'usd', false) : formatFinancialPercent(row.bondingApr)}{!hourly && row.partial ? ' est.' : ''}</td></tr>{/each}</tbody>
+          <thead><tr><th scope="col">{hourly ? `HOUR · ${localTimeZone()}` : 'DAY · UTC'}</th><th scope="col">VOLUME · {currency.toUpperCase()}</th><th scope="col">SYSTEM INCOME · {currency.toUpperCase()}</th><th scope="col">{hourly ? 'RUNE PRICE · USD' : 'BONDING APR'}</th></tr></thead>
+          <tbody>{#each tablePoints as row}<tr class:partial={row.partial}><th scope="row"><button class="inline-action" on:click={() => selectDay(row.day.slice(0, 10))} aria-label={`Show top swaps and pools for ${row.day.slice(0, 10)}`}>{hourly ? formatLocalHour(row.day, { timeZoneName: 'short' }) : row.day}</button>{#if row.partial}<span class="partial-label">LIVE / PARTIAL</span>{/if}</th><td>{amount(currency === 'usd' ? row.volumeUsd : row.volumeRune, false)}</td><td>{amount(currency === 'usd' ? row.incomeUsd : row.incomeRune, false)}</td><td class="apr-value">{hourly ? formatFinancialAmount(row.runePriceUsd, 'usd', false) : formatFinancialPercent(row.bondingApr)}{!hourly && row.partial ? ' est.' : ''}</td></tr>{/each}</tbody>
         </table>
       </div>
     </details>

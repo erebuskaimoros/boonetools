@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalTime } from './utils/datetime.js';
   import { onDestroy, onMount, tick } from 'svelte';
   import TerminalAlert from './components/terminal/TerminalAlert.svelte';
   import CurrencySelector from './components/CurrencySelector.svelte';
@@ -129,7 +130,7 @@
   $: showPortfolio = !compact || panel === PORTFOLIO_TAB.id || !tracked.length;
   $: bondOwners = [...new Set(bondRows.map((row) => row.address))];
   $: scopeOptions = [...new Set([...bondOwners, focusAddress].filter(Boolean))];
-  $: updatedAt = lastUpdated ? lastUpdated.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+  $: updatedAt = lastUpdated ? formatLocalTime(lastUpdated, { second: undefined }) : '';
   $: bondMetricsProps = {
     rows: view.bondRows,
     history: bondHistory,
@@ -372,7 +373,7 @@
   {#if compact}
     <div class="mbar">
       <h1 class="sr-only">Thorfolio</h1>
-      <span class="status" title={statusLabel === 'LIVE' ? `Updated ${lastUpdated?.toLocaleTimeString()}` : statusLabel.toLowerCase()}>
+      <span class="status" title={statusLabel === 'LIVE' ? `Updated ${formatLocalTime(lastUpdated)}` : statusLabel.toLowerCase()}>
         <span class="dot" class:ok={statusLabel === 'LIVE'} class:warn={statusLabel === 'DEGRADED' || statusLabel === 'SYNCING'}></span>
         {loading ? 'syncing' : updatedAt || statusLabel.toLowerCase()}
       </span>
@@ -669,7 +670,7 @@
           <button class="row-btn" on:click={() => (focusAddress = '')}>
             <span class="bracket">[</span><span class="key">esc</span><span class="bracket">]</span> show all
           </button>
-        {:else if lastUpdated}updated {lastUpdated.toLocaleTimeString()}{/if}
+        {:else if lastUpdated}updated {formatLocalTime(lastUpdated)}{/if}
       </span>
     </div>
     {:else if focusAddress && panel !== 'bond' && panel !== PORTFOLIO_TAB.id}

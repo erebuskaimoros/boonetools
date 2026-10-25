@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalDateTime } from './utils/datetime.js';
   import { onMount, onDestroy, tick } from 'svelte';
   import { createVisiblePoll } from './utils/visible-poll.js';
   import { formatNumber, formatUSD, formatUSDCompact } from '$lib/utils/formatting';
@@ -147,15 +148,7 @@
   }
 
   function formatDateTime(value) {
-    if (!value) return '-';
-    const date = new Date(value);
-    if (!Number.isFinite(date.getTime())) return '-';
-    return date.toLocaleString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit'
-    });
+    return formatLocalDateTime(value, { year: undefined, second: undefined });
   }
 
   function formatFreshness(seconds) {

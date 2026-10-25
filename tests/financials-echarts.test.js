@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { buildFinancialEChartsOption as buildOption, financialEChartsTooltip as tooltip, financialEChartsWindow } from '../src/lib/financials/echarts-options.js';
 import { financialChartIndices, financialChartWindow } from '../src/lib/financials/series.js';
+import { formatLocalDateTime } from '../src/lib/utils/datetime.js';
 
 // Keep the accounting/APR regression suite explicitly on the APR selection.
 // Default-price behavior and metric switching have their own interaction suite.
@@ -80,7 +81,7 @@ test('zoom accepts ECharts category values, indices, and percentages without cha
 test('tooltip retains completeness/coverage details and has only one APR value', () => {
   const text = financialEChartsTooltip(rows[5], 'usd');
   assert.match(text, /UTC · IN PROGRESS/);
-  assert.match(text, /Through 12:00:00 UTC/);
+  assert.ok(text.includes(`Through ${formatLocalDateTime('2026-09-06T12:00:00Z')}`));
   assert.match(text, /elapsed-time annualized estimate/);
   assert.equal(text.match(/BONDING APR:/g).length, 1);
   assert.match(financialEChartsTooltip(rows[2], 'usd'), /bond snapshot unavailable/);
@@ -109,7 +110,7 @@ test('tooltip swatches follow series visibility, currency, and partial APR witho
     const html = financialEChartsTooltip(rows[5], 'rune', hidden);
     assert.equal((html.match(/data-series=/g) ?? []).length, 3 - hidden.length);
     for (const id of hidden) assert.ok(!html.includes(`data-series="${id}"`));
-    assert.match(html, /Through 12:00:00 UTC/);
+    assert.ok(html.includes(`Through ${formatLocalDateTime('2026-09-06T12:00:00Z')}`));
     assert.match(html, /Gross liquidity fees:/);
   }
   assert.match(financialEChartsTooltip(rows[5], 'rune'), /DAILY VOLUME: 25,000 ᚱ/);

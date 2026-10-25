@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalDate, formatLocalDateTime, formatLocalTime, localTimeZone } from './utils/datetime.js';
   import EventTimeSeriesChart from './charts/EventTimeSeriesChart.svelte';
   import RangeSummary from './charts/RangeSummary.svelte';
   import { onDestroy, onMount } from 'svelte';
@@ -373,18 +374,9 @@
   function formatChartTick(observedAt, index) {
     if (index === 4) return 'NOW';
     const date = new Date(observedAt);
-    const day = new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      timeZone: 'UTC'
-    }).format(date).toUpperCase();
+    const day = formatLocalDate(date, { year: undefined }).toUpperCase();
     if (chartDurationMs > 2 * 24 * 60 * 60 * 1000) return day;
-    const time = new Intl.DateTimeFormat('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-      timeZone: 'UTC'
-    }).format(date).toUpperCase();
+    const time = formatLocalTime(date, { second: undefined, timeZoneName: undefined });
     return chartDurationMs <= 6 * 60 * 60 * 1000 ? time : `${day} ${time}`;
   }
 
@@ -500,11 +492,7 @@
   }
 
   function formatTimestamp(value) {
-    const date = new Date(value || '');
-    if (!Number.isFinite(date.getTime())) return '—';
-    return date.toLocaleString('en-US', {
-      month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC'
-    }).toUpperCase();
+    return formatLocalDateTime(value, { year: undefined, second: undefined });
   }
 
   function coverageState(pool) {
@@ -592,7 +580,7 @@
     <div class="preview-alert" role="note"><span>WRN</span> {[...(summary?.warnings || []), ...(summary?.stale ? ['Snapshot is stale.'] : [])].join(' ')}</div>
   {:else}
     <div class="source-line" role="status">
-      <span>AS OF {formatTimestamp(summary?.as_of)} UTC</span>
+      <span>AS OF {formatTimestamp(summary?.as_of)}</span>
       <span>TC {summary?.sources?.pool?.status || '—'}</span>
       <span>ORACLE {summary?.sources?.oracle?.status || '—'}</span>
       <span>BINANCE {summary?.sources?.binance?.status || '—'}</span>
@@ -771,7 +759,7 @@
             role="tooltip"
             style={`left: ${((chartX(hoverPoint) / CHART.width) * 100).toFixed(2)}%`}
           >
-            <strong>{formatTimestamp(hoverPoint.observedAt)} UTC</strong>
+            <strong>{formatTimestamp(hoverPoint.observedAt)}</strong>
             <div><span>TC POOL</span><b>{formatPrice(hoverPoint.poolPrice)}</b></div>
             {#if sourceMode !== 'binance' && oracleTrendVisible}
               <div><span>TC ORACLE</span><b>{formatPrice(hoverPoint.oraclePrice)}</b></div>
@@ -912,7 +900,7 @@
         </tbody>
       </table>
     </div>
-    <div class="table-foot"><span>{filteredPools.length}/{dashboard.totalPools} VISIBLE POOLS</span><span>{dashboard.hiddenHaltedPools} HALTED POOLS HIDDEN · {dashboard.haltedChains.length} CHAINS</span><span>ALL TIMES UTC</span></div>
+    <div class="table-foot"><span>{filteredPools.length}/{dashboard.totalPools} VISIBLE POOLS</span><span>{dashboard.hiddenHaltedPools} HALTED POOLS HIDDEN · {dashboard.haltedChains.length} CHAINS</span><span>TIMES · {localTimeZone()}</span></div>
   </section>
 
   <footer class="method-line">

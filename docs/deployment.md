@@ -139,6 +139,16 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### Browser-local timestamp display
+
+The October 25 timezone change is frontend-only. Deploy through the frontend
+guard, then reload Financials and POL: freshness, hourly axes/tooltips and
+snapshot times should use the browser timezone. H must still select 24H.
+Daily/weekly/monthly accounting dates remain UTC; cached observations, request
+windows and aggregation are unchanged. No backend deploy, migration, cache
+reset or provider warmup is required. See
+[the display contract](../knowledge/local-time-display.md).
+
 ### TC Fee pool-share chart
 
 Deploy backend before frontend. The additive `feeComposition` field in the existing

@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalTime } from './utils/datetime.js';
   import LegacyChartTools from './charts/LegacyChartTools.svelte';
   import RangeSummary from './charts/RangeSummary.svelte';
   import PoolFeeShareChart from './tc-fee-dash/PoolFeeShareChart.svelte';
@@ -177,7 +178,7 @@
           : systemIncomeDistribution.overflowBps > 0 ? 'explicit allocations exceed 100%'
           : systemIncomeDistribution.pendulum.error);
       }
-      distributionCheckedAt = new Date().toISOString().slice(11, 19);
+      distributionCheckedAt = new Date().toISOString();
     } catch (loadError) {
       distributionError = loadError.message || String(loadError);
     } finally {
@@ -578,7 +579,7 @@
           are explicit deductions; the incentive pendulum splits the remainder between
           Bond Providers and Liquidity Providers.
           Current-state estimate from cached network liquidity and active-node bonds, not a historical payout.
-          {#if distributionCheckedAt}Checked {distributionCheckedAt} UTC · refreshes every minute.{/if}
+          {#if distributionCheckedAt}Checked {formatLocalTime(distributionCheckedAt)} · refreshes every minute.{/if}
         </p>
 
         {#if distributionLoading && !systemIncomeDistribution.complete}

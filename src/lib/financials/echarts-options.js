@@ -2,7 +2,8 @@ import { buildTimeSeriesOption, timeSeriesTooltip } from '../charts/time-series.
 import { DAY_MS, reduceObservations } from '../charts/analytics.js';
 import { FINANCIALS_SERIES, financialLineSeries } from './series.js';
 import { formatFinancialAmount, formatFinancialDay, formatFinancialPercent } from '../../../shared/financials/model.js';
-import { formatFinancialHour } from '../../../shared/financials/hourly.js';
+import { formatLocalDateTime, formatLocalHour, localTimeZone } from '../utils/datetime.js';
+import { localHourLabels } from '../charts/hour-labels.js';
 
 export { utcDayZoomWindow as financialEChartsWindow } from '../charts/viewport.js';
 
@@ -44,7 +45,7 @@ function financialTooltip(row, currency, hidden = [], { header = '', grain = 'da
     `${grouped ? 'Closing active bond' : 'Active bond'}: ${amount(row.activeBondRune, 'rune', true)}`,
     ...(grouped ? ['Flows: sum · RUNE price / active bond: closing observation · APR: mean daily rate.'] : []),
     ...(row.partial && !grouped && Number.isFinite(row.through) ? [
-      `Through ${new Date(row.through * 1000).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false })} UTC`,
+      `Through ${formatLocalDateTime(row.through * 1000)}`,
       'APR: elapsed-time annualized estimate'
     ] : []),
     ...(!Number.isFinite(row.reserveEmissionsRune) || !Number.isFinite(row.revshareRune)
@@ -117,7 +118,7 @@ export function buildFinancialEChartsOption(rows, { currency = 'usd', hidden = [
   });
 }
 
-export function buildFinancialHourlyOption(rows, { currency = 'usd', hidden = [], ...viewport } = {}) {
+export function buildFinancialHourlyOption(rows, { currency = 'usd', hidden = [], timeZone = localTimeZone(), ...viewport } = {}) {
   const suffix = currency === 'rune' ? 'Rune' : 'Usd';
   const metrics = [...FINANCIALS_SERIES.slice(0, 2).map(series => ({ ...series,
     label: series.id === 'volume' ? 'HOURLY VOLUME' : series.label })), financialLineSeries('runePriceUsd')];
@@ -131,14 +132,14 @@ export function buildFinancialHourlyOption(rows, { currency = 'usd', hidden = []
       ...(index < 2 ? { fill: seriesFills[series.id], barMaxWidth: 20, order: 2 - index } : {}),
       data: rows.map(row => row[index === 2 ? 'runePriceUsd' : `${series.id}${suffix}`])
     })),
-    xLabel: value => `${formatFinancialHour(value)}${rows.find(row => row.day === value)?.partial ? '*' : ''}`,
+    xLabel: value => `${formatLocalHour(value, { timeZone })}${rows.find(row => row.day === value)?.partial ? '*' : ''}`,
     tooltip: row => timeSeriesTooltip([
-      `${formatFinancialHour(row.day)} UTC${row.partial ? ' · IN PROGRESS' : ''}`,
+      `${formatLocalHour(row.day, { timeZone, timeZoneName: 'short' })}${row.partial ? ' · IN PROGRESS' : ''}`,
       ...metrics.filter(series => !hidden.includes(series.id)).map((series, index) => ({ ...series,
         fill: seriesFills[series.id] || series.color,
         text: `${series.label}: ${formatFinancialAmount(row[series.id === 'runePriceUsd' ? series.id : `${series.id}${suffix}`], series.id === 'runePriceUsd' ? 'usd' : currency, false)}`
       })),
-      `Through ${formatFinancialHour(new Date(row.through * 1000).toISOString())} UTC`,
+      `Through ${formatLocalHour(row.through * 1000, { timeZone, timeZoneName: 'short' })}`,
       `Gross liquidity fees: ${formatFinancialAmount(row.feesRune, 'rune', false)}`,
       'Income: retained earnings after REVSHARE. USD uses this hour’s closing RUNE price.',
       ...(row.partial ? ['Current hour includes only completed five-minute intervals; not extrapolated.'] : []),
@@ -150,16 +151,7 @@ export function buildFinancialHourlyOption(rows, { currency = 'usd', hidden = []
   const start = option.dataZoom[0]?.startValue ?? 0;
   const end = option.dataZoom[0]?.endValue ?? rows.length - 1;
   const step = option.xAxis.axisLabel.interval + 1;
-  const labels = new Map();
-  let previousDate;
-  for (let index = start; index <= end && rows[index]; index += step) {
-    const row = rows[index], date = row.day.slice(0, 10);
-    const dateLabel = date !== previousDate ? new Date(row.day).toLocaleDateString('en-US', {
-      month: 'short', day: 'numeric', timeZone: 'UTC'
-    }) : '';
-    labels.set(row.day, `${dateLabel}\n${row.day.slice(11, 16)}${row.partial ? '*' : ''}`);
-    previousDate = date;
-  }
+  const labels = localHourLabels(rows, { start, end, step, timeZone });
   // Separate date/time lines keep the transition label from colliding with
   // neighboring hours on a narrow chart, while all clock times stay aligned.
   return { ...option, grid: { ...option.grid, bottom: 44 }, xAxis: { ...option.xAxis,

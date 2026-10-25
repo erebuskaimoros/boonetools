@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { formatLocalDateTime } from '../src/lib/utils/datetime.js';
 import { financialDayStatus } from '../src/lib/financials/day-status.js';
 
 test('pending status distinguishes saved exclusions from live state and targeted checks from a day scan', () => {
@@ -11,8 +12,8 @@ test('pending status distinguishes saved exclusions from live state and targeted
   assert.match(status.warning, /Unpriced swaps are not automatically retried/);
   assert.match(status.settlement, /Only saved pending IDs are rechecked/);
   assert.match(status.settlement, /day is not rescanned/);
-  assert.match(status.settlement, /Last complete pending-ID check: 2026-10-24 01:15:00 UTC/);
-  assert.match(status.settlement, /Next pending-ID check scheduled for 2026-10-24 02:15:00 UTC/);
+  assert.ok(status.settlement.includes(`Last complete pending-ID check: ${formatLocalDateTime('2026-10-24T01:15:00Z')}`));
+  assert.ok(status.settlement.includes(`Next pending-ID check scheduled for ${formatLocalDateTime('2026-10-24T02:15:00Z')}`));
   assert.equal(status.pauseLabel, 'Settlement checks paused');
 });
 

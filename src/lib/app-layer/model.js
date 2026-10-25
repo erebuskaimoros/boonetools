@@ -1,4 +1,5 @@
 import { fromBaseUnit } from '../utils/blockchain.js';
+import { formatLocalDateTime as formatDateTime } from '../utils/datetime.js';
 
 const number2 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const number4 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
@@ -611,18 +612,7 @@ export function formatDataSource(source) {
   return value.replaceAll('-', ' ');
 }
 
-export function formatDateTime(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  if (!Number.isFinite(date.getTime())) return '';
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short'
-  });
-}
+export { formatDateTime };
 
 export function staticArtifactLabel(artifactMeta, label = 'static fallback artifact') {
   const generatedAt = artifactMeta?.generatedAt;

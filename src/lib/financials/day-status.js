@@ -1,6 +1,8 @@
-function utcTimestamp(value) {
+import { formatLocalDateTime } from '../utils/datetime.js';
+
+function localTimestamp(value) {
   const timestamp = Date.parse(value || '');
-  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC') : '';
+  return Number.isFinite(timestamp) ? formatLocalDateTime(timestamp) : '';
 }
 
 /** Keep acquisition coverage, saved exclusions, and pending-ID settlement passes
@@ -23,7 +25,7 @@ export function financialDayStatus(detail) {
   }
 
   const notes = [];
-  const checkedAt = utcTimestamp(settlement?.checkedAt);
+  const checkedAt = localTimestamp(settlement?.checkedAt);
   if (settlement?.status === 'pending') {
     notes.push('Only saved pending IDs are rechecked; the day is not rescanned.');
     if (!checkedAt) notes.push('First complete pending-ID check has not finished.');
@@ -33,7 +35,7 @@ export function financialDayStatus(detail) {
     notes.push('Automatic pending-ID checks unavailable.');
   }
   if (notes.length && checkedAt) notes.push(`Last complete pending-ID check: ${checkedAt}.`);
-  const nextCheckAt = utcTimestamp(settlement?.nextCheckAt);
+  const nextCheckAt = localTimestamp(settlement?.nextCheckAt);
   if (settlement?.status === 'pending' && nextCheckAt) notes.push(`Next pending-ID check scheduled for ${nextCheckAt}.`);
 
   return {

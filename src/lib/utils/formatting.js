@@ -1,3 +1,5 @@
+import { formatLocalDateTime } from './datetime.js';
+
 /**
  * Shared formatting utilities for RUNE Tools
  * Consolidates duplicate formatting functions from 15+ components
@@ -299,14 +301,7 @@ export function formatDate(date, options = {}) {
  * @returns {string} Formatted datetime string
  */
 export function formatDateTime(date) {
-  const d = new Date(date);
-  return d.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  return formatLocalDateTime(date, { second: undefined });
 }
 
 // ============================================

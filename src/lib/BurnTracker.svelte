@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalDateTime } from './utils/datetime.js';
   import { onDestroy, onMount } from 'svelte';
   import RangeSummary from './charts/RangeSummary.svelte';
   import TimeSeriesChart from './charts/TimeSeriesChart.svelte';
@@ -103,10 +104,7 @@
   }
 
   function displayTimestamp(value) {
-    const parsed = new Date(value || '');
-    return Number.isFinite(parsed.getTime())
-      ? parsed.toLocaleString('en-US', { timeZone: 'UTC', hour12: false }) + ' UTC'
-      : '—';
+    return formatLocalDateTime(value);
   }
 
   onMount(() => {

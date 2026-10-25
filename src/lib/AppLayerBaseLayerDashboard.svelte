@@ -135,31 +135,31 @@
       flow: '50% target path included the Base Layer collector'
     },
     {
-      date: '2026-04-30 07:19 UTC',
+      date: '2026-04-30T07:19:00Z',
       collector: 'Current collectors',
       event: 'Migrated to code 157',
       flow: 'Expanded target denoms and route configs'
     },
     {
-      date: '2026-04-30 18:28 UTC',
+      date: '2026-04-30T18:28:00Z',
       collector: 'Current collectors',
       event: 'Migrated to code 159',
       flow: 'Current payment execution code'
     },
     {
-      date: '2026-04-30 18:32 UTC',
+      date: '2026-04-30T18:32:00Z',
       collector: 'Base Layer Collector',
       event: 'First observed RESERVE deposit',
       flow: 'Final payment from app-layer collector into TC Reserve'
     },
     {
-      date: '2026-08-13 12:24 UTC',
+      date: '2026-08-13T12:24:00Z',
       collector: 'RUJI Swap + Base Layer collectors',
       event: 'Target weights changed to 2:1',
       flow: 'RUJI side: stakers / Ecosystem Fund · Base side: TC Reserve / THORChain POL Fund'
     },
     {
-      date: '2026-08-13 12:27 UTC',
+      date: '2026-08-13T12:27:00Z',
       collector: 'Base Layer Collector',
       event: 'First observed split settlement',
       flow: 'New payouts settle 2/3 to TC Reserve and 1/3 to the POL Fund; earlier history remains Reserve-only'
@@ -1454,7 +1454,7 @@
                   {#if index < versionTimeline.length - 1}<span class="t-line"></span>{/if}
                 </div>
                 <div class="t-body">
-                  <span class="t-date">{item.date}</span>
+                  <span class="t-date">{item.date.includes('T') ? formatDateTime(item.date) : item.date}</span>
                   <strong class="t-collector">{item.collector}</strong>
                   <b class="t-event">{item.event}</b>
                   <p class="t-flow">{item.flow}</p>

@@ -10,7 +10,7 @@ const points = Array.from({ length: 3 }, (_, index) => financialHourlyPoint(firs
   { earnings: '100000000', liquidityFees: '100000000', runePriceUSD: '0.5' }, first + index * 3600 + (index === 2 ? 900 : 3600)));
 
 test('hour categories remain distinct across UTC midnight and use execution USD / hourly income pricing', () => {
-  const option = buildFinancialHourlyOption(points);
+  const option = buildFinancialHourlyOption(points, { timeZone: 'UTC' });
   assert.deepEqual(option.xAxis.data, points.map(point => point.day));
   assert.deepEqual(option.series[0].data, [0, 1, 2]);
   assert.deepEqual(option.series[1].data, [.5, .5, .5]);
@@ -32,14 +32,14 @@ test('hour categories remain distinct across UTC midnight and use execution USD 
 test('dates appear on the first visible hourly tick and the first tick after a skipped UTC boundary', () => {
   const start = Date.parse('2026-10-24T17:00:00Z') / 1000;
   const rows = Array.from({ length: 30 }, (_, index) => financialHourlyPoint(start + index * 3600, null, null));
-  const option = buildFinancialHourlyOption(rows, { width: 1000 });
+  const option = buildFinancialHourlyOption(rows, { width: 1000, timeZone: 'UTC' });
   const ticks = rows.filter((row, index) => option.xAxis.axisLabel.interval(index, row.day));
   assert.deepEqual(ticks.slice(0, 3).map(row => row.day.slice(11, 16)), ['17:00', '21:00', '01:00']);
   // Deliberately invoke the formatter out of order, as the renderer can do.
   assert.equal(option.xAxis.axisLabel.formatter(ticks[2].day), 'Oct 25\n01:00');
   assert.equal(option.xAxis.axisLabel.formatter(ticks[1].day), '\n21:00');
   assert.equal(option.xAxis.axisLabel.formatter(ticks[0].day), 'Oct 24\n17:00');
-  const zoomed = buildFinancialHourlyOption(rows, { window: { startDay: rows[12].day, endDay: rows[17].day } });
+  const zoomed = buildFinancialHourlyOption(rows, { timeZone: 'UTC', window: { startDay: rows[12].day, endDay: rows[17].day } });
   assert.equal(zoomed.xAxis.axisLabel.formatter(rows[12].day), 'Oct 25\n05:00');
   assert.equal(zoomed.xAxis.axisLabel.formatter(rows[13].day), '\n06:00');
 });
@@ -72,7 +72,7 @@ test('mounted chart switches daily/hourly renderer behavior without retaining da
   const controller = createTimeSeriesController(chart, { points: [], options: { bucket: 'day' }, window: null },
     { buildOption: buildFinancialChartOption, width: () => 1000 });
   try {
-    controller.update({ points, options: { bucket: 'hour' }, window: null });
+    controller.update({ points, options: { bucket: 'hour', timeZone: 'UTC' }, window: null });
     assert.equal(rendered.xAxis.axisLabel.formatter(points[0].day), 'Oct 24\n23:00');
     assert.doesNotMatch(rendered.xAxis.axisLabel.formatter(points[0].day), /Invalid Date/);
     assert.equal(rendered.series[0].name, 'HOURLY VOLUME');

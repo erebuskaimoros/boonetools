@@ -1,4 +1,5 @@
 <script>
+  import { formatLocalDateTime, localTimeZone } from './utils/datetime.js';
   import { onDestroy, onMount } from 'svelte';
   import RangeSummary from './charts/RangeSummary.svelte';
   import TimeSeriesChart from './charts/TimeSeriesChart.svelte';
@@ -238,10 +239,7 @@
   }
 
   function displayTimestamp(value) {
-    const parsed = new Date(value || '');
-    return Number.isFinite(parsed.getTime())
-      ? `${parsed.toLocaleString('en-US', { timeZone: 'UTC', hour12: false })} UTC`
-      : '—';
+    return formatLocalDateTime(value);
   }
 
   function periodBounds(pool) {
@@ -530,7 +528,7 @@
     <span>EST APR = ANNUALIZED FEES / CURRENT TWO-SIDED DEPTH</span>
     <span>SYSTEM-INCOME DISTRIBUTION OUT OF SCOPE</span>
     <span>GAPS ARE NOT INTERPOLATED</span>
-    <span>ALL TIMES UTC</span>
+    <span>TIMES · {localTimeZone()} · DAILY BUCKETS UTC</span>
   </footer>
 </main>
 
