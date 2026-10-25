@@ -27,6 +27,7 @@ This directory contains website/backend-specific protocol notes and session hist
 - [near-revenue-reconciliation-2026-09-20.md](./near-revenue-reconciliation-2026-09-20.md) — BooneTools' NEAR swap income vs NEAR-reported monthly revenue: unresolved gap and the open accounting decision.
 - [tc-fee-dash.md](./tc-fee-dash.md) — `/tc-fee-dash` historical fee-capture metrics plus its live Mimir/default system-income allocation and Sankey flow contract.
 - [slow-block-consensus-wasm-report-2026-08-06.md](./slow-block-consensus-wasm-report-2026-08-06.md) — three-window analysis of >10-second block intervals, scheduled proposer failures, final commit behavior, and Wasm/FIN activity.
+- [slow-block-consensus-report-2026-09-24.md](./slow-block-consensus-report-2026-09-24.md) — September 24 slow blocks: ten active validators missing proposer slots, the Rujira Virtualization Strategy cross-check, and measured transaction gas ([samples](./slow-block-gas-samples-2026-09-24.csv)).
 - [architecture-consolidation.md](./architecture-consolidation.md) — runtime ownership, unified API/backend contract, canonical provenance, queued reads, archive policy, and CI ratchets.
 - Use the shared [BooneTools project page](../../../knowledge/projects/boonetools.md) for durable product context.
 - Use the shared [analytics and tooling workstream](../../../knowledge/workstreams/analytics-and-tooling.md) for cross-project relationships.
