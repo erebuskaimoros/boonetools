@@ -2,7 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${BOONETOOLS_ENV_FILE:-$ROOT/backend/.env}"
+DB_MODE="${BOONETOOLS_DB_MODE:-docker}"
+case "$DB_MODE" in
+  docker) ENV_FILE="${BOONETOOLS_ENV_FILE:-$ROOT/backend/.env}" ;;
+  native) ENV_FILE="${BOONETOOLS_ENV_FILE:-/dev/null}" ;;
+  *) echo "BOONETOOLS_DB_MODE must be docker or native." >&2; exit 1 ;;
+esac
 
 if [[ -f "$ENV_FILE" ]]; then
   while IFS='=' read -r key value || [[ -n "$key" ]]; do
@@ -13,13 +18,32 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 CONTAINER="${BOONETOOLS_DB_CONTAINER:-boonetools-postgres}"
-DB_NAME="${BOONETOOLS_DB_NAME:-boonetools}"
-DB_USER="${BOONETOOLS_DB_USER:-boonetools}"
-: "${BOONETOOLS_DB_PASSWORD:?BOONETOOLS_DB_PASSWORD is required}"
+if [[ "$DB_MODE" == docker ]]; then
+  DB_NAME="${BOONETOOLS_DB_NAME:-boonetools}"
+  DB_USER="${BOONETOOLS_DB_USER:-boonetools}"
+  : "${BOONETOOLS_DB_PASSWORD:?BOONETOOLS_DB_PASSWORD is required}"
+  DEFAULT_LOCK_FILE=/var/lock/boonetools-db-migrate.lock
+else
+  DB_NAME="${BOONETOOLS_DB_NAME:-${PGDATABASE:-}}"
+  [[ -n "$DB_NAME" ]] || {
+    echo "Native migrations require an explicit BOONETOOLS_DB_NAME or PGDATABASE." >&2
+    exit 1
+  }
+  DB_USER="${BOONETOOLS_DB_USER:-${PGUSER:-$(id -un)}}"
+  PSQL_BIN="${BOONETOOLS_PSQL_BIN:-psql}"
+  command -v "$PSQL_BIN" >/dev/null 2>&1 || {
+    echo "Native PostgreSQL psql is required; set BOONETOOLS_PSQL_BIN if it is not on PATH." >&2
+    exit 1
+  }
+  # Different local databases can migrate independently; matching targets use
+  # the same user-owned lock without requiring /var/lock permissions.
+  LOCK_ID="$(printf '%s\n' "${PGHOST:-localhost}" "${PGPORT:-5432}" "$DB_USER" "$DB_NAME" | cksum | awk '{print $1}')"
+  DEFAULT_LOCK_FILE="${TMPDIR:-/tmp}/boonetools-db-migrate-$(id -u)-$LOCK_ID.lock"
+fi
 
 # Serialize the whole runner at the host level so two deploys cannot both
 # observe an unapplied filename and start the same migration.
-MIGRATION_LOCK_FILE="${BOONETOOLS_DB_MIGRATION_LOCK_FILE:-/var/lock/boonetools-db-migrate.lock}"
+MIGRATION_LOCK_FILE="${BOONETOOLS_DB_MIGRATION_LOCK_FILE:-$DEFAULT_LOCK_FILE}"
 mkdir -p "$(dirname "$MIGRATION_LOCK_FILE")"
 if command -v flock >/dev/null 2>&1; then
   exec 9>"$MIGRATION_LOCK_FILE"
@@ -34,12 +58,19 @@ else
     exit 1
   fi
   trap 'rmdir "$MIGRATION_LOCK_DIR"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 fi
 
 run_psql() {
-  docker exec -i "$CONTAINER" \
-    env PGPASSWORD="$BOONETOOLS_DB_PASSWORD" \
-    psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" "$@"
+  if [[ "$DB_MODE" == native ]]; then
+    PGPASSWORD="${BOONETOOLS_DB_PASSWORD:-${PGPASSWORD:-}}" \
+      "$PSQL_BIN" -X -w -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" "$@"
+  else
+    docker exec -i "$CONTAINER" \
+      env PGPASSWORD="$BOONETOOLS_DB_PASSWORD" \
+      psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" "$@"
+  fi
 }
 
 run_psql <<'SQL'

@@ -55,7 +55,9 @@ if grep -Eq '(src|href)="\./assets/' "$BUILD_DIR/dist/index.html"; then
   echo "Deploy aborted: dist/index.html contains route-relative asset URLs." >&2
   exit 1
 fi
-COPYFILE_DISABLE=1 tar -C "$BUILD_DIR/dist" -czf "$ARCHIVE" .
+# COPYFILE_DISABLE suppresses AppleDouble files; explicitly exclude xattr
+# archive headers too, using a flag supported by both BSD and GNU tar.
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$BUILD_DIR/dist" -czf "$ARCHIVE" .
 tar -tzf "$ARCHIVE" >/dev/null
 ARCHIVE_SHA256="$(sha256sum "$ARCHIVE" | awk '{ print $1 }')"
 

@@ -1,16 +1,22 @@
 import path from 'node:path';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { ageComparisonPayload, COMPARISON_REFRESH_MS, hasComparisonData } from '../shared/protocol-fee-comparison/model.js';
 import { buildComparisonPayload, collectComparison, emptyComparisonCache } from '../backend/src/protocol-fee-comparison/collector.js';
 import { createComparisonRequest } from '../shared/protocol-fee-comparison/request.js';
+import { createDevDataCache } from './dev-data-cache.mjs';
 
-export const comparisonCacheFile = fileURLToPath(new URL('../node_modules/.cache/protocol-fee-comparison/state.json', import.meta.url));
+const defaultCache = createDevDataCache('protocol-fee-comparison/state.json', {
+  validate: stored => stored?.cache?.version === 1 && [stored.cache.days, stored.cache.boundaries]
+    .every(value => value && typeof value === 'object' && !Array.isArray(value))
+});
+export const comparisonCacheFile = defaultCache.file;
 export async function readComparisonCache(cacheFile = comparisonCacheFile) {
+  await defaultCache.prepare(cacheFile);
   try { return JSON.parse(await readFile(cacheFile, 'utf8')); }
   catch (error) { if (error.code !== 'ENOENT') throw error; return { cache: emptyComparisonCache(), payload: null }; }
 }
 export async function saveComparisonCache(cache, payload, cacheFile = comparisonCacheFile) {
+  await defaultCache.prepare(cacheFile);
   // Acquisition checkpoints must not erase the last published snapshot.
   if (payload === undefined) payload = (await readComparisonCache(cacheFile)).payload;
   await mkdir(path.dirname(cacheFile), { recursive: true });

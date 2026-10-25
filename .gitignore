@@ -1,6 +1,7 @@
 .env
 .env.local
 /node_modules/
+/.boonetools-cache/
 /backend/node_modules/
 /dist/
 /.vscode/

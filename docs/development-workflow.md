@@ -24,9 +24,8 @@ npm run backend:test
 ```
 
 Root import-boundary checks load backend modules, so installing only frontend
-dependencies is insufficient. Do not reinstall a running development checkout
-without preserving any durable observations stored under `node_modules/.cache`;
-prefer a fresh worktree for clean-install verification.
+dependencies is insufficient. Prefer a fresh worktree for clean-install
+verification rather than reinstalling a running development checkout.
 
 Put Node test options before filenames:
 
@@ -40,6 +39,26 @@ canonical workspace:
 ```bash
 /Users/boonewheeler/Desktop/Projects/THORChain/scripts/audit-workspace.sh --project boonetools-website
 ```
+
+## Local PostgreSQL checks
+
+Without a database, `npm run backend:test` skips its PostgreSQL-backed tests.
+With native PostgreSQL tools installed, run them against a disposable cluster:
+
+```bash
+node backend/scripts/with-test-postgres.mjs -- npm run backend:test
+```
+
+The harness creates its own cluster in a short private `/tmp` directory, applies
+every migration through `scripts/boonetools-db-migrate.sh` in
+`BOONETOOLS_DB_MODE=native`, runs the command with temporary connection
+settings, then stops and removes only that cluster. Startup errors include the
+PostgreSQL log. With no arguments it runs the acquisition integration and SQL
+price-bound checks; `--migrate-only` checks migrations alone.
+`BOONETOOLS_PG_BIN` selects a PostgreSQL `bin` directory when the tools are not
+on `PATH` or in a standard Homebrew/Linux location. Existing databases are
+never used. Production migrations keep the default Docker transport; see
+[backend operations](boonetools-backend-hetzner.md).
 
 ## Committing session records
 
@@ -85,6 +104,29 @@ this pass. New raw fetch/HTTP imports, hard-coded provider URLs in collectors,
 public transport imports from backend jobs, and shared environment reads fail CI.
 Tests include deliberately violating fixtures and routing, budget, cancellation,
 redaction, validation and external-provider transport contracts.
+
+## Durable development history
+
+The Vite Financials and protocol-comparison collectors keep observations in
+ignored, per-checkout files outside npm's disposable dependency tree:
+
+- `.boonetools-cache/financials/history-v1.json`
+- `.boonetools-cache/financials/hourly-v1.json`
+- `.boonetools-cache/protocol-fee-comparison/state.json`
+
+On first use, an absent default file is copied from the matching legacy
+`node_modules/.cache/` location. Migration preserves exact bytes, leaves the
+legacy file intact, and never replaces an existing durable file. Invalid data
+or permission failures stop preparation instead of silently discarding history.
+Explicit custom cache paths are not migrated. Production storage is unchanged.
+
+When upgrading an older checkout, preserve its legacy cache **before the first
+`npm ci`**, or start the updated dev server once before reinstalling so it can
+migrate them. npm cannot recover a legacy cache it has already removed.
+Once migrated, dependency reinstalls leave the new files intact. Scratch
+source-review artifacts elsewhere under `node_modules/.cache` are not migrated.
+Independent worktrees retain independent histories; do not run concurrent
+collectors against the same cache.
 
 ## Deployment and browser verification
 

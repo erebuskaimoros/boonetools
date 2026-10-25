@@ -108,8 +108,12 @@ the backend. The newly introduced timer may then fetch on its normal cadence.
 Do not commit the snapshot/SQL or place it in public frontend assets.
 
 Local Vite has its own six-hour background collector and ignored
-`node_modules/.cache/protocol-fee-comparison/state.json`; its
+`.boonetools-cache/protocol-fee-comparison/state.json`; its
 `/__protocol-fee-comparison` GET is also read-only. No Dune key is required.
+An absent default cache migrates from the legacy `node_modules/.cache/`
+location without overwriting existing durable data; preserve legacy history
+before the first dependency reinstall (see
+[development-workflow.md](development-workflow.md#durable-development-history)).
 Methodology `swap-income-less-gross-network-subsidy-v2` includes NEAR's own
 frontend earnings in total retained Intents income. Published `dailyRevenue`
 already includes that wallet, so do not add its receipts again. Daily receipt

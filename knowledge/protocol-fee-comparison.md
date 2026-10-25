@@ -376,9 +376,12 @@ Independent boundary checks:
   checkpointed. The archive then timed out; the month remains unavailable.
   New completed days are prioritized over older missing days on scheduled runs.
 
-Development-only source-review and raw checkpoint artifacts are under
-`node_modules/.cache/protocol-fee-comparison/`; the durable collector cache has
-the wallet history, epoch checkpoints, verified FLIP days and boundary hints.
+Development-only source-review and raw checkpoint artifacts from this
+investigation were stored under `node_modules/.cache/protocol-fee-comparison/`.
+The current durable collector file is
+`.boonetools-cache/protocol-fee-comparison/state.json`; it has the wallet
+history, epoch checkpoints, verified FLIP days and boundary hints. First-use
+migration copies only the legacy `state.json`, not the scratch review artifacts.
 The one-off acquisition processes have been stopped; the normal six-hour
 server-owned collector resumes from this cache. Do not start concurrent writers.
 
@@ -616,7 +619,8 @@ References: [emissions implementation](https://github.com/chainflip-io/chainflip
   `01M2TCJ5Y87HFX9G7W02WGR480`, August 1–September 17. This does **not** enable
   automatic future local Dune updates. Production is configured to use its
   existing server-owned key; no production execution was performed here.
-- Local cache: `node_modules/.cache/protocol-fee-comparison/state.json`.
+- Local cache at this rollout: `node_modules/.cache/protocol-fee-comparison/state.json`
+  (now migrated on first use to `.boonetools-cache/protocol-fee-comparison/state.json`).
   Vite reader uses `/__protocol-fee-comparison`; its server-owned background
   job runs on a six-hour cadence, never in response to visitor GETs.
 - Current preview is port **5184**, process launched in this checkout. Port

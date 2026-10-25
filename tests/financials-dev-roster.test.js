@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { createFinancialsDayDevQueue, createFinancialsDevPlugin, createFinancialsDevRequest } from '../scripts/dev-financials.mjs';
 import { financialDayStatus } from '../src/lib/financials/day-status.js';
 
@@ -178,15 +181,19 @@ test('dev provider transport receives cancellation and rejects before charging a
   assert.equal(budgets, 1); assert.equal(requests, 1);
 });
 
-test('dev roster plugin starts only when the Vite server is configured and stops on close', async () => {
+test('dev roster plugin starts only when the Vite server is configured and stops on close', async t => {
   let starts = 0, stops = 0, serviceStops = 0;
   const events = new Map();
+  // A throwaway checkout root keeps the plugin's cache migration away from real dev data.
+  const root = await mkdtemp(path.join(tmpdir(), 'boonetools-dev-roster-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const plugin = createFinancialsDevPlugin({
+    root,
     days: { start: () => starts++, stop: async () => stops++ },
     createService: () => ({ stop: async () => serviceStops++ })
   });
   assert.equal(starts, 0);
-  plugin.configureServer({ middlewares: { use() {} }, httpServer: { once: (event, callback) => events.set(event, callback) } });
+  await plugin.configureServer({ middlewares: { use() {} }, httpServer: { once: (event, callback) => events.set(event, callback) } });
   assert.equal(starts, 1);
   assert.equal(typeof events.get('close'), 'function');
   await events.get('close')();

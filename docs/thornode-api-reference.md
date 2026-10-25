@@ -302,6 +302,22 @@ Midgard provides aggregated analytics data. BooneTools primary base URL: `https:
 
 Full documentation: https://gateway.liquify.com/chain/thorchain_midgard/v2/doc
 
+### History query parameters
+
+For interval history, supply **at most two** of `count`, `from`, and `to`.
+Use `interval=day&count=100&from=<unix-seconds>` for forward pagination, or
+`interval=day&from=<start>&to=<end>` for an explicit bounded window. Do not add
+`count` to an existing `from`/`to` range. Advance by the requested date window
+or a verified returned boundary; an empty interval array alone does not prove
+the rest of history is empty.
+
+Provider limits and error help can disagree. On September 2, 2026, Liquify's
+`/v2/history/swaps?interval=day&count=400` returned HTTP 200 with 400 intervals,
+while supplying all three range parameters returned HTTP 400 with an older
+usage message claiming a 100-interval limit. Keep the vendored Swagger's
+documented limit separate from a collector's chosen batch size, and verify the
+specific endpoint and provider before changing either.
+
 ---
 
 ## External Resources

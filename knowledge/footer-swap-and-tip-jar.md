@@ -60,3 +60,23 @@ through the affiliate program after review. The memoless API
 - It prefills $3 of RUNE from `/thorchain/network` (`rune_price_in_tor`),
   rounded up to 2 decimals, offers $3 / $5 / $10 presets, and refuses an amount
   the wallet cannot cover after `native_tx_fee_rune`.
+
+## Alternative considered: SwapKit widget (September 2026, not shipped)
+
+A development-only SwapKit popup was built on `explore/swapkit-widget` but never
+committed. Findings worth keeping if SwapKit is reconsidered:
+
+- It embeds as a self-registering CDN web component (`<swapkit-widget>`, React
+  bundled inside) that needs an explicitly sized host (about 560px wide, at
+  least 640px tall) and owns wallets, quotes and signing.
+- Credentials are a domain-bound Widget ID and Widget Key, browser-visible by
+  design; register each origin, including localhost. Affiliate fees are an
+  app-level dashboard setting, not enabled by embedding.
+- No documented provider allowlist, so it cannot be restricted to THORChain
+  routing; no wallet handoff from the site; no amount or URL sync in the web
+  component.
+- Vultisig is experimental and hidden outside Developer Mode.
+- Sentry telemetry is on by default; an empty DSN attribute does not disable it.
+- Docs use a mutable `/widget/latest/` URL; a pinned release needs vendor
+  support. The `@swapkit/ui` package (0.24.2) showed no usable license or public
+  repository, so do not assume it may be self-hosted or modified.
