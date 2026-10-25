@@ -14,13 +14,18 @@
   export let showRollingControls = true;
   export let interactiveLegend = true;
   export let inlineControls = false;
+  export let grains = ['day', 'week', 'month'];
+  // Features that switch source datasets (rather than aggregate one source)
+  // may explicitly declare the available bucket choices.
+  /** @type {string[] | null} */
+  export let availableGrains = null;
   export let onHidden = (value) => {};
   export let onRolling = (value) => {};
   export let onGrain = (value) => {};
   let open = false, menu, trigger;
-  const grainAvailable = (value, source) => source !== 'epoch'
+  const grainAvailable = (value, source) => availableGrains ? availableGrains.includes(value) : source !== 'epoch'
     && (source !== 'month' || value === 'month') && (source !== 'week' || value === 'week');
-  $: grains = ['day', 'week', 'month'].filter(value => !hideUnavailableGrains || grainAvailable(value, sourceGrain));
+  $: visibleGrains = grains.filter(value => !hideUnavailableGrains || grainAvailable(value, sourceGrain));
   $: legendSeries = series.map(item => ({ ...item, label: grain === 'week' ? item.label.replace(/^DAILY /i, 'WEEKLY ') : grain === 'month' ? item.label.replace(/^DAILY /i, 'MONTHLY ') : item.label }));
   const toggle = (list, id) => list.includes(id) ? list.filter(item => item !== id) : [...list, id];
   function dismiss(event) { if (open && !menu?.contains(event.target)) open = false; }
@@ -31,10 +36,10 @@
 <div class="chart-tools" class:with-controls={inlineControls}>
   <div class="buckets" role="group" aria-label="Chart buckets">
     {#if allowNative}<button aria-pressed={grain === 'native'} on:click={() => onGrain('native')}>[NATIVE]</button>{/if}
-    {#each grains as value}
+    {#each visibleGrains as value}
       <button aria-label={`${value} buckets`} aria-pressed={grain === value}
         disabled={!grainAvailable(value, sourceGrain)}
-        title={sourceGrain !== 'day' ? `Source resolution: ${sourceGrain}; finer buckets cannot be reconstructed.` : `${calendar} calendar buckets; weeks start Monday`}
+        title={availableGrains ? `${calendar} ${value} buckets` : sourceGrain !== 'day' ? `Source resolution: ${sourceGrain}; finer buckets cannot be reconstructed.` : `${calendar} calendar buckets; weeks start Monday`}
         on:click={() => onGrain(value)}>[{value[0].toUpperCase()}]</button>
     {/each}
   </div>

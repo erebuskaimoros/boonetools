@@ -390,6 +390,12 @@ RUNE/USD price, with a sliding RUNE Price / Bonding APR switch in the legend row
 Daily clicks expand top-swap and pool-volume tables below the chart; a UTC date
 picker provides keyboard access and day selection from weekly/monthly views.
 Drag-to-zoom never selects a day, and changing the line preserves the viewport.
+Financials additionally offers `[H]` alongside D/W/M. Selecting H resets the
+range to the latest 24 UTC hourly buckets, including a labeled partial hour;
+hourly presets are 24H/7D/30D. Hourly plots show volume, retained income and
+RUNE/USD price, with latest price replacing the APR summary. Omit APR and daily
+rolling overlays for hours. Returning to D/W/M restores the daily source at 30D.
+Hour timestamps remain distinct across UTC midnight and zoom updates.
 TC Fee Dash's pool-fee composition uses a fixed 0–100% stacked area plot for
 native BTC, native ETH, stablecoin pools across chains, and other pools. Its
 four summary cards and D/W/M or rolling shares are weighted by historical USD

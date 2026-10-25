@@ -49,6 +49,37 @@ releases remains supported; rollback does not delete retained Financials data.
 
 ## Accounting
 
+### Hourly view (October 25, 2026)
+
+`[H]` selects the latest 24 UTC hourly buckets, including the current partial
+hour, and clears any daily zoom. Hourly presets are 24H/7D/30D. Returning to
+D/W/M restores the 30D daily source. Hourly volume, retained system income and
+RUNE/USD price use the same units as daily observations; hourly USD income uses
+the hour's closing price. The fourth summary card becomes latest RUNE price;
+APR and daily rolling overlays are absent in hourly mode. All hourly timestamps
+retain their full UTC category identity, including zoom and cross-midnight labels.
+The hour axis shows the date only on its first visible tick and when the visible
+ticks cross into a new UTC date; remaining ticks show just the clock time.
+
+The bounded hourly collector uses `/history/swaps` and `/history/earnings` with
+`interval=hour`, prioritizes the newest 24 buckets, then adds at most 120 older
+hours per source per pass up to 30 days. Completed observations persist in
+`hourly-v1.json` alongside the daily cache. Only the two newest completed hours
+are refreshed for corrections, at five-minute intervals. The current hour sums
+complete five-minute source buckets behind the indexed watermark; it is never
+extrapolated or promoted into completed history after rollover. No hourly
+validator/bond queries or transaction scans run. Missing source data stays null.
+
+Production wiring uses the existing Financials process, shared provider budgets,
+and a separate `financials:hour:30d:v1` read model. Its acquisition loop runs at
+most once per minute; publication stays independent so older history cannot
+block recent observations. `financials?bucket=hour&range=24h|7d|30d` reads/slices
+only that model, ageing partial hours on read. Vite uses the same collector and
+process-wide dev request budget through `/__financials`. Deploy the backend
+before the frontend so the hourly read model can begin filling normally.
+
+### Daily and larger buckets
+
 - The amber line defaults to closing RUNE/USD price. The sliding control switches
   it to bonding APR without resetting zoom; price stays USD even when volume and
   income are denominated in RUNE. Weekly/monthly prices use the closing observation,

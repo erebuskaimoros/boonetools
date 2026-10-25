@@ -1,14 +1,15 @@
 import { booneToolsApi } from '../api/boonetools.js';
 
-/** @param {string} range @param {{ signal?: AbortSignal }} [options] */
-export async function fetchFinancials(range, { signal } = {}) {
+/** @param {string} range @param {{ signal?: AbortSignal, bucket?: string }} [options] */
+export async function fetchFinancials(range, { signal, bucket = 'day' } = {}) {
+  const query = { range, ...(bucket === 'hour' ? { bucket } : {}) };
   if (import.meta.env.DEV) {
-    const response = await fetch(`/__financials?range=${range}`, { signal });
+    const response = await fetch(`/__financials?${new URLSearchParams(query)}`, { signal });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `Financials returned HTTP ${response.status}`);
     return data;
   }
-  return booneToolsApi.get('/financials', { query: { range }, signal,
+  return booneToolsApi.get('/financials', { query, signal,
     errorMessage: ({ response }) => `Financials snapshot failed (${response.status})` });
 }
 

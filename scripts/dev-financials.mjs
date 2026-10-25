@@ -2,6 +2,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { financialsWindow } from '../shared/financials/model.js';
 import { createFinancialsService } from '../backend/src/shared/financials-service.js';
+import { createFinancialsHourlyService } from '../backend/src/shared/financials-hourly.js';
+import { financialHourlyWindow } from '../shared/financials/hourly.js';
 import { requestFromProviders } from '../shared/provider-client.js';
 import { createProviderServices } from '../shared/provider-services.js';
 import { advanceFinancialDay, financialDetailDay, financialDaySnapshotComplete, financialDayRetryAt,
@@ -143,9 +145,10 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
   return queue;
 }
 
-export function createFinancialsDevPlugin({ days = createFinancialsDayDevQueue(), createService = createFinancialsService } = {}) {
-  let service, stopping;
-  const stop = () => stopping ||= Promise.all([days.stop(), service?.stop()]);
+export function createFinancialsDevPlugin({ days = createFinancialsDayDevQueue(), createService = createFinancialsService,
+  createHourlyService = createFinancialsHourlyService } = {}) {
+  let service, hourly, stopping;
+  const stop = () => stopping ||= Promise.all([days.stop(), service?.stop(), hourly?.stop()]);
   return {
     name: 'financials-dev-data',
     apply: 'serve',
@@ -153,6 +156,8 @@ export function createFinancialsDevPlugin({ days = createFinancialsDayDevQueue()
       const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
       service = createService({ cacheDir: path.join(root, 'node_modules/.cache/financials'),
         requestJson: createFinancialsDevRequest(), rpcConcurrency: 6 });
+      hourly = createHourlyService({ cacheDir: path.join(root, 'node_modules/.cache/financials'),
+        requestJson: createFinancialsDevRequest() });
       days.start();
       server.httpServer?.once('close', stop);
       server.middlewares.use(async (req, res, next) => {
@@ -161,6 +166,19 @@ export function createFinancialsDevPlugin({ days = createFinancialsDayDevQueue()
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Cache-Control', 'no-store');
         if (req.method !== 'GET') { res.statusCode = 405; res.end(JSON.stringify({ error: 'GET required' })); return; }
+        if (url.searchParams.has('bucket') && !['hour', 'day'].includes(url.searchParams.get('bucket'))) {
+          res.statusCode = 400; res.end(JSON.stringify({ error: 'Bucket must be hour or day' })); return;
+        }
+        if (url.searchParams.get('bucket') === 'hour') {
+          const range = url.searchParams.get('range') || '24h';
+          try {
+            if (url.searchParams.has('day')) throw new Error('Day details use daily buckets');
+            financialHourlyWindow(range);
+          } catch (failure) { res.statusCode = 400; res.end(JSON.stringify({ error: failure.message })); return; }
+          // Serve cached observations immediately while one bounded fill runs.
+          void hourly.refresh();
+          res.end(JSON.stringify(await hourly.getSnapshot(range))); return;
+        }
         if (url.searchParams.has('day')) {
           const day = url.searchParams.get('day');
           try { financialDetailDay(day); } catch (failure) { res.statusCode = 400; res.end(JSON.stringify({ error: failure.message })); return; }

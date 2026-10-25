@@ -2,6 +2,7 @@ import { buildTimeSeriesOption, timeSeriesTooltip } from '../charts/time-series.
 import { DAY_MS, reduceObservations } from '../charts/analytics.js';
 import { FINANCIALS_SERIES, financialLineSeries } from './series.js';
 import { formatFinancialAmount, formatFinancialDay, formatFinancialPercent } from '../../../shared/financials/model.js';
+import { formatFinancialHour } from '../../../shared/financials/hourly.js';
 
 export { utcDayZoomWindow as financialEChartsWindow } from '../charts/viewport.js';
 
@@ -114,4 +115,62 @@ export function buildFinancialEChartsOption(rows, { currency = 'usd', hidden = [
       month: 'short', ...(rows.length <= 365 ? { day: 'numeric' } : { year: '2-digit' }), timeZone: 'UTC'
     })
   });
+}
+
+export function buildFinancialHourlyOption(rows, { currency = 'usd', hidden = [], ...viewport } = {}) {
+  const suffix = currency === 'rune' ? 'Rune' : 'Usd';
+  const metrics = [...FINANCIALS_SERIES.slice(0, 2).map(series => ({ ...series,
+    label: series.id === 'volume' ? 'HOURLY VOLUME' : series.label })), financialLineSeries('runePriceUsd')];
+  const option = buildTimeSeriesOption(rows, {
+    ...viewport, sourceGrain: 'hour', hidden, zoomId: 'financials-hour-window', minSpan: 2,
+    axes: metrics.map((series, index) => ({ ...series, position: index ? 'right' : 'left',
+      label: `${index === 0 ? 'VOLUME' : index === 1 ? 'INCOME' : 'RUNE PRICE'} · ${index === 2 ? 'USD' : currency.toUpperCase()}`,
+      format: value => formatFinancialAmount(value, index === 2 ? 'usd' : currency)
+    })),
+    series: metrics.map((series, index) => ({ ...series, axis: series.id,
+      ...(index < 2 ? { fill: seriesFills[series.id], barMaxWidth: 20, order: 2 - index } : {}),
+      data: rows.map(row => row[index === 2 ? 'runePriceUsd' : `${series.id}${suffix}`])
+    })),
+    xLabel: value => `${formatFinancialHour(value)}${rows.find(row => row.day === value)?.partial ? '*' : ''}`,
+    tooltip: row => timeSeriesTooltip([
+      `${formatFinancialHour(row.day)} UTC${row.partial ? ' · IN PROGRESS' : ''}`,
+      ...metrics.filter(series => !hidden.includes(series.id)).map((series, index) => ({ ...series,
+        fill: seriesFills[series.id] || series.color,
+        text: `${series.label}: ${formatFinancialAmount(row[series.id === 'runePriceUsd' ? series.id : `${series.id}${suffix}`], series.id === 'runePriceUsd' ? 'usd' : currency, false)}`
+      })),
+      `Through ${formatFinancialHour(new Date(row.through * 1000).toISOString())} UTC`,
+      `Gross liquidity fees: ${formatFinancialAmount(row.feesRune, 'rune', false)}`,
+      'Income: retained earnings after REVSHARE. USD uses this hour’s closing RUNE price.',
+      ...(row.partial ? ['Current hour includes only completed five-minute intervals; not extrapolated.'] : []),
+      ...(row.volumeRune === null || row.incomeRune === null ? ['Some source data is unavailable.'] : [])
+    ])
+  });
+  // Plan visible ticks before formatting: ECharts may ask for labels out of
+  // order, and comparing adjacent source hours misses a skipped midnight tick.
+  const start = option.dataZoom[0]?.startValue ?? 0;
+  const end = option.dataZoom[0]?.endValue ?? rows.length - 1;
+  const step = option.xAxis.axisLabel.interval + 1;
+  const labels = new Map();
+  let previousDate;
+  for (let index = start; index <= end && rows[index]; index += step) {
+    const row = rows[index], date = row.day.slice(0, 10);
+    const dateLabel = date !== previousDate ? new Date(row.day).toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', timeZone: 'UTC'
+    }) : '';
+    labels.set(row.day, `${dateLabel}\n${row.day.slice(11, 16)}${row.partial ? '*' : ''}`);
+    previousDate = date;
+  }
+  // Separate date/time lines keep the transition label from colliding with
+  // neighboring hours on a narrow chart, while all clock times stay aligned.
+  return { ...option, grid: { ...option.grid, bottom: 44 }, xAxis: { ...option.xAxis,
+    axisLabel: { ...option.xAxis.axisLabel, showMinLabel: true, hideOverlap: false,
+      interval: (_index, value) => labels.has(value), formatter: value => labels.get(value) || '' }
+  } };
+}
+
+// The chart controller retains its builder for the mounted chart's lifetime.
+// Switch source behavior through options, not by replacing that function prop.
+/** @param {any[]} rows @param {any} options */
+export function buildFinancialChartOption(rows, options = {}) {
+  return options.bucket === 'hour' ? buildFinancialHourlyOption(rows, options) : buildFinancialEChartsOption(rows, options);
 }

@@ -4,12 +4,14 @@
   import ProtocolComparison from './protocol-fee-comparison/Comparison.svelte';
   import DayDetail from './financials/DayDetail.svelte';
   import { fetchFinancials } from './financials/api.js';
+  import { FINANCIALS_HOURLY_RANGES, formatFinancialHour } from '../../shared/financials/hourly.js';
   import {
     FINANCIALS_RANGES, formatFinancialAmount, formatFinancialDay,
     formatFinancialPercent, summarizeFinancials
   } from '../../shared/financials/model.js';
 
   let range = '30d';
+  let grain = 'day';
   let currency = 'usd';
   let payload = null;
   let loading = true;
@@ -25,7 +27,7 @@
   let chartError = '';
   let selectedDay = '';
   function selectDay(day) {
-    if (points.some(point => point.day === day)) selectedDay = day;
+    if (points.some(point => point.day.slice(0, 10) === day)) selectedDay = day;
   }
   let historyPoints = [], historyRequest, historyLoading = false, historyError = '';
   async function loadRollingHistory(ids) {
@@ -38,15 +40,20 @@
     finally { historyLoading = false; }
   }
 
-  $: points = payload?.range === range ? payload.points : [];
+  $: hourly = grain === 'hour';
+  $: bucket = hourly ? 'hour' : 'day';
+  $: ranges = hourly ? FINANCIALS_HOURLY_RANGES : FINANCIALS_RANGES;
+  $: points = payload?.range === range && (payload.bucket || 'day') === bucket ? payload.points : [];
   $: selectedPoints = zoomWindow ? points.filter((row) => row.day >= zoomWindow.startDay && row.day <= zoomWindow.endDay) : points;
   $: summary = summarizeFinancials(selectedPoints, currency);
   $: tablePoints = [...selectedPoints].reverse().slice(0, 30);
   $: hasData = points.some((point) => point.volumeRune !== null || point.incomeRune !== null);
-  $: pending = payload?.range === range ? payload.bonding.pending : 0;
+  $: pending = !hourly && payload?.range === range ? payload.bonding?.pending || 0 : 0;
   $: livePoint = selectedPoints.find((point) => point.partial);
   $: sourceDelayed = payload?.stale || payload?.live?.stale;
   $: amount = (value, compact = true) => formatFinancialAmount(value, currency, compact);
+  $: observationUnit = hourly ? 'hours' : 'days';
+  $: latestPrice = selectedPoints.findLast(point => point.runePriceUsd !== null)?.runePriceUsd;
 
   onMount(() => {
     loadChart();
@@ -82,9 +89,9 @@
     refreshing = true;
     error = '';
     try {
-      const data = await fetchFinancials(range, { signal: request.signal });
+      const data = await fetchFinancials(range, { signal: request.signal, bucket: grain === 'hour' ? 'hour' : 'day' });
       if (id !== sequence || destroyed) return;
-      const sameWindow = payload?.range === data.range;
+      const sameWindow = payload?.range === data.range && payload?.bucket === data.bucket;
       payload = data;
       loading = false;
       if (!sameWindow) zoomWindow = null;
@@ -118,6 +125,18 @@
     load();
   }
 
+  function selectGrain(next) {
+    if (next === grain) return;
+    const sourceChanged = (next === 'hour') !== (grain === 'hour');
+    grain = next;
+    if (sourceChanged) {
+      range = next === 'hour' ? '24h' : '30d';
+      zoomWindow = null;
+      selectedDay = '';
+      load();
+    }
+  }
+
   function selectCurrency(next) {
     if (next === currency) return;
     currency = next;
@@ -148,17 +167,17 @@
     </div>
     <div class="source-state" class:stale={sourceDelayed || Boolean(error)} aria-live="polite">
       <span><i class:live={!loading && !sourceDelayed && !error}></i>{loading ? 'LOADING HISTORY' : error ? 'SOURCE ERROR' : sourceDelayed ? 'SOURCE DELAYED' : 'LIVE · 5 MIN BUCKETS'}</span>
-      <small>{payload?.live?.through ? `Updated through ${new Date(payload.live.through).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false })} UTC` : 'Waiting for today’s first complete bucket'}</small>
+      <small>{payload?.live?.through ? `Updated through ${new Date(payload.live.through).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false })} UTC` : hourly ? 'Waiting for hourly observations' : 'Waiting for today’s first complete bucket'}</small>
     </div>
   </header>
 
   {#if error}
     <TerminalAlert tone="err" tag="ERR">{error} <button class="inline-action" on:click={() => load()}>retry</button></TerminalAlert>
   {/if}
-  {#if payload?.stale}
+  {#if payload?.stale && (!hourly || payload.error || payload.asOf)}
     <TerminalAlert tone="warn" tag="DATA">The history source is delayed. Last indexed: {payload.asOf ? new Date(payload.asOf).toLocaleString('en-US', { timeZone: 'UTC', hour12: false }) : 'unknown'} UTC. {payload.error}</TerminalAlert>
   {/if}
-  {#if payload?.live?.stale}
+  {#if payload?.live?.stale && !hourly}
     <TerminalAlert tone="warn" tag="LIVE">Today’s feed is delayed; showing the last verified totals. {payload.live.error}</TerminalAlert>
   {/if}
 
@@ -166,22 +185,22 @@
     <div class="metric">
       <span class="metric-index">01 <span>{zoomWindow ? 'ZOOMED RANGE' : 'SELECTED RANGE'}</span></span>
       <h2>SWAP VOLUME</h2><strong class="volume-value">{amount(summary.volume.value)}</strong>
-      <small>{summary.volume.days} / {summary.days} days observed{livePoint ? ' · today partial' : ''}</small>
+      <small>{summary.volume.days} / {summary.days} {observationUnit} observed{livePoint ? hourly ? ' · current hour partial' : ' · today partial' : ''}</small>
     </div>
     <div class="metric">
       <span class="metric-index">02 <span>POST-REVSHARE</span></span>
       <h2>SYSTEM INCOME</h2><strong class="income-value">{amount(summary.income.value)}</strong>
-      <small>{summary.income.days} / {summary.days} days observed{livePoint ? ' · today partial' : ''}</small>
+      <small>{summary.income.days} / {summary.days} {observationUnit} observed{livePoint ? hourly ? ' · current hour partial' : ' · today partial' : ''}</small>
     </div>
     <div class="metric">
-      <span class="metric-index">03 <span>DAILY AVERAGE</span></span>
-      <h2>INCOME / DAY</h2><strong>{amount(summary.averageDailyIncome)}</strong>
-      <small>Across {summary.averageIncomeDays} completed days</small>
+      <span class="metric-index">03 <span>{hourly ? 'HOURLY' : 'DAILY'} AVERAGE</span></span>
+      <h2>INCOME / {hourly ? 'HOUR' : 'DAY'}</h2><strong>{amount(summary.averageDailyIncome)}</strong>
+      <small>Across {summary.averageIncomeDays} completed {observationUnit}</small>
     </div>
     <div class="metric">
-      <span class="metric-index">04 <span>DAILY ANNUALIZED RATE</span></span>
-      <h2>AVG BONDING APR</h2><strong class="apr-value">{formatFinancialPercent(summary.averageApr)}</strong>
-      <small>{summary.averageAprDays} / {summary.completedDays} completed days</small>
+      <span class="metric-index">04 <span>{hourly ? 'LATEST OBSERVATION' : 'DAILY ANNUALIZED RATE'}</span></span>
+      <h2>{hourly ? 'RUNE PRICE' : 'AVG BONDING APR'}</h2><strong class="apr-value">{hourly ? formatFinancialAmount(latestPrice, 'usd', false) : formatFinancialPercent(summary.averageApr)}</strong>
+      <small>{#if hourly}USD · latest observed hour in view{:else}{summary.averageAprDays} / {summary.completedDays} completed days{/if}</small>
     </div>
   </section>
 
@@ -190,7 +209,7 @@
       <h2 id="financial-chart-title"><span aria-hidden="true">▌</span> PROTOCOL FINANCIALS</h2>
       <div class="chart-controls">
         <div class="button-group" aria-label="Chart range">
-          {#each FINANCIALS_RANGES as item}
+          {#each ranges as item}
             <button class:active={range === item.id} aria-pressed={range === item.id} on:click={() => selectRange(item.id)}>{item.label}</button>
           {/each}
         </div>
@@ -208,37 +227,37 @@
     {#if chartError}
       <TerminalAlert tone="err" tag="ERR">{chartError} <button class="inline-action" on:click={loadChart}>retry chart</button></TerminalAlert>
     {:else if ChartComponent}
-      {#if historyLoading || historyError}<p class="muted-text">{historyError || 'Loading rolling-average lookback…'}</p>{/if}
-      <svelte:component this={ChartComponent} {points} {historyPoints} onRollingChange={loadRollingHistory} {currency} {hidden} {zoomWindow} {loading} {hasData} onZoom={(window) => zoomWindow = window} onSelect={selectDay} />
+      {#if !hourly && (historyLoading || historyError)}<p class="muted-text">{historyError || 'Loading rolling-average lookback…'}</p>{/if}
+      <svelte:component this={ChartComponent} {points} {historyPoints} {grain} onGrainChange={selectGrain} onRollingChange={loadRollingHistory} {currency} {hidden} {zoomWindow} {loading} {hasData} onZoom={(window) => zoomWindow = window} onSelect={selectDay} />
     {:else}
       <div class="chart-loading" role="status">Loading chart renderer…</div>
     {/if}
     <div class="chart-footer">
-      <span>{formatFinancialDay(selectedPoints[0]?.day)} → {formatFinancialDay(selectedPoints.at(-1)?.day)} <span class="muted-text">· UTC</span></span>
+      <span>{(hourly ? formatFinancialHour : formatFinancialDay)(selectedPoints[0]?.day)} → {(hourly ? formatFinancialHour : formatFinancialDay)(selectedPoints.at(-1)?.day)} <span class="muted-text">· UTC{hourly ? ' · hour starts' : ''}</span></span>
       <span>Independent scales <span class="muted-text">·</span> Drag or pinch to zoom</span>
     </div>
     <div class="day-picker">
-      <label for="financial-detail-day">Click a daily bar or choose a day</label>
-      <input id="financial-detail-day" type="date" value={selectedDay} min={points[0]?.day} max={points.at(-1)?.day}
+      <label for="financial-detail-day">{hourly ? 'Choose a day for top swaps & pools' : 'Click a daily bar or choose a day'}</label>
+      <input id="financial-detail-day" type="date" value={selectedDay} min={points[0]?.day.slice(0, 10)} max={points.at(-1)?.day.slice(0, 10)}
         disabled={!hasData} on:change={event => selectDay(event.currentTarget.value)} />
       <span class="muted-text">Top swaps &amp; pools · UTC</span>
     </div>
     {#if selectedDay}{#key selectedDay}<DayDetail day={selectedDay} onClose={() => selectedDay = ''} />{/key}{/if}
     {#if livePoint}
-      <div class="live-note"><span>TODAY · IN PROGRESS</span>
+      <div class="live-note"><span>{hourly ? 'CURRENT HOUR' : 'TODAY'} · IN PROGRESS</span>
         {#if payload?.live?.through}
-          Through {new Date(payload.live.through).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false })} UTC · APR run rate {formatFinancialPercent(livePoint.bondingApr)}
+          Through {new Date(payload.live.through).toLocaleTimeString('en-US', { timeZone: 'UTC', hour12: false })} UTC{#if !hourly} · APR run rate {formatFinancialPercent(livePoint.bondingApr)}{/if}
         {:else}Waiting for the first completed five-minute bucket.{/if}
-        <small>Checks every 30 seconds. Today is included in totals; daily averages use completed days only.</small>
+        <small>{hourly ? 'UTC hourly buckets include the current partial hour. Five-minute source intervals are not extrapolated; averages use completed hours only.' : 'Checks every 30 seconds. Today is included in totals; daily averages use completed days only.'}</small>
       </div>
     {/if}
     {#if pending}
       <div class="coverage-note" role="status">Loading historical bonds · {summary.aprDays} / {summary.days} APR days ready. APR becomes available as snapshots arrive.</div>
-    {:else if hasData && summary.aprDays < summary.days}
+    {:else if !hourly && hasData && summary.aprDays < summary.days}
       <div class="coverage-note">Bonding APR is available for {summary.aprDays} / {summary.days} days. Gaps indicate unavailable historical validator state.</div>
     {/if}
     {#if hasData && (summary.income.days < summary.days || summary.volume.days < summary.days)}
-      <div class="coverage-note">Some daily values are missing. Totals and averages include only observed days.</div>
+      <div class="coverage-note">Some {hourly ? 'hourly' : 'daily'} values are missing. Totals and averages include only observed {observationUnit}.</div>
     {/if}
   </section>
 
@@ -246,18 +265,18 @@
 
   <section class="methodology" aria-label="Metric definitions">
     <div><h2><span class="volume-value">01</span> VOLUME</h2><p>Executed swap volume across every pool, including trade, secured, and synth swaps. Cross-asset swaps contribute both pool legs.</p></div>
-    <div><h2><span class="income-value">02</span> SYSTEM INCOME</h2><p>Midgard’s retained earnings after REVSHARE. The hover breakdown is gross liquidity fees + Reserve emissions − REVSHARE + a separately disclosed reconciliation adjustment. Emissions use historical Reserve balances and the protocol formula; REVSHARE uses finalized payouts. Missing coverage stays unavailable. USD income uses each day’s closing RUNE price, or the latest covered five-minute price today. Swap USD uses prices at execution.</p></div>
+    <div><h2><span class="income-value">02</span> SYSTEM INCOME</h2><p>Midgard’s retained earnings after REVSHARE. The daily hover breakdown is gross liquidity fees + Reserve emissions − REVSHARE + a separately disclosed reconciliation adjustment. Emissions use historical Reserve balances and the protocol formula; REVSHARE uses finalized payouts. Missing coverage stays unavailable. USD income uses each day’s or hour’s closing RUNE price, or the latest covered five-minute price for a partial bucket. Swap USD uses prices at execution.</p></div>
     <div><h2><span class="apr-value">03</span> RUNE PRICE / BONDING APR</h2><p>The amber line defaults to closing RUNE price in USD; weekly and monthly views use the last observation. Switch to APR for daily node rewards ÷ closing active bond × 365. Today’s APR estimate scales rewards by the elapsed covered time, using a bond snapshot at the same cutoff. Snapshots reflect bonds, unbonds, and active-set changes; balances are not time-weighted. Excludes individual fees and performance adjustments.</p></div>
   </section>
 
   {#if hasData}
     <details class="daily-data">
-      <summary>DAILY DATA <span>[{tablePoints.length} most recent days in view]</span></summary>
+      <summary>{hourly ? 'HOURLY' : 'DAILY'} DATA <span>[{tablePoints.length} most recent {observationUnit} in view]</span></summary>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the data table.) -->
-      <div class="table-scroll" tabindex="0" role="region" aria-label="Daily financials table">
+      <div class="table-scroll" tabindex="0" role="region" aria-label={`${hourly ? 'Hourly' : 'Daily'} financials table`}>
         <table>
-          <thead><tr><th scope="col">DAY · UTC</th><th scope="col">VOLUME · {currency.toUpperCase()}</th><th scope="col">SYSTEM INCOME · {currency.toUpperCase()}</th><th scope="col">BONDING APR</th></tr></thead>
-          <tbody>{#each tablePoints as row}<tr class:partial={row.partial}><th scope="row"><button class="inline-action" on:click={() => selectDay(row.day)} aria-label={`Show top swaps and pools for ${row.day}`}>{row.day}</button>{#if row.partial}<span class="partial-label">LIVE / PARTIAL</span>{/if}</th><td>{amount(currency === 'usd' ? row.volumeUsd : row.volumeRune, false)}</td><td>{amount(currency === 'usd' ? row.incomeUsd : row.incomeRune, false)}</td><td class="apr-value">{formatFinancialPercent(row.bondingApr)}{row.partial ? ' est.' : ''}</td></tr>{/each}</tbody>
+          <thead><tr><th scope="col">{hourly ? 'HOUR' : 'DAY'} · UTC</th><th scope="col">VOLUME · {currency.toUpperCase()}</th><th scope="col">SYSTEM INCOME · {currency.toUpperCase()}</th><th scope="col">{hourly ? 'RUNE PRICE · USD' : 'BONDING APR'}</th></tr></thead>
+          <tbody>{#each tablePoints as row}<tr class:partial={row.partial}><th scope="row"><button class="inline-action" on:click={() => selectDay(row.day.slice(0, 10))} aria-label={`Show top swaps and pools for ${row.day.slice(0, 10)}`}>{hourly ? formatFinancialHour(row.day) : row.day}</button>{#if row.partial}<span class="partial-label">LIVE / PARTIAL</span>{/if}</th><td>{amount(currency === 'usd' ? row.volumeUsd : row.volumeRune, false)}</td><td>{amount(currency === 'usd' ? row.incomeUsd : row.incomeRune, false)}</td><td class="apr-value">{hourly ? formatFinancialAmount(row.runePriceUsd, 'usd', false) : formatFinancialPercent(row.bondingApr)}{!hourly && row.partial ? ' est.' : ''}</td></tr>{/each}</tbody>
         </table>
       </div>
     </details>

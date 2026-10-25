@@ -1,6 +1,8 @@
 <script>
   import TimeSeriesChart from '../charts/TimeSeriesChart.svelte';
-  import { buildFinancialEChartsOption } from './echarts-options.js';
+  import ChartTools from '../charts/ChartTools.svelte';
+  import { analysisLegend, analysisRollingSeries } from '../charts/analytics.js';
+  import { buildFinancialEChartsOption, buildFinancialHourlyOption, buildFinancialChartOption } from './echarts-options.js';
 
   export let points = [];
   export let historyPoints = [];
@@ -12,22 +14,32 @@
   export let hasData = false;
   export let onZoom = (_window) => {};
   export let onSelect = (_day) => {};
+  export let grain = 'day';
+  export let onGrainChange = (_grain) => {};
   let lineMetric = 'runePriceUsd';
-  let grain = 'day';
+  let rolling = [];
+  $: hourly = grain === 'hour';
+  $: baseSpec = (hourly ? buildFinancialHourlyOption(points, { currency }) : buildFinancialEChartsOption(points, { currency, lineMetric }))._spec;
+  $: historySpec = historyPoints.length && !hourly ? buildFinancialEChartsOption(historyPoints, { currency, lineMetric })._spec : baseSpec;
+  $: options = { currency, hidden, lineMetric, bucket: hourly ? 'hour' : 'day', selectWithZoom: !hourly,
+    ...(!hourly ? { analysis: { grain, hidden, rolling, baseSpec, historySpec, historyRows: historyPoints } } : {}) };
 </script>
 
-<TimeSeriesChart {points} {historyPoints} {onRollingChange} options={{ currency, hidden, lineMetric, selectWithZoom: true }} buildOption={buildFinancialEChartsOption}
-  {zoomWindow} {loading} {hasData} {onZoom}
-  onGrainChange={(value) => grain = value} onSelect={(day) => { if (grain === 'day') onSelect(day); }}
-  ariaLabel={`Daily THORChain volume and system income bars, plus ${lineMetric === 'bondingApr' ? 'bonding APR' : 'RUNE price in USD'} on three independent axes. Click a day to show its top swaps and pools, or use the day picker below. Weekly and monthly views use the day picker.`}
-  emptyText="No protocol history is available for this range.">
-  <button slot="legend-extra" class="line-switch" role="switch" aria-label="Show bonding APR instead of RUNE price" aria-checked={lineMetric === 'bondingApr'}
+<ChartTools series={analysisLegend(baseSpec.series)} rollingSeries={analysisRollingSeries(baseSpec)}
+  {grain} {hidden} {rolling} sourceGrain={hourly ? 'hour' : 'day'} showSourceResolution={false} showRollingControls={!hourly}
+  grains={['hour', 'day', 'week', 'month']} availableGrains={['hour', 'day', 'week', 'month']}
+  onGrain={onGrainChange} onHidden={value => hidden = value} onRolling={value => { rolling = value; onRollingChange(value); }}>
+  <svelte:fragment slot="legend-extra">{#if !hourly}<button class="line-switch" role="switch" aria-label="Show bonding APR instead of RUNE price" aria-checked={lineMetric === 'bondingApr'}
     on:click={() => lineMetric = lineMetric === 'bondingApr' ? 'runePriceUsd' : 'bondingApr'}>
     <span class:active={lineMetric === 'runePriceUsd'}>RUNE PRICE</span>
     <span class="track" aria-hidden="true"><span class="thumb"></span></span>
     <span class:active={lineMetric === 'bondingApr'}>BONDING APR</span>
-  </button>
-</TimeSeriesChart>
+  </button>{/if}</svelte:fragment>
+</ChartTools>
+<TimeSeriesChart {points} {options} buildOption={buildFinancialChartOption} tools={false} {zoomWindow} {loading} {hasData} {onZoom}
+  onSelect={(day) => { if (grain === 'day') onSelect(day); }}
+  ariaLabel={`${hourly ? 'Hourly' : 'Daily'} THORChain volume and system income bars, plus ${!hourly && lineMetric === 'bondingApr' ? 'bonding APR' : 'RUNE price in USD'} on three independent axes. Use the day picker below for daily top swaps and pools.`}
+  emptyText={hourly ? 'Hourly history is loading; saved observations will appear as they arrive.' : 'No protocol history is available for this range.'} />
 
 <style>
   .line-switch { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 0; border: 0; background: transparent; color: var(--term-text-3); font: 11px var(--term-font-mono); cursor: pointer; }

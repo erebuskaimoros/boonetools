@@ -14,6 +14,8 @@ import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-poo
 import { refreshFinancialDayQueue } from '../shared/financials-day-detail.js';
 import { createFinancialDaySource } from '../shared/financials-day-source.js';
 import { acquisitionMetrics } from '../lib/acquisition-metrics.js';
+import { createFinancialsHourlyService } from '../shared/financials-hourly.js';
+import { FINANCIALS_HOURLY_MODEL_KEY } from '../../../shared/financials/hourly.js';
 
 // Liquify's block-results archive currently starts on October 6. Begin at the
 // next complete UTC day, including the full first REVSHARE day (October 7).
@@ -57,6 +59,19 @@ export async function publishFinancialsSnapshots(service, client, options = {}) 
   return results;
 }
 
+export async function publishFinancialHourlySnapshot(service, client, options = {}) {
+  const payload = await service.getSnapshot('30d');
+  if (!payload.points.some(point => point.volumeRune !== null || point.incomeRune !== null)) return;
+  const now = options.now?.() ?? Date.now(), etag = createReadModelEtag(payload);
+  const previous = options.published?.get(FINANCIALS_HOURLY_MODEL_KEY);
+  if (previous?.etag === etag && now - previous.at < FINANCIALS_MODEL_TTL_MS / 2) return;
+  await (options.publish || publishReadModel)(FINANCIALS_HOURLY_MODEL_KEY, payload, {
+    client, schemaVersion: 1, ttlMs: FINANCIALS_MODEL_TTL_MS, generatedAt: new Date(now).toISOString(),
+    sourceUpdatedAt: payload.live?.through || payload.asOf, metadata: { collector: 'financials', interval_seconds: 3600 }
+  });
+  options.published?.set(FINANCIALS_HOURLY_MODEL_KEY, { etag, at: now });
+}
+
 // Independent acquisition and publication loops keep the live read model
 // moving while slow archive calls or first-run history fills are in flight.
 export async function runFinancialsCollector(options = {}) {
@@ -70,6 +85,10 @@ export async function runFinancialsCollector(options = {}) {
       readRewardAccounting: window => readFinancialRewardAccountingDays(client, window)
     });
     const published = new Map();
+    const hourly = options.hourlyService || (!options.service ? createFinancialsHourlyService({
+      cacheDir: options.cacheDir || process.env.FINANCIALS_CACHE_DIR || '/var/lib/boonetools-financials',
+      requestJson: createFinancialsProviderRequest(client)
+    }) : null);
     const log = options.log || ((message) => console.error(JSON.stringify({ type: 'financials', message })));
     const daySource = createFinancialDaySource({ client,
       getJson: route => createFinancialsProviderRequest(client)(route,
@@ -77,7 +96,7 @@ export async function runFinancialsCollector(options = {}) {
     let stopping;
     const stop = () => {
       controller.abort();
-      stopping ||= service.stop();
+      stopping ||= Promise.all([service.stop(), hourly?.stop()]);
     };
     options.signal?.addEventListener('abort', stop, { once: true });
     if (options.signal?.aborted) stop();
@@ -94,6 +113,7 @@ export async function runFinancialsCollector(options = {}) {
           await loop(5 * 60_000, () => service.refreshHistory('all'));
         })(),
         loop(30_000, async () => { await service.refreshLive(); await service.refreshRewardAccounting?.(); }),
+        ...(hourly ? [loop(60_000, () => hourly.refresh())] : []),
         ...(options.service && !options.refreshDayDetails ? [] : [loop(5000, () =>
           (options.refreshDayDetails || refreshFinancialDayQueue)(client, { signal,
             getJson: daySource }))]),
@@ -120,7 +140,10 @@ export async function runFinancialsCollector(options = {}) {
           if (result.deferred) log(`Reserve emissions: deferred ${result.deferred} blocks: ${result.errors.join('; ')}`);
           await service.refreshRewardAccounting?.();
         })]),
-        loop(5000, () => publishFinancialsSnapshots(service, client, { published, publish: options.publish }))
+        loop(5000, async () => {
+          await publishFinancialsSnapshots(service, client, { published, publish: options.publish });
+          if (hourly) await publishFinancialHourlySnapshot(hourly, client, { published, publish: options.publish });
+        })
       ]);
     } finally {
       stop();

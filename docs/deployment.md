@@ -450,6 +450,20 @@ panels stop renewing their leases. If an incident temporarily held specific queu
 rows by `available_at`, release only those exact holds after the fixed collector
 is active; preserve any newer retry deadlines and all payload/state/cooldown data.
 
+#### Hourly Financials (October 25, 2026)
+
+Deploy the backend before the frontend. No migration or new service/timer is required.
+The Financials process adds bounded hourly acquisition and independently
+publishes `financials:hour:30d:v1`. Preserve both `history-v1.json` and the new
+`hourly-v1.json` in its existing StateDirectory. Normal shared request budgets
+and cooldowns apply; do not reset them or force an hourly warmup/backfill.
+
+Verify the cached `financials?bucket=hour&range=24h` response, hourly timestamp
+identity, explicit partial-hour coverage, and no provider calls from public
+GETs. `[H]` must reset to 24H; hourly presets cap at 30D, and D/W/M continue to
+use daily history. Hourly APR is deliberately absent. Check restart reuse of
+completed hours, missing intervals, UTC rollover and budget-deferred retries.
+
 ### Crosschain comparison stuck at a shared date
 
 Check the public `protocol-fee-comparison` endpoint's `errors` and the
