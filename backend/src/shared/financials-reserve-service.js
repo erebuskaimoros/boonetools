@@ -113,6 +113,10 @@ export async function repairFinancialReserveEmissions(client, options = {}) {
     current.push(row);
   }
   if (current.length) chunks.push(current);
+  // Anchors are the expensive step and one covers up to chunkSize blocks, so
+  // anchor the largest chunk first (stable sort: ties stay newest-first). Pure
+  // newest-first let a few live blocks spend the budget and starve a backlog.
+  chunks.sort((left, right) => right.length - left.length);
   // Persist explicit invalid-observation deferrals once, rather than letting a
   // permanent transition occupy the front of every future candidate batch.
   for (const { rows: invalidRows, error } of invalid.values()) {
