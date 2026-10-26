@@ -1,4 +1,6 @@
-import { fetchFinancialReserveAnchor, replayFinancialReserveEmissions } from './financials-reserve-emissions.js';
+import {
+  fetchFinancialReserveAnchor, replayFinancialReserveEmissions, reviewedReserveVersionChange
+} from './financials-reserve-emissions.js';
 
 const METHOD = 'historical-reserve-formula-v1';
 
@@ -8,7 +10,7 @@ function checkedObservation(row) {
   if (!Number.isSafeInteger(height) || height < 1 || point?.schemaVersion !== 1 || point.height !== height) {
     throw new Error('Invalid compact Reserve observation height/schema');
   }
-  if (!Array.isArray(point.configChanges) || point.configChanges.length) {
+  if (reviewedReserveVersionChange(point.configChanges) === false) {
     throw new Error('Reserve configuration transition requires a separately verified boundary');
   }
   if (point.rewardEventCount !== 1) throw new Error('Exactly one verified Reserve rewards event is required');

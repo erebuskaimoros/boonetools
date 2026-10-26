@@ -68,10 +68,31 @@ test('a malformed observation or config transition is deferred without starving 
   assert.ok(db.failures.every((item) => item.emissions_evidence.retry_after));
 });
 
+test('the reviewed 3.21.0 upgrade block is reconstructed inside one verified chunk', async () => {
+  // Production observations around the 3.20.3 -> 3.21.0 upgrade at 28366100.
+  const db = database([
+    row(28366101, { reserveDeltaE8: '25995328', rewardTransfersE8: '386376606' }),
+    row(28366100, { reserveDeltaE8: '-79694928482546', rewardTransfersE8: '3841376895',
+      configChanges: [{ type: 'version', version: '3.21.0' }] }),
+    row(28366099, { reserveDeltaE8: '1995175', rewardTransfersE8: '5086087' })
+  ]);
+  const anchors = [];
+  const result = await repairFinancialReserveEmissions(db, { fetchAnchor: async (height) => {
+    anchors.push(height);
+    return { ...anchor(height), reserveBalanceE8: '2456239632252315', version: '3.21.0' };
+  } });
+  assert.deepEqual(anchors, [28366101]);
+  assert.equal(result.deferred, 0);
+  assert.equal(result.reconstructed, 3);
+  assert.deepEqual(db.failures, []);
+  assert.deepEqual(db.writes.map((item) => [item.height, item.reserve_emissions_e8]),
+    [[28366101, '4673'], [28366100, '4673'], [28366099, '4825']]);
+});
+
 test('unsupported anchored versions fail closed and are deferred while an older supported chunk can complete', async () => {
   const db = database([row(28204118), row(28204116)]);
   const result = await repairFinancialReserveEmissions(db, { fetchAnchor: async (height) => ({ ...anchor(height),
-    version: height === 28204118 ? '3.21.0' : '3.20.3' }) });
+    version: height === 28204118 ? '3.22.0' : '3.20.3' }) });
   assert.equal(result.reconstructed, 1);
   assert.equal(db.writes[0].height, 28204116);
   assert.equal(db.failures[0].height, 28204118);
