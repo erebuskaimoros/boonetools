@@ -3,7 +3,9 @@ import { QueryBalanceRequest, QueryBalanceResponse } from 'cosmjs-types/cosmos/b
 
 export const FINANCIAL_RESERVE_ADDRESS = 'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
 const METHOD = 'historical-reserve-formula-v1';
-const SUPPORTED_VERSION = '3.20.3';
+const REVIEWED_VERSIONS = new Set(['3.20.3', '3.21.0']);
+// Reviewed upgrade -> predecessor whose formula governs the blocks before it.
+const REVIEWED_TRANSITIONS = new Map([['3.21.0', '3.20.3']]);
 const BLOCKS_PER_YEAR = '5256000';
 const PRECISION = 10n ** 18n;
 const INT64_MAX = (1n << 63n) - 1n;
@@ -16,6 +18,13 @@ const RELEVANT_MIMIRS = new Set(['EMISSIONCURVE', 'RESERVEMAXCAP']);
 // constants_v1.go. All positive rewards attributes are Reserve transfers made
 // before the rewards event. Saver yield mints synths; it does not debit Reserve.
 // SDK math v1.5.3 uses 18-decimal Quo and RoundInt64 with half-to-even rounding.
+// Reviewed v3.21.0 (909528f18d62dea894cddd7461d58f1b003371e7): calcBlockRewards
+// is byte-identical; UpdateNetwork only adds telemetry and commits the Reserve
+// transfers, rewards event and SetNetwork atomically in a CacheContext (event
+// order preserved); BlocksPerYear/emission constants, Cosmos SDK v0.53.0 and
+// math v1.5.3 are unchanged. Replaying 1,000 production blocks 28367099→28366100
+// across the upgrade from a Liquify height-verified anchor reproduced the
+// verified Reserve balance at 28366099 exactly.
 // Unknown protocol versions/config transitions intentionally require review.
 function integer(value, label, { signed = false } = {}) {
   if (typeof value === 'number' && !Number.isSafeInteger(value)) throw new Error(`Invalid ${label}`);
@@ -173,7 +182,7 @@ function bankersRound(numerator, denominator) {
 }
 
 export function calculateFinancialReserveEmissionE8(reserveBeforeRewardsE8, parameters) {
-  if (parameters?.version !== SUPPORTED_VERSION) throw new Error(`Unsupported Reserve emissions version ${parameters?.version}`);
+  if (!REVIEWED_VERSIONS.has(parameters?.version)) throw new Error(`Unsupported Reserve emissions version ${parameters?.version}`);
   if (String(parameters.blocksPerYear) !== BLOCKS_PER_YEAR) throw new Error('Unsupported Reserve blocks-per-year configuration');
   const reserve = integer(reserveBeforeRewardsE8, 'Reserve balance');
   if (reserve > INT64_MAX) throw new Error('Reserve balance exceeds protocol int64 range');
@@ -189,8 +198,21 @@ export function calculateFinancialReserveEmissionE8(reserveBeforeRewardsE8, para
   return bankersRound(decimal, PRECISION).toString();
 }
 
+// Only a version change to a reviewed upgrade keeps the emissions configuration;
+// Mimir changes and any other version change still need a verified boundary.
+// Returns null when nothing changed, the reviewed upgrade version, or false.
+export function reviewedReserveVersionChange(configChanges) {
+  if (!Array.isArray(configChanges)) return false;
+  if (!configChanges.length) return null;
+  const version = configChanges[0]?.version;
+  return REVIEWED_TRANSITIONS.has(version) && configChanges.every((change) =>
+    change?.type === 'version' && change.version === version) ? version : false;
+}
+
 // No extrapolation or implicit sorting: anchor is the post-block bank balance,
-// and every complete observation must descend exactly one block from it.
+// and every complete observation must descend exactly one block from it. A
+// reviewed upgrade block runs the version in effect; blocks below it run the
+// reviewed predecessor with the same anchored Mimir parameters.
 export function replayFinancialReserveEmissions(observations, anchor) {
   let height = checkedHeight(anchor?.height);
   let balance = integer(anchor?.reserveBalanceE8, 'Reserve balance anchor');
@@ -198,9 +220,12 @@ export function replayFinancialReserveEmissions(observations, anchor) {
   calculateFinancialReserveEmissionE8(balance.toString(), anchor);
   if (!Array.isArray(observations)) throw new Error('Invalid Reserve observations');
   const blocks = [];
+  let parameters = anchor;
   for (const observation of observations) {
     if (observation?.schemaVersion !== 1 || checkedHeight(observation.height) !== height) throw new Error('Reserve observations must be contiguous descending heights');
-    if (!Array.isArray(observation.configChanges) || observation.configChanges.length) throw new Error('Reserve configuration changed; a verified configuration boundary is required');
+    const upgrade = reviewedReserveVersionChange(observation.configChanges);
+    if (upgrade === false) throw new Error('Reserve configuration changed; a verified configuration boundary is required');
+    if (upgrade && upgrade !== parameters.version) throw new Error(`Reserve upgrade to ${upgrade} contradicts the anchored ${parameters.version} configuration`);
     if (observation.rewardEventCount !== 1) throw new Error('Exactly one verified rewards event is required');
     const delta = integer(observation.reserveDeltaE8, 'Reserve block delta', { signed: true });
     const after = integer(observation.afterRewardsDeltaE8, 'Reserve post-rewards delta', { signed: true });
@@ -209,8 +234,9 @@ export function replayFinancialReserveEmissions(observations, anchor) {
     const beforeRewards = atRewards + rewards;
     const previous = balance - delta;
     if (atRewards < 0n || previous < 0n) throw new Error('Reconstructed Reserve balance is negative');
-    blocks.push({ height, reserveEmissionsE8: calculateFinancialReserveEmissionE8(beforeRewards.toString(), anchor),
+    blocks.push({ height, reserveEmissionsE8: calculateFinancialReserveEmissionE8(beforeRewards.toString(), parameters),
       reserveBeforeRewardsE8: beforeRewards.toString() });
+    if (upgrade) parameters = { ...anchor, version: REVIEWED_TRANSITIONS.get(upgrade) };
     balance = previous;
     height--;
   }
@@ -233,7 +259,7 @@ function readVersion(bytes) {
     if (field === 10) version = reader.string();
     else reader.skipType(field & 7);
   }
-  if (version !== SUPPORTED_VERSION) throw new Error(`Unsupported Reserve emissions version ${version}`);
+  if (!REVIEWED_VERSIONS.has(version)) throw new Error(`Unsupported Reserve emissions version ${version}`);
   return version;
 }
 

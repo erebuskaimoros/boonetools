@@ -310,6 +310,20 @@ is bounded to 5,000 observations per pass and stores its evidence in the ledger.
 
 Verified block 28204118 emitted 4,822 e8 RUNE (0.00004822 RUNE); backward
 reconstruction also matched independently queried state at block 28204117.
+
+THORNode v3.21.0 (upstream `909528f18d62dea894cddd7461d58f1b003371e7`) took
+effect at block 28366100 on October 23, 2026. Its `calcBlockRewards` is
+byte-identical to v3.20.3, and `UpdateNetwork` only adds telemetry and commits
+the Reserve transfers atomically, preserving event order. Both versions are
+therefore reviewed for the same method. The upgrade block's `version` event is
+accepted only as the reviewed 3.20.3 → 3.21.0 transition; blocks below it use
+3.20.3 with the anchored Mimir values. Mimir changes and any other version change
+still need a separately verified boundary. Until this review shipped, every block
+from 28366100 was deferred as "Unsupported Reserve emissions version 3.21.0", so
+October 23–26 emissions, gross income and the comparison's THORChain subsidy were
+missing. Replaying 1,000 production blocks across the upgrade reproduced the
+height-verified Reserve balance at 28366099 exactly. Review each future THORNode
+version the same way before adding it.
 As of rollout, Liquify block results were only retained from height 28124001
 (October 6). Initial repair therefore starts at October 7 UTC. Older income and
 APR remain available from existing sources, but their unverified emission

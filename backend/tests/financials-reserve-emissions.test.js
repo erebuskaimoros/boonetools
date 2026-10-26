@@ -135,7 +135,7 @@ test('formula reproduces SDK half-to-even rounding, Reserve cap override, and ex
 
 test('replay rejects gaps, unsupported versions/configurations, missing rewards and invalid balance anchors', () => {
   const point = parseFinancialReserveObservation(blockPayload(), height);
-  for (const bad of [{ ...anchor, height: height + 1 }, { ...anchor, version: '3.21.0' },
+  for (const bad of [{ ...anchor, height: height + 1 }, { ...anchor, version: '3.22.0' },
     { ...anchor, reserveBalanceE8: '-1' }, { ...anchor, emissionCurve: '0' }, { ...anchor, blocksPerYear: '1' }]) {
     assert.throws(() => replayFinancialReserveEmissions([point], bad));
   }
@@ -151,6 +151,53 @@ test('relevant Mimir and version changes require another explicit anchor rather 
     assert.equal(observation.configChanges.length, 1);
     assert.throws(() => replayFinancialReserveEmissions([observation], anchor), /configuration/);
   }
+});
+
+// Compact observations for the 3.20.3 -> 3.21.0 upgrade (block 28366100 carries
+// the version event and the upgrade's Reserve migration transfers). Balances are
+// Liquify height-verified Bank Balance ABCI at 28366101 and 28366098 on 2026-10-26.
+const upgradeHeight = 28366100;
+const upgradeObservations = [
+  { schemaVersion: 1, height: 28366101, reserveDeltaE8: '25995328', afterRewardsDeltaE8: '0',
+    rewardTransfersE8: '386376606', rewardEventCount: 1, configChanges: [] },
+  { schemaVersion: 1, height: upgradeHeight, reserveDeltaE8: '-79694928482546', afterRewardsDeltaE8: '0',
+    rewardTransfersE8: '3841376895', rewardEventCount: 1, configChanges: [{ type: 'version', version: '3.21.0' }] },
+  { schemaVersion: 1, height: 28366099, reserveDeltaE8: '1995175', afterRewardsDeltaE8: '0',
+    rewardTransfersE8: '5086087', rewardEventCount: 1, configChanges: [] }
+];
+const upgradeAnchor = { height: 28366101, reserveBalanceE8: '2456239632252315', version: '3.21.0',
+  emissionCurve: '100000', reserveMaxCapE8: '0', blocksPerYear: '5256000' };
+
+test('THORNode 3.21.0 keeps the reviewed v3.20.3 Reserve emission formula', () => {
+  assert.equal(calculateFinancialReserveEmissionE8('2534440353693046', { ...anchor, version: '3.21.0' }),
+    calculateFinancialReserveEmissionE8('2534440353693046', anchor));
+});
+
+test('the 3.20.3 to 3.21.0 upgrade block replays against verified historical balances', () => {
+  const result = replayFinancialReserveEmissions(upgradeObservations, upgradeAnchor);
+  assert.deepEqual(result.blocks.map((block) => [block.height, block.reserveEmissionsE8]),
+    [[28366101, '4673'], [upgradeHeight, '4673'], [28366099, '4825']]);
+  // 28366099 already holds 4825 from its own 3.20.3 anchor in production.
+  assert.equal(result.previousHeight, 28366098);
+  assert.equal(result.previousReserveBalanceE8, '2535934532744358');
+});
+
+test('unreviewed versions and version transitions still require an explicit review', () => {
+  const [top, boundary, below] = upgradeObservations;
+  const bump = { ...boundary, configChanges: [{ type: 'version', version: '3.22.0' }] };
+  assert.throws(() => replayFinancialReserveEmissions([top, bump, below], { ...upgradeAnchor, version: '3.22.0' }), /Unsupported|configuration/);
+  assert.throws(() => replayFinancialReserveEmissions([top, bump, below], upgradeAnchor), /configuration/);
+  // An anchor older than a later version event cannot describe the blocks above it.
+  assert.throws(() => replayFinancialReserveEmissions([top, boundary, below], { ...upgradeAnchor, version: '3.20.3' }), /configuration/);
+  const mimir = { ...boundary, configChanges: [{ type: 'mimir', key: 'EMISSIONCURVE', value: '200000' }] };
+  assert.throws(() => replayFinancialReserveEmissions([top, mimir, below], upgradeAnchor), /configuration/);
+});
+
+test('anchor acquisition accepts the reviewed 3.21.0 protocol version', async () => {
+  const result = await fetchFinancialReserveAnchor(height, { getJson: anchorGetJson({
+    '/types.Query/Version': abciResponse(BinaryWriter.create().uint32(10).string('3.21.0').finish())
+  }) });
+  assert.equal(result.version, '3.21.0');
 });
 
 function abciResponse(value, atHeight = height) {
