@@ -46,7 +46,7 @@
     <span class="footer-by">by <a href={AUTHOR_URL} target="_blank" rel="noopener noreferrer" on:click={() => trackFooterClick('boonew')}>@boonew</a></span>
     <span class="sep" aria-hidden="true">│</span>
     <span class="tip-group">
-      <span class="tip-label">buy me a coffee?</span>
+      <span class="tip-label">buy me a coffee ☕?</span>
       <button
         class="tip"
         class:active={tipOpen}
