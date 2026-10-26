@@ -109,6 +109,21 @@ test('ordinary provider failure preserves previous chunks and is not mislabeled 
   assert.equal(db.failures.length, 0);
 });
 
+test('a deferred backlog is not starved by the newest live blocks when anchors exhaust the budget', async () => {
+  // After the 3.21.0 deferral, every pass's newest-first chunk was a few dozen
+  // fresh blocks; one slow anchor spent the budget and the backlog never ran.
+  const live = [28411700, 28411699].map((height) => row(height));
+  const backlog = Array.from({ length: 6 }, (_, offset) => row(28400000 - offset));
+  const db = database([...live, ...backlog]);
+  let clock = 0;
+  const anchors = [];
+  const result = await repairFinancialReserveEmissions(db, { now: () => clock, budgetMs: 20_000,
+    fetchAnchor: async (height) => { anchors.push(height); clock += 30_000; return anchor(height); } });
+  assert.deepEqual(anchors, [28400000], 'the largest contiguous chunk is anchored first');
+  assert.equal(result.reconstructed, 6);
+  assert.deepEqual(db.writes.map((item) => item.height), backlog.map((item) => Number(item.height)));
+});
+
 test('cancellation and chunk budgets bound anchor work, and explicit date filters reach the query', async () => {
   const db = database([row(28204118), row(28204116)]);
   const controller = new AbortController();
