@@ -37,7 +37,7 @@ test('a tip is a plain MsgSend of RUNE to a thor1 address, with no memo', async 
 
 test('the footer offers a coffee and loads the send modal only when asked', async () => {
   const footer = await source('../src/lib/Footer.svelte');
-  assert.match(footer, /<span class="tip-label">buy me a coffee ☕\?<\/span>/);
+  assert.match(footer, /<span class="tip-label">buy me a coffee <span class="coffee-emoji" aria-hidden="true">☕️<\/span>\?<\/span>/);
   assert.match(footer, /aria-expanded=\{tipOpen\}[\s\S]*aria-controls="tip-panel"[\s\S]*on:click=\{toggleTipJar\}/);
   // Docked like the swap panel and never both at once.
   assert.match(footer, /\$: if \(\$swapOpen\) tipOpen = false;/);

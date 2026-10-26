@@ -46,7 +46,7 @@
     <span class="footer-by">by <a href={AUTHOR_URL} target="_blank" rel="noopener noreferrer" on:click={() => trackFooterClick('boonew')}>@boonew</a></span>
     <span class="sep" aria-hidden="true">│</span>
     <span class="tip-group">
-      <span class="tip-label">buy me a coffee ☕?</span>
+      <span class="tip-label">buy me a coffee <span class="coffee-emoji" aria-hidden="true">☕️</span>?</span>
       <button
         class="tip"
         class:active={tipOpen}
@@ -159,6 +159,14 @@
   .tip-label {
     flex: none;
     color: var(--term-text-3);
+  }
+
+  .tip-label .coffee-emoji {
+    display: inline-block;
+    font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+    font-size: 20px;
+    line-height: 1;
+    vertical-align: middle;
   }
 
   .tip-address {
