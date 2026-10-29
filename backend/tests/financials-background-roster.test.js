@@ -109,7 +109,8 @@ async function withRosterDatabase(name, run) {
     await client.query(`create schema financial_roster_${process.pid}_${name}`);
     await client.query(`set local search_path to financial_roster_${process.pid}_${name}`);
     await client.query("set local time zone 'America/New_York'");
-    for (const migration of ['068_financials_day_details.sql', '072_financials_background_rosters.sql']) {
+    for (const migration of ['068_financials_day_details.sql', '072_financials_background_rosters.sql',
+      '073_financials_swap_candidates.sql']) {
       await client.query(await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8'));
     }
     await run(client);

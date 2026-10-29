@@ -235,6 +235,7 @@ test('Postgres migration, cold enqueue, resumable worker, last-good errors and f
     await client.query(`set local search_path to financial_day_test_${process.pid}`);
     await client.query(await readFile(new URL('../migrations/068_financials_day_details.sql', import.meta.url), 'utf8'));
     await client.query(await readFile(new URL('../migrations/072_financials_background_rosters.sql', import.meta.url), 'utf8'));
+    await client.query(await readFile(new URL('../migrations/073_financials_swap_candidates.sql', import.meta.url), 'utf8'));
     // This test isolates the visitor lane; the managed current day is cooling.
     await client.query(`insert into financials_day_details (day, background, available_at)
       values ((now() at time zone 'UTC')::date, true, now() + interval '1 day')`);
@@ -284,6 +285,7 @@ test('Postgres queue freezes provisional closed days, pauses abandoned scans and
     await client.query("set local time zone 'America/New_York'");
     await client.query(await readFile(new URL('../migrations/068_financials_day_details.sql', import.meta.url), 'utf8'));
     await client.query(await readFile(new URL('../migrations/072_financials_background_rosters.sql', import.meta.url), 'utf8'));
+    await client.query(await readFile(new URL('../migrations/073_financials_swap_candidates.sql', import.meta.url), 'utf8'));
     await client.query(`insert into financials_day_details (day, background, available_at)
       values ((now() at time zone 'UTC')::date, true, now() + interval '1 day')`);
     const complete = { day, through: new Date(to * 1000).toISOString(), observedAt: new Date(now).toISOString(),

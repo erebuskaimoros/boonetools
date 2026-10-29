@@ -107,6 +107,9 @@ export const config = Object.freeze({
     day: readInt('MIDGARD_PORTAL_REQUEST_BUDGET_BULK_DAY', readInt('MIDGARD_REQUEST_BUDGET_BULK_DAY', 5000))
   }),
   midgardPortalRequestMinIntervalMs: readInt('MIDGARD_PORTAL_REQUEST_MIN_INTERVAL_MS', 200),
+  // Finalized-block swaps at least this large (whole RUNE) compete for each
+  // Financials day ranking; only a day's top candidates cost a Midgard lookup.
+  financialsSwapCandidateMinRuneE8: Math.max(0, readInt('FINANCIALS_SWAP_CANDIDATE_MIN_RUNE', 5000)) * 1e8,
   rpcRestUrl,
   rpcArchiveRestUrl,
   rpcRestUrls: readList('RPC_REST_URLS', [
