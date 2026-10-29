@@ -79,13 +79,14 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
       emissions_method: reserveEmissions === null ? null : emissionsMethod,
       source: String(observation.source || 'thorchain-rpc:rev_share.payout') };
   });
-  const minRune = BigInt(config.financialsSwapCandidateMinRuneE8);
-  const swaps = new Map();
+  const swaps = new Map(), fees = new Map();
   observations.forEach((observation, index) => {
     for (const swap of Array.isArray(observation.swapCandidates) ? observation.swapCandidates : []) {
       if (!swap?.txId || !swap.inputAsset || !/^\d+$/.test(swap.inputE8 ?? '')
-        || !/^\d+$/.test(swap.runeValueE8 ?? '') || BigInt(swap.runeValueE8) < minRune) continue;
+        || !/^\d+$/.test(swap.runeValueE8 ?? '')) continue;
       const { height, block_time: seenAt } = rows[index];
+      fees.set(`${height}:${swap.txId}`, { tx_id: swap.txId, height,
+        fee_rune_e8: /^\d+$/.test(swap.feeRuneE8 ?? '') ? swap.feeRuneE8 : null });
       swaps.set(swap.txId, mergeSwapCandidate(swaps.get(swap.txId), { tx_id: swap.txId, day: seenAt.slice(0, 10),
         first_height: height, first_seen_at: seenAt, input_asset: swap.inputAsset, input_e8: swap.inputE8,
         rune_value_e8: swap.runeValueE8, output_asset: swap.outputAsset || '', streaming: Boolean(swap.streaming),
@@ -96,22 +97,31 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
   // Live (ascending) and repair (descending) arrivals merge to the same row:
   // a start record dates it and a completion record sizes it.
   const result = await client.query(
-    `with swap_candidates as (
+    `with inserted_fees as (
+       insert into financials_swap_fee_blocks (tx_id, height, fee_rune_e8)
+       select tx_id, height, fee_rune_e8 from jsonb_to_recordset($3::jsonb)
+         as incoming(tx_id text, height bigint, fee_rune_e8 numeric)
+       on conflict (tx_id, height) do nothing returning tx_id, fee_rune_e8
+     ), fee_totals as (
+       select tx_id, case when bool_and(fee_rune_e8 is not null) then sum(fee_rune_e8) end as fee_rune_e8
+       from inserted_fees group by tx_id
+     ), swap_candidates as (
        insert into financials_swap_candidates as candidate (
          tx_id, day, first_height, first_seen_at, input_asset, input_e8, rune_value_e8, output_asset,
-         streaming, started, complete, completed_at
+         streaming, started, complete, completed_at, fee_rune_e8
        )
-       select tx_id, day, first_height, first_seen_at, input_asset, input_e8, rune_value_e8, output_asset,
-         streaming, started, complete, completed_at
+       select incoming.tx_id, day, first_height, first_seen_at, input_asset, input_e8, rune_value_e8, output_asset,
+         streaming, started, complete, completed_at, case when totals.tx_id is null then 0 else totals.fee_rune_e8 end
        from jsonb_to_recordset($2::jsonb) as incoming (
          tx_id text, day date, first_height bigint, first_seen_at timestamptz, input_asset text, input_e8 numeric,
          rune_value_e8 numeric, output_asset text, streaming boolean, started boolean, complete boolean, completed_at timestamptz
        )
+       left join fee_totals totals on totals.tx_id = incoming.tx_id
        on conflict (tx_id) do update set
          (first_height, first_seen_at, day, started) = (
            select case when dating.incoming then excluded.first_height else candidate.first_height end,
              case when dating.incoming then excluded.first_seen_at else candidate.first_seen_at end,
-             case when dating.incoming and candidate.status <> 'verified' then excluded.day else candidate.day end,
+             case when dating.incoming then excluded.day else candidate.day end,
              candidate.started or excluded.started
            from (select excluded.started and not candidate.started as incoming) as dating),
          (input_asset, input_e8, rune_value_e8, output_asset, complete, completed_at) = (
@@ -122,7 +132,8 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
              candidate.complete or excluded.complete,
              case when sizing.incoming then excluded.completed_at else candidate.completed_at end
            from (select excluded.complete and not candidate.complete as incoming) as sizing),
-         streaming = candidate.streaming or excluded.streaming
+         streaming = candidate.streaming or excluded.streaming,
+         fee_rune_e8 = candidate.fee_rune_e8 + excluded.fee_rune_e8
      )
      insert into financials_reward_blocks as current (
        height, block_time, revshare_e8, source, reserve_observation, reserve_emissions_e8, emissions_method
@@ -138,7 +149,7 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
        emissions_method = case when current.reserve_emissions_e8 is null then excluded.emissions_method else current.emissions_method end
      where current.reserve_observation is null and excluded.reserve_observation is not null
         or current.reserve_emissions_e8 is null and excluded.reserve_emissions_e8 is not null`,
-    [JSON.stringify(rows), JSON.stringify([...swaps.values()])]
+    [JSON.stringify(rows), JSON.stringify([...swaps.values()]), JSON.stringify([...fees.values()])]
   );
   return result.rowCount || 0;
 }

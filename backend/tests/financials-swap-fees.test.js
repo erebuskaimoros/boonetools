@@ -27,12 +27,13 @@ async function withDatabase(run) {
     await client.query(`set local search_path to "${schema}"`);
     await client.query("set local time zone 'Pacific/Honolulu'");
     for (const migration of ['051_pool_analysis.sql', '066_pool_analysis_intraday_snapshots.sql', '068_financials_day_details.sql',
-      '072_financials_background_rosters.sql', '073_financials_swap_candidates.sql', '074_financials_swap_fees.sql']) {
+      '072_financials_background_rosters.sql', '073_financials_swap_candidates.sql', '074_financials_swap_fees.sql',
+      '075_financials_local_fee_rankings.sql', '076_financials_fee_candidates.sql']) {
       const sql = await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8');
       await client.query(sql.replace(/^\s*(begin|commit);\s*$/gim, '').replaceAll('public.', ''));
     }
     // A day from before the stream ledger: its stored scan rows predate fee fields.
-    await client.query(`update financials_swap_ledger set started_at = '2099-01-01T00:00:00Z'`);
+    await client.query(`update financials_swap_ledger set started_at = '2099-01-01T00:00:00Z', fee_started_at = '2099-01-01T00:00:00Z'`);
     await run(client);
   } finally { await client.query('rollback'); await client.end(); }
 }
@@ -43,7 +44,7 @@ test('a ranked swap row carries Midgard\'s liquidity fee in RUNE', () => {
   assert.ok(Math.abs(row.volumeUsd - 23123.89339232 * 0.6213014558320356) < 1e-6);
 });
 
-test('stored rows without fees are filled once by transaction ID, then priced at the swap\'s 15-minute RUNE rate', postgres, async () => {
+test('legacy fills remain idempotent and cannot seed new fee rankings; new rows use the swap\'s 15-minute RUNE rate', postgres, async () => {
   await withDatabase(async client => {
     const volumeUsd = 23123.89339232 * 0.6213014558320356;
     await client.query('insert into financials_day_details (day, payload_json) values ($1, $2)', [day, {
@@ -67,6 +68,12 @@ test('stored rows without fees are filled once by transaction ID, then priced at
     await fillFinancialSwapFees(client, { getJson, now: () => at });
     await fillFinancialSwapFees(client, { getJson, now: () => at });
     assert.equal(lookups, 1, 'each stored transaction is looked up once');
+    const cold = await readFinancialDay(day, { client, now: () => at });
+    assert.equal(cold.loading, true, 'legacy volume top ten is not reinterpreted as a fee ranking');
+    await client.query('update financials_day_rankings set payload_json = $2 where day = $1', [day, {
+      day, through: new Date(dayEnd).toISOString(), observedAt: new Date(dayEnd).toISOString(),
+      swaps: [financialSwapRow(action).row], pools: [], pendingSwaps: 0, unpricedSwaps: 0,
+      excludedSwaps: [], exclusionsIncomplete: false, swapRankingBasis: 'liquidity-fees-usd' }]);
     const detail = await readFinancialDay(day, { client, now: () => at });
     const [swap] = detail.swaps;
     assert.equal(swap.feeRune, 22.7878012);

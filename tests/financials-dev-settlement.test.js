@@ -7,7 +7,7 @@ const from = Date.parse(`${day}T00:00:00Z`) / 1000;
 const now = Date.parse('2026-10-24T12:00:00Z');
 const action = (txId, status = 'pending') => ({ type: 'swap', status, date: String(BigInt(from + 10) * 1000000000n),
   in: [{ txID: txId, coins: [{ asset: 'BTC.BTC', amount: '100000000' }] }],
-  out: [{ coins: [{ asset: 'ETH.ETH', amount: '100000000' }] }], metadata: { swap: { inPriceUSD: '60000' } } });
+  out: [{ coins: [{ asset: 'ETH.ETH', amount: '100000000' }] }], metadata: { swap: { inPriceUSD: '60000', liquidityFee: '100000000' } } });
 
 function source(ids, routes, lookup) {
   return async route => {
@@ -15,7 +15,7 @@ function source(ids, routes, lookup) {
     const url = new URL(route, 'https://example.invalid');
     if (url.searchParams.has('txid')) return lookup(url.searchParams.get('txid'));
     if (route === '/health') return { inSync: true, lastAggregated: { timestamp: from + 86400 } };
-    if (url.pathname === '/history/earnings') return { intervals: [{ startTime: from, endTime: from + 86400, pools: [] }] };
+    if (url.pathname === '/history/earnings') return { intervals: [{ startTime: from, endTime: from + 86400, pools: [], runePriceUSD: '0.5' }] };
     return { actions: [...ids.map(id => action(id)), { ...action('OLD'), date: String(BigInt(from - 1) * 1000000000n) }] };
   };
 }

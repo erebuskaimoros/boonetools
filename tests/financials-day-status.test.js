@@ -60,3 +60,15 @@ test('invalid settlement dates never render Invalid Date or claim a scheduled pa
     settlement: { status: 'pending', checkedAt: 'bad', nextCheckAt: 'bad' } });
   assert.doesNotMatch(status.settlement, /Invalid Date|scheduled|Last complete/);
 });
+
+test('fee-ledger status distinguishes unverified candidates and missing pricing from Midgard pending actions', () => {
+  const status = financialDayStatus({ swapSource: 'finalized-block-ledger', swapRankingBasis: 'liquidity-fees-usd',
+    pendingSwaps: 3, unpricedSwaps: 2, settlement: { status: 'pending', checkedAt: '2026-10-29T04:15:00Z',
+      nextCheckAt: '2026-10-29T04:25:00Z' } });
+  assert.match(status.warning, /3 swaps awaiting completion or verification/);
+  assert.match(status.warning, /missing fee or price data/);
+  assert.doesNotMatch(status.warning, /last seen pending|saved Midgard status|not automatically retried/);
+  assert.match(status.settlement, /Saved swap candidates are checked after completion/);
+  assert.match(status.settlement, /Latest candidate check/);
+  assert.doesNotMatch(status.settlement, /Last complete pending-ID check/);
+});

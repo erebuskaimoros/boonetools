@@ -11,11 +11,15 @@ export function financialDayStatus(detail) {
   const pending = detail?.pendingSwaps || 0;
   const unpriced = detail?.unpricedSwaps || 0;
   const settlement = detail?.settlement;
+  const ledger = detail?.swapSource === 'finalized-block-ledger';
+  const feeRanking = detail?.swapRankingBasis === 'liquidity-fees-usd';
   const warnings = [];
   if (pending || unpriced || detail?.exclusionsIncomplete) {
-    warnings.push(`Provisional snapshot · ${unpriced} unpriced and ${pending} swaps last seen pending are excluded.`);
-    if (pending) warnings.push('Pending reflects saved Midgard status, not a live on-chain count.');
-    if (unpriced) warnings.push('Unpriced swaps are not automatically retried.');
+    warnings.push(`Provisional snapshot · ${unpriced} unpriced and ${pending} swaps ${ledger ? 'awaiting completion or verification' : 'last seen pending'} are excluded.`);
+    if (pending) warnings.push(ledger ? 'These counts reflect saved observations, not a live on-chain count.'
+      : 'Pending reflects saved Midgard status, not a live on-chain count.');
+    if (unpriced) warnings.push(feeRanking ? 'Swaps with missing fee or price data are excluded, never treated as zero.'
+      : 'Unpriced swaps are not automatically retried.');
     if (detail?.exclusionsIncomplete) {
       warnings.push('Some excluded transaction IDs were not retained; those exclusions cannot be rechecked automatically.');
     } else if (pending && settlement?.status === 'unavailable') {
@@ -27,16 +31,17 @@ export function financialDayStatus(detail) {
   const notes = [];
   const checkedAt = localTimestamp(settlement?.checkedAt);
   if (settlement?.status === 'pending') {
-    notes.push('Only saved pending IDs are rechecked; the day is not rescanned.');
-    if (!checkedAt) notes.push('First complete pending-ID check has not finished.');
+    notes.push(ledger ? 'Saved swap candidates are checked after completion; the day is not rescanned.'
+      : 'Only saved pending IDs are rechecked; the day is not rescanned.');
+    if (!checkedAt) notes.push(ledger ? 'No completed candidate checks yet.' : 'First complete pending-ID check has not finished.');
   } else if (settlement?.status === 'complete') {
-    notes.push('Saved pending-ID checks complete.');
+    notes.push(ledger ? 'Saved swap candidate checks complete.' : 'Saved pending-ID checks complete.');
   } else if (settlement?.status === 'unavailable') {
     notes.push('Automatic pending-ID checks unavailable.');
   }
-  if (notes.length && checkedAt) notes.push(`Last complete pending-ID check: ${checkedAt}.`);
+  if (notes.length && checkedAt) notes.push(`${ledger ? 'Latest candidate check' : 'Last complete pending-ID check'}: ${checkedAt}.`);
   const nextCheckAt = localTimestamp(settlement?.nextCheckAt);
-  if (settlement?.status === 'pending' && nextCheckAt) notes.push(`Next pending-ID check scheduled for ${nextCheckAt}.`);
+  if (settlement?.status === 'pending' && nextCheckAt) notes.push(`Next ${ledger ? 'candidate' : 'pending-ID'} check scheduled for ${nextCheckAt}.`);
 
   return {
     warning: warnings.join(' '),

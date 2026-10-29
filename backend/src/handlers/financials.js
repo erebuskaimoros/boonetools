@@ -20,9 +20,10 @@ export async function handleFinancials(_request, url, options = {}) {
   }
   if (url.searchParams.has('day')) {
     const day = url.searchParams.get('day');
-    try { financialDetailDay(day, options.now?.() ?? Date.now()); }
+    let timeZone;
+    try { timeZone = financialDetailDay(day, options.now?.() ?? Date.now(), url.searchParams.get('timeZone') ?? 'UTC').timeZone || 'UTC'; }
     catch (failure) { return error(failure.message, 400); }
-    const detail = await (options.readDay || readFinancialDay)(day);
+    const detail = await (options.readDay || readFinancialDay)(day, { timeZone });
     return json(detail, 200, { 'Cache-Control': 'no-store' });
   }
   const range = url.searchParams.get('range') || '30d';

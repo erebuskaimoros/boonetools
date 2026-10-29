@@ -4,6 +4,7 @@
   import ProtocolComparison from './protocol-fee-comparison/Comparison.svelte';
   import DayDetail from './financials/DayDetail.svelte';
   import { fetchFinancials } from './financials/api.js';
+  import { financialDetailPicker, selectFinancialDetailDay } from './financials/day-selection.js';
   import { FINANCIALS_HOURLY_RANGES } from '../../shared/financials/hourly.js';
   import { formatLocalDateTime, formatLocalTime, formatLocalHour, localTimeZone } from './utils/datetime.js';
   import {
@@ -27,8 +28,12 @@
   let ChartComponent = null;
   let chartError = '';
   let selectedDay = '';
+  let detailTimeZone = localTimeZone();
+  let detailPicker = financialDetailPicker({ timeZone: detailTimeZone });
   function selectDay(day) {
-    if (points.some(point => point.day.slice(0, 10) === day)) selectedDay = day;
+    detailTimeZone = localTimeZone();
+    detailPicker = financialDetailPicker({ timeZone: detailTimeZone });
+    selectedDay = selectFinancialDetailDay(day, { timeZone: detailTimeZone });
   }
   let historyPoints = [], historyRequest, historyLoading = false, historyError = '';
   async function loadRollingHistory(ids) {
@@ -82,6 +87,8 @@
   }
 
   async function load(silent = false) {
+    detailTimeZone = localTimeZone();
+    detailPicker = financialDetailPicker({ timeZone: detailTimeZone });
     const id = ++sequence;
     request?.abort();
     request = new AbortController();
@@ -238,12 +245,12 @@
       <span>Independent scales <span class="muted-text">·</span> Drag or pinch to zoom</span>
     </div>
     <div class="day-picker">
-      <label for="financial-detail-day">{hourly ? 'Choose a day for top swaps & pools' : 'Click a daily bar or choose a day'}</label>
-      <input id="financial-detail-day" type="date" value={selectedDay} min={points[0]?.day.slice(0, 10)} max={points.at(-1)?.day.slice(0, 10)}
+      <label for="financial-detail-day">{hourly ? 'Choose a local day for top swaps & pools' : 'Click a daily bar or choose a local day'}</label>
+      <input id="financial-detail-day" type="date" value={selectedDay} min={detailPicker.min} max={detailPicker.max}
         disabled={!hasData} on:change={event => selectDay(event.currentTarget.value)} />
-      <span class="muted-text">Top swaps &amp; pools · UTC</span>
+      <span class="muted-text">Top swaps &amp; pools · {detailTimeZone}</span>
     </div>
-    {#if selectedDay}{#key selectedDay}<DayDetail day={selectedDay} onClose={() => selectedDay = ''} />{/key}{/if}
+    {#if selectedDay}{#key `${selectedDay}:${detailTimeZone}`}<DayDetail day={selectedDay} timeZone={detailTimeZone} onClose={() => selectedDay = ''} />{/key}{/if}
     {#if livePoint}
       <div class="live-note"><span>{hourly ? 'CURRENT HOUR' : 'TODAY'} · IN PROGRESS</span>
         {#if payload?.live?.through}

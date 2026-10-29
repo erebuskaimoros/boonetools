@@ -26,7 +26,7 @@ async function withDatabase(run) {
     await client.query("set local time zone 'Pacific/Honolulu'");
     // Pool Analysis DDL stays inside this rollback-only schema.
     for (const migration of ['051_pool_analysis.sql', '066_pool_analysis_intraday_snapshots.sql',
-      '068_financials_day_details.sql', '072_financials_background_rosters.sql', '073_financials_swap_candidates.sql']) {
+      '068_financials_day_details.sql', '072_financials_background_rosters.sql', '073_financials_swap_candidates.sql', '075_financials_local_fee_rankings.sql', '076_financials_fee_candidates.sql']) {
       const sql = await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8');
       await client.query(sql.replace(/^begin;|commit;\s*$/gi, '').replaceAll('public.', ''));
     }
@@ -38,7 +38,7 @@ const postgres = { skip: !databaseUrl };
 
 test('Postgres adopts closed retained IDs without reviving count-only rows or resetting durable cooldowns', postgres, async () => {
   await withDatabase(async client => {
-    await client.query(`insert into financials_day_details(day, background, available_at) values ($1, true, $2)`, [today, iso(now + 86400_000)]);
+    await client.query(`insert into financials_day_rankings(day, background, available_at) values ($1, true, $2)`, [today, iso(now + 86400_000)]);
     const deferredDay = '2026-10-20', dueDay = '2026-10-21', countOnlyDay = '2026-10-19', noWorkDay = '2026-10-18';
     const countOnly = { ...snapshot(countOnlyDay), excludedSwaps: undefined };
     for (const [day, payload, available, error] of [
@@ -47,7 +47,7 @@ test('Postgres adopts closed retained IDs without reviving count-only rows or re
       [countOnlyDay, countOnly, now - 1, null],
       [noWorkDay, snapshot(noWorkDay, []), now - 1, null]
     ]) {
-      await client.query(`insert into financials_day_details(day, payload_json, requested_at, available_at, last_error)
+      await client.query(`insert into financials_day_rankings(day, payload_json, requested_at, available_at, last_error)
         values ($1, $2, $3, $4, $5)`, [day, payload, iso(now - 10 * 86400_000), iso(available), error]);
     }
     const routes = [];
@@ -56,7 +56,7 @@ test('Postgres adopts closed retained IDs without reviving count-only rows or re
     } });
     assert.equal(routes.length, 1);
     assert.equal(new URL(routes[0], 'https://example.invalid').searchParams.get('txid'), 'DUE');
-    const saved = (await client.query(`select day::text, background, available_at, state_json, payload_json from financials_day_details order by day`)).rows;
+    const saved = (await client.query(`select day::text, background, available_at, state_json, payload_json from financials_day_rankings order by day`)).rows;
     assert.equal(saved.find(row => row.day === deferredDay).background, true);
     assert.equal(saved.find(row => row.day === deferredDay).available_at.toISOString(), iso(now + 3600_000));
     assert.equal(saved.find(row => row.day === deferredDay).state_json, null);
@@ -74,24 +74,24 @@ test('Postgres adopts closed retained IDs without reviving count-only rows or re
 test('Postgres settlement checkpoint survives a failed ID and retries only that ID at the provider horizon', postgres, async () => {
   await withDatabase(async client => {
     const day = '2026-10-22', payload = snapshot(day, ['A', 'B', 'C']);
-    await client.query(`insert into financials_day_details(day, background, available_at) values ($1, true, $2)`, [today, iso(now + 86400_000)]);
-    await client.query(`insert into financials_day_details(day, payload_json, available_at, requested_at) values ($1, $2, $3, $4)`,
+    await client.query(`insert into financials_day_rankings(day, background, available_at) values ($1, true, $2)`, [today, iso(now + 86400_000)]);
+    await client.query(`insert into financials_day_rankings(day, payload_json, available_at, requested_at) values ($1, $2, $3, $4)`,
       [day, payload, iso(now), iso(now - 10 * 86400_000)]);
     const routes = [];
     const options = { now: () => now, maxRequests: 1, getJson: async route => { routes.push(route); return { actions: [] }; } };
     await refreshFinancialDayQueue(client, options);
-    const first = (await client.query('select state_json from financials_day_details where day = $1', [day])).rows[0].state_json;
+    const first = (await client.query('select state_json from financials_day_rankings where day = $1', [day])).rows[0].state_json;
     assert.equal(first.settlement.cursor, 1);
     assert.equal(first.settlement.checkedAt, undefined, 'only whole passes have check timestamps');
     const retryAt = iso(now + 4 * 3600_000);
     await refreshFinancialDayQueue(client, { ...options, getJson: async route => {
       routes.push(route); throw Object.assign(new Error('Budget deferred'), { code: 'MIDGARD_BUDGET_DEFERRED', retryAt });
     } });
-    assert.deepEqual((await client.query('select state_json from financials_day_details where day = $1', [day])).rows[0].state_json, first);
+    assert.deepEqual((await client.query('select state_json from financials_day_rankings where day = $1', [day])).rows[0].state_json, first);
     await refreshFinancialDayQueue(client, { ...options, now: () => now + 3600_000, getJson: () => assert.fail('provider retry must remain authoritative') });
     await refreshFinancialDayQueue(client, { ...options, now: () => Date.parse(retryAt) });
     assert.deepEqual(routes.map(route => new URL(route, 'https://example.invalid').searchParams.get('txid')), ['A', 'B', 'B']);
-    const resumed = (await client.query('select state_json, payload_json from financials_day_details where day = $1', [day])).rows[0];
+    const resumed = (await client.query('select state_json, payload_json from financials_day_rankings where day = $1', [day])).rows[0];
     assert.equal(resumed.state_json.settlement.cursor, 2);
     assert.deepEqual(resumed.payload_json.pools, payload.pools);
     assert.equal(resumed.payload_json.through, payload.through);
@@ -103,7 +103,7 @@ test('Postgres current, unfinished, visitor and closed settlement lanes share on
     const closed = '2026-10-21';
     for (const [day, background, payload] of [[today, true, null], ['2026-10-23', true, null], ['2026-10-20', false, null],
       [closed, false, snapshot(closed, ['PENDING'])]]) {
-      await client.query(`insert into financials_day_details(day, background, payload_json, available_at, requested_at)
+      await client.query(`insert into financials_day_rankings(day, background, payload_json, available_at, requested_at)
         values ($1, $2, $3, $4, $4)`, [day, background, payload, iso(now)]);
     }
     let clock = now;
@@ -115,7 +115,7 @@ test('Postgres current, unfinished, visitor and closed settlement lanes share on
       } });
       clock += 1000;
     }
-    const rows = (await client.query('select day::text, state_json, last_worked_at from financials_day_details')).rows;
+    const rows = (await client.query('select day::text, state_json, last_worked_at from financials_day_rankings')).rows;
     assert.equal(rows.length, 4);
     assert.ok(rows.every(row => row.last_worked_at), 'every lane receives one turn before any gets a second');
     assert.equal(routes.filter(route => route === '/health').length, 3);
@@ -126,8 +126,8 @@ test('Postgres current, unfinished, visitor and closed settlement lanes share on
 test('Postgres targeted settlement batches honor the ten-step cap and never erase a saved partial-pass cursor', postgres, async () => {
   await withDatabase(async client => {
     const day = '2026-10-22', ids = Array.from({ length: 25 }, (_, index) => `ID-${index}`);
-    await client.query(`insert into financials_day_details(day, background, available_at) values ($1, true, $2)`, [today, iso(now + 86400_000)]);
-    await client.query(`insert into financials_day_details(day, payload_json, available_at, requested_at) values ($1, $2, $3, $4)`,
+    await client.query(`insert into financials_day_rankings(day, background, available_at) values ($1, true, $2)`, [today, iso(now + 86400_000)]);
+    await client.query(`insert into financials_day_rankings(day, payload_json, available_at, requested_at) values ($1, $2, $3, $4)`,
       [day, snapshot(day, ids), iso(now), iso(now - 10 * 86400_000)]);
     const lookedUp = [];
     const options = { now: () => now, maxRequests: 100, getJson: async route => {
@@ -135,7 +135,7 @@ test('Postgres targeted settlement batches honor the ten-step cap and never eras
     } };
     await refreshFinancialDayQueue(client, options);
     assert.deepEqual(lookedUp, ids.slice(0, 10));
-    assert.equal((await client.query('select state_json from financials_day_details where day = $1', [day])).rows[0].state_json.settlement.cursor, 10);
+    assert.equal((await client.query('select state_json from financials_day_rankings where day = $1', [day])).rows[0].state_json.settlement.cursor, 10);
     await refreshFinancialDayQueue(client, options);
     assert.deepEqual(lookedUp, ids.slice(0, 20));
   });

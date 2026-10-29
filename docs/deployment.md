@@ -510,6 +510,35 @@ streams. Confirm `financials_swap_candidates` fills from the listener with
 that today's completed top swaps appear in `financials?day=` within minutes of
 completion, with no `/actions?type=swap` paging.
 
+#### Local-day fee rankings (October 29, 2026)
+
+Deploy the backend before the frontend. Migration 075 creates the timezone-keyed
+`financials_day_rankings` cache; preserve the old `financials_day_details` table,
+its payloads and cursors for rollback. New fee rankings require fresh acquisition
+or complete fee-ledger coverage: never seed them by sorting the old volume top
+ten. Existing request limits and cooldowns apply to any one-time window build.
+
+Migration 076 adds replay-safe per-block fee accumulation and a distinct
+`fee_started_at` coverage watermark. This is a coordinated backend migration;
+the listener and collector must use the new parser before fee coverage is claimed.
+Check that replaying a finalized block does not add fees twice, both pool legs
+and every streaming sub-swap contribute, and a late completion retains its start
+date. The former input-notional candidate floor no longer applies. The obsolete
+fee-fill loop for old volume-only snapshots is removed; bounded transaction-ID
+verification and provider controls remain.
+
+Verify `financials?day=YYYY-MM-DD&timeZone=America%2FNew_York` reports local
+midnight boundaries, excludes the prior local evening, and includes the selected
+local evening after UTC midnight. Check both DST transitions, timezone cache
+isolation, unknown fee/price exclusions, and a small high-fee swap that was absent
+from the old volume leaders. The fee table must descend by `feeUsd`; pool volumes
+must use those same boundaries. Invalid timezone names return 400 before enqueueing.
+
+After reloading the frontend, confirm the picker names the viewer's timezone and
+the table says it ranks fees. Daily chart aggregates remain labeled UTC days.
+No provider-budget reset, manual cache deletion, or forced full-history backfill
+is part of this rollout.
+
 ### Crosschain comparison stuck at a shared date
 
 Check the public `protocol-fee-comparison` endpoint's `errors` and the

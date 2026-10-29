@@ -12,7 +12,7 @@ test('the collector starts a durable current-day roster without a visitor reques
     statements.push({ sql, args });
     return { rows: [] };
   } }, { now: () => now, maxRequests: 1, getJson: () => assert.fail('no selected job') });
-  assert.ok(statements.some(({ sql }) => /insert into financials_day_details/i.test(sql)),
+  assert.ok(statements.some(({ sql }) => /insert into financials_day_rankings/i.test(sql)),
     'today must be scheduled by the collector, not the first visitor');
 });
 

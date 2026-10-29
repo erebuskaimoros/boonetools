@@ -4,21 +4,22 @@
   import { financialDayPollDelay } from './day-poll.js';
   import { financialDayStatus } from './day-status.js';
   import { formatFinancialAmount } from '../../../shared/financials/model.js';
-  import { formatLocalDateTime } from '../utils/datetime.js';
+  import { formatLocalDateTime, localTimeZone } from '../utils/datetime.js';
   export let day;
+  export let timeZone = localTimeZone();
   export let onClose = () => {};
   let detail = null, error = '', loading = true, request, timer, destroyed = false, sequence = 0;
   $: dayStatus = financialDayStatus(detail);
   const usd = value => formatFinancialAmount(value, 'usd', false);
   const assetLabel = value => String(value || '—').split('-')[0];
-  const time = value => formatLocalDateTime(value, { year: undefined });
+  const time = value => formatLocalDateTime(value, { year: undefined, timeZone });
   const bps = value => Number.isFinite(value) ? `${(value * 10000).toFixed(2)} bps` : '—';
   async function load() {
     const id = ++sequence;
     clearTimeout(timer);
     request?.abort(); request = new AbortController();
     try {
-      const result = await fetchFinancialDay(day, { signal: request.signal });
+      const result = await fetchFinancialDay(day, { signal: request.signal, timeZone });
       if (destroyed || id !== sequence) return;
       detail = result; error = '';
     } catch (failure) { if (!destroyed && id === sequence && failure.name !== 'AbortError') error = failure.message; }
@@ -39,9 +40,10 @@
   onDestroy(() => { destroyed = true; sequence++; request?.abort(); clearTimeout(timer); });
 </script>
 
-<section class="day-detail" aria-label={`Top swaps and pools for ${day}`} aria-busy={loading || detail?.loading}>
-  <header><h3><span aria-hidden="true">▌</span> {day} <span class="muted">· UTC{detail?.partial ? ' · IN PROGRESS' : ''}</span></h3>
+<section class="day-detail" aria-label={`Top swaps by fees and pools for ${day} in ${timeZone}`} aria-busy={loading || detail?.loading}>
+  <header><h3><span aria-hidden="true">▌</span> {day} <span class="muted">· {timeZone}{detail?.partial ? ' · IN PROGRESS' : ''}</span></h3>
     <button on:click={onClose} aria-label="Close day details">[×] close</button></header>
+  {#if detail?.windowFrom && detail?.windowTo}<p class="basis">Local day · {time(detail.windowFrom)} → {time(detail.windowTo)}</p>{/if}
   <p class="progress" role="status">
     {#if !error && detail?.deferred}
       {dayStatus.pauseLabel}{detail.retryAt ? ` until ${formatLocalDateTime(detail.retryAt)}` : ''} · saved progress is preserved.
@@ -53,13 +55,13 @@
   {#if dayStatus.warning}<p class="warning">{dayStatus.warning}</p>{/if}
   {#if dayStatus.settlement}<p class="basis">{dayStatus.settlement}</p>{/if}
   <div class="rankings">
-    <section aria-labelledby="top-swaps-title"><h4 id="top-swaps-title">TOP 10 SWAPS <span>INPUT VALUE · USD</span></h4>
+    <section aria-labelledby="top-swaps-title"><h4 id="top-swaps-title">TOP 10 SWAPS BY FEES <span>LIQUIDITY FEES · USD</span></h4>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
-      <div class="table-scroll" tabindex="0" role="region" aria-label="Top ten swaps">
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Top ten swaps by liquidity fees paid">
         <table><thead><tr><th scope="col">#</th><th scope="col">SWAP</th><th scope="col" class="amount">VALUE</th><th scope="col" class="amount">FEES</th><th scope="col" class="amount">RATE</th></tr></thead>
           <tbody>{#each detail?.swaps || [] as row, index (row.txId)}<tr><td>{String(index + 1).padStart(2, '0')}</td>
             <th scope="row" title={`${row.inputAsset} → ${row.outputAsset}`}><a href={`https://thorchain.net/tx/${encodeURIComponent(row.txId)}`} target="_blank" rel="noreferrer" title={`${row.txId} · ${time(row.timestamp)}`}>{assetLabel(row.inputAsset)} <span class="muted">→</span> {assetLabel(row.outputAsset)}</a>{#if row.streaming}<small>STREAMING</small>{/if}</th>
-            <td class="amount">{usd(row.volumeUsd)}</td><td class="amount fee">{usd(row.feeUsd)}</td><td class="amount fee">{bps(row.feeRate)}</td>
+            <td class="amount value">{usd(row.volumeUsd)}</td><td class="amount">{usd(row.feeUsd)}</td><td class="amount value">{bps(row.feeRate)}</td>
           </tr>{/each}
           {#if !detail?.swaps?.length}<tr><td colspan="5" class="empty">{loading || detail?.loading ? 'Waiting for complete swap coverage…' : error || detail?.error ? 'Swap ranking unavailable.' : 'No completed, priced swaps in this window.'}</td></tr>{/if}</tbody>
         </table>
@@ -75,8 +77,8 @@
       </div>
     </section>
   </div>
-  <p class="basis">Swaps use input value once per route and Midgard’s action date. Pool volume counts each executed leg; cross-asset swaps touch two pools. All rankings are in USD. Fees are THORChain liquidity fees from Midgard, valued at RUNE’s USD price for the swap’s 15-minute window; rate is fees ÷ input value.</p>
-  <p class="basis">Today’s roster adds newly indexed activity in the background and stays cached after the full UTC day is covered. Older, untracked days may need a one-time build while this panel is open.</p>
+  <p class="basis">Swaps rank by THORChain liquidity fees paid, in USD, for swaps started on the selected local day. Value is the input amount once per route; rate is fees ÷ input value. Pool volume counts each executed leg within the same local day; cross-asset swaps touch two pools.</p>
+  <p class="basis">Today’s roster adds newly indexed activity in the background and stays cached after the full local day is covered. Older, untracked days may need a one-time build while this panel is open.</p>
 </section>
 
 <style>
@@ -99,7 +101,7 @@
   thead th { font-size: 11px; color: var(--term-text-3); background: var(--term-surface); }
   td:first-child { color: var(--term-text-3); }
   .amount { text-align: right; }
-  td.amount { color: var(--term-accent); } td.fee { color: var(--term-text-2); }
+  td.amount { color: var(--term-accent); } td.value { color: var(--term-text-2); }
   tr:hover { background: var(--term-surface-hover); }
   a { color: inherit; text-underline-offset: 3px; } small { display: block; font-size: 11px; margin-top: 4px; }
   .empty { white-space: normal; color: var(--term-text-3); padding: 20px 8px; }

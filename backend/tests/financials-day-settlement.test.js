@@ -10,12 +10,12 @@ const pools = [{ asset: 'BTC.BTC', volumeUsd: 12345, volumeRune: 6789 }];
 const snapshot = (ids = ['PENDING-A']) => ({ day, through: '2026-10-24T00:00:00.000Z',
   observedAt: '2026-10-24T00:22:00.000Z', partial: false, finalized: false,
   pendingSwaps: ids.length, unpricedSwaps: 0, exclusionsIncomplete: false,
-  excludedSwaps: ids.map(txId => ({ txId, kind: 'pending' })), swaps: [], pools });
+  runePrices: [{ from, to: from + 86400, price: 1 }], excludedSwaps: ids.map(txId => ({ txId, kind: 'pending' })), swaps: [], pools });
 const action = (txId, status = 'success') => ({ type: 'swap', status,
   date: String(BigInt(from + 100) * 1000000000n),
   in: [{ txID: txId, coins: [{ asset: 'BTC.BTC', amount: '200000000' }] }],
   out: [{ coins: [{ asset: 'ETH.ETH', amount: '400000000' }] }],
-  metadata: { swap: { inPriceUSD: '60000', isStreamingSwap: true } } });
+  metadata: { swap: { inPriceUSD: '60000', liquidityFee: '12000000000000', isStreamingSwap: true } } });
 
 test('closed roster reconciles the retained transaction ID without reacquiring the day or pools', async () => {
   const routes = [];
@@ -101,7 +101,7 @@ test('only the canonical inbound identity can settle a saved exclusion', async (
 });
 
 test('settled swaps are reranked with exact original UTC bounds and updated source action dates', async () => {
-  const original = { ...snapshot(), swaps: Array.from({ length: 10 }, (_, index) => ({ txId: `OLD-${index}`, volumeUsd: 1000 - index })) };
+  const original = { ...snapshot(), swaps: Array.from({ length: 10 }, (_, index) => ({ txId: `OLD-${index}`, volumeUsd: 1000 - index, feeUsd: 1000 - index })) };
   for (const [seconds, included] of [[from, true], [from + 86399, true], [from - 1, false], [from + 86400, false]]) {
     const settled = { ...action('pending-a'), date: String(BigInt(seconds) * 1000000000n) };
     const result = await advanceFinancialDay(day, financialDayStateFromSnapshot(day, original, now), async () => ({ actions: [settled] }), now);

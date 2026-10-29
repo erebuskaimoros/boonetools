@@ -39,7 +39,7 @@ const midgard = status => async route => {
   return { actions: [{ type: 'swap', status, date: String(BigInt(Date.parse('2026-10-27T13:29:41Z')) * 1000000n),
     pools: ['BTC.BTC', 'ETH.ETH'], in: [{ txID: TX, coins: [{ asset: 'BTC.BTC', amount: '517060000' }] }],
     out: status === 'success' ? [{ coins: [{ asset: 'ETH.ETH', amount: '17713662072' }] }] : [],
-    metadata: { swap: { inPriceUSD: '80469.7', isStreamingSwap: true } } }] };
+    metadata: { swap: { inPriceUSD: '80469.7', liquidityFee: '138314302000', isStreamingSwap: true } } }] };
 };
 const storedDay = through => ({ day, through: new Date(through).toISOString(), observedAt: new Date(through).toISOString(),
   swaps: [{ txId: 'STALE', timestamp: '2026-10-27T01:00:00.000Z', inputAsset: 'BTC.BTC', inputAmount: 1,
@@ -58,29 +58,31 @@ async function withDatabase(run) {
     await client.query("set local time zone 'Pacific/Honolulu'");
     for (const migration of ['051_pool_analysis.sql', '066_pool_analysis_intraday_snapshots.sql',
       '067_financials_reward_accounting.sql', '068_financials_day_details.sql',
-      '072_financials_background_rosters.sql', '073_financials_swap_candidates.sql']) {
+      '072_financials_background_rosters.sql', '073_financials_swap_candidates.sql', '074_financials_swap_fees.sql',
+      '075_financials_local_fee_rankings.sql', '076_financials_fee_candidates.sql']) {
       const sql = await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8');
       await client.query(sql.replace(/^\s*(begin|commit);\s*$/gim, '').replaceAll('public.', ''));
     }
     // The ledger owns every UTC day that starts after it began recording.
-    await client.query(`update financials_swap_ledger set started_at = '2026-10-26T00:00:00Z'`);
+    await client.query(`update financials_swap_ledger set started_at = '2026-10-26T00:00:00Z', fee_started_at = '2026-10-26T00:00:00Z'`);
+    await client.query("insert into pool_analysis_daily(asset,day,rune_price_usd) values ('BTC.BTC','2026-10-27',0.5)");
     await run(client);
   } finally { await client.query('rollback'); await client.end(); }
 }
 
 const byTx = rows => [...rows].sort((a, b) => a.txId.localeCompare(b.txId));
 
-test('a stream is recorded at its first sub-swap and at its completion, valued at each block\'s RUNE rate', () => {
+test('a stream records every block fee, with input valuation at its first and last block', () => {
   assert.deepEqual(parseFinancialSwapCandidates(firstBlock.events), [{ txId: TX, inputAsset: 'BTC.BTC',
-    inputE8: '517060032', runeValueE8: '66353823973728', outputAsset: 'ETH.ETH', streaming: true, started: true, complete: false }]);
+    inputE8: '517060032', runeValueE8: '66353823973728', outputAsset: 'ETH.ETH', streaming: true, started: true, complete: false, feeRuneE8: '1382714917' }]);
   assert.deepEqual(parseFinancialSwapCandidates(lastBlock.events), [{ txId: TX, inputAsset: 'BTC.BTC',
-    inputE8: '517060000', runeValueE8: '66328573021070', outputAsset: 'ETH.ETH', streaming: true, started: false, complete: true }]);
+    inputE8: '517060000', runeValueE8: '66328573021070', outputAsset: 'ETH.ETH', streaming: true, started: false, complete: true, feeRuneE8: '1381382102' }]);
   const middle = leg('BTC.BTC', '5386040 BTC.BTC', '690000000000 THOR.RUNE', '690000000', 50);
-  assert.deepEqual(parseFinancialSwapCandidates([middle]), [], 'sub-swaps between start and completion are not recorded');
+  assert.equal(parseFinancialSwapCandidates([middle])[0].feeRuneE8, '690000000', 'intermediate sub-swaps contribute fees');
   const runeIn = event('swap', { pool: 'ETH.ETH', coin: '1000000000000 THOR.RUNE', emit_asset: '250000000 ETH.ETH',
     liquidity_fee_in_rune: '1000000000', streaming_swap_quantity: '1', streaming_swap_count: '1', id: 'runein' });
   assert.deepEqual(parseFinancialSwapCandidates([runeIn]), [{ txId: 'RUNEIN', inputAsset: 'THOR.RUNE',
-    inputE8: '1000000000000', runeValueE8: '1000000000000', outputAsset: 'ETH.ETH', streaming: false, started: true, complete: true }]);
+    inputE8: '1000000000000', runeValueE8: '1000000000000', outputAsset: 'ETH.ETH', streaming: false, started: true, complete: true, feeRuneE8: '1000000000' }]);
   // A completion whose own final sub-swap failed uses another swap's rate for the same asset in that block.
   const other = event('swap', { pool: 'BTC.BTC', coin: '100000000 BTC.BTC', emit_asset: '1000000000000 THOR.RUNE',
     liquidity_fee_in_rune: '0', streaming_swap_quantity: '1', streaming_swap_count: '1', id: 'other' });
@@ -88,9 +90,9 @@ test('a stream is recorded at its first sub-swap and at its completion, valued a
     deposit: '200000000 BTC.BTC', in: '150000000 BTC.BTC', out: '1000000000 ETH.ETH', failed_swaps: '3', failed_swap_reasons: '' });
   assert.deepEqual(byTx(parseFinancialSwapCandidates([other, partial])), [
     { txId: 'OTHER', inputAsset: 'BTC.BTC', inputE8: '100000000', runeValueE8: '1000000000000', outputAsset: 'THOR.RUNE',
-      streaming: false, started: true, complete: true },
+      streaming: false, started: true, complete: true, feeRuneE8: '0' },
     { txId: 'PARTIAL', inputAsset: 'BTC.BTC', inputE8: '200000000', runeValueE8: '2000000000000', outputAsset: 'ETH.ETH',
-      streaming: true, started: false, complete: true }]);
+      streaming: true, started: false, complete: true, feeRuneE8: '0' }]);
 });
 
 test('arrival order does not matter: the start dates a stream and its completion sizes it', postgres, async () => {
@@ -109,12 +111,12 @@ test('arrival order does not matter: the start dates a stream and its completion
 test('the stream ledger ranks a swap the Midgard actions scan never saw', postgres, async () => {
   await withDatabase(async client => {
     await saveFinancialRewardBlocks(client, [observe(firstBlock), observe(lastBlock)]);
-    await client.query('insert into financials_day_details (day, payload_json) values ($1, $2)', [day, storedDay(dayEnd)]);
+    await client.query('insert into financials_day_rankings (day, payload_json) values ($1, $2)', [day, storedDay(dayEnd)]);
     const at = dayEnd + 3600_000;
     await verifyFinancialSwapCandidates(client, { getJson: midgard('success'), now: () => at });
     const detail = await readFinancialDay(day, { client, now: () => at });
     assert.deepEqual(detail.swaps.map(row => [row.txId, row.inputAsset, row.inputAmount, row.outputAsset, row.streaming, row.timestamp]),
-      [[TX, 'BTC.BTC', 5.1706, 'ETH.ETH', true, '2026-10-27T13:29:41.000Z']]);
+      [[TX, 'BTC.BTC', 5.1706, 'ETH.ETH', true, '2026-10-27T13:29:41.447Z']]);
     assert.ok(Math.abs(detail.swaps[0].volumeUsd - 5.1706 * 80469.7) < 0.01);
     assert.equal(detail.pendingSwaps, 0);
   });
@@ -124,7 +126,7 @@ test('an in-progress stream is disclosed from its start without a Midgard lookup
   await withDatabase(async client => {
     const early = Date.parse('2026-10-27T13:35:00Z');
     await saveFinancialRewardBlocks(client, [observe(firstBlock)]);
-    await client.query('insert into financials_day_details (day, payload_json) values ($1, $2)', [day, storedDay(early)]);
+    await client.query('insert into financials_day_rankings (day, payload_json) values ($1, $2)', [day, storedDay(early)]);
     let lookups = 0;
     await verifyFinancialSwapCandidates(client, { getJson: async () => { lookups++; return { actions: [] }; }, now: () => early });
     assert.equal(lookups, 0, 'an unfinished stream costs no Midgard request');

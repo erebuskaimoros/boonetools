@@ -1,3 +1,5 @@
+import { priceFinancialSwapRows, priceFinancialSwapRowsAtPrices } from './financials-swap-pricing.js';
+export { priceFinancialSwapRows, priceFinancialSwapRowsAtPrices } from './financials-swap-pricing.js';
 import { midgardActionTimestampSeconds } from '../../../shared/dynamic-fees/affiliate-volume.js';
 
 export const FINANCIAL_SWAP_CANDIDATE_RANK = 25;
@@ -23,8 +25,8 @@ function coin(value) {
 
 /** Swap records in one finalized block, valued at that block's RUNE rate for
  * the input asset. A stream is recorded at its first sub-swap (that leg times
- * quantity) and at its completion (the actual deposit); sub-swaps in between
- * are ignored. Malformed events are skipped, never thrown. */
+ * quantity) and at its completion (the actual deposit). Every intermediate
+ * block contributes fees; input notional never gates fee eligibility. */
 export function parseFinancialSwapCandidates(events) {
   const txs = new Map(), rates = new Map([[RUNE, [1n, 1n]]]);
   const tx = txId => txs.get(txId) || txs.set(txId, { legs: [] }).get(txId);
@@ -46,7 +48,7 @@ export function parseFinancialSwapCandidates(events) {
       rates.set(input.asset, [num + emit.amount + BigInt(fee), den + input.amount]);
     }
     if (txId && input) tx(txId).legs.push({ input, emit, quantity: values.get('streaming_swap_quantity')?.trim() || '0',
-      count: values.get('streaming_swap_count')?.trim() });
+      count: values.get('streaming_swap_count')?.trim(), fee: integer(fee) ? BigInt(fee) : null });
   }
   const candidates = [];
   for (const [txId, { legs, completion }] of txs) {
@@ -61,13 +63,15 @@ export function parseFinancialSwapCandidates(events) {
       const inputAsset = legs[0].input.asset;
       record = { inputAsset, inputE8: legs.filter(leg => leg.input.asset === inputAsset).reduce((sum, leg) => sum + leg.input.amount, 0n),
         outputAsset, streaming: false, started: true, complete: true };
-    } else if (quantity !== null && start) {
-      record = { inputAsset: start.input.asset, inputE8: start.input.amount * BigInt(quantity),
-        outputAsset, streaming: true, started: true, complete: false };
+    } else if (quantity !== null && legs.length) {
+      const first = start || legs[0];
+      record = { inputAsset: first.input.asset, inputE8: first.input.amount * BigInt(quantity),
+        outputAsset, streaming: true, started: Boolean(start), complete: false };
     } else continue;
     const [num, den] = rates.get(record.inputAsset) || [0n, 0n];
-    if (!den) continue;
-    candidates.push({ txId, ...record, inputE8: String(record.inputE8), runeValueE8: String(record.inputE8 * num / den) });
+    const feeRuneE8 = legs.some(leg => leg.fee === null) ? null : String(legs.reduce((sum, leg) => sum + leg.fee, 0n));
+    candidates.push({ txId, ...record, inputE8: String(record.inputE8),
+      runeValueE8: den ? String(record.inputE8 * num / den) : '0', feeRuneE8 });
   }
   return candidates;
 }
@@ -82,17 +86,20 @@ export function financialSwapRow(action) {
   const asset = inputs[0]?.asset;
   const price = action.metadata?.swap?.inPriceUSD;
   // One source asset per route. Never turn an unpriced swap into a zero.
-  if (!txId || !inputs.length || !positive(price) || inputs.some(coin => coin.asset !== asset || !integer(coin.amount))) {
+  if (!txId || !inputs.length || inputs.some(coin => coin.asset !== asset || !integer(coin.amount))) {
     return exclude('unpriced');
   }
   const inputAmount = Number(inputs.reduce((sum, coin) => sum + BigInt(coin.amount), 0n)) / 1e8;
-  const volumeUsd = inputAmount * Number(price);
-  if (!Number.isFinite(volumeUsd)) return exclude('unpriced');
+  if (!Number.isFinite(inputAmount)) return exclude('unpriced');
+  const volumeUsd = positive(price) && Number.isFinite(inputAmount * Number(price)) ? inputAmount * Number(price) : null;
   const outputs = (action.out || []).filter(leg => !leg.affiliate).flatMap(leg => leg.coins || []);
   const fee = action.metadata?.swap?.liquidityFee;
-  return { row: { txId: String(txId).toUpperCase(), timestamp: new Date(seconds * 1000).toISOString(),
+  const runePriceUsd = asset === RUNE && positive(price) ? Number(price)
+    : outputs[0]?.asset === RUNE && positive(action.metadata?.swap?.outPriceUSD) ? Number(action.metadata.swap.outPriceUSD) : null;
+  const row = { txId: String(txId).toUpperCase(), timestamp: new Date(seconds * 1000).toISOString(),
     inputAsset: asset, inputAmount, outputAsset: outputs[0]?.asset || action.metadata?.swap?.streamingSwapMeta?.outCoin?.asset || '',
-    volumeUsd, feeRune: integer(fee) ? Number(BigInt(fee)) / 1e8 : null, streaming: Boolean(action.metadata?.swap?.isStreamingSwap) } };
+    volumeUsd, feeRune: integer(fee) ? Number(BigInt(fee)) / 1e8 : null, runePriceUsd, streaming: Boolean(action.metadata?.swap?.isStreamingSwap) };
+  return { row: priceFinancialSwapRowsAtPrices([row])[0] };
 }
 
 /** A txid search can include related actions. Only a successful action with
@@ -111,22 +118,72 @@ export function financialSwapSettlement(actions, txId) {
   return { related, action: action || null };
 }
 
-/** Each day's top completed candidates are verified once by transaction ID;
- * Midgard supplies the exact USD row and action day. Unfinished streams cost
- * no request. A budget deferral or provider skip ends the pass; other errors
- * retry only that row. */
+/** Price all retained candidates before choosing a bounded verification batch.
+ * Local windows are independent rankings: filtering the UTC top 25 would lose
+ * a small high-fee swap when another part of that UTC day is busier. */
 export async function verifyFinancialSwapCandidates(client, { getJson, now = Date.now, maxRequests = 5, signal } = {}) {
   if (signal?.aborted) return 0;
-  const { rows } = await client.query(`select tx_id, status, checks from (
-      select tx_id, day, status, checks, next_check_at, complete, completed_at,
-        row_number() over (partition by day order by rune_value_e8 desc, tx_id) as rank
-      from financials_swap_candidates where status <> 'excluded'
-        -- Recent days only: lower-ranked rows stay observed forever.
-        and day >= ($1::timestamptz at time zone 'UTC')::date - 3
-    ) ranked where status in ('observed', 'pending') and rank <= ${FINANCIAL_SWAP_CANDIDATE_RANK}
-      and complete and completed_at <= $1::timestamptz - interval '2 minutes'
-      and coalesce(next_check_at, '-infinity') <= $1::timestamptz
-    order by day desc, rank limit $2`, [new Date(now()).toISOString(), Math.max(1, Math.trunc(maxRequests) || 1)]);
+  const atStart = now();
+  const { rows: candidates } = await client.query(`with windows as (
+      select start_at as window_from, start_at + interval '24 hours' as window_to
+      from generate_series(date_trunc('day', $1::timestamptz at time zone 'UTC') at time zone 'UTC' - interval '3 days',
+        date_trunc('day', $1::timestamptz at time zone 'UTC') at time zone 'UTC', interval '24 hours') start_at
+      union
+      select coalesce(window_start, day::timestamp at time zone time_zone),
+        coalesce(window_end, (day + 1)::timestamp at time zone time_zone)
+      from financials_day_rankings where (background and coalesce(window_end,
+        (day + 1)::timestamp at time zone time_zone) >= $1::timestamptz - interval '3 days')
+        or requested_at > $1::timestamptz - interval '2 minutes'
+      union
+      select remembered.window_from, remembered.window_to from financials_swap_verification_windows remembered
+      join financials_swap_candidates waiting on waiting.tx_id = remembered.tx_id
+      where waiting.status in ('observed','pending') and waiting.complete
+        and coalesce(waiting.next_check_at, waiting.completed_at + interval '2 minutes') <= $1::timestamptz
+    ) select candidate.tx_id, candidate.status, candidate.checks, candidate.next_check_at, candidate.complete,
+      candidate.completed_at, candidate.first_seen_at, candidate.fee_rune_e8::text, candidate.verified_row,
+      windows.window_from, windows.window_to
+    from windows join financials_swap_candidates candidate on candidate.started
+      and candidate.first_seen_at >= windows.window_from and candidate.first_seen_at < windows.window_to
+    where candidate.status <> 'excluded'
+      and windows.window_from >= (select fee_started_at from financials_swap_ledger)`, [new Date(atStart).toISOString()]);
+  if (!candidates.length) return 0;
+  const from = candidates.reduce((earliest, row) => Math.min(earliest, new Date(row.window_from).getTime()), Infinity) / 1000;
+  const to = candidates.reduce((latest, row) => Math.max(latest, new Date(row.window_to).getTime()), -Infinity) / 1000;
+  const unique = [...new Map(candidates.map(row => [row.tx_id, candidatePricingRow(row)])).values()];
+  const priced = new Map((await priceFinancialSwapRows(client, unique, { from, to })).map(row => [row.txId, row]));
+  const windows = new Map();
+  for (const row of candidates) {
+    const key = `${new Date(row.window_from).toISOString()}/${new Date(row.window_to).toISOString()}`;
+    if (!windows.has(key)) windows.set(key, []);
+    windows.get(key).push({ ...row, feeUsd: priced.get(row.tx_id)?.feeUsd ?? null });
+  }
+  const due = new Map(), remembered = [];
+  for (const rows of windows.values()) {
+    rows.sort(candidateOrder);
+    // Missing source prices remain disclosed. Check their highest native-fee
+    // candidates too: a native RUNE action can supply its exact USD price.
+    const eligible = [...rows.filter(row => row.feeUsd !== null).slice(0, FINANCIAL_SWAP_CANDIDATE_RANK),
+      ...rows.filter(row => row.feeUsd === null).slice(0, FINANCIAL_SWAP_CANDIDATE_RANK)];
+    remembered.push({ from: new Date(rows[0].window_from).toISOString(), to: new Date(rows[0].window_to).toISOString(),
+      ids: [...new Set([...eligible, ...rows.filter(row => !row.complete)]
+        .filter(row => ['observed', 'pending'].includes(row.status)).map(row => row.tx_id))] });
+    for (const row of eligible) {
+      if (!['observed', 'pending'].includes(row.status) || !row.complete
+        || new Date(row.completed_at).getTime() > atStart - 120_000
+        || row.next_check_at && new Date(row.next_check_at).getTime() > atStart) continue;
+      due.set(row.tx_id, row);
+    }
+  }
+  // Checkpoint eligibility before any provider call, including budget deferral.
+  await client.query(`with windows as (select * from jsonb_to_recordset($1::jsonb)
+      as incoming("from" timestamptz, "to" timestamptz, ids jsonb)), inserted as (
+      insert into financials_swap_verification_windows(window_from,window_to,tx_id)
+      select windows."from", windows."to", id from windows cross join lateral jsonb_array_elements_text(windows.ids) id
+      on conflict do nothing
+    ) delete from financials_swap_verification_windows saved using windows
+      where saved.window_from = windows."from" and saved.window_to = windows."to" and not (windows.ids ? saved.tx_id)`,
+    [JSON.stringify(remembered)]);
+  const rows = [...due.values()].sort(candidateOrder).slice(0, Math.max(1, Math.min(25, Math.trunc(maxRequests) || 1)));
   let checked = 0;
   for (const row of rows) {
     if (signal?.aborted) break;
@@ -143,16 +200,35 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
     const at = now();
     const { related, action } = financialSwapSettlement(actions, row.tx_id);
     const ranked = action?.type === 'swap' ? financialSwapRow(action).row : null;
-    await client.query(`update financials_swap_candidates set status = $2, verified_row = $3::jsonb,
-        day = coalesce($4::date, day), checks = checks + 1, next_check_at = $5::timestamptz, last_error = $6,
-        updated_at = $7::timestamptz where tx_id = $1`,
-    [row.tx_id, ranked ? 'verified' : action ? 'excluded' : related.length ? 'pending' : row.status,
-      ranked ? JSON.stringify(ranked) : null, ranked?.timestamp.slice(0, 10) ?? null,
+    const valid = ranked && ranked.feeRune !== null;
+    // The first finalized sub-swap owns the day even if Midgard's action date
+    // changes later. SQL uses the latest stored start if repair races lookup.
+    await client.query(`update financials_swap_candidates set status = $2,
+        verified_row = case when $3::jsonb is null then null else jsonb_set($3::jsonb, '{timestamp}',
+          to_jsonb(to_char(first_seen_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))) end,
+        checks = checks + 1, next_check_at = $4::timestamptz, last_error = $5,
+        updated_at = $6::timestamptz where tx_id = $1`,
+    [row.tx_id, valid ? 'verified' : action ? 'excluded' : related.length ? 'pending' : row.status,
+      valid ? JSON.stringify(ranked) : null,
       action ? null : new Date(at + VERIFY_BACKOFF_MS[Math.min(row.checks, VERIFY_BACKOFF_MS.length - 1)]).toISOString(),
-      ranked || !action ? '' : action.type === 'swap' ? 'unpriced' : 'refunded', new Date(at).toISOString()]);
+      valid || !action ? '' : action.type === 'swap' ? 'unpriced' : 'refunded', new Date(at).toISOString()]);
+    if (action) await client.query('delete from financials_swap_verification_windows where tx_id = $1', [row.tx_id]);
     checked++;
   }
   return checked;
+}
+
+function candidatePricingRow(row) {
+  return { ...(row.verified_row || {}), txId: row.tx_id,
+    timestamp: new Date(row.first_seen_at).toISOString(),
+    feeRune: typeof row.verified_row?.feeRune === 'number' ? row.verified_row.feeRune
+      : row.fee_rune_e8 == null ? null : Number(row.fee_rune_e8) / 1e8 };
+}
+
+function candidateOrder(a, b) {
+  return (b.feeUsd ?? -1) - (a.feeUsd ?? -1)
+    || Number(b.fee_rune_e8 ?? 0) - Number(a.fee_rune_e8 ?? 0)
+    || a.tx_id.localeCompare(b.tx_id);
 }
 
 /** Day rows stored before ranked rows carried feeRune get one lookup each by
@@ -186,28 +262,38 @@ export async function fillFinancialSwapFees(client, { getJson, now = Date.now, m
 }
 
 export async function readFinancialSwapLedgerStart(client) {
-  const { rows = [] } = await client.query('select started_at from financials_swap_ledger');
+  const { rows = [] } = await client.query('select fee_started_at as started_at from financials_swap_ledger');
   const started = rows[0]?.started_at ? new Date(rows[0].started_at).getTime() : NaN;
   return Number.isFinite(started) ? started : null;
 }
 
-/** Every block from a covered UTC day's midnight passed through the ledger. */
-export const financialSwapLedgerCovers = (startedAt, day) =>
-  startedAt !== null && Date.parse(`${day}T00:00:00Z`) >= startedAt;
+/** Only windows starting after complete fee capture began can use the ledger. */
+export const financialSwapLedgerCovers = (startedAt, dayOrBounds) =>
+  startedAt !== null && (typeof dayOrBounds === 'string' ? Date.parse(`${dayOrBounds}T00:00:00Z`) : dayOrBounds.from * 1000) >= startedAt;
 
-/** Verified rows, unverified top-ranked IDs and unpriced exclusions for one day. */
-export async function readFinancialSwapLedgerDay(client, day, now = Date.now()) {
+/** Select the whole exact start-time window, then price and rank it. */
+export async function readFinancialSwapLedgerDay(client, dayOrBounds, now = Date.now()) {
+  const from = typeof dayOrBounds === 'string' ? Date.parse(`${dayOrBounds}T00:00:00Z`) / 1000 : dayOrBounds.from;
+  const to = typeof dayOrBounds === 'string' ? from + 86400 : dayOrBounds.to;
   const { rows } = await client.query(`select tx_id, status, verified_row, last_error, checks, updated_at,
-      coalesce(next_check_at, completed_at + interval '2 minutes') as due_at,
-      row_number() over (partition by status = 'excluded' order by rune_value_e8 desc, tx_id) as rank
-    from financials_swap_candidates where day = $1::date order by rune_value_e8 desc, tx_id`, [day]);
-  const pending = rows.filter(row => ['observed', 'pending'].includes(row.status) && Number(row.rank) <= FINANCIAL_SWAP_CANDIDATE_RANK);
+      first_seen_at, complete, fee_rune_e8::text, coalesce(next_check_at, completed_at + interval '2 minutes') as due_at
+    from financials_swap_candidates where started and first_seen_at >= $1::timestamptz
+      and first_seen_at < $2::timestamptz`, [new Date(from * 1000).toISOString(), new Date(to * 1000).toISOString()]);
+  const priced = new Map((await priceFinancialSwapRows(client, rows.map(candidatePricingRow), { from, to }))
+    .map(row => [row.txId, row]));
+  const ranked = rows.filter(row => row.status !== 'excluded').map(row => ({ ...row, feeUsd: priced.get(row.tx_id).feeUsd }))
+    .sort(candidateOrder);
+  const leaders = [...ranked.filter(row => row.feeUsd !== null).slice(0, FINANCIAL_SWAP_CANDIDATE_RANK),
+    ...ranked.filter(row => row.feeUsd === null).slice(0, FINANCIAL_SWAP_CANDIDATE_RANK)];
+  const pending = [...new Map([...leaders, ...ranked.filter(row => !row.complete)]
+    .filter(row => ['observed', 'pending'].includes(row.status)).map(row => [row.tx_id, row])).values()];
   const checked = rows.filter(row => row.status !== 'observed' || row.checks > 0).map(row => new Date(row.updated_at).getTime());
-  // Unfinished streams have no scheduled check until their completion arrives.
   const due = pending.filter(row => row.due_at).map(row => new Date(row.due_at).getTime());
-  return { swaps: rows.filter(row => row.status === 'verified' && row.verified_row).map(row => row.verified_row),
-    pending: pending.map(row => row.tx_id),
-    unpriced: rows.filter(row => row.status === 'excluded' && row.last_error === 'unpriced').map(row => row.tx_id),
+  const unpriced = rows.filter(row => row.status === 'excluded' && row.last_error === 'unpriced'
+    || row.status === 'verified' && priced.get(row.tx_id).feeUsd === null).map(row => row.tx_id);
+  return { swaps: ranked.filter(row => row.status === 'verified' && row.verified_row && row.feeUsd !== null)
+      .map(row => priced.get(row.tx_id)),
+    pending: pending.map(row => row.tx_id), unpriced,
     checkedAt: checked.length ? new Date(Math.max(...checked)).toISOString() : null,
     nextCheckAt: due.length ? new Date(Math.max(now, Math.min(...due))).toISOString() : null };
 }

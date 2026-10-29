@@ -3,6 +3,7 @@ import { financialsWindow } from '../shared/financials/model.js';
 import { createFinancialsService } from '../backend/src/shared/financials-service.js';
 import { createFinancialsHourlyService } from '../backend/src/shared/financials-hourly.js';
 import { financialHourlyWindow } from '../shared/financials/hourly.js';
+import { financialLocalDay } from '../shared/financials/day-window.js';
 import { requestFromProviders } from '../shared/provider-client.js';
 import { createProviderServices } from '../shared/provider-services.js';
 import { createDevDataCache } from './dev-data-cache.mjs';
@@ -60,14 +61,16 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
   const batchSize = Math.max(1, Math.min(10, Number(maxRequests) || 10));
   let stopped = false, started = false, timer, active;
   const utcDay = timestamp => new Date(timestamp).toISOString().slice(0, 10);
+  const keyFor = (day, timeZone) => `${timeZone}:${day}`;
   const leased = entry => entry.background || financialDaySettlement(entry.payload?.day, entry.payload)?.status === 'pending'
     || now() - entry.requestedAt < FINANCIAL_DAY_VISITOR_LEASE_MS;
-  function ensureDay(day, background = false) {
-    let entry = days.get(day);
+  function ensureDay(day, background = false, timeZone = 'UTC') {
+    const key = keyFor(day, timeZone);
+    let entry = days.get(key);
     if (!entry) {
-      entry = { state: null, payload: null, running: false, retryAt: background ? financialDayRosterReadyAt(day, now()) : 0,
+      entry = { day, timeZone, state: null, payload: null, running: false, retryAt: background ? financialDayRosterReadyAt(day, now(), timeZone) : 0,
         requestedAt: 0, lastWorkedAt: now(), background, error: '' };
-      days.set(day, entry);
+      days.set(key, entry);
     } else if (background) entry.background = true;
     return entry;
   }
@@ -77,7 +80,7 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
     try {
       for (let index = 0; index < batchSize && !stopped && leased(entry); index++) {
         const result = await advanceFinancialDay(day, entry.state,
-          (route, options) => requestJson(route, { ...options, signal: controller.signal }), now(), { background: entry.background });
+          (route, options) => requestJson(route, { ...options, signal: controller.signal }), now(), { background: entry.background, timeZone: entry.timeZone });
         entry.state = result.state;
         if (result.payload) {
           entry.payload = result.payload;
@@ -107,9 +110,10 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
     timer?.unref?.();
   }
   const queue = {
-    read(day) {
-      financialDetailDay(day, now());
-      const entry = ensureDay(day, day === utcDay(now()));
+    read(day, requestedTimeZone = 'UTC') {
+      const bounds = financialDetailDay(day, now(), requestedTimeZone);
+      const timeZone = bounds.timeZone || 'UTC';
+      const entry = ensureDay(day, day === financialLocalDay(now(), timeZone), timeZone);
       entry.requestedAt = now();
       const complete = financialDaySnapshotComplete(day, entry.payload);
       run(day, entry);
@@ -119,7 +123,8 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
         const eligibleAt = Math.max(Date.parse(settlement.nextCheckAt) || 0, entry.retryAt);
         if (eligibleAt > now()) settlement.nextCheckAt = new Date(eligibleAt).toISOString();
       }
-      return { day, ...entry.payload, loading: !entry.payload, refreshing: Boolean(entry.payload && entry.running && !complete),
+      return { day, timeZone, windowFrom: new Date(bounds.from * 1000).toISOString(), windowTo: new Date(bounds.to * 1000).toISOString(),
+        ...entry.payload, loading: !entry.payload, refreshing: Boolean(entry.payload && entry.running && !complete),
         ...(complete ? { finalized: financialDaySnapshotFinalized(day, entry.payload, now()), settlement } : {}),
         retryAt: working && entry.error ? new Date(entry.retryAt).toISOString() : null,
         deferred: Boolean(working && entry.error && entry.retryAt > now()), error: working ? entry.error : '',
@@ -128,15 +133,17 @@ export function createFinancialsDayDevQueue({ requestJson = createFinancialsDevR
     async tick() {
       if (stopped) return;
       ensureDay(utcDay(now()), true);
-      const yesterday = utcDay(now() - 86400_000);
-      if (days.has(yesterday) && !financialDaySnapshotComplete(yesterday, days.get(yesterday).payload)) ensureDay(yesterday, true);
-      for (const [day, entry] of days) if (financialDaySettlement(day, entry.payload)?.status === 'pending') entry.background = true;
+      for (const entry of days.values()) {
+        const yesterday = utcDay(Date.parse(`${financialLocalDay(now(), entry.timeZone)}T00:00:00Z`) - 86400_000);
+        if (entry.day === yesterday && !financialDaySnapshotComplete(entry.day, entry.payload)
+          || financialDaySettlement(entry.day, entry.payload)?.status === 'pending') entry.background = true;
+      }
       if (active) return active;
       // A single bounded batch at a time. Rotate eligible days by their last
       // work time so cold visitor scans cannot starve the maintained roster.
-      const next = [...days].filter(([day, entry]) => leased(entry) && financialDayNeedsWork(day, entry.payload, now()) && now() >= entry.retryAt)
-        .sort(([dayA, a], [dayB, b]) => a.lastWorkedAt - b.lastWorkedAt || dayA.localeCompare(dayB))[0];
-      if (next) await run(...next);
+      const next = [...days.values()].filter(entry => leased(entry) && financialDayNeedsWork(entry.day, entry.payload, now()) && now() >= entry.retryAt)
+        .sort((a, b) => a.lastWorkedAt - b.lastWorkedAt || a.day.localeCompare(b.day) || a.timeZone.localeCompare(b.timeZone))[0];
+      if (next) await run(next.day, next);
     },
     start() { if (!started && !stopped) { started = true; schedule(0); } },
     async idle() { await active; },
@@ -190,8 +197,11 @@ export function createFinancialsDevPlugin({ root, cacheDir, days = createFinanci
         }
         if (url.searchParams.has('day')) {
           const day = url.searchParams.get('day');
-          try { financialDetailDay(day); } catch (failure) { res.statusCode = 400; res.end(JSON.stringify({ error: failure.message })); return; }
-          res.end(JSON.stringify(days.read(day)));
+          const requestedTimeZone = url.searchParams.get('timeZone') ?? 'UTC';
+          let timeZone;
+          try { timeZone = financialDetailDay(day, Date.now(), requestedTimeZone).timeZone || 'UTC'; }
+          catch (failure) { res.statusCode = 400; res.end(JSON.stringify({ error: failure.message })); return; }
+          res.end(JSON.stringify(days.read(day, timeZone)));
           return;
         }
         const range = url.searchParams.get('range') || '30d';

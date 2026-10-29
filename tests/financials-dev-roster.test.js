@@ -205,7 +205,7 @@ test('dev roster plugin starts only when the Vite server is configured and stops
 test('day detail explains maintained rosters without promising instant cold history or financial finality', () => {
   const source = readFileSync(new URL('../src/lib/financials/DayDetail.svelte', import.meta.url), 'utf8');
   assert.match(source, /Today’s roster adds newly indexed activity in the background/);
-  assert.match(source, /cached after the full UTC day is covered/);
+  assert.match(source, /cached after the full local day is covered/);
   assert.match(source, /Older, untracked days may need a one-time build/);
   assert.doesNotMatch(source, /Today adds newly indexed activity while this panel is open|leaving pauses unfinished scans/);
   assert.doesNotMatch(source, /Late settlements are not automatically rescanned/);

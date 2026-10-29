@@ -144,12 +144,64 @@ intraday data rather than carrying a partial total forward.
 
 ## Day drill-down
 
-Click a daily chart bucket or use the UTC date picker to expand two tables below
-the plot: the ten largest successful swaps by input USD value (once per route),
-and ten pools by executed USD volume. Weekly/monthly views retain the date picker
+Click a daily chart bucket or use the local-calendar date picker to expand two
+tables below the plot: the ten successful swaps with the highest THORChain
+liquidity fees in USD (once per route), and ten pools by executed USD volume. Weekly/monthly views retain the date picker
 rather than treating an aggregated bucket as one day. Transaction links open the
 explorer; the tables always identify their USD ranking basis, independently of
 the chart's denomination. Dragging to zoom must not select a day.
+
+### Local calendar days and fee rankings (October 29, 2026)
+
+Day details accept `timeZone=<IANA zone>` alongside `day=YYYY-MM-DD`; the browser
+sends its timezone. Each table covers that local date's midnight through the next
+local midnight. Daylight-saving transitions can produce 23- or 25-hour windows;
+UTC is the compatibility default for callers that omit the timezone. The main
+D/W/M chart continues to use its labeled UTC reporting buckets. Clicking a daily
+bar selects the same date label for the local-day detail rather than changing the
+chart's historical aggregates.
+
+For example, October 29 in America/New_York is October 29 04:00 UTC through
+October 30 04:00 UTC. A swap at October 29 01:20 UTC belongs to October 28 locally.
+The earlier timezone display change converted timestamps only; it did not change
+those accounting boundaries, which caused the apparent previous-day rows.
+
+Migration 075 stores the new fee rankings in `financials_day_rankings`, keyed by
+calendar date and canonical timezone. Existing `financials_day_details` volume
+rankings and acquisition checkpoints remain intact for rollback. The old volume
+top ten cannot be sorted or filtered into a correct local-day fee top ten; a
+requested window without complete ledger coverage requires its own bounded,
+resumable build. Public reads only enqueue/read persisted data. Unknown fees or
+USD prices are exclusions, never zero-valued winners.
+
+Both the fee ranking and pool totals must use the same local window. A shifted
+24-hour window must request intraday intervals, not a UTC daily bucket. Completed
+pool-prefix reuse requires exact matching boundaries. Swap value and fee rate
+remain displayed, but ordering is by liquidity fees paid in USD. This excludes
+outbound network fees and affiliate fees, matching the existing Fees column.
+
+Migration 076 records every swap leg's liquidity fee, including intermediate
+streaming sub-swaps, with `(tx_id, height)` replay deduplication. The former
+input-value candidate floor does not apply to fee rankings. Complete ledger
+coverage begins at `financials_swap_ledger.fee_started_at`; a local window must
+start at or after that boundary before it can skip the actions scan. A stream
+belongs to its first finalized sub-swap's local date even when it completes later.
+The verifier selects candidates inside each exact requested window before ranking,
+so a local top fee payer cannot disappear because it missed a UTC volume list.
+Unresolved leaders and unfinished streams retain their window and retry path
+beyond the recent-day scan horizon. Unfinished streams remain provisional even
+before their accumulated fees reach the current verification cutoff.
+
+Fee USD uses a containing Pool Analysis fifteen-minute price observation, then
+matching earnings or completed-day pricing, with a native RUNE action price as
+fallback. Missing fees or prices remain unavailable. Stored scan rankings retain
+the price used when selecting their top ten; repricing only those ten could hide
+an omitted candidate that should now rank. Pool reuse combines exact prefixes and
+sealed UTC totals across the local window; missing boundaries use bounded source
+acquisition without modifying completed Pool Analysis history.
+
+The following sections record the earlier UTC/input-volume implementation and
+its operational history; the local-day fee cache supersedes that ranking basis.
 
 `/financials?day=YYYY-MM-DD` validates the mainnet date range and enqueues/reads
 `financials_day_details` (migration 068), without upstream calls in the public
