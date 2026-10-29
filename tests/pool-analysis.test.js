@@ -303,7 +303,7 @@ test('Pool legend toggles hide only their series, axis, and tooltip row without 
 test('Pool Analysis wires keyboard-accessible legend buttons to renderer visibility', async () => {
   const source = await readFile(new URL('../src/lib/PoolAnalysis.svelte', import.meta.url), 'utf8');
   assert.match(source, /onHiddenChange=\{\(ids\) => hidden = ids\}/);
-  assert.match(source, /options=\{\{ lineMetric: lineMetricId, hidden \}\}/);
+  assert.match(source, /options=\{\{ lineMetric: lineMetricId, hidden(?:, [^}]*)? \}\}/);
   assert.match(source, /historyPoints=\{rollingPoints\}/);
   assert.match(source, /hidden = toggleHiddenChartTrend\(hidden, id\)/);
 });

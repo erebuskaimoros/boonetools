@@ -539,6 +539,22 @@ the table says it ranks fees. Daily chart aggregates remain labeled UTC days.
 No provider-budget reset, manual cache deletion, or forced full-history backfill
 is part of this rollout.
 
+#### Forward-only per-pool fee rankings (October 29, 2026)
+
+Deploy backend before frontend. Migration 077 marks `pool_started_at` during the
+coordinated service stop and creates replay-safe per-pool fee totals, block
+coverage, and requested local-window tables. Do not seed these from old route
+fees or run a backfill. Confirm the listener captures new blocks and fees after
+the marker, and summed per-block fees equal per-route/pool totals.
+
+The public `pool-analysis-swaps` route reads only the database. An earlier day
+must return `before-tracking` without adding a requested window; the launch day
+must disclose partial coverage. Check current pool fees differ appropriately
+from whole-route fees, pending leaders verify under the existing five-lookup
+batch, and missing block/attribution coverage remains visible. Reload Pool
+Analysis, open a pool, click a daily bar, and check the pool-specific fee table
+and local timezone. Completed days retain saved facts and pending-ID checks.
+
 ### Crosschain comparison stuck at a shared date
 
 Check the public `protocol-fee-comparison` endpoint's `errors` and the

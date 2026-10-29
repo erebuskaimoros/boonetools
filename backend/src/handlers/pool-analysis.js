@@ -6,6 +6,29 @@ import {
   getPoolAnalysisReadModel
 } from '../shared/pool-analysis.js';
 import { loadPoolAnalysisSeries } from '../shared/pool-analysis-store.js';
+import { financialCalendarWindow } from '../../../shared/financials/day-window.js';
+import { readFinancialPoolSwapDay } from '../shared/financials-pool-swaps.js';
+
+export async function handlePoolAnalysisSwaps(_request, url, options = {}) {
+  const asset = String(url.searchParams.get('asset') || '').trim().toUpperCase();
+  const day = url.searchParams.get('day');
+  const now = options.now?.() ?? Date.now();
+  if (!asset || asset.length > 160 || !/^[A-Z0-9]+\.[A-Z0-9._:-]+$/.test(asset)) return error('A valid pool asset is required', 400);
+  let bounds;
+  try { bounds = financialCalendarWindow(day, now, url.searchParams.get('timeZone') || 'UTC'); }
+  catch (failure) { return error(failure.message, 400); }
+  const model = await (options.getReadModel || getPoolAnalysisReadModel)();
+  if (!model) return error('Pool Analysis is warming', 503, { 'Cache-Control': 'no-store', 'Retry-After': '30' });
+  if (!model.payload?.pools?.some(pool => pool.asset === asset)) return error('Pool is not present in the current pool set', 404);
+  const readDay = options.readDay || (async (...args) => {
+    const { pool } = await import('../db/pool.js');
+    const client = await pool.connect();
+    try { return await readFinancialPoolSwapDay(client, ...args); }
+    finally { client.release(); }
+  });
+  const payload = await readDay(asset, day, { timeZone: bounds.timeZone || 'UTC', now });
+  return json(payload, 200, { 'Cache-Control': 'no-store' });
+}
 
 async function defaultLoadSeries(asset) {
   const { query } = await import('../db/pool.js');

@@ -38,7 +38,7 @@ import {
 } from './handlers/node-votes.js';
 import { handleNetworkSnapshot } from './handlers/network-snapshot.js';
 import { handlePoolDislocation, handlePoolDislocationSeries } from './handlers/pool-dislocation.js';
-import { handlePoolAnalysis, handlePoolAnalysisSeries } from './handlers/pool-analysis.js';
+import { handlePoolAnalysis, handlePoolAnalysisSeries, handlePoolAnalysisSwaps } from './handlers/pool-analysis.js';
 import { handlePolTracker } from './handlers/pol-tracker.js';
 import { handleRapidSwaps, handleRapidSwapsSummary } from './handlers/rapid-swaps.js';
 import { handleRapidSwapsSwapHistory } from './handlers/rapid-swaps-swap-history.js';
@@ -76,6 +76,7 @@ const routes = new Map([
   ['/pool-dislocation-series', route(handlePoolDislocationSeries, 2, 16)],
   ['/pool-analysis', route(handlePoolAnalysis, 1, 64)],
   ['/pool-analysis-series', route(handlePoolAnalysisSeries, 2, 16)],
+  ['/pool-analysis-swaps', route(handlePoolAnalysisSwaps, 2, 16)],
   ['/financials', route(handleFinancials, 1, 64)],
   ['/protocol-fee-comparison', route(handleProtocolFeeComparison, 1, 64)],
   ['/pol-tracker', route(handleSystemIncomePol, 1, 64)],

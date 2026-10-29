@@ -467,3 +467,15 @@ cache reuse with stale-data fallback, partial APR scaling, five-minute source
 coverage, refresh coalescing, midnight rollover/recovery, provider-free public
 reads, independent publication during slow backfills, graceful collector
 shutdown, and rollback-compatible unit startup.
+
+## Pool Analysis reuse — October 29, 2026
+
+Migration 077 extends the finalized swap ledger with explicit per-pool fee
+attribution from the release boundary onward. Pool Analysis reuses DayDetail and
+the existing bounded transaction-ID verifier. Pool/window leaders are selected
+before the top-25 cutoff so they need not be network-wide leaders. Pending IDs
+are merged across scopes before checkpointing and deduplicated before requests;
+the five-lookups-per-30-second budget remains shared. Pool-only views use exact
+local calendar windows, require no historical scan, and retain raw fees and
+verified metadata after rollover. See [Pool Analysis](pool-analysis.md) for the
+forward-only coverage and pricing contract.

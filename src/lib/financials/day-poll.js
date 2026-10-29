@@ -3,6 +3,8 @@
  * do not call this endpoint; only untracked historical scans pause when their
  * lease expires. Collector-owned daily rosters continue in the background. */
 export function financialDayPollDelay(detail, error, now = Date.now()) {
+  if (detail?.availability === 'before-tracking') return null;
+  if (detail?.swapRankingBasis === 'pool-liquidity-fees-usd' && detail?.refreshing) return 60_000;
   if (detail?.deferred) {
     const retryAt = Date.parse(detail.retryAt || '');
     return Number.isFinite(retryAt) ? Math.max(5000, Math.min(60_000, retryAt - now)) : 60_000;

@@ -4,7 +4,7 @@ import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-poo
 import { config } from '../lib/config.js';
 import { providerLifecycleHooks } from './provider-cooldown.js';
 import { parseFinancialReserveObservation } from './financials-reserve-emissions.js';
-import { decodedEventText as decoded, parseFinancialSwapCandidates } from './financials-swap-candidates.js';
+import { decodedEventText as decoded, parseFinancialSwapCandidates, parseFinancialPoolSwapFees } from './financials-swap-candidates.js';
 
 // First positive finalized payout, verified with Liquify's ascending indexed
 // `rev_share.payout > 0` block search on 2026-10-13. Earlier intervals have no
@@ -54,7 +54,7 @@ export function parseFinancialRevshareBlock(payload = {}, expectedHeight) {
   catch (error) { reserveObservationError = error.message; }
   return { height, revshareE8: total.toString(), reserveObservation,
     ...(reserveObservationError ? { reserveObservationError } : {}),
-    swapCandidates: parseFinancialSwapCandidates(events) };
+    swapCandidates: parseFinancialSwapCandidates(events), poolSwapFees: parseFinancialPoolSwapFees(events) };
 }
 
 export async function saveFinancialRewardBlocks(client, observations = []) {
@@ -79,8 +79,14 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
       emissions_method: reserveEmissions === null ? null : emissionsMethod,
       source: String(observation.source || 'thorchain-rpc:rev_share.payout') };
   });
-  const swaps = new Map(), fees = new Map();
+  const swaps = new Map(), fees = new Map(), poolFees = new Map(), poolBlocks = new Map();
   observations.forEach((observation, index) => {
+    const { height, block_time } = rows[index];
+    if (observation.poolSwapFees) {
+      poolBlocks.set(height, { height, block_time, attribution_complete: observation.poolSwapFees.complete === true });
+      for (const fee of observation.poolSwapFees.fees || []) poolFees.set(`${height}/${fee.txId}/${fee.asset}`,
+        { height, block_time, tx_id: fee.txId, asset: fee.asset, fee_rune_e8: fee.feeRuneE8 });
+    }
     for (const swap of Array.isArray(observation.swapCandidates) ? observation.swapCandidates : []) {
       if (!swap?.txId || !swap.inputAsset || !/^\d+$/.test(swap.inputE8 ?? '')
         || !/^\d+$/.test(swap.runeValueE8 ?? '')) continue;
@@ -97,7 +103,23 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
   // Live (ascending) and repair (descending) arrivals merge to the same row:
   // a start record dates it and a completion record sizes it.
   const result = await client.query(
-    `with inserted_fees as (
+    `with pool_blocks as (
+       insert into financials_pool_swap_blocks (height, block_time, attribution_complete)
+       select height, block_time, attribution_complete from jsonb_to_recordset($4::jsonb)
+         as incoming(height bigint, block_time timestamptz, attribution_complete boolean)
+       where block_time >= (select pool_started_at from financials_swap_ledger)
+       on conflict (height) do nothing
+     ), inserted_pool_fees as (
+       insert into financials_swap_pool_fee_blocks (tx_id, asset, height, fee_rune_e8)
+       select tx_id, asset, height, fee_rune_e8 from jsonb_to_recordset($5::jsonb)
+         as incoming(tx_id text, asset text, height bigint, block_time timestamptz, fee_rune_e8 numeric)
+       where block_time >= (select pool_started_at from financials_swap_ledger)
+       on conflict do nothing returning tx_id, asset, fee_rune_e8
+     ), pool_totals as (
+       insert into financials_swap_pool_fees as current (tx_id, asset, fee_rune_e8)
+       select tx_id, asset, sum(fee_rune_e8) from inserted_pool_fees group by tx_id, asset
+       on conflict (asset, tx_id) do update set fee_rune_e8 = current.fee_rune_e8 + excluded.fee_rune_e8
+     ), inserted_fees as (
        insert into financials_swap_fee_blocks (tx_id, height, fee_rune_e8)
        select tx_id, height, fee_rune_e8 from jsonb_to_recordset($3::jsonb)
          as incoming(tx_id text, height bigint, fee_rune_e8 numeric)
@@ -149,7 +171,8 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
        emissions_method = case when current.reserve_emissions_e8 is null then excluded.emissions_method else current.emissions_method end
      where current.reserve_observation is null and excluded.reserve_observation is not null
         or current.reserve_emissions_e8 is null and excluded.reserve_emissions_e8 is not null`,
-    [JSON.stringify(rows), JSON.stringify([...swaps.values()]), JSON.stringify([...fees.values()])]
+    [JSON.stringify(rows), JSON.stringify([...swaps.values()]), JSON.stringify([...fees.values()]),
+      JSON.stringify([...poolBlocks.values()]), JSON.stringify([...poolFees.values()])]
   );
   return result.rowCount || 0;
 }

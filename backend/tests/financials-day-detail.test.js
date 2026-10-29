@@ -307,6 +307,7 @@ test('Postgres migration, cold enqueue, resumable worker, last-good errors and f
     await client.query(await readFile(new URL('../migrations/073_financials_swap_candidates.sql', import.meta.url), 'utf8'));
     await client.query(await readFile(new URL('../migrations/075_financials_local_fee_rankings.sql', import.meta.url), 'utf8'));
     await client.query(await readFile(new URL('../migrations/076_financials_fee_candidates.sql', import.meta.url), 'utf8'));
+    await client.query(await readFile(new URL('../migrations/077_financials_pool_swap_fees.sql', import.meta.url), 'utf8'));
     // This test isolates the visitor lane; the managed current day is cooling.
     await client.query(`insert into financials_day_rankings (day, background, available_at)
       values ((now() at time zone 'UTC')::date, true, now() + interval '1 day')`);
@@ -360,6 +361,7 @@ test('Postgres queue freezes provisional closed days, pauses abandoned scans and
     await client.query(await readFile(new URL('../migrations/073_financials_swap_candidates.sql', import.meta.url), 'utf8'));
     await client.query(await readFile(new URL('../migrations/075_financials_local_fee_rankings.sql', import.meta.url), 'utf8'));
     await client.query(await readFile(new URL('../migrations/076_financials_fee_candidates.sql', import.meta.url), 'utf8'));
+    await client.query(await readFile(new URL('../migrations/077_financials_pool_swap_fees.sql', import.meta.url), 'utf8'));
     await client.query(`insert into financials_day_rankings (day, background, available_at)
       values ((now() at time zone 'UTC')::date, true, now() + interval '1 day')`);
     const complete = { day, through: new Date(to * 1000).toISOString(), observedAt: new Date(now).toISOString(),

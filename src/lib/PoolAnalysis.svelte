@@ -8,6 +8,8 @@
   import { getAssetLogo } from './constants/assets.js';
   import { fetchPoolAnalysis, fetchPoolAnalysisSeries } from './pool-analysis/api.js';
   import { buildPoolAnalysisOption, poolAnalysisChartSeries } from './pool-analysis/charts.js';
+  import DayDetail from './financials/DayDetail.svelte';
+  import { financialDetailPicker, selectFinancialDetailDay } from './financials/day-selection.js';
 
   import {
     POOL_ANALYSIS_RANGES,
@@ -32,6 +34,11 @@
   const FALLBACK_LOGO = '/assets/coins/fallback-logo.svg';
   let payload = null;
   let selectedAsset = '';
+  let selectedDay = '';
+  let chartGrain = 'day';
+  const detailTimeZone = localTimeZone();
+  $: dayPicker = financialDetailPicker({ timeZone: detailTimeZone });
+  function selectDay(day) { selectedDay = selectFinancialDetailDay(day, { timeZone: detailTimeZone }); }
   let selectedSeries = null;
   let rangeId = '30d';
   let lineMetricId = 'cumulativeFees';
@@ -141,6 +148,8 @@
   }
 
   async function togglePool(asset) {
+    selectedDay = '';
+    chartGrain = 'day';
     cancelRollingHistory();
     rollingHistory = null;
     if (selectedAsset === asset) {
@@ -489,7 +498,8 @@
                       {/if}
                       <div class="chart-frame">
                         <TimeSeriesChart points={displayedPoints}
-                          options={{ lineMetric: lineMetricId, hidden }} historyPoints={rollingPoints}
+                          options={{ lineMetric: lineMetricId, hidden, selectWithZoom: true }} historyPoints={rollingPoints}
+                          onSelect={(day) => { if (chartGrain === 'day') selectDay(day); }} onGrainChange={(grain) => chartGrain = grain}
                           onRollingChange={(ids) => rollingAverages = ids} onHiddenChange={(ids) => hidden = ids} buildOption={buildPoolAnalysisOption}
                           {zoomWindow} onZoom={(window) => zoomWindow = window}
                           loading={seriesLoading} hasData={displayedPoints.length > 0}
@@ -497,6 +507,16 @@
                           loadingText={`LOADING ${pool.asset} DAILY HISTORY`} emptyText="NO DAILY HISTORY AVAILABLE"
                           ariaLabel={`${pool.asset} daily volume, daily pool-generated liquidity fees, and ${lineMetricId === 'depth' ? 'two-sided pool depth' : 'cumulative pool-generated liquidity fees'} in US dollars${rollingAverages.length ? ', with selected rolling averages' : ''}`} />
                       </div>
+
+                      <div class="swap-day-picker">
+                        <label for="pool-swap-day">Click a daily bar or choose a local day</label>
+                        <input id="pool-swap-day" type="date" value={selectedDay} min={dayPicker.min} max={dayPicker.max}
+                          on:change={(event) => selectDay(event.currentTarget.value)} />
+                        <span>Top swaps by pool fees · {detailTimeZone}</span>
+                      </div>
+                      {#if selectedDay}{#key `${pool.asset}:${selectedDay}:${detailTimeZone}`}
+                        <DayDetail day={selectedDay} poolAsset={pool.asset} timeZone={detailTimeZone} onClose={() => selectedDay = ''} />
+                      {/key}{/if}
 
                       {#if selectedSeries?.asset === pool.asset}
                         {#if lineMetricId === 'depth' && selectedSeries.coverage.depthMissingDays.length}
@@ -547,6 +567,9 @@
 </main>
 
 <style>
+  .swap-day-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; color: var(--term-text-3); font: 11px var(--term-font-mono); }
+  .swap-day-picker input { color-scheme: dark; color: var(--term-text); background: var(--term-surface); border: 1px solid var(--term-border); border-radius: 0; padding: 7px 8px; font: inherit; }
+  .swap-day-picker input:focus-visible { outline: 2px solid var(--term-accent); outline-offset: 2px; }
   :global(body) { background: var(--term-bg, #080808); }
   .pool-analysis { width: min(1600px, calc(100% - 40px)); margin: 0 auto; padding: 24px 0 56px; color: var(--term-text-body, #c8c8c8); }
   .terminal-header, .panel-heading, .table-controls, .period-picker, .period-control, .status-control, .detail-heading, .chart-controls, .range-buttons, .zoom-buttons, .table-foot, .detail-foot, .method-line { display: flex; align-items: center; }

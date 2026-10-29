@@ -1,6 +1,7 @@
 import { priceFinancialSwapRows, priceFinancialSwapRowsAtPrices } from './financials-swap-pricing.js';
 export { priceFinancialSwapRows, priceFinancialSwapRowsAtPrices } from './financials-swap-pricing.js';
 import { midgardActionTimestampSeconds } from '../../../shared/dynamic-fees/affiliate-volume.js';
+import { loadPoolSwapVerificationCandidates } from './financials-pool-swaps.js';
 
 export const FINANCIAL_SWAP_CANDIDATE_RANK = 25;
 const VERIFY_BACKOFF_MS = [10 * 60_000, 30 * 60_000, 3600_000, 6 * 3600_000, 24 * 3600_000];
@@ -21,6 +22,27 @@ export function decodedEventText(value) {
 function coin(value) {
   const match = /^(\d{1,39}) (\S+)$/.exec(String(value ?? '').trim());
   return match ? { amount: BigInt(match[1]), asset: match[2].toUpperCase() } : null;
+}
+
+/** Attribute only explicit swap-event pool fees; route totals cannot be split
+ * reliably after the fact. Multiple legs/sub-swaps in one block are summed. */
+export function parseFinancialPoolSwapFees(events) {
+  const fees = new Map();
+  let complete = true;
+  for (const event of Array.isArray(events) ? events : []) {
+    if (decodedEventText(event?.type).toLowerCase() !== 'swap') continue;
+    const values = new Map((event.attributes || []).map(item => [decodedEventText(item.key), decodedEventText(item.value)]));
+    const txId = values.get('id')?.trim().toUpperCase();
+    const asset = values.get('pool')?.trim().toUpperCase();
+    const fee = values.get('liquidity_fee_in_rune');
+    if (!txId || !asset || asset.length > 160 || !/^[A-Z0-9]+\.[A-Z0-9._:-]+$/.test(asset) || !integer(fee)) {
+      complete = false; continue;
+    }
+    const key = `${txId}/${asset}`;
+    const previous = fees.get(key);
+    fees.set(key, { txId, asset, feeRuneE8: String(BigInt(previous?.feeRuneE8 || 0) + BigInt(fee)) });
+  }
+  return { complete, fees: [...fees.values()] };
 }
 
 /** Swap records in one finalized block, valued at that block's RUNE rate for
@@ -121,7 +143,7 @@ export function financialSwapSettlement(actions, txId) {
 /** Price all retained candidates before choosing a bounded verification batch.
  * Local windows are independent rankings: filtering the UTC top 25 would lose
  * a small high-fee swap when another part of that UTC day is busier. */
-export async function verifyFinancialSwapCandidates(client, { getJson, now = Date.now, maxRequests = 5, signal } = {}) {
+export async function verifyFinancialSwapCandidates(client, { getJson, now = Date.now, maxRequests = 5, signal, poolScopes = false } = {}) {
   if (signal?.aborted) return 0;
   const atStart = now();
   const { rows: candidates } = await client.query(`with windows as (
@@ -146,16 +168,18 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
       and candidate.first_seen_at >= windows.window_from and candidate.first_seen_at < windows.window_to
     where candidate.status <> 'excluded'
       and windows.window_from >= (select fee_started_at from financials_swap_ledger)`, [new Date(atStart).toISOString()]);
+  if (poolScopes) candidates.push(...await loadPoolSwapVerificationCandidates(client, atStart));
   if (!candidates.length) return 0;
   const from = candidates.reduce((earliest, row) => Math.min(earliest, new Date(row.window_from).getTime()), Infinity) / 1000;
   const to = candidates.reduce((latest, row) => Math.max(latest, new Date(row.window_to).getTime()), -Infinity) / 1000;
-  const unique = [...new Map(candidates.map(row => [row.tx_id, candidatePricingRow(row)])).values()];
+  const pricingKey = row => `${row.pool_asset || ''}/${row.tx_id}`;
+  const unique = [...new Map(candidates.map(row => [pricingKey(row), { ...candidatePricingRow(row), txId: pricingKey(row) }])).values()];
   const priced = new Map((await priceFinancialSwapRows(client, unique, { from, to })).map(row => [row.txId, row]));
   const windows = new Map();
   for (const row of candidates) {
-    const key = `${new Date(row.window_from).toISOString()}/${new Date(row.window_to).toISOString()}`;
+    const key = `${row.pool_asset || ''}/${new Date(row.window_from).toISOString()}/${new Date(row.window_to).toISOString()}`;
     if (!windows.has(key)) windows.set(key, []);
-    windows.get(key).push({ ...row, feeUsd: priced.get(row.tx_id)?.feeUsd ?? null });
+    windows.get(key).push({ ...row, feeUsd: priced.get(pricingKey(row))?.feeUsd ?? null });
   }
   const due = new Map(), remembered = [];
   for (const rows of windows.values()) {
@@ -167,14 +191,20 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
     remembered.push({ from: new Date(rows[0].window_from).toISOString(), to: new Date(rows[0].window_to).toISOString(),
       ids: [...new Set([...eligible, ...rows.filter(row => !row.complete)]
         .filter(row => ['observed', 'pending'].includes(row.status)).map(row => row.tx_id))] });
-    for (const row of eligible) {
+    for (const [rank, row] of eligible.entries()) {
       if (!['observed', 'pending'].includes(row.status) || !row.complete
         || new Date(row.completed_at).getTime() > atStart - 120_000
         || row.next_check_at && new Date(row.next_check_at).getTime() > atStart) continue;
-      due.set(row.tx_id, row);
+      if (!due.has(row.tx_id) || rank < due.get(row.tx_id).rank) due.set(row.tx_id, { ...row, rank });
     }
   }
   // Checkpoint eligibility before any provider call, including budget deferral.
+  const rememberedWindows = new Map();
+  for (const window of remembered) {
+    const key = `${window.from}/${window.to}`;
+    const previous = rememberedWindows.get(key);
+    rememberedWindows.set(key, { ...window, ids: [...new Set([...(previous?.ids || []), ...window.ids])] });
+  }
   await client.query(`with windows as (select * from jsonb_to_recordset($1::jsonb)
       as incoming("from" timestamptz, "to" timestamptz, ids jsonb)), inserted as (
       insert into financials_swap_verification_windows(window_from,window_to,tx_id)
@@ -182,8 +212,8 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
       on conflict do nothing
     ) delete from financials_swap_verification_windows saved using windows
       where saved.window_from = windows."from" and saved.window_to = windows."to" and not (windows.ids ? saved.tx_id)`,
-    [JSON.stringify(remembered)]);
-  const rows = [...due.values()].sort(candidateOrder).slice(0, Math.max(1, Math.min(25, Math.trunc(maxRequests) || 1)));
+    [JSON.stringify([...rememberedWindows.values()])]);
+  const rows = [...due.values()].sort((a, b) => a.rank - b.rank || candidateOrder(a, b)).slice(0, Math.max(1, Math.min(25, Math.trunc(maxRequests) || 1)));
   let checked = 0;
   for (const row of rows) {
     if (signal?.aborted) break;
@@ -221,7 +251,7 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
 function candidatePricingRow(row) {
   return { ...(row.verified_row || {}), txId: row.tx_id,
     timestamp: new Date(row.first_seen_at).toISOString(),
-    feeRune: typeof row.verified_row?.feeRune === 'number' ? row.verified_row.feeRune
+    feeRune: !row.pool_asset && typeof row.verified_row?.feeRune === 'number' ? row.verified_row.feeRune
       : row.fee_rune_e8 == null ? null : Number(row.fee_rune_e8) / 1e8 };
 }
 

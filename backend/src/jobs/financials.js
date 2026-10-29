@@ -120,7 +120,7 @@ export async function runFinancialsCollector(options = {}) {
         // Fee-ranked stream candidates share the day-detail lane and bulk
         // budget. Legacy input-value snapshots are no longer fee-fill work.
         ...(!verifySwaps ? [] : [loop(30_000, () =>
-          verifySwaps(client, { signal, getJson: dayRequest }))]),
+          verifySwaps(client, { signal, getJson: dayRequest, poolScopes: true }))]),
         loop(60_000, () => {
           const acquisition = acquisitionMetrics({ reset: true });
           if (acquisition) log({ type: 'acquisition_metrics', window_seconds: 60, acquisition });

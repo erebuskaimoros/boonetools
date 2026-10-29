@@ -144,3 +144,28 @@ Deploy backend then frontend. No migration, cache reset, historical rewrite or
 timer change is needed. Verify an ordinary scheduled publication, exact rolling
 24H bounds and saved-boundary reuse. The regression fixture preserves the ZEC
 incident's amounts and proves recovery without needing surrounding samples.
+
+## Forward-only daily top swaps — October 29, 2026
+
+Click a daily bar, or choose a local calendar day below the expanded chart, to
+open the shared Financials day-detail table for that pool. The chart retains UTC
+aggregates; the detail explicitly names the viewer's timezone. Weekly/monthly
+buckets retain the date picker without selecting an entire bucket as one day.
+
+`/pool-analysis-swaps?asset=...&day=YYYY-MM-DD&timeZone=...` reads stored facts only.
+Migration 077 sets `financials_swap_ledger.pool_started_at`; earlier days return
+`before-tracking` without enqueueing work. The launch day discloses partial
+coverage and excludes swaps that started before capture. Each subsequent block
+records explicit swap-event `pool` and `liquidity_fee_in_rune` in replay-safe
+per-block and per-route/pool tables, sharing Financials' atomic block ingestion.
+Never divide a route's aggregate fee between its pools. Streams retain their
+original local start day and accumulate all executed legs in that pool.
+
+Rank by the selected pool's fees in USD, priced at the saved RUNE price at swap
+start. Input value is the whole route's notional; rate is selected-pool fees over
+that notional. The existing verifier selects candidates separately for each pool
+and exact local window, deduplicates transaction IDs, and retains the same five
+requests per 30-second pass. Saved totals and verification survive closed days;
+only pending IDs are checked later. No new actions scan, history backfill, or
+provider budget is introduced. Independent SIPOL block boundaries expose missing
+or unattributed blocks; such rankings remain explicitly incomplete.

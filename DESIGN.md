@@ -427,6 +427,10 @@ with 30D, 90D, 1Y and ALL presets and inclusive UTC zoom.
 POL Tracker deposits retain only total and
 average in a two-column summary. Pool Analysis places
 its controls and legend below these cards, immediately before the plot.
+Below the pool chart, a daily-bar click or local-day picker opens the shared
+Financials top-ten table in a single column, ranked by that pool's fees. Name the
+pool and local timezone, retain right-aligned numeric headers/cells, and disclose
+forward-only tracking, partial first-day coverage, or missing block coverage.
 Its Depth/Cumulative Fees switch uses a sliding indicator with reduced-motion
 support. POL deposit rolling averages apply only to daily deposits, not the
 cumulative total.

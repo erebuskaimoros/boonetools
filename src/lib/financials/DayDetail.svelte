@@ -1,11 +1,13 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { fetchFinancialDay } from './api.js';
+  import { fetchPoolAnalysisSwaps } from '../pool-analysis/api.js';
   import { financialDayPollDelay } from './day-poll.js';
   import { financialDayStatus } from './day-status.js';
   import { formatFinancialAmount } from '../../../shared/financials/model.js';
   import { formatLocalDateTime, localTimeZone } from '../utils/datetime.js';
   export let day;
+  export let poolAsset = '';
   export let timeZone = localTimeZone();
   export let onClose = () => {};
   let detail = null, error = '', loading = true, request, timer, destroyed = false, sequence = 0;
@@ -19,7 +21,8 @@
     clearTimeout(timer);
     request?.abort(); request = new AbortController();
     try {
-      const result = await fetchFinancialDay(day, { signal: request.signal, timeZone });
+      const result = await (poolAsset ? fetchPoolAnalysisSwaps(poolAsset, day, { signal: request.signal, timeZone })
+        : fetchFinancialDay(day, { signal: request.signal, timeZone }));
       if (destroyed || id !== sequence) return;
       detail = result; error = '';
     } catch (failure) { if (!destroyed && id === sequence && failure.name !== 'AbortError') error = failure.message; }
@@ -40,8 +43,8 @@
   onDestroy(() => { destroyed = true; sequence++; request?.abort(); clearTimeout(timer); });
 </script>
 
-<section class="day-detail" aria-label={`Top swaps by fees and pools for ${day} in ${timeZone}`} aria-busy={loading || detail?.loading}>
-  <header><h3><span aria-hidden="true">▌</span> {day} <span class="muted">· {timeZone}{detail?.partial ? ' · IN PROGRESS' : ''}</span></h3>
+<section class="day-detail" aria-label={`Top swaps by fees ${poolAsset ? `for ${poolAsset}` : 'and pools'} for ${day} in ${timeZone}`} aria-busy={loading || detail?.loading}>
+  <header><h3><span aria-hidden="true">▌</span> {poolAsset ? `${assetLabel(poolAsset)} · ` : ''}{day} <span class="muted">· {timeZone}{detail?.partial ? ' · IN PROGRESS' : ''}</span></h3>
     <button on:click={onClose} aria-label="Close day details">[×] close</button></header>
   {#if detail?.windowFrom && detail?.windowTo}<p class="basis">Local day · {time(detail.windowFrom)} → {time(detail.windowTo)}</p>{/if}
   <p class="progress" role="status">
@@ -49,25 +52,31 @@
       {dayStatus.pauseLabel}{detail.retryAt ? ` until ${formatLocalDateTime(detail.retryAt)}` : ''} · saved progress is preserved.
       <span class="deferred-reason">{detail.error}</span>
     {:else if error || detail?.error}{error || detail.error} <button on:click={load}>[R] retry</button>
-    {:else if loading || detail?.loading}Loading the full day’s rankings{detail?.progress?.pages ? ` · ${detail.progress.pages} swap pages checked` : ''}…
+    {:else if loading || detail?.loading}Loading {poolAsset ? 'saved pool swaps' : 'the full day’s rankings'}{detail?.progress?.pages ? ` · ${detail.progress.pages} swap pages checked` : ''}…
+    {:else if detail?.availability === 'before-tracking'}Pool swap tracking {detail.trackingSince ? `began ${formatLocalDateTime(detail.trackingSince)}` : 'has not started'}. Earlier days are not backfilled.
+    {:else if poolAsset && !detail?.through}Waiting for the first captured blocks…
     {:else}Through {detail?.through ? formatLocalDateTime(detail.through) : `${day} UTC`}{detail?.refreshing ? ' · refreshing' : ''}{/if}
   </p>
+  {#if poolAsset && detail?.availability === 'tracked'}
+    {#if detail.partialCoverage}<p class="warning">PARTIAL FIRST DAY · Tracking began {formatLocalDateTime(detail.coverageFrom)}. Swaps started earlier are excluded.</p>{/if}
+    {#if !detail.coverageComplete}<p class="warning">Incomplete block coverage{detail.missingBlocks ? ` · ${detail.missingBlocks} missing blocks` : ''}{detail.unattributedBlocks ? ` · ${detail.unattributedBlocks} blocks with unavailable pool attribution` : ''}{detail.stale ? ' · block feed delayed' : ''}. Rankings cover saved observations only.</p>{/if}
+  {/if}
   {#if dayStatus.warning}<p class="warning">{dayStatus.warning}</p>{/if}
   {#if dayStatus.settlement}<p class="basis">{dayStatus.settlement}</p>{/if}
-  <div class="rankings">
-    <section aria-labelledby="top-swaps-title"><h4 id="top-swaps-title">TOP 10 SWAPS BY FEES <span>LIQUIDITY FEES · USD</span></h4>
+  <div class="rankings" class:pool-only={poolAsset}>
+    <section aria-labelledby="top-swaps-title"><h4 id="top-swaps-title">TOP 10 SWAPS BY FEES <span>{poolAsset ? 'THIS POOL’S FEES' : 'LIQUIDITY FEES'} · USD</span></h4>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
       <div class="table-scroll" tabindex="0" role="region" aria-label="Top ten swaps by liquidity fees paid">
-        <table><thead><tr><th scope="col">#</th><th scope="col">SWAP</th><th scope="col" class="amount">VALUE</th><th scope="col" class="amount">FEES</th><th scope="col" class="amount">RATE</th></tr></thead>
+        <table><thead><tr><th scope="col">#</th><th scope="col">SWAP</th><th scope="col" class="amount">VALUE</th><th scope="col" class="amount">{poolAsset ? 'POOL FEES' : 'FEES'}</th><th scope="col" class="amount">RATE</th></tr></thead>
           <tbody>{#each detail?.swaps || [] as row, index (row.txId)}<tr><td>{String(index + 1).padStart(2, '0')}</td>
             <th scope="row" title={`${row.inputAsset} → ${row.outputAsset}`}><a href={`https://thorchain.net/tx/${encodeURIComponent(row.txId)}`} target="_blank" rel="noreferrer" title={`${row.txId} · ${time(row.timestamp)}`}>{assetLabel(row.inputAsset)} <span class="muted">→</span> {assetLabel(row.outputAsset)}</a>{#if row.streaming}<small>STREAMING</small>{/if}</th>
             <td class="amount value">{usd(row.volumeUsd)}</td><td class="amount">{usd(row.feeUsd)}</td><td class="amount value">{bps(row.feeRate)}</td>
           </tr>{/each}
-          {#if !detail?.swaps?.length}<tr><td colspan="5" class="empty">{loading || detail?.loading ? 'Waiting for complete swap coverage…' : error || detail?.error ? 'Swap ranking unavailable.' : 'No completed, priced swaps in this window.'}</td></tr>{/if}</tbody>
+          {#if !detail?.swaps?.length}<tr><td colspan="5" class="empty">{loading || detail?.loading ? 'Loading saved rankings…' : error || detail?.error ? 'Swap ranking unavailable.' : detail?.availability === 'before-tracking' ? 'Not tracked for this day.' : detail?.pendingSwaps ? 'Waiting for saved swap candidates to finish verification…' : 'No completed, priced swaps in the captured window.'}</td></tr>{/if}</tbody>
         </table>
       </div>
     </section>
-    <section aria-labelledby="top-pools-title"><h4 id="top-pools-title">TOP 10 POOLS <span>EXECUTED VOLUME · USD</span></h4>
+    {#if !poolAsset}<section aria-labelledby="top-pools-title"><h4 id="top-pools-title">TOP 10 POOLS <span>EXECUTED VOLUME · USD</span></h4>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
       <div class="table-scroll" tabindex="0" role="region" aria-label="Top ten pools by volume">
         <table><thead><tr><th scope="col">#</th><th scope="col">POOL</th><th scope="col" class="amount">VOLUME</th></tr></thead>
@@ -75,10 +84,15 @@
           {#if !detail?.pools?.length}<tr><td colspan="3" class="empty">{loading || detail?.loading ? 'Waiting for complete pool coverage…' : error || detail?.error ? 'Pool ranking unavailable.' : 'No pool volume in this window.'}</td></tr>{/if}</tbody>
         </table>
       </div>
-    </section>
+    </section>{/if}
   </div>
+  {#if poolAsset}
+  <p class="basis">Ranked by liquidity fees earned by {assetLabel(poolAsset)}, in USD, for swaps started on the selected local day. Includes this pool’s executed legs across the entire stream. Value is the whole route’s input; rate is this pool’s fees ÷ input value. USD uses the saved RUNE price at the swap’s start.</p>
+  <p class="basis">Tracking runs in the background from launch onward. Saved swaps remain available after the day closes; unfinished candidates are checked by transaction ID. Earlier days are not backfilled.</p>
+  {:else}
   <p class="basis">Swaps rank by THORChain liquidity fees paid, in USD, for swaps started on the selected local day. Value is the input amount once per route; rate is fees ÷ input value. Pool volume counts each executed leg within the same local day; cross-asset swaps touch two pools.</p>
   <p class="basis">Today’s roster adds newly indexed activity in the background and stays cached after the full local day is covered. Older, untracked days may need a one-time build while this panel is open.</p>
+  {/if}
 </section>
 
 <style>
@@ -93,6 +107,7 @@
   .deferred-reason { display: block; color: var(--term-amber); overflow-wrap: anywhere; }
   .warning { color: var(--term-amber); }
   .rankings { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 24px; }
+  .rankings.pool-only { grid-template-columns: minmax(0, 1fr); }
   h4 { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; font: 12px var(--term-font-mono); color: var(--term-text); margin: 16px 0 12px; }
   h4 span { font-size: 11px; color: var(--term-text-3); }
   .table-scroll { overflow: auto; }

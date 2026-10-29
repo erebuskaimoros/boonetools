@@ -12,7 +12,7 @@ export function financialDayStatus(detail) {
   const unpriced = detail?.unpricedSwaps || 0;
   const settlement = detail?.settlement;
   const ledger = detail?.swapSource === 'finalized-block-ledger';
-  const feeRanking = detail?.swapRankingBasis === 'liquidity-fees-usd';
+  const feeRanking = ['liquidity-fees-usd', 'pool-liquidity-fees-usd'].includes(detail?.swapRankingBasis);
   const warnings = [];
   if (pending || unpriced || detail?.exclusionsIncomplete) {
     warnings.push(`Provisional snapshot · ${unpriced} unpriced and ${pending} swaps ${ledger ? 'awaiting completion or verification' : 'last seen pending'} are excluded.`);

@@ -59,7 +59,7 @@ async function withDatabase(run) {
     for (const migration of ['051_pool_analysis.sql', '066_pool_analysis_intraday_snapshots.sql',
       '067_financials_reward_accounting.sql', '068_financials_day_details.sql',
       '072_financials_background_rosters.sql', '073_financials_swap_candidates.sql', '074_financials_swap_fees.sql',
-      '075_financials_local_fee_rankings.sql', '076_financials_fee_candidates.sql']) {
+      '075_financials_local_fee_rankings.sql', '076_financials_fee_candidates.sql', '077_financials_pool_swap_fees.sql']) {
       const sql = await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8');
       await client.query(sql.replace(/^\s*(begin|commit);\s*$/gim, '').replaceAll('public.', ''));
     }
