@@ -23,7 +23,7 @@ test('ECharts uses the same units, three independent axes, colors and drawing or
   assert.deepEqual(options.yAxis.map((axis) => axis.id), ['volume', 'income', 'bondingApr']);
   assert.deepEqual(options.series.slice(0, 3).map((series) => series.yAxisIndex), [0, 1, 2]);
   assert.deepEqual(options.series.slice(0, 3).map((series) => series.z), [2, 1, 3]);
-  assert.deepEqual(options.yAxis.map((axis) => axis.axisLine.lineStyle.color), ['#5588cc', '#00cc66', '#d4a017']);
+  assert.deepEqual(options.yAxis.map((axis) => axis.axisLine.lineStyle.color), ['#5588cc', '#d4a017', '#00cc66']);
   assert.deepEqual(options.series[0].data, rows.map((row) => row.volumeUsd));
   const rune = buildFinancialEChartsOption(rows, { currency: 'rune' });
   assert.deepEqual(rune.series[0].data, rows.map((row) => row.volumeRune));

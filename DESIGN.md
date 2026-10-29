@@ -401,7 +401,8 @@ Hover callbacks may drive HTML values; preset-aware reset uses `resetWindow`.
 Primary time-series charts use `RangeSummary.svelte`: four square,
 flush cards above the plot, responsive to container width. Rapid Swaps, POL
 TVL, Bond History and the main Financials plot are explicit exceptions: they omit per-chart summaries and retain
-their dashboards' top-level stats. Financials defaults its amber line to closing
+their dashboards' top-level stats. Financials matches Pool Analysis with blue
+volume bars, amber income bars, and a green line. It defaults that line to closing
 RUNE/USD price, with a sliding RUNE Price / Bonding APR switch in the legend row.
 The price axis fits the visible price series with padded bounds on every range,
 calendar grain and zoom window, including hourly views. Flow bars retain zero baselines.

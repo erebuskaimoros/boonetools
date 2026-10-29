@@ -274,7 +274,7 @@
   <section class="methodology" aria-label="Metric definitions">
     <div><h2><span class="volume-value">01</span> VOLUME</h2><p>Executed swap volume across every pool, including trade, secured, and synth swaps. Cross-asset swaps contribute both pool legs.</p></div>
     <div><h2><span class="income-value">02</span> SYSTEM INCOME</h2><p>Midgard’s retained earnings after REVSHARE. The daily hover breakdown is gross liquidity fees + Reserve emissions − REVSHARE + a separately disclosed reconciliation adjustment. Emissions use historical Reserve balances and the protocol formula; REVSHARE uses finalized payouts. Missing coverage stays unavailable. USD income uses each day’s or hour’s closing RUNE price, or the latest covered five-minute price for a partial bucket. Swap USD uses prices at execution.</p></div>
-    <div><h2><span class="apr-value">03</span> RUNE PRICE / BONDING APR</h2><p>The amber line defaults to closing RUNE price in USD; weekly and monthly views use the last observation. Switch to APR for daily node rewards ÷ closing active bond × 365. Today’s APR estimate scales rewards by the elapsed covered time, using a bond snapshot at the same cutoff. Snapshots reflect bonds, unbonds, and active-set changes; balances are not time-weighted. Excludes individual fees and performance adjustments.</p></div>
+    <div><h2><span class="apr-value">03</span> RUNE PRICE / BONDING APR</h2><p>The green line defaults to closing RUNE price in USD; weekly and monthly views use the last observation. Switch to APR for daily node rewards ÷ closing active bond × 365. Today’s APR estimate scales rewards by the elapsed covered time, using a bond snapshot at the same cutoff. Snapshots reflect bonds, unbonds, and active-set changes; balances are not time-weighted. Excludes individual fees and performance adjustments.</p></div>
   </section>
 
   {#if hasData}
@@ -331,8 +331,8 @@
   .metric strong { display: block; color: var(--term-text); font-size: 26px; font-weight: 800; }
   .metric small { display: block; margin-top: 10px; color: var(--term-text-4); font-size: 11px; }
   .volume-value { color: var(--term-info) !important; }
-  .income-value { color: var(--term-accent) !important; }
-  .apr-value { color: var(--term-amber) !important; }
+  .income-value { color: var(--term-amber) !important; }
+  .apr-value { color: var(--term-accent) !important; }
   .chart-panel { border: 1px solid var(--term-border); background: var(--term-surface); padding: 20px; }
   .panel-heading { justify-content: space-between; flex-wrap: wrap; }
   .panel-heading h2 { margin: 0; font-size: 13px; letter-spacing: .08em; }

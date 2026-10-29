@@ -9,7 +9,7 @@ export { utcDayZoomWindow as financialEChartsWindow } from '../charts/viewport.j
 
 const seriesFills = {
   volume: 'rgba(85,136,204,0.30)',
-  income: 'rgba(0,204,102,0.35)',
+  income: 'rgba(212,160,23,0.28)',
   bondingApr: FINANCIALS_SERIES[2].color
 };
 

@@ -80,7 +80,8 @@ before the frontend so the hourly read model can begin filling normally.
 
 ### Daily and larger buckets
 
-- The amber line defaults to closing RUNE/USD price. The sliding control switches
+- Blue volume bars, amber income bars, and a green line match Pool Analysis.
+  The green line defaults to closing RUNE/USD price. The sliding control switches
   it to bonding APR without resetting zoom; price stays USD even when volume and
   income are denominated in RUNE. Weekly/monthly prices use the closing observation,
   APR uses the mean daily rate, and missing prices remain gaps.
