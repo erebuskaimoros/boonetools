@@ -148,6 +148,7 @@ test('a closed day ranks Pool Analysis daily totals over its stored pool snapsho
       { asset: 'BTC.BTC', volume_usd_e2: '787593530', volume_rune_e8: '1246000000000000' },
       { asset: 'TRON.TRX', volume_usd_e2: '661191506', volume_rune_e8: '1049284457621485' },
       { asset: 'GAIA.ATOM', volume_usd_e2: '0', volume_rune_e8: '0' }] };
+    if (/financials_swap_ledger/.test(sql)) return { rows: [] }; // Not a stream-covered day.
     throw new Error(`Unexpected query: ${sql}`);
   } };
   const result = await readFinancialDay(day, { now: () => now, client });
@@ -164,6 +165,7 @@ test('a partial day ranks each pool\'s latest Pool Analysis prefix at or before 
       assert.ok(args.some(value => new Date(value).getTime() === through * 1000), 'bounded by the stored snapshot horizon');
       return { rows: [{ asset: 'BTC.BTC', volume_usd_e2: '400000000', volume_rune_e8: '630000000000000' }] };
     }
+    if (/financials_swap_ledger/.test(sql)) return { rows: [] }; // Not a stream-covered day.
     throw new Error(`Unexpected query: ${sql}`);
   } };
   const result = await readFinancialDay(day, { now: () => (through + 600) * 1000, client });
@@ -302,6 +304,7 @@ test('Postgres migration, cold enqueue, resumable worker, last-good errors and f
     await client.query(await readFile(new URL('../migrations/068_financials_day_details.sql', import.meta.url), 'utf8'));
     await client.query(await readFile(new URL('../migrations/072_financials_background_rosters.sql', import.meta.url), 'utf8'));
     await poolAnalysisTables(client, readFile);
+    await client.query(await readFile(new URL('../migrations/073_financials_swap_candidates.sql', import.meta.url), 'utf8'));
     // This test isolates the visitor lane; the managed current day is cooling.
     await client.query(`insert into financials_day_details (day, background, available_at)
       values ((now() at time zone 'UTC')::date, true, now() + interval '1 day')`);
@@ -352,6 +355,7 @@ test('Postgres queue freezes provisional closed days, pauses abandoned scans and
     await client.query(await readFile(new URL('../migrations/068_financials_day_details.sql', import.meta.url), 'utf8'));
     await client.query(await readFile(new URL('../migrations/072_financials_background_rosters.sql', import.meta.url), 'utf8'));
     await poolAnalysisTables(client, readFile);
+    await client.query(await readFile(new URL('../migrations/073_financials_swap_candidates.sql', import.meta.url), 'utf8'));
     await client.query(`insert into financials_day_details (day, background, available_at)
       values ((now() at time zone 'UTC')::date, true, now() + interval '1 day')`);
     const complete = { day, through: new Date(to * 1000).toISOString(), observedAt: new Date(now).toISOString(),

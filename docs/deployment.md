@@ -493,6 +493,23 @@ GETs. `[H]` must reset to 24H; hourly presets cap at 30D, and D/W/M continue to
 use daily history. Hourly APR is deliberately absent. Check restart reuse of
 completed hours, missing intervals, UTC rollover and budget-deferred retries.
 
+#### Stream swap ledger (October 28, 2026)
+
+Migration 073 makes this a coordinated deploy: services stop before migrating, so
+`financials_swap_ledger.started_at` marks where the listener and reward repair
+begin recording swap candidates: one record per single swap, and a start and a
+completion record per stream. Coverage begins at the next UTC midnight; the
+deploy day and earlier days keep the Midgard actions scan and their saved
+rankings. No backfill, cache reset or budget change is required;
+`FINANCIALS_SWAP_CANDIDATE_MIN_RUNE` defaults to 5000. Afterwards, check the
+verifier's Midgard request volume in `midgard_request_budgets` (bulk counters)
+and the Financials minute acquisition log: about 25 txid lookups per covered day
+plus pending rechecks, at most five per 30-second pass, and none for unfinished
+streams. Confirm `financials_swap_candidates` fills from the listener with
+`started` and `complete` set as streams progress and, on the first covered day,
+that today's completed top swaps appear in `financials?day=` within minutes of
+completion, with no `/actions?type=swap` paging.
+
 ### Crosschain comparison stuck at a shared date
 
 Check the public `protocol-fee-comparison` endpoint's `errors` and the

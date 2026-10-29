@@ -4,6 +4,7 @@ import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-poo
 import { config } from '../lib/config.js';
 import { providerLifecycleHooks } from './provider-cooldown.js';
 import { parseFinancialReserveObservation } from './financials-reserve-emissions.js';
+import { decodedEventText as decoded, parseFinancialSwapCandidates } from './financials-swap-candidates.js';
 
 // First positive finalized payout, verified with Liquify's ascending indexed
 // `rev_share.payout > 0` block search on 2026-10-13. Earlier intervals have no
@@ -24,15 +25,6 @@ function rpcError(details, fallback = 'REVSHARE RPC response failed') {
 
 // REVSHARE is paid in EndBlock, before the rewards allocations observed by
 // Midgard. Transaction-result events are intentionally not a second source.
-function decoded(value) {
-  const text = String(value ?? '');
-  if (/^[A-Za-z0-9+/]+=*$/.test(text) && text.length > 1) {
-    const candidate = Buffer.from(text, 'base64').toString('utf8');
-    if (candidate && /^[\x20-\x7e]+$/.test(candidate)) return candidate;
-  }
-  return text;
-}
-
 export function parseFinancialRevshareBlock(payload = {}, expectedHeight) {
   if (payload.error) throw rpcError(payload.error);
   const result = payload.result ?? payload;
@@ -61,7 +53,8 @@ export function parseFinancialRevshareBlock(payload = {}, expectedHeight) {
   try { reserveObservation = parseFinancialReserveObservation(payload, height); }
   catch (error) { reserveObservationError = error.message; }
   return { height, revshareE8: total.toString(), reserveObservation,
-    ...(reserveObservationError ? { reserveObservationError } : {}) };
+    ...(reserveObservationError ? { reserveObservationError } : {}),
+    swapCandidates: parseFinancialSwapCandidates(events) };
 }
 
 export async function saveFinancialRewardBlocks(client, observations = []) {
@@ -86,8 +79,52 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
       emissions_method: reserveEmissions === null ? null : emissionsMethod,
       source: String(observation.source || 'thorchain-rpc:rev_share.payout') };
   });
+  const minRune = BigInt(config.financialsSwapCandidateMinRuneE8);
+  const swaps = new Map();
+  observations.forEach((observation, index) => {
+    for (const swap of Array.isArray(observation.swapCandidates) ? observation.swapCandidates : []) {
+      if (!swap?.txId || !swap.inputAsset || !/^\d+$/.test(swap.inputE8 ?? '')
+        || !/^\d+$/.test(swap.runeValueE8 ?? '') || BigInt(swap.runeValueE8) < minRune) continue;
+      const { height, block_time: seenAt } = rows[index];
+      swaps.set(swap.txId, mergeSwapCandidate(swaps.get(swap.txId), { tx_id: swap.txId, day: seenAt.slice(0, 10),
+        first_height: height, first_seen_at: seenAt, input_asset: swap.inputAsset, input_e8: swap.inputE8,
+        rune_value_e8: swap.runeValueE8, output_asset: swap.outputAsset || '', streaming: Boolean(swap.streaming),
+        started: Boolean(swap.started), complete: Boolean(swap.complete), completed_at: swap.complete ? seenAt : null }));
+    }
+  });
+  // Candidates commit with their block: a block is never observed without them.
+  // Live (ascending) and repair (descending) arrivals merge to the same row:
+  // a start record dates it and a completion record sizes it.
   const result = await client.query(
-    `insert into financials_reward_blocks as current (
+    `with swap_candidates as (
+       insert into financials_swap_candidates as candidate (
+         tx_id, day, first_height, first_seen_at, input_asset, input_e8, rune_value_e8, output_asset,
+         streaming, started, complete, completed_at
+       )
+       select tx_id, day, first_height, first_seen_at, input_asset, input_e8, rune_value_e8, output_asset,
+         streaming, started, complete, completed_at
+       from jsonb_to_recordset($2::jsonb) as incoming (
+         tx_id text, day date, first_height bigint, first_seen_at timestamptz, input_asset text, input_e8 numeric,
+         rune_value_e8 numeric, output_asset text, streaming boolean, started boolean, complete boolean, completed_at timestamptz
+       )
+       on conflict (tx_id) do update set
+         (first_height, first_seen_at, day, started) = (
+           select case when dating.incoming then excluded.first_height else candidate.first_height end,
+             case when dating.incoming then excluded.first_seen_at else candidate.first_seen_at end,
+             case when dating.incoming and candidate.status <> 'verified' then excluded.day else candidate.day end,
+             candidate.started or excluded.started
+           from (select excluded.started and not candidate.started as incoming) as dating),
+         (input_asset, input_e8, rune_value_e8, output_asset, complete, completed_at) = (
+           select case when sizing.incoming then excluded.input_asset else candidate.input_asset end,
+             case when sizing.incoming then excluded.input_e8 else candidate.input_e8 end,
+             case when sizing.incoming then excluded.rune_value_e8 else candidate.rune_value_e8 end,
+             case when sizing.incoming then excluded.output_asset else candidate.output_asset end,
+             candidate.complete or excluded.complete,
+             case when sizing.incoming then excluded.completed_at else candidate.completed_at end
+           from (select excluded.complete and not candidate.complete as incoming) as sizing),
+         streaming = candidate.streaming or excluded.streaming
+     )
+     insert into financials_reward_blocks as current (
        height, block_time, revshare_e8, source, reserve_observation, reserve_emissions_e8, emissions_method
      )
      select height, block_time, revshare_e8, source, reserve_observation, reserve_emissions_e8, emissions_method
@@ -101,9 +138,18 @@ export async function saveFinancialRewardBlocks(client, observations = []) {
        emissions_method = case when current.reserve_emissions_e8 is null then excluded.emissions_method else current.emissions_method end
      where current.reserve_observation is null and excluded.reserve_observation is not null
         or current.reserve_emissions_e8 is null and excluded.reserve_emissions_e8 is not null`,
-    [JSON.stringify(rows)]
+    [JSON.stringify(rows), JSON.stringify([...swaps.values()])]
   );
   return result.rowCount || 0;
+}
+
+// Same rule as the SQL merge: the start owns the day, the completion the size.
+function mergeSwapCandidate(current, next) {
+  if (!current) return next;
+  const dated = next.started && !current.started ? next : current;
+  const sized = next.complete && !current.complete ? next : current;
+  return { ...sized, first_height: dated.first_height, first_seen_at: dated.first_seen_at, day: dated.day,
+    started: dated.started, streaming: current.streaming || next.streaming };
 }
 
 function windowEvidence(from, through) {

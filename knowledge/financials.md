@@ -173,6 +173,24 @@ Missing pools still use the budgeted source; the tracked-pool subset never repla
 discovery of the full day's pool universe. No ranking is published until both
 complete scans finish.
 
+From the first UTC day after the October 28, 2026 deploy (migration 073), the
+swap list comes from a stream ledger instead of the `/actions` page scan. The
+chain listener and reward-block repair turn finalized `swap` and `streaming_swap`
+events into candidate records, committed in the same statement as the reward
+block. A single swap is one record. A stream is recorded twice: at its first
+sub-swap (that leg times the quantity), which dates it, and at its completion
+(the actual deposit), which sizes it; sub-swaps in between are ignored. Each
+record is valued at its own block's RUNE rate for the input asset, from every
+asset-to-RUNE leg in that block, with a default floor of 5,000 RUNE. Each UTC
+day's top 25 completed candidates get one Midgard `/actions?txid=` lookup, which
+supplies the exact USD row and action date. Unfinished streams cost no request
+and stay disclosed as pending; swaps Midgard still reports pending are rechecked
+with backoff from ten minutes to a day. Covered days keep earnings and pool-history
+acquisition; days before `financials_swap_ledger.started_at` keep the scan. On
+2026-10-27 the roughly 800-page scan, competing for the 5,000/day bulk budget,
+made no requests from about 12:00 to 24:00 UTC and missed 6 of the true top ten,
+although every block had already reached the listener.
+
 ### Request efficiency and bounded acquisition (October 18, 2026)
 
 A completed UTC-day snapshot is retained without automatic rescanning, even when

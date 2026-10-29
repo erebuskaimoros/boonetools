@@ -26,7 +26,7 @@ async function withDatabase(run) {
     await client.query("set local time zone 'Pacific/Honolulu'");
     // Pool Analysis DDL stays inside this rollback-only schema.
     for (const migration of ['051_pool_analysis.sql', '066_pool_analysis_intraday_snapshots.sql',
-      '068_financials_day_details.sql', '072_financials_background_rosters.sql']) {
+      '068_financials_day_details.sql', '072_financials_background_rosters.sql', '073_financials_swap_candidates.sql']) {
       const sql = await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8');
       await client.query(sql.replace(/^begin;|commit;\s*$/gi, '').replaceAll('public.', ''));
     }

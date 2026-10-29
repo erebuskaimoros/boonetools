@@ -1,4 +1,6 @@
 import { midgardActionTimestampSeconds } from '../../../shared/dynamic-fees/affiliate-volume.js';
+import { financialSwapLedgerCovers, financialSwapRow, financialSwapSettlement, readFinancialSwapLedgerDay,
+  readFinancialSwapLedgerStart } from './financials-swap-candidates.js';
 
 const DAY = 86400;
 export const FINANCIAL_DAY_REFRESH_MS = 15 * 60_000;
@@ -41,23 +43,8 @@ function rankedSwaps(actions, from, through) {
   for (const action of actions) {
     const seconds = midgardActionTimestampSeconds(action.date);
     if (seconds < from || seconds >= through || action.type !== 'swap') continue;
-    const txId = action.in?.find(leg => leg.txID)?.txID;
-    const exclude = kind => exclusions.push({ txId: txId ? String(txId).toUpperCase() : null, kind });
-    if (action.status !== 'success') { exclude('pending'); continue; }
-    const inputs = (action.in || []).flatMap(leg => leg.coins || []);
-    const asset = inputs[0]?.asset;
-    const price = action.metadata?.swap?.inPriceUSD;
-    // One source asset per route. Never turn an unpriced swap into a zero.
-    if (!txId || !inputs.length || !positive(price) || inputs.some(coin => coin.asset !== asset || !integer(coin.amount))) {
-      exclude('unpriced'); continue;
-    }
-    const inputAmount = Number(inputs.reduce((sum, coin) => sum + BigInt(coin.amount), 0n)) / 1e8;
-    const volumeUsd = inputAmount * Number(price);
-    if (!Number.isFinite(volumeUsd)) { exclude('unpriced'); continue; }
-    const outputs = (action.out || []).filter(leg => !leg.affiliate).flatMap(leg => leg.coins || []);
-    rows.push({ txId: String(txId).toUpperCase(), timestamp: iso(seconds),
-      inputAsset: asset, inputAmount, outputAsset: outputs[0]?.asset || action.metadata?.swap?.streamingSwapMeta?.outCoin?.asset || '',
-      volumeUsd, streaming: Boolean(action.metadata?.swap?.isStreamingSwap) });
+    const { row, exclusion } = financialSwapRow(action);
+    if (row) rows.push(row); else exclusions.push(exclusion);
   }
   return { rows, exclusions };
 }
@@ -173,18 +160,7 @@ async function advanceSettlement(day, state, getJson, now) {
   const txId = pass.ids[pass.cursor];
   const response = await getJson(`/actions?${new URLSearchParams({ txid: txId, limit: '50' })}`);
   if (!Array.isArray(response?.actions)) throw new Error('Invalid pending swap lookup');
-  // A txid search can include related actions. Only a successful action with
-  // this exact inbound ID is evidence that this saved exclusion has settled.
-  const related = response.actions.filter(action =>
-    ['swap', 'refund'].includes(action?.type)
-    && Array.isArray(action.in) && String(action.in.find(leg => leg?.txID)?.txID || '').trim().toUpperCase() === txId);
-  const matches = related.filter(action => action.status === 'success');
-  const action = matches.find(candidate => {
-    const seconds = midgardActionTimestampSeconds(candidate.date);
-    return candidate.type === 'swap' && seconds > 0 && Number.isFinite(seconds)
-      && Number.isFinite(new Date(seconds * 1000).getTime());
-  }) || (!related.some(candidate => candidate.type === 'swap')
-    && matches.find(candidate => candidate.type === 'refund'));
+  const { action } = financialSwapSettlement(response.actions, txId);
   if (action) {
     const previous = (state.exclusions || []).find(row => row.kind === 'pending' && String(row.txId).trim().toUpperCase() === txId);
     if (previous) {
@@ -252,7 +228,8 @@ export function financialPoolVolume(payload, { from, through }, asset) {
 
 /** Each call advances one provider request; persist before continuing. No
  * incomplete scan is published as a full-day top ten. A fixed source horizon
- * and opaque descending cursor survive both provider errors and restarts. */
+ * and opaque descending cursor survive both provider errors and restarts.
+ * Days the swap stream ledger covers skip the actions scan entirely. */
 export async function advanceFinancialDay(day, previous, getJson, now = Date.now(), options = {}) {
   const bounds = financialDetailDay(day, now);
   let state = previous ? structuredClone(previous) : { ...bounds, phase: 'health', swaps: [], pools: [], poolRows: [], tokens: [], pages: 0, unpriced: 0, pending: 0 };
@@ -287,7 +264,7 @@ export async function advanceFinancialDay(day, previous, getJson, now = Date.now
     const earningsFrom = state.actionFrom || state.from;
     const params = new URLSearchParams(financialDetailHistoryQuery(earningsFrom, state.through));
     state.pools = [...new Set([...state.pools, ...poolsFromEarnings(await getJson(`/history/earnings?${params}`), earningsFrom, state.through)])].sort();
-    state.phase = 'actions';
+    state.phase = options.streamSwaps ? 'pools' : 'actions';
   } else if (state.phase === 'actions') {
     // Midgard rejects timestamp + nextPageToken together. The first request
     // anchors the horizon; subsequent opaque cursors retain it, with local
@@ -348,6 +325,20 @@ async function financialDayPools(db, day, from, payload, complete) {
   return topPools([...pools.values()]);
 }
 
+/** A covered day ranks verified stream candidates instead of the saved scan's
+ * swaps. Unverified top candidates stay disclosed as pending; the saved
+ * horizon, pool totals and acquisition state are unchanged. */
+async function ledgerPayload(db, day, payload, now) {
+  if (!financialSwapLedgerCovers(await readFinancialSwapLedgerStart(db), day)) return null;
+  const ledger = await readFinancialSwapLedgerDay(db, day, now);
+  const pending = ledger.pending.length;
+  const merged = { ...payload, swaps: topSwaps(ledger.swaps), pendingSwaps: pending, unpricedSwaps: ledger.unpriced.length,
+    excludedSwaps: [...ledger.pending.map(txId => ({ txId, kind: 'pending' })), ...ledger.unpriced.map(txId => ({ txId, kind: 'unpriced' }))],
+    exclusionsIncomplete: false, settlement: { status: pending ? 'pending' : 'complete', checkedAt: ledger.checkedAt,
+      nextCheckAt: ledger.nextCheckAt, remaining: pending, passCount: 0 } };
+  return { ...merged, finalized: financialDaySnapshotFinalized(day, merged, now) };
+}
+
 export async function readFinancialDay(day, options = {}) {
   const now = options.now?.() ?? Date.now();
   const { from } = financialDetailDay(day, now);
@@ -356,17 +347,19 @@ export async function readFinancialDay(day, options = {}) {
     on conflict (day) do update set requested_at = now()
     returning payload_json, state_json->>'phase' as phase, state_json->>'pages' as pages, last_error, available_at`, [day]);
   const row = rows[0];
-  const complete = financialDaySnapshotComplete(day, row?.payload_json);
-  const settlement = financialDaySettlement(day, row?.payload_json);
+  const ledger = row?.payload_json ? await ledgerPayload(db, day, row.payload_json, now) : null;
+  const payload = ledger || row?.payload_json;
+  const complete = financialDaySnapshotComplete(day, payload);
+  const settlement = financialDaySettlement(day, payload);
   const working = !complete || settlement?.status === 'pending';
-  if (settlement?.status === 'pending') {
+  if (settlement?.status === 'pending' && !ledger) {
     const eligibleAt = Math.max(Date.parse(settlement.nextCheckAt) || 0, new Date(row?.available_at).getTime() || 0);
     if (eligibleAt > now) settlement.nextCheckAt = new Date(eligibleAt).toISOString();
   }
-  const pools = row?.payload_json && await financialDayPools(db, day, from, row.payload_json, complete);
-  return { day, ...(row?.payload_json || {}), ...(pools && { pools }), loading: !row?.payload_json,
-    ...(complete ? { finalized: financialDaySnapshotFinalized(day, row.payload_json, now), settlement } : {}),
-    refreshing: Boolean(row?.payload_json && !complete && new Date(row.available_at).getTime() <= now),
+  const pools = payload && await financialDayPools(db, day, from, payload, complete);
+  return { day, ...(payload || {}), ...(pools && { pools }), loading: !payload,
+    ...(complete ? { finalized: financialDaySnapshotFinalized(day, payload, now), settlement } : {}),
+    refreshing: Boolean(payload && !complete && new Date(row.available_at).getTime() <= now),
     retryAt: working && row?.last_error ? new Date(row.available_at).toISOString() : null,
     deferred: Boolean(working && row?.last_error && new Date(row.available_at).getTime() > now),
     progress: { phase: settlement?.status === 'pending' ? 'settlement' : complete ? 'done' : row?.phase || (row?.payload_json ? 'done' : 'queued'), pages: Number(row?.pages) || 0 },
@@ -412,6 +405,8 @@ export async function refreshFinancialDayQueue(client, options = {}) {
   }));
   const trackedPools = jobs.length ? new Set((await client.query('select asset from pool_analysis_sync_state')).rows
     .map(row => row.asset).filter(Boolean)) : undefined;
+  // Load the ledger start once per pass. A day it covers ranks stream swaps.
+  const ledgerStart = jobs.length ? await readFinancialSwapLedgerStart(client) : null;
   const maxRequests = Math.max(1, Math.min(10, Number(options.maxRequests) || 10));
   let requests = 0;
   while (jobs.length && requests < maxRequests && !options.signal?.aborted) {
@@ -420,7 +415,8 @@ export async function refreshFinancialDayQueue(client, options = {}) {
     if (!job.background && (options.now?.() ?? Date.now()) - job.requestedAt >= FINANCIAL_DAY_VISITOR_LEASE_MS) continue;
     requests++;
     try {
-      const result = await advanceFinancialDay(job.day, job.state, options.getJson, options.now?.() ?? Date.now(), { background: job.background, trackedPools });
+      const result = await advanceFinancialDay(job.day, job.state, options.getJson, options.now?.() ?? Date.now(),
+        { background: job.background, trackedPools, streamSwaps: financialSwapLedgerCovers(ledgerStart, job.day) });
       const savedAt = options.now?.() ?? Date.now();
       const availableAt = financialDayNextWorkAt(job.day, result.payload, savedAt, { background: job.background }) ?? savedAt;
       const saved = await client.query(`update financials_day_details set state_json = $2::jsonb,
