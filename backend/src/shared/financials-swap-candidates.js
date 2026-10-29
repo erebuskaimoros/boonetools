@@ -89,9 +89,10 @@ export function financialSwapRow(action) {
   const volumeUsd = inputAmount * Number(price);
   if (!Number.isFinite(volumeUsd)) return exclude('unpriced');
   const outputs = (action.out || []).filter(leg => !leg.affiliate).flatMap(leg => leg.coins || []);
+  const fee = action.metadata?.swap?.liquidityFee;
   return { row: { txId: String(txId).toUpperCase(), timestamp: new Date(seconds * 1000).toISOString(),
     inputAsset: asset, inputAmount, outputAsset: outputs[0]?.asset || action.metadata?.swap?.streamingSwapMeta?.outCoin?.asset || '',
-    volumeUsd, streaming: Boolean(action.metadata?.swap?.isStreamingSwap) } };
+    volumeUsd, feeRune: integer(fee) ? Number(BigInt(fee)) / 1e8 : null, streaming: Boolean(action.metadata?.swap?.isStreamingSwap) } };
 }
 
 /** A txid search can include related actions. Only a successful action with
@@ -152,6 +153,36 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
     checked++;
   }
   return checked;
+}
+
+/** Day rows stored before ranked rows carried feeRune get one lookup each by
+ * transaction ID; a null fee records the check. Stored payloads are never
+ * edited. Errors stop or skip exactly as in verification. */
+export async function fillFinancialSwapFees(client, { getJson, now = Date.now, maxRequests = 5, signal } = {}) {
+  if (signal?.aborted) return 0;
+  const { rows } = await client.query(`select swap->>'txId' as tx_id from financials_day_details,
+      jsonb_array_elements(case when jsonb_typeof(payload_json->'swaps') = 'array' then payload_json->'swaps' else '[]'::jsonb end) swap
+    where jsonb_typeof(swap->'txId') = 'string' and not (swap ? 'feeRune')
+      and not exists (select 1 from financials_swap_fees fee where fee.tx_id = swap->>'txId')
+    group by 1 order by max(day) desc, 1 limit $1`, [Math.max(1, Math.trunc(maxRequests) || 1)]);
+  let filled = 0;
+  for (const { tx_id: txId } of rows) {
+    if (signal?.aborted) break;
+    let actions;
+    try {
+      actions = (await getJson(`/actions?${new URLSearchParams({ txid: txId, limit: '50' })}`))?.actions;
+      if (!Array.isArray(actions)) throw new Error('Invalid swap fee lookup');
+    } catch (error) {
+      if (signal?.aborted || error.code === 'MIDGARD_BUDGET_DEFERRED' || error.skipProvider) break;
+      continue;
+    }
+    const { action } = financialSwapSettlement(actions, txId);
+    const fee = action?.type === 'swap' ? action.metadata?.swap?.liquidityFee : null;
+    await client.query(`insert into financials_swap_fees (tx_id, fee_rune_e8, checked_at) values ($1, $2::numeric, $3::timestamptz)
+      on conflict (tx_id) do nothing`, [txId, integer(fee) ? String(fee) : null, new Date(now()).toISOString()]);
+    filled++;
+  }
+  return filled;
 }
 
 export async function readFinancialSwapLedgerStart(client) {
