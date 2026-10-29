@@ -41,3 +41,12 @@ test('settlement checks retain provider deferral cadence without fast acquisitio
   assert.equal(financialDayPollDelay({ ...pending, deferred: true,
     retryAt: new Date(now + 12_000).toISOString() }, '', now), 12_000);
 });
+
+test('finished swap rankings keep polling independent incomplete or delayed pool coverage', () => {
+  const now = Date.parse('2026-10-31T12:00:00Z');
+  const closed = { partial:false,settlement:{status:'complete'},windowTo:'2026-10-30T04:00:00Z' };
+  assert.equal(financialDayPollDelay({...closed,poolRanking:{complete:false,through:null}},'',now),60_000);
+  assert.equal(financialDayPollDelay({...closed,poolRanking:{complete:true,through:closed.windowTo,stale:true}},'',now),60_000);
+  assert.equal(financialDayPollDelay({...closed,poolRanking:{complete:true,through:'2026-10-29T21:30:00Z',fallback:true}},'',now),60_000);
+  assert.equal(financialDayPollDelay({...closed,poolRanking:{complete:true,through:closed.windowTo,stale:false}},'',now),null);
+});

@@ -556,6 +556,21 @@ batch, and missing block/attribution coverage remains visible. Reload Pool
 Analysis, open a pool, click a daily bar, and check the pool-specific fee table
 and local timezone. Completed days retain saved facts and pending-ID checks.
 
+#### Pool rankings independent of swap acquisition (October 29, 2026)
+
+Deploy backend before frontend; no migration, collector warmup, cache deletion,
+budget reset, or history rescan is needed. `financials?day=...&timeZone=...`
+reads exact saved pool windows separately from its swap snapshot and returns
+`poolRanking` coverage metadata. Validate all ten ranked amounts against saved
+start/end prefixes at the response's pool cutoff, including leaders absent from
+the previous top ten. Confirm the swap cutoff and paused acquisition state do
+not change merely because the pool table becomes current.
+
+Reload Financials and check both tables' local-time cutoffs. Partial pool
+coverage and fallback snapshots must be visibly qualified, never presented as a
+complete current ranking. Check a midnight crossing, DST local day, and a cold
+swap snapshot with independently available pool totals.
+
 #### Saved swap verification admission (October 29, 2026)
 
 Deploy backend before frontend. Migration 078 adds the verifier-wide pause

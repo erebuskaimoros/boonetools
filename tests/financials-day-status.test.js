@@ -112,3 +112,36 @@ test('fee-ledger status distinguishes unverified candidates and missing pricing 
   assert.match(status.settlement, /Latest candidate check/);
   assert.doesNotMatch(status.settlement, /Last complete pending-ID check/);
 });
+
+test('a paused swap scan keeps separate visible cutoffs for swaps and current pool rankings', () => {
+  const timeZone = 'America/New_York';
+  const swapThrough = '2026-10-29T07:45:00Z', poolThrough = '2026-10-29T21:30:00Z';
+  const status = financialDayStatus({ through: swapThrough, deferred: true, progress: {phase:'actions'},
+    poolRanking: {from:'2026-10-29T04:00:00Z',through:poolThrough,complete:true,stale:false,fallback:false} }, {timeZone});
+  assert.equal(status.pauseLabel, 'Swap acquisition paused');
+  assert.equal(status.swapThrough, `Through ${formatLocalDateTime(swapThrough,{timeZone})}`);
+  assert.equal(status.poolThrough, `Through ${formatLocalDateTime(poolThrough,{timeZone})}`);
+  assert.equal(status.poolWarning, '');
+  assert.doesNotMatch(status.poolThrough, /03:45/);
+});
+
+test('pool fallback and incomplete coverage remain explicit without claiming no volume', () => {
+  const status = financialDayStatus({poolRanking:{through:'2026-10-29T07:45:00Z',complete:false,
+    fallback:true,stale:true,missingPools:['BTC.BTC','ETH.ETH']},pools:[]});
+  assert.match(status.poolWarning, /saved ranking/i);
+  assert.match(status.poolWarning, /delayed/i);
+  assert.match(status.poolWarning, /2 pools.*unavailable/i);
+  assert.match(status.poolEmpty, /unavailable/i);
+  assert.doesNotMatch(status.poolEmpty, /No pool volume/);
+});
+
+test('missing pool coverage metadata never invents a current cutoff or zero-volume claim', () => {
+  const unavailable = financialDayStatus({through:'2026-10-29T07:45:00Z',poolRanking:{complete:false,through:null},pools:[]});
+  assert.equal(unavailable.poolThrough, 'Pool coverage unavailable');
+  assert.match(unavailable.poolEmpty, /unavailable/i);
+  const invalid = financialDayStatus({poolRanking:{complete:true,through:'bad'},pools:[]});
+  assert.doesNotMatch(invalid.poolThrough, /Invalid Date|Through/);
+  assert.match(invalid.poolEmpty, /unavailable/i);
+  const zero = financialDayStatus({poolRanking:{complete:true,through:'2026-10-29T21:30:00Z'},pools:[]});
+  assert.equal(zero.poolEmpty,'No pool volume in this window.');
+});

@@ -11,7 +11,7 @@
   export let timeZone = localTimeZone();
   export let onClose = () => {};
   let detail = null, error = '', loading = true, request, timer, destroyed = false, sequence = 0;
-  $: dayStatus = financialDayStatus(detail);
+  $: dayStatus = financialDayStatus(detail, { timeZone });
   const usd = value => formatFinancialAmount(value, 'usd', false);
   const assetLabel = value => String(value || '—').split('-')[0];
   const time = value => formatLocalDateTime(value, { year: undefined, timeZone });
@@ -52,10 +52,11 @@
       {dayStatus.pauseLabel}{detail.retryAt ? ` until ${formatLocalDateTime(detail.retryAt)}` : ''} · saved progress is preserved.
       <span class="deferred-reason">{detail.error}</span>
     {:else if error || detail?.error}{error || detail.error} <button on:click={load}>[R] retry</button>
-    {:else if loading || detail?.loading}Loading {poolAsset ? 'saved pool swaps' : 'the full day’s rankings'}{detail?.progress?.pages ? ` · ${detail.progress.pages} swap pages checked` : ''}…
+    {:else if loading || detail?.loading}Loading {poolAsset ? 'saved pool swaps' : detail?.poolRanking ? 'swap rankings' : 'the full day’s rankings'}{detail?.progress?.pages ? ` · ${detail.progress.pages} swap pages checked` : ''}…
     {:else if detail?.availability === 'before-tracking'}Pool swap tracking {detail.trackingSince ? `began ${formatLocalDateTime(detail.trackingSince)}` : 'has not started'}. Earlier days are not backfilled.
     {:else if poolAsset && !detail?.through}Waiting for the first captured blocks…
-    {:else}Through {detail?.through ? formatLocalDateTime(detail.through) : `${day} UTC`}{detail?.refreshing ? ' · refreshing' : ''}{/if}
+    {:else if poolAsset}Through {detail?.through ? formatLocalDateTime(detail.through) : `${day} UTC`}{detail?.refreshing ? ' · refreshing' : ''}
+    {:else if detail?.refreshing}Refreshing swap rankings…{/if}
   </p>
   {#if poolAsset && detail?.availability === 'tracked'}
     {#if detail.partialCoverage}<p class="warning">PARTIAL FIRST DAY · Tracking began {formatLocalDateTime(detail.coverageFrom)}. Swaps started earlier are excluded.</p>{/if}
@@ -65,6 +66,7 @@
   {#if dayStatus.settlement}<p class="basis">{dayStatus.settlement}</p>{/if}
   <div class="rankings" class:pool-only={poolAsset}>
     <section aria-labelledby="top-swaps-title"><h4 id="top-swaps-title">TOP 10 SWAPS BY FEES <span>{poolAsset ? 'THIS POOL’S FEES' : 'LIQUIDITY FEES'} · USD</span></h4>
+      {#if !poolAsset && dayStatus.swapThrough}<p class="basis">{dayStatus.swapThrough}</p>{/if}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
       <div class="table-scroll" tabindex="0" role="region" aria-label="Top ten swaps by liquidity fees paid">
         <table><thead><tr><th scope="col">#</th><th scope="col">SWAP</th><th scope="col" class="amount">VALUE</th><th scope="col" class="amount">{poolAsset ? 'POOL FEES' : 'FEES'}</th><th scope="col" class="amount">RATE</th></tr></thead>
@@ -77,11 +79,13 @@
       </div>
     </section>
     {#if !poolAsset}<section aria-labelledby="top-pools-title"><h4 id="top-pools-title">TOP 10 POOLS <span>EXECUTED VOLUME · USD</span></h4>
+      {#if dayStatus.poolThrough || dayStatus.swapThrough}<p class="basis">{dayStatus.poolThrough || dayStatus.swapThrough}</p>{/if}
+      {#if dayStatus.poolWarning}<p class="warning">{dayStatus.poolWarning}</p>{/if}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the table.) -->
       <div class="table-scroll" tabindex="0" role="region" aria-label="Top ten pools by volume">
         <table><thead><tr><th scope="col">#</th><th scope="col">POOL</th><th scope="col" class="amount">VOLUME</th></tr></thead>
           <tbody>{#each detail?.pools || [] as row, index (row.asset)}<tr><td>{String(index + 1).padStart(2, '0')}</td><th scope="row" title={row.asset}>{assetLabel(row.asset)}</th><td class="amount">{usd(row.volumeUsd)}</td></tr>{/each}
-          {#if !detail?.pools?.length}<tr><td colspan="3" class="empty">{loading || detail?.loading ? 'Waiting for complete pool coverage…' : error || detail?.error ? 'Pool ranking unavailable.' : 'No pool volume in this window.'}</td></tr>{/if}</tbody>
+          {#if !detail?.pools?.length}<tr><td colspan="3" class="empty">{dayStatus.poolEmpty || (loading || detail?.loading ? 'Waiting for complete pool coverage…' : error || detail?.error ? 'Pool ranking unavailable.' : 'No pool volume in this window.')}</td></tr>{/if}</tbody>
         </table>
       </div>
     </section>{/if}
@@ -104,6 +108,7 @@
   button:hover, a:hover { color: var(--term-accent); }
   button:focus-visible, a:focus-visible, .table-scroll:focus-visible { outline: 2px solid var(--term-accent); outline-offset: 2px; }
   .progress, .basis, .warning { font: 11px/1.7 var(--term-font-mono); color: var(--term-text-3); margin: 10px 0; }
+  .progress:empty { display: none; }
   .deferred-reason { display: block; color: var(--term-amber); overflow-wrap: anywhere; }
   .warning { color: var(--term-amber); }
   .rankings { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 24px; }

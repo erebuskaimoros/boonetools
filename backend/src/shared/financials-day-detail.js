@@ -361,23 +361,65 @@ export async function readFinancialPoolWindow(db, assets, { from, through }) {
   return totals;
 }
 
-/** Stored rows only cover pools Pool Analysis does not track, plus local windows. */
-async function financialDayPools(db, day, from, payload, complete) {
-  if (payload.timeZone && payload.timeZone !== 'UTC') return topPools(payload.pools || []);
-  const { rows } = complete
-    ? await db.query(`select asset, volume_usd_e2::text, volume_rune_e8::text from pool_analysis_daily where day = $1::date`, [day])
-    // Per tracked pool, so each newest prefix is one primary-key probe.
-    : await db.query(`select tracked.asset, latest.volume_usd_e2::text, latest.volume_rune_e8::text
-      from pool_analysis_sync_state tracked cross join lateral (select volume_usd_e2, volume_rune_e8
-        from pool_analysis_intraday_snapshots where asset = tracked.asset
-          and bucket_end >= $1::timestamptz and bucket_end <= $2::timestamptz
-        order by bucket_end desc limit 1) latest`, [iso(from), payload.through]);
-  const pools = new Map((payload.pools || []).map(row => [row.asset, row]));
-  for (const row of rows) {
-    if (row.asset && row.volume_usd_e2 != null && row.volume_rune_e8 != null) pools.set(row.asset,
-      { asset: row.asset, volumeUsd: Number(row.volume_usd_e2) / 100, volumeRune: Number(row.volume_rune_e8) / 1e8 });
+/** Pool activity is already captured independently of the action scan. Rank
+ * every tracked pool at one exact cutoff; never carry an older pool's total
+ * into a newer window, or restrict the universe to yesterday's top ten. */
+async function financialDayPools(db, bounds, payload, now) {
+  const { from, to } = bounds;
+  const cap = Math.min(to, Math.floor(now / 1000));
+  const firstDay = iso(from).slice(0, 10), lastDay = iso(Math.max(from, cap - 1)).slice(0, 10);
+  const { rows: universe } = await db.query(`select asset from pool_analysis_sync_state
+      where first_day is null or first_day <= $2::date
+    union select asset from pool_analysis_daily where day between $1::date and $2::date`, [firstDay, lastDay]);
+  const assets = [...new Set([...universe.map(row => row.asset), ...(payload?.pools || []).map(row => row.asset)])]
+    .filter(asset => typeof asset === 'string' && asset).sort();
+  let through = to <= cap ? to : null;
+  if (assets.length && !through && cap > from) {
+    // One indexed latest-prefix probe per asset, bounded to the selected day.
+    const { rows: heads } = await db.query(`select tracked.asset, latest.bucket_end
+      from unnest($1::text[]) as tracked(asset) cross join lateral (
+        select bucket_end from pool_analysis_intraday_snapshots where asset = tracked.asset
+          and bucket_end > $2::timestamptz and bucket_end <= $3::timestamptz
+        order by bucket_end desc limit 1) latest`, [assets, iso(from), iso(cap)]);
+    const { rows: sealed } = await db.query(`select max(interval_end) as through from pool_analysis_daily daily
+      where asset = any($1::text[]) and day between $2::date and $3::date
+        and not partial and to_jsonb(daily)->>'completed_at' is not null
+        and source = 'liquify-midgard-swaps' and interval_start = day::timestamp at time zone 'UTC'
+        and interval_end = (day + 1)::timestamp at time zone 'UTC'
+        and interval_end > $4::timestamptz and interval_end <= $5::timestamptz`,
+    [assets, firstDay, lastDay, iso(from), iso(cap)]);
+    const cutoffs = [...heads.map(row => row.bucket_end), sealed[0]?.through]
+      .map(value => value && new Date(value).getTime() / 1000).filter(value => Number.isFinite(value) && value > from && value <= cap);
+    if (cutoffs.length) through = Math.max(...cutoffs);
   }
-  return topPools([...pools.values()]);
+  const savedThrough = Date.parse(payload?.through || '') / 1000;
+  const canRead = assets.length && through > from && through >= (Number.isFinite(savedThrough) ? savedThrough : 0);
+  const rows = canRead ? await readFinancialPoolWindow(db, assets, { from, through }) : [];
+  const found = new Set(rows.map(row => row.asset));
+  // Retired/untracked pools may only exist in the saved ranking. Reuse those
+  // amounts only when both boundaries match exactly, never at an older cutoff.
+  if (rows.length && savedThrough === through && (!payload.windowFrom || Date.parse(payload.windowFrom) / 1000 === from)) {
+    for (const row of payload.pools || []) if (!found.has(row.asset)
+      && Number.isFinite(row.volumeRune) && row.volumeRune >= 0 && Number.isFinite(row.volumeUsd) && row.volumeUsd >= 0) {
+      rows.push(row); found.add(row.asset);
+    }
+  }
+  const missingPools = assets.filter(asset => !found.has(asset));
+  const stale = cutoff => !Number.isFinite(cutoff) || cap - cutoff > 20 * 60;
+  if (rows.length) return { pools: topPools(rows), poolRanking: {
+    from: iso(from), through: iso(through), source: 'pool-analysis-cache',
+    complete: missingPools.length === 0, missingPools, stale: stale(through), fallback: false
+  } };
+  // A previously published action-scan ranking covered all its pools at that
+  // saved cutoff. Keep it whole instead of mixing it with newer partial rows.
+  if (Array.isArray(payload?.pools) && savedThrough > from && savedThrough <= cap) {
+    return { pools: topPools(payload.pools), poolRanking: {
+      from: iso(from), through: iso(savedThrough), source: 'saved-ranking',
+      complete: true, missingPools: [], stale: stale(savedThrough), fallback: true
+    } };
+  }
+  return { pools: [], poolRanking: { from: iso(from), through: null, source: 'unavailable',
+    complete: false, missingPools: assets, stale: true, fallback: false } };
 }
 
 /** A covered day ranks verified stream candidates instead of the saved scan's
@@ -417,11 +459,11 @@ export async function readFinancialDay(day, options = {}) {
     const eligibleAt = Math.max(Date.parse(settlement.nextCheckAt) || 0, new Date(row?.available_at).getTime() || 0);
     if (eligibleAt > now) settlement.nextCheckAt = new Date(eligibleAt).toISOString();
   }
-  const pools = payload && await financialDayPools(db, day, from, payload, complete);
+  const poolRanking = await financialDayPools(db, bounds, payload, now);
   // Scan rows keep the prices used before top-ten truncation. Repricing just
   // the ten saved winners could miss a previously eleventh-ranked transaction.
   // Ledger reads price every candidate before choosing their winners above.
-  return { day, timeZone, windowFrom: iso(from), windowTo: iso(bounds.to), ...(payload || {}), ...(pools && { pools }), loading: !payload,
+  return { day, timeZone, windowFrom: iso(from), windowTo: iso(bounds.to), ...(payload || {}), ...poolRanking, loading: !payload,
     ...(complete ? { finalized: financialDaySnapshotFinalized(day, payload, now), settlement } : {}),
     refreshing: Boolean(payload && !complete && new Date(row.available_at).getTime() <= now),
     retryAt: working && row?.last_error ? new Date(row.available_at).toISOString() : null,

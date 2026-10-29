@@ -80,7 +80,8 @@ test('day endpoint validates before enqueueing and public reads only use the dat
   assert.equal(response.status, 200); assert.equal(queued, day);
   const invalid = await handleFinancials({}, new URL('https://example.test/financials?day=2026-02-30'), { readDay: () => { throw new Error('must not enqueue'); } });
   assert.equal(invalid.status, 400);
-  const result = await readFinancialDay(day, { now: () => now, client: { query: async (_sql, args) => {
+  const result = await readFinancialDay(day, { now: () => now, client: { query: async (sql, args) => {
+    if (!sql.startsWith('insert')) return { rows: [] };
     assert.deepEqual(args, [day, 'UTC', false, new Date(from * 1000).toISOString(), new Date(to * 1000).toISOString()]); return { rows: [{ phase: 'actions', pages: '4' }] };
   } } });
   assert.equal(result.loading, true); assert.equal(result.progress.pages, 4);
@@ -143,11 +144,14 @@ test('a closed day ranks Pool Analysis daily totals over its stored pool snapsho
     if (/financials_day_rankings/.test(sql)) return { rows: [storedDay(to, [
       { asset: 'TRON.TRX', volumeUsd: 6611915.06, volumeRune: 10492844.57621485 },
       { asset: 'BNB.BNB', volumeUsd: 5000, volumeRune: 8000 }])] };
+    if (/pool_analysis_intraday_snapshots/.test(sql)) return { rows: [] };
     if (/pool_analysis_daily/.test(sql)) return { rows: [
       { asset: 'ETH.ETH', volume_usd_e2: '1516321771', volume_rune_e8: '2400000000000000' },
       { asset: 'BTC.BTC', volume_usd_e2: '787593530', volume_rune_e8: '1246000000000000' },
       { asset: 'TRON.TRX', volume_usd_e2: '661191506', volume_rune_e8: '1049284457621485' },
-      { asset: 'GAIA.ATOM', volume_usd_e2: '0', volume_rune_e8: '0' }] };
+      { asset: 'GAIA.ATOM', volume_usd_e2: '0', volume_rune_e8: '0' }].map(row => ({...row, day,
+        interval_start: new Date(from*1000), interval_end: new Date(to*1000), partial:false,
+        source:'liquify-midgard-swaps', completed_at:new Date(now)})) };
     if (/financials_swap_ledger/.test(sql)) return { rows: [] }; // Not a stream-covered day.
     throw new Error(`Unexpected query: ${sql}`);
   } };
@@ -157,19 +161,25 @@ test('a closed day ranks Pool Analysis daily totals over its stored pool snapsho
     ['TRON.TRX', 6611915.06, 10492844.57621485], ['BNB.BNB', 5000, 8000]]);
 });
 
-test('a partial day ranks each pool\'s latest Pool Analysis prefix at or before its snapshot horizon', async () => {
-  const through = from + 14 * 3600;
+test('a partial UTC day uses an independent exact pool cutoff while preserving the swap cutoff', async () => {
+  const through = from + 14 * 3600, oldThrough = through - 3600;
   const client = { query: async (sql, args) => {
-    if (/financials_day_rankings/.test(sql)) return { rows: [storedDay(through, [])] };
+    if (/financials_day_rankings/.test(sql)) return { rows: [storedDay(oldThrough, [])] };
+    if (/pool_analysis_sync_state/.test(sql)) return { rows: [{asset:'BTC.BTC'}] };
     if (/pool_analysis_intraday_snapshots/.test(sql)) {
-      assert.ok(args.some(value => new Date(value).getTime() === through * 1000), 'bounded by the stored snapshot horizon');
-      return { rows: [{ asset: 'BTC.BTC', volume_usd_e2: '400000000', volume_rune_e8: '630000000000000' }] };
+      if (/cross join lateral/.test(sql)) {
+        assert.equal(args[2],new Date((through+600)*1000).toISOString(),'pool reads are bounded by current time');
+        return {rows:[{asset:'BTC.BTC',bucket_end:new Date(through*1000)}]};
+      }
+      return { rows: [{ asset: 'BTC.BTC', bucket_end:new Date(through*1000), volume_usd_e2: '400000000', volume_rune_e8: '630000000000000' }] };
     }
-    if (/financials_swap_ledger/.test(sql)) return { rows: [] }; // Not a stream-covered day.
+    if (/pool_analysis_daily|financials_swap_ledger/.test(sql)) return { rows: [] };
     throw new Error(`Unexpected query: ${sql}`);
   } };
   const result = await readFinancialDay(day, { now: () => (through + 600) * 1000, client });
   assert.deepEqual(result.pools.map(row => [row.asset, row.volumeUsd, row.volumeRune]), [['BTC.BTC', 4000000, 6300000]]);
+  assert.equal(result.poolRanking.through,new Date(through*1000).toISOString());
+  assert.equal(result.through,new Date(oldThrough*1000).toISOString());
 });
 
 test('the collector requests Midgard pool history only for pools Pool Analysis does not track', async () => {

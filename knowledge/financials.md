@@ -201,6 +201,26 @@ an omitted candidate that should now rank. Pool reuse combines exact prefixes an
 sealed UTC totals across the local window; missing boundaries use bounded source
 acquisition without modifying completed Pool Analysis history.
 
+### Independent pool rankings (October 29, 2026)
+
+The local-day pool table originally returned the saved swap-acquisition payload
+unchanged. When that scan exhausted its bulk allowance, the pool ranking froze
+with it—even though Pool Analysis continued saving all 44 pools. At 21:30 UTC,
+October 29 ETH volume for the New York local day was $3,065,269.82 from exact
+04:00/21:30 prefixes, while Financials showed $331,320.62 through 07:45 UTC.
+The acquisition-pause banner also hid the old cutoff.
+
+Pool rankings now have independent `poolRanking` coverage metadata and refresh
+from stored Pool Analysis totals on read, without provider calls. The full
+tracked pool universe is ranked before truncating to ten. Every displayed fresh
+row uses the same cutoff and exact local-day start; UTC-midnight crossings use
+sealed daily slices plus exact endpoint prefixes. Missing/negative boundaries
+are unavailable rather than interpolated or silently mixed with older rows.
+If only a saved ranking can be served, its original cutoff and fallback are
+explicit. Swap acquisition state, its cutoff, and request budgets are preserved.
+The UI names each table's cutoff so a swap-scan pause cannot imply that current
+pool totals are paused too.
+
 ### Saved-candidate verification starvation (October 29, 2026)
 
 At 18:26 UTC, the ZEC ledger contained 4,824 completed candidates with zero

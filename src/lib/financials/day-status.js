@@ -1,13 +1,13 @@
 import { formatLocalDateTime } from '../utils/datetime.js';
 
-function localTimestamp(value) {
+function localTimestamp(value, timeZone) {
   const timestamp = Date.parse(value || '');
-  return Number.isFinite(timestamp) ? formatLocalDateTime(timestamp) : '';
+  return Number.isFinite(timestamp) ? formatLocalDateTime(timestamp, { timeZone }) : '';
 }
 
 /** Keep acquisition coverage, saved exclusions, and pending-ID settlement passes
  * distinct. A pass timestamp does not describe every incremental saved count. */
-export function financialDayStatus(detail) {
+export function financialDayStatus(detail, { timeZone = undefined } = {}) {
   const pending = detail?.pendingSwaps || 0;
   const unpriced = detail?.unpricedSwaps || 0;
   const settlement = detail?.settlement;
@@ -29,7 +29,7 @@ export function financialDayStatus(detail) {
   }
 
   const notes = [];
-  const checkedAt = localTimestamp(settlement?.checkedAt);
+  const checkedAt = localTimestamp(settlement?.checkedAt, timeZone);
   const deferred = settlement?.status === 'pending' && settlement?.deferred === true;
   if (settlement?.status === 'pending') {
     if (deferred) {
@@ -48,16 +48,35 @@ export function financialDayStatus(detail) {
     notes.push('Automatic pending-ID checks unavailable.');
   }
   if (notes.length && checkedAt) notes.push(`${ledger ? 'Latest candidate check' : 'Last complete pending-ID check'}: ${checkedAt}.`);
-  const nextCheckAt = localTimestamp(settlement?.nextCheckAt);
+  const nextCheckAt = localTimestamp(settlement?.nextCheckAt, timeZone);
   if (settlement?.status === 'pending' && nextCheckAt) {
     notes.push(deferred ? `Earliest retry: ${nextCheckAt}.`
       : `Next ${ledger ? 'candidate' : 'pending-ID'} check scheduled for ${nextCheckAt}.`);
   }
 
+  const swapThrough = localTimestamp(detail?.through, timeZone);
+  const ranking = detail?.poolRanking;
+  const poolThrough = localTimestamp(ranking?.through, timeZone);
+  const poolWarnings = [];
+  if (ranking?.fallback) poolWarnings.push('Showing a saved ranking; newer pool totals are unavailable.');
+  if (ranking?.stale) poolWarnings.push('Pool data is delayed.');
+  if (ranking && ranking.complete !== true) {
+    const missing = Array.isArray(ranking.missingPools) ? ranking.missingPools.length : 0;
+    poolWarnings.push(missing
+      ? `Incomplete coverage · ${missing} ${missing === 1 ? 'pool is' : 'pools are'} unavailable. The ranking may omit larger pools.`
+      : 'Pool coverage is incomplete. The ranking may omit larger pools.');
+  }
+
   return {
+    ...(swapThrough ? { swapThrough: `Through ${swapThrough}` } : {}),
+    ...(ranking ? {
+      poolThrough: poolThrough ? `Through ${poolThrough}` : 'Pool coverage unavailable',
+      poolWarning: poolWarnings.join(' '),
+      poolEmpty: ranking.complete === true && poolThrough ? 'No pool volume in this window.' : 'Pool ranking unavailable for this window.'
+    } : {}),
     warning: warnings.join(' '),
     settlement: notes.join(' '),
     pauseLabel: settlement?.status === 'pending' || detail?.progress?.phase === 'settlement'
-      ? 'Settlement checks paused' : 'Acquisition paused'
+      ? 'Settlement checks paused' : ranking ? 'Swap acquisition paused' : 'Acquisition paused'
   };
 }
