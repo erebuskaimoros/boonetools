@@ -13,6 +13,11 @@ const seriesFills = {
   bondingApr: FINANCIALS_SERIES[2].color
 };
 
+// Auto-scaled price windows can have tick spacing smaller than one cent.
+const priceAxisFormat = new Intl.NumberFormat('en-US', {
+  style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 8
+});
+
 function financialTooltip(row, currency, hidden = [], { header = '', grain = 'day', lineMetric = 'runePriceUsd' } = {}) {
   if (!row) return '';
   const suffix = currency === 'rune' ? 'Rune' : 'Usd';
@@ -97,7 +102,7 @@ export function buildFinancialEChartsOption(rows, { currency = 'usd', hidden = [
     axes: metricSeries.map((series, index) => ({
       ...series, position: index === 0 ? 'left' : 'right',
       label: `${index === 0 ? 'VOLUME' : index === 1 ? 'INCOME' : line.label} · ${index === 2 ? isApr ? '%' : 'USD' : unit}`,
-      format: index === 2 ? isApr ? formatFinancialPercent : value => formatFinancialAmount(value, 'usd', false) : (value) => formatFinancialAmount(value, currency)
+      format: index === 2 ? isApr ? formatFinancialPercent : priceAxisFormat.format : (value) => formatFinancialAmount(value, currency)
     })),
     series: [
       ...FINANCIALS_SERIES.slice(0, 2).map((series, index) => ({
@@ -126,7 +131,7 @@ export function buildFinancialHourlyOption(rows, { currency = 'usd', hidden = []
     ...viewport, sourceGrain: 'hour', hidden, zoomId: 'financials-hour-window', minSpan: 2,
     axes: metrics.map((series, index) => ({ ...series, position: index ? 'right' : 'left',
       label: `${index === 0 ? 'VOLUME' : index === 1 ? 'INCOME' : 'RUNE PRICE'} · ${index === 2 ? 'USD' : currency.toUpperCase()}`,
-      format: value => formatFinancialAmount(value, index === 2 ? 'usd' : currency)
+      format: index === 2 ? priceAxisFormat.format : value => formatFinancialAmount(value, currency)
     })),
     series: metrics.map((series, index) => ({ ...series, axis: series.id,
       ...(index < 2 ? { fill: seriesFills[series.id], barMaxWidth: 20, order: 2 - index } : {}),
