@@ -403,6 +403,8 @@ flush cards above the plot, responsive to container width. Rapid Swaps, POL
 TVL, Bond History and the main Financials plot are explicit exceptions: they omit per-chart summaries and retain
 their dashboards' top-level stats. Financials defaults its amber line to closing
 RUNE/USD price, with a sliding RUNE Price / Bonding APR switch in the legend row.
+The price axis fits the visible price series with padded bounds on every range,
+calendar grain and zoom window, including hourly views. Flow bars retain zero baselines.
 Daily clicks expand top-swap and pool-volume tables below the chart; a UTC date
 picker provides keyboard access and day selection from weekly/monthly views.
 Drag-to-zoom never selects a day, and changing the line preserves the viewport.
