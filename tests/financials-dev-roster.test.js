@@ -209,7 +209,7 @@ test('day detail explains maintained rosters without promising instant cold hist
   assert.match(source, /Older, untracked days may need a one-time build/);
   assert.doesNotMatch(source, /Today adds newly indexed activity while this panel is open|leaving pauses unfinished scans/);
   assert.doesNotMatch(source, /Late settlements are not automatically rescanned/);
-  assert.match(source, /financialDayStatus\(detail\)/);
+  assert.match(source, /financialDayStatus\(detail,\s*\{\s*timeZone\s*\}\)/);
   assert.match(source, /\{dayStatus.warning\}/);
   assert.match(source, /\{dayStatus.settlement\}/);
   const { warning, settlement } = financialDayStatus({ pendingSwaps: 1, settlement: { status: 'pending' } });
