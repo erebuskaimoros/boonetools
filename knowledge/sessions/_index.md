@@ -2,6 +2,8 @@
 
 ## Current Work In Progress
 
+- Financials day detail: confirm the first stream-ledger day (2026-10-30 UTC) ranks verified swaps without an `/actions` scan; the one-time fee fill for stored rows finishes on its own; Oct 27 swaps remain the stalled scan's list
+- Server RPC: `RUJIRA_BASE_FEES_RPC_URLS` and `RUJIRA_RESERVE_PAYMENTS_RPC_URLS` still list the invalid keyed Liquify URL first
 - Time-series renderer migration: shared controls are deployed; nine Chart.js integrations and native event views remain supported pending later migration
 
 - App Layer fee-share settlement: monitor POL scheduler/backfill freshness, pricing, and separated Reserve/POL totals
@@ -18,8 +20,8 @@
 
 | Date | Focus | Summary | Link |
 |------|-------|---------|------|
+| 2026-10-29 #1 | Financials recovery, RPC config and day-detail rankings | 3.21.0 Reserve emissions restored; RPC moved off a 403 key; day-detail pools from Pool Analysis, swaps from a verified block ledger, plus fees and rate; deployed `c19a5bb` | [Session](2026-10-29/session-1.md) |
 | 2026-10-21 #6 | Thorfolio operator fees | Actual operator payouts per churn, conditional table/export column, migration and resumable enrichment; tested and authorized for production rollout | [Session](2026-10-21/session-6.md) |
 | 2026-10-21 #5 | Thorfolio release preparation | Legacy URL forwarding, card navigation, footer refinements, unavailable TCY balances, and hidden swap launcher; 99 focused tests pass | [Session](2026-10-21/session-5.md) |
 | 2026-10-21 #4 | Thorfolio design, route, footer swap and coffee panels | Design pass, multi-address bond history, `/thorfolio`, STO swap panel and RUNE tip panel on `feat/thorfolio`; 713 tests and checks pass, wallet signing untested | [Session](2026-10-21/session-4.md) |
 | 2026-10-21 #3 | Thorfolio TCY APR and payouts | Corrected upstream APR inflation, added lifetime payout totals and fitted cumulative axes; 75 tests pass and two papercuts resolved | [Session](2026-10-21/session-3.md) |
-| 2026-10-21 #2 | Thorfolio wrap-up | Resolved session-record staging friction, verified Svelte checks, and recorded the bounded papercut review; 79 entries remain open | [Session](2026-10-21/session-2.md) |
