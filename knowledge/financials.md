@@ -191,6 +191,12 @@ acquisition; days before `financials_swap_ledger.started_at` keep the scan. On
 made no requests from about 12:00 to 24:00 UTC and missed 6 of the true top ten,
 although every block had already reached the listener.
 
+Since migration 074, each ranked swap row carries Midgard's `liquidityFee` as
+`feeRune`; reads add `feeUsd`, at RUNE's USD price for the swap's 15-minute Pool
+Analysis bucket (else that day's BTC.BTC close), and `feeRate` (fees ÷ input
+value). Rows stored earlier get a one-time `/actions?txid=` fill into
+`financials_swap_fees` on the 30-second verifier loop, without editing payloads.
+
 ### Request efficiency and bounded acquisition (October 18, 2026)
 
 A completed UTC-day snapshot is retained without automatic rescanning, even when

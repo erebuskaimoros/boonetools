@@ -12,7 +12,7 @@ import { readFinancialRewardAccountingDays, repairFinancialRewardBlocks } from '
 import { repairFinancialReserveEmissions } from '../shared/financials-reserve-service.js';
 import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-pool.js';
 import { refreshFinancialDayQueue } from '../shared/financials-day-detail.js';
-import { verifyFinancialSwapCandidates } from '../shared/financials-swap-candidates.js';
+import { fillFinancialSwapFees, verifyFinancialSwapCandidates } from '../shared/financials-swap-candidates.js';
 import { acquisitionMetrics } from '../lib/acquisition-metrics.js';
 import { createFinancialsHourlyService } from '../shared/financials-hourly.js';
 import { FINANCIALS_HOURLY_MODEL_KEY } from '../../../shared/financials/hourly.js';
@@ -92,6 +92,8 @@ export async function runFinancialsCollector(options = {}) {
     const log = options.log || ((message) => console.error(JSON.stringify({ type: 'financials', message })));
     const dayRequest = route => createFinancialsProviderRequest(client)(route,
       { lane: 'day-details', midgardBudgetClass: 'bulk', signal });
+    const verifySwaps = options.verifySwapCandidates || (!options.service && verifyFinancialSwapCandidates);
+    const fillSwapFees = options.fillSwapFees || (!options.service && fillFinancialSwapFees);
     let stopping;
     const stop = () => {
       controller.abort();
@@ -116,10 +118,13 @@ export async function runFinancialsCollector(options = {}) {
         ...(options.service && !options.refreshDayDetails ? [] : [loop(5000, () =>
           (options.refreshDayDetails || refreshFinancialDayQueue)(client, { signal,
             getJson: dayRequest }))]),
-        // Stream-ledger day rankings: one txid lookup per top candidate, under
-        // the same day-detail lane and bulk budget as the day queue.
-        ...(options.service && !options.verifySwapCandidates ? [] : [loop(30_000, () =>
-          (options.verifySwapCandidates || verifyFinancialSwapCandidates)(client, { signal, getJson: dayRequest }))]),
+        // Stream-ledger day rankings: one txid lookup per top candidate, then
+        // one per stored row lacking a fee, under the same day-detail lane and
+        // bulk budget as the day queue.
+        ...(!verifySwaps && !fillSwapFees ? [] : [loop(30_000, async () => {
+          if (verifySwaps) await verifySwaps(client, { signal, getJson: dayRequest });
+          if (fillSwapFees) await fillSwapFees(client, { signal, getJson: dayRequest });
+        })]),
         loop(60_000, () => {
           const acquisition = acquisitionMetrics({ reset: true });
           if (acquisition) log({ type: 'acquisition_metrics', window_seconds: 60, acquisition });

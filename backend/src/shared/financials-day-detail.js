@@ -339,6 +339,31 @@ async function ledgerPayload(db, day, payload, now) {
   return { ...merged, finalized: financialDaySnapshotFinalized(day, merged, now) };
 }
 
+const finite = value => typeof value === 'number' && Number.isFinite(value) ? value : null;
+
+/** Response-only fee fields. Rows stored before feeRune use the one-time fill;
+ * each fee is valued at RUNE's price for the swap's 15-minute Pool Analysis
+ * bucket, else that day's close. Stored data is unchanged. */
+async function pricedSwapFees(db, from, swaps) {
+  const missing = [...new Set(swaps.filter(row => row.feeRune === undefined).map(row => row.txId))];
+  const filled = new Map(missing.length ? (await db.query(`select tx_id, fee_rune_e8::text from financials_swap_fees
+    where tx_id = any($1::text[])`, [missing])).rows.map(row => [row.tx_id, row.fee_rune_e8 == null ? null : Number(row.fee_rune_e8) / 1e8]) : []);
+  // Primary-key ranges over both majors; BTC.BTC wins a shared boundary.
+  const { rows } = await db.query(`select distinct on (bucket_end) bucket_end, rune_price_usd::text from pool_analysis_intraday_snapshots
+    where asset = any(array['BTC.BTC','ETH.ETH']) and rune_price_usd > 0 and bucket_end > $1::timestamptz and bucket_end <= $2::timestamptz
+    order by bucket_end, asset`, [iso(from), iso(from + DAY)]);
+  const prices = rows.map(row => [new Date(row.bucket_end).getTime(), Number(row.rune_price_usd)]);
+  const close = prices.length ? null : Number((await db.query(`select rune_price_usd::text from pool_analysis_daily
+    where asset = 'BTC.BTC' and day = $1::date and rune_price_usd > 0`, [iso(from).slice(0, 10)])).rows[0]?.rune_price_usd);
+  return swaps.map(row => {
+    const at = Date.parse(row.timestamp);
+    const price = finite(prices.length ? (prices.find(([end]) => end >= at) || prices.findLast(([end]) => end <= at))?.[1] : close);
+    const feeRune = finite(row.feeRune === undefined ? filled.get(row.txId) : row.feeRune);
+    const feeUsd = feeRune === null || price === null ? null : finite(feeRune * price);
+    return { ...row, feeRune, feeUsd, feeRate: feeUsd === null ? null : finite(feeUsd / row.volumeUsd) };
+  });
+}
+
 export async function readFinancialDay(day, options = {}) {
   const now = options.now?.() ?? Date.now();
   const { from } = financialDetailDay(day, now);
@@ -357,7 +382,8 @@ export async function readFinancialDay(day, options = {}) {
     if (eligibleAt > now) settlement.nextCheckAt = new Date(eligibleAt).toISOString();
   }
   const pools = payload && await financialDayPools(db, day, from, payload, complete);
-  return { day, ...(payload || {}), ...(pools && { pools }), loading: !payload,
+  const swaps = payload?.swaps?.length ? await pricedSwapFees(db, from, payload.swaps) : null;
+  return { day, ...(payload || {}), ...(pools && { pools }), ...(swaps && { swaps }), loading: !payload,
     ...(complete ? { finalized: financialDaySnapshotFinalized(day, payload, now), settlement } : {}),
     refreshing: Boolean(payload && !complete && new Date(row.available_at).getTime() <= now),
     retryAt: working && row?.last_error ? new Date(row.available_at).toISOString() : null,
