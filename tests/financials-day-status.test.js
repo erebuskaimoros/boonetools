@@ -3,6 +3,46 @@ import test from 'node:test';
 import { formatLocalDateTime } from '../src/lib/utils/datetime.js';
 import { financialDayStatus } from '../src/lib/financials/day-status.js';
 
+test('saved swap verification explains a budget pause rather than promising an immediate scheduled check', () => {
+  const retryAt = '2026-10-30T00:00:00.000Z';
+  const status = financialDayStatus({ swapSource: 'finalized-block-ledger', swapRankingBasis: 'pool-liquidity-fees-usd',
+    pendingSwaps: 25, settlement: { status: 'pending', checkedAt: null, nextCheckAt: retryAt,
+      deferred: true, deferredReason: 'request-budget' } });
+  assert.match(status.warning, /25 swaps awaiting completion or verification/);
+  assert.match(status.settlement, /verification.*paused|checks.*paused/i);
+  assert.match(status.settlement, /shared request budget/i);
+  assert.ok(status.settlement.includes(`Earliest retry: ${formatLocalDateTime(retryAt)}`));
+  assert.doesNotMatch(status.settlement, /Next candidate check scheduled/);
+});
+
+test('provider cooldown preserves the last candidate check without promising a scheduled retry', () => {
+  const checkedAt = '2026-10-29T16:00:00Z';
+  const retryAt = '2026-10-29T16:05:00Z';
+  const status = financialDayStatus({ swapSource: 'finalized-block-ledger', pendingSwaps: 3,
+    settlement: { status: 'pending', checkedAt, nextCheckAt: retryAt, deferred: true,
+      deferredReason: 'provider-cooldown' } });
+  assert.match(status.settlement, /Verification checks paused while the data provider is cooling down/);
+  assert.ok(status.settlement.includes(`Latest candidate check: ${formatLocalDateTime(checkedAt)}`));
+  assert.ok(status.settlement.includes(`Earliest retry: ${formatLocalDateTime(retryAt)}`));
+  assert.doesNotMatch(status.settlement, /scheduled|No completed candidate checks|request budget/);
+});
+
+test('unknown deferral reason or invalid retry time does not invent a cause or retry promise', () => {
+  const status = financialDayStatus({ pendingSwaps: 1,
+    settlement: { status: 'pending', nextCheckAt: 'invalid', deferred: true, deferredReason: 'unknown' } });
+  assert.match(status.settlement, /Verification checks are paused/);
+  assert.doesNotMatch(status.settlement, /request budget|cooling down|Earliest retry|scheduled|Invalid Date/);
+});
+
+test('completed checks ignore leftover deferral metadata', () => {
+  const status = financialDayStatus({ swapSource: 'finalized-block-ledger',
+    settlement: { status: 'complete', checkedAt: '2026-10-29T16:00:00Z',
+      nextCheckAt: '2026-10-30T00:00:00Z', deferred: true, deferredReason: 'request-budget' } });
+  assert.match(status.settlement, /Saved swap candidate checks complete/);
+  assert.match(status.settlement, /Latest candidate check/);
+  assert.doesNotMatch(status.settlement, /paused|Earliest retry|scheduled|request budget/);
+});
+
 test('pending status distinguishes saved exclusions from live state and targeted checks from a day scan', () => {
   const status = financialDayStatus({ pendingSwaps: 231, unpricedSwaps: 2,
     settlement: { status: 'pending', checkedAt: '2026-10-24T01:15:00Z', nextCheckAt: '2026-10-24T02:15:00Z', remaining: 231 } });

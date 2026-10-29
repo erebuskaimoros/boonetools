@@ -1,5 +1,6 @@
 import { financialCalendarWindow } from '../../../shared/financials/day-window.js';
 import { priceFinancialSwapRows } from './financials-swap-pricing.js';
+import { readFinancialSwapVerificationPause, financialSwapVerificationSchedule } from './financials-swap-verification-pause.js';
 
 /** Reuse the Financials verifier's request limit, cooldowns and saved IDs. Each
  * pool gets its own candidate selection before the bounded batch is chosen. */
@@ -87,6 +88,7 @@ export async function readFinancialPoolSwapDay(client, asset, day, { timeZone = 
   const checks = rows.filter(row => row.checks > 0).map(row => new Date(row.updated_at).getTime());
   const due = rows.filter(row => pending.has(row.tx_id) && row.complete)
     .map(row => new Date(row.next_check_at || new Date(row.completed_at).getTime() + 120_000).getTime()).filter(Number.isFinite);
+  const pause = due.length ? await readFinancialSwapVerificationPause(client, now) : null;
   return { ...payload, availability: 'tracked', coverageFrom, partialCoverage: captureFrom > bounds.from * 1000,
     coverageComplete: complete, missingBlocks, unattributedBlocks: coverage.unattributed,
     stale: !coverage.end_bounded && stale, through: iso(coverage.through),
@@ -97,6 +99,6 @@ export async function readFinancialPoolSwapDay(client, asset, day, { timeZone = 
     refreshing: !complete,
     settlement: { status: pending.size ? 'pending' : 'complete',
       checkedAt: checks.length ? iso(Math.max(...checks)) : null,
-      nextCheckAt: due.length ? iso(Math.max(now, Math.min(...due))) : null }
+      ...financialSwapVerificationSchedule(due, pause, now) }
   };
 }

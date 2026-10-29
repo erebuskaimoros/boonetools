@@ -196,6 +196,34 @@ test('managed day maintenance starts independently and joins the collector shutd
   assert.equal(dayOptions.signal.aborted, true);
 });
 
+test('collector separates bounded saved-transaction verification from bulk day acquisition', async () => {
+  const controller = new AbortController();
+  const requests = [];
+  let dayOptions, verificationOptions;
+  const service = { refreshHistory: async () => {}, refreshLive: async () => {},
+    getSnapshot: async range => ({ ...payload, range }), stop: async () => {} };
+  await runFinancialsCollector({ service, signal: controller.signal, lockRunner: async (_key, work) => work({}),
+    providerTransport: async options => { requests.push(options); return { actions: [] }; },
+    refreshDayDetails: async (_client, options) => {
+      dayOptions = options;
+      await options.getJson('/actions?limit=50&offset=100');
+    },
+    verifySwapCandidates: async (_client, options) => {
+      verificationOptions = options;
+      await options.getJson(`/actions?txid=${'A'.repeat(64)}&limit=50`);
+    },
+    publish: async () => controller.abort()
+  });
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests.map(request => request.midgardBudgetClass), ['bulk', 'verification']);
+  assert.deepEqual(requests.map(request => request.providerScope), ['financials-day-details', 'financials-swap-verification']);
+  assert.equal(verificationOptions.maxRequests, 5, 'each 30-second verification pass remains bounded');
+  assert.equal(verificationOptions.poolScopes, true);
+  assert.equal(verificationOptions.signal, dayOptions.signal);
+  assert.ok(requests.every(request => request.request.signal === dayOptions.signal));
+  assert.equal(dayOptions.signal.aborted, true);
+});
+
 test('Reward archive repair and Reserve reconstruction run independently of live publication', async () => {
   const abort = new AbortController();
   const calls = [];

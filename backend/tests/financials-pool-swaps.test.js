@@ -3,7 +3,7 @@ import test from 'node:test';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
-import { parseFinancialPoolSwapFees, verifyFinancialSwapCandidates } from '../src/shared/financials-swap-candidates.js';
+import { parseFinancialPoolSwapFees, verifyFinancialSwapCandidates, readFinancialSwapLedgerDay } from '../src/shared/financials-swap-candidates.js';
 import { parseFinancialRevshareBlock, saveFinancialRewardBlocks } from '../src/shared/financials-reward-source.js';
 import { readFinancialPoolSwapDay } from '../src/shared/financials-pool-swaps.js';
 import { handlePoolAnalysisSwaps } from '../src/handlers/pool-analysis.js';
@@ -47,7 +47,7 @@ async function database(run) {
     for (const migration of ['043_chain_block_headers.sql','051_pool_analysis.sql','054_system_income_pol.sql',
       '066_pool_analysis_intraday_snapshots.sql','067_financials_reward_accounting.sql','068_financials_day_details.sql',
       '072_financials_background_rosters.sql','073_financials_swap_candidates.sql','075_financials_local_fee_rankings.sql',
-      '076_financials_fee_candidates.sql','077_financials_pool_swap_fees.sql']) {
+      '076_financials_fee_candidates.sql','077_financials_pool_swap_fees.sql', '078_financials_verification_pause.sql']) {
       const sql = await readFile(new URL(`../migrations/${migration}`,import.meta.url),'utf8');
       await client.query(sql.replace(/^\s*(begin|commit);\s*$/gim,'').replaceAll('public.',''));
     }
@@ -158,3 +158,62 @@ test('pool endpoint validates dates/timezones/assets before reading and forwards
   assert.equal(response.status,200);assert.equal(response.headers['Cache-Control'],'no-store');
   assert.deepEqual(calls,[['ZEC.ZEC','2026-10-29',{now,timeZone:'America/New_York'}]]);
 });
+
+test('a verification budget pause survives reads with its real retry time and no fictitious completed check',postgres,async()=>database(async client=>{
+  const retryAt = '2026-10-30T00:00:00.000Z';
+  await save(client,[block(10,'2026-10-29T08:01:00Z',[event('budget-paused','ZEC.ZEC',100000000)])]);
+  await verifyFinancialSwapCandidates(client,{poolScopes:true,now:()=>now,getJson:async()=>{
+    throw Object.assign(new Error('Midgard request budget exhausted'),{
+      code:'MIDGARD_BUDGET_DEFERRED',skipProvider:true,retryAt,budgetReason:'total-day'
+    });
+  }});
+  const candidate=(await client.query("select checks,next_check_at from financials_swap_candidates where tx_id='BUDGET-PAUSED'")).rows[0];
+  assert.equal(candidate.checks,0);
+  assert.equal(candidate.next_check_at?.toISOString(),retryAt);
+  const detail=await readFinancialPoolSwapDay(client,'ZEC.ZEC','2026-10-29',{now:now+60000});
+  assert.equal(detail.settlement.checkedAt,null);
+  assert.equal(detail.settlement.status,'pending');
+  assert.equal(detail.settlement.deferred,true);
+  assert.equal(detail.settlement.deferredReason,'request-budget');
+  assert.equal(detail.settlement.nextCheckAt,retryAt);
+}));
+
+test('the shared verification pause covers new pool arrivals and clears after an admitted check',postgres,async()=>database(async client=>{
+  const retryAt = '2026-10-30T00:00:00.000Z';
+  await save(client,[block(10,'2026-10-29T08:01:00Z',[event('existing','ZEC.ZEC',100000000)])]);
+  let calls = 0;
+  await verifyFinancialSwapCandidates(client,{poolScopes:true,now:()=>now,getJson:async()=>{
+    calls++;
+    throw Object.assign(new Error('private provider URL must not be stored'),{
+      name:'ProviderCooldownError',skipProvider:true,blockedUntil:retryAt
+    });
+  }});
+  await save(client,[block(11,'2026-10-29T08:11:00Z',[event('new-arrival','BTC.BTC',200000000)])]);
+  const later = now + 600000;
+  assert.equal(await verifyFinancialSwapCandidates(client,{poolScopes:true,now:()=>later,getJson:async()=>{
+    calls++;throw new Error('must not request during cooldown');
+  }}),0);
+  assert.equal(calls,1);
+  const detail = await readFinancialPoolSwapDay(client,'BTC.BTC','2026-10-29',{now:later});
+  assert.equal(detail.settlement.deferred,true);
+  assert.equal(detail.settlement.deferredReason,'provider-cooldown');
+  assert.equal(detail.settlement.nextCheckAt,retryAt);
+  assert.equal(detail.settlement.checkedAt,null);
+  const global = await readFinancialSwapLedgerDay(client,'2026-10-29',later);
+  assert.equal(global.deferredReason,'provider-cooldown');
+  assert.equal(global.nextCheckAt,retryAt);
+  assert.equal(global.checkedAt,null);
+  const saved = (await client.query('select tx_id,checks,last_error from financials_swap_candidates order by tx_id')).rows;
+  assert.deepEqual(saved,[{tx_id:'EXISTING',checks:0,last_error:''},{tx_id:'NEW-ARRIVAL',checks:0,last_error:''}]);
+  assert.equal((await client.query("select count(*)::int as n from financials_swap_verification_windows where tx_id='NEW-ARRIVAL'")).rows[0].n > 0,true);
+  const resumed = Date.parse(retryAt) + 1000;
+  assert.equal(await verifyFinancialSwapCandidates(client,{poolScopes:true,now:()=>resumed,getJson:async route=>{
+    calls++;return {actions:[action(new URL(route,'https://test.invalid').searchParams.get('txid'))]};
+  }}),2);
+  const finished = await readFinancialPoolSwapDay(client,'BTC.BTC','2026-10-29',{now:resumed});
+  assert.equal(finished.settlement.status,'complete');
+  assert.equal(finished.settlement.deferred,undefined);
+  assert.equal(finished.settlement.nextCheckAt,null);
+  assert.equal(finished.settlement.checkedAt,new Date(resumed).toISOString());
+  assert.equal((await client.query('select verification_deferred_until from financials_swap_ledger')).rows[0].verification_deferred_until,null);
+}));

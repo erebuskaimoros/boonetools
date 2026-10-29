@@ -502,7 +502,8 @@ completion record per stream. Coverage begins at the next UTC midnight; the
 deploy day and earlier days keep the Midgard actions scan and their saved
 rankings. No backfill, cache reset or budget change is required;
 `FINANCIALS_SWAP_CANDIDATE_MIN_RUNE` defaults to 5000. Afterwards, check the
-verifier's Midgard request volume in `midgard_request_budgets` (bulk counters)
+verifier's Midgard request volume in `midgard_request_budgets` (total counters;
+saved-ID verification uses normal admission as of October 29)
 and the Financials minute acquisition log: about 25 txid lookups per covered day
 plus pending rechecks, at most five per 30-second pass, and none for unfinished
 streams. Confirm `financials_swap_candidates` fills from the listener with
@@ -554,6 +555,24 @@ from whole-route fees, pending leaders verify under the existing five-lookup
 batch, and missing block/attribution coverage remains visible. Reload Pool
 Analysis, open a pool, click a daily bar, and check the pool-specific fee table
 and local timezone. Completed days retain saved facts and pending-ID checks.
+
+#### Saved swap verification admission (October 29, 2026)
+
+Deploy backend before frontend. Migration 078 adds the verifier-wide pause
+fields to `financials_swap_ledger`, preserving existing candidates, rankings and
+request counters. This uses the coordinated activation path. The existing Financials
+collector checks at most five saved transaction IDs per 30-second pass, using
+normal admission only for a single 64-hex `txid`, a `limit` of 1–50, and no scan
+parameters. All shared total limits, provider cooldowns and pacing still apply;
+historical actions scans continue to consume the bulk subset.
+
+Let the ordinary verifier resume saved work. Confirm a known completed ZEC
+candidate advances from observed to verified and appears in
+`pool-analysis-swaps`, while unfinished streams remain pending. Public reads
+must not issue upstream requests. A budget/provider pause must expose its true
+retry horizon without incrementing `checks` or advancing `checkedAt`; the UI
+must describe an earliest retry rather than a scheduled near-current check.
+Do not reset budgets, mark candidates verified manually, or rescan any day.
 
 ### Crosschain comparison stuck at a shared date
 

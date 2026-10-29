@@ -78,20 +78,23 @@ export async function runFinancialsCollector(options = {}) {
   return (options.lockRunner || withAdvisoryLock)('boonetools:financials', async (client) => {
     const controller = new AbortController();
     const signal = controller.signal;
+    const providerRequest = createFinancialsProviderRequest(client, { transport: options.providerTransport });
     const service = options.service || createFinancialsService({
       cacheDir: options.cacheDir || process.env.FINANCIALS_CACHE_DIR || '/var/lib/boonetools-financials',
-      requestJson: createFinancialsProviderRequest(client),
+      requestJson: providerRequest,
       rpcConcurrency: config.thorchainProviderBalancingEnabled && hasThorchainProviderPair(config.rpcRestUrls) ? 6 : 3,
       readRewardAccounting: window => readFinancialRewardAccountingDays(client, window)
     });
     const published = new Map();
     const hourly = options.hourlyService || (!options.service ? createFinancialsHourlyService({
       cacheDir: options.cacheDir || process.env.FINANCIALS_CACHE_DIR || '/var/lib/boonetools-financials',
-      requestJson: createFinancialsProviderRequest(client)
+      requestJson: providerRequest
     }) : null);
     const log = options.log || ((message) => console.error(JSON.stringify({ type: 'financials', message })));
-    const dayRequest = route => createFinancialsProviderRequest(client)(route,
+    const dayRequest = route => providerRequest(route,
       { lane: 'day-details', midgardBudgetClass: 'bulk', signal });
+    const verificationRequest = route => providerRequest(route,
+      { lane: 'swap-verification', midgardBudgetClass: 'verification', signal });
     const verifySwaps = options.verifySwapCandidates || (!options.service && verifyFinancialSwapCandidates);
     let stopping;
     const stop = () => {
@@ -117,10 +120,10 @@ export async function runFinancialsCollector(options = {}) {
         ...(options.service && !options.refreshDayDetails ? [] : [loop(5000, () =>
           (options.refreshDayDetails || refreshFinancialDayQueue)(client, { signal,
             getJson: dayRequest }))]),
-        // Fee-ranked stream candidates share the day-detail lane and bulk
-        // budget. Legacy input-value snapshots are no longer fee-fill work.
+        // Saved transaction checks use a separate cooldown lane and the live
+        // allowance, while retaining shared total caps and provider pacing.
         ...(!verifySwaps ? [] : [loop(30_000, () =>
-          verifySwaps(client, { signal, getJson: dayRequest, poolScopes: true }))]),
+          verifySwaps(client, { signal, getJson: verificationRequest, maxRequests: 5, poolScopes: true }))]),
         loop(60_000, () => {
           const acquisition = acquisitionMetrics({ reset: true });
           if (acquisition) log({ type: 'acquisition_metrics', window_seconds: 60, acquisition });
@@ -138,7 +141,7 @@ export async function runFinancialsCollector(options = {}) {
         ...(options.service && !options.repairEmissions ? [] : [loop(5000, async () => {
           const result = await (options.repairEmissions || repairFinancialReserveEmissions)(client, {
             signal, from: REWARD_HISTORY_FROM, limit: 5000,
-            getJson: (path, options) => createFinancialsProviderRequest(client)(path, { ...options, lane: 'reserve-emissions' })
+            getJson: (path, options) => providerRequest(path, { ...options, lane: 'reserve-emissions' })
           });
           if (result.reconstructed) log(`Reserve emissions: verified ${result.reconstructed} blocks`);
           if (result.deferred) log(`Reserve emissions: deferred ${result.deferred} blocks: ${result.errors.join('; ')}`);

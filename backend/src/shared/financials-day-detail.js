@@ -391,7 +391,8 @@ async function ledgerPayload(db, day, payload, now) {
   const merged = { ...payload, swapSource: 'finalized-block-ledger', swaps: topSwaps(ledger.swaps), pendingSwaps: pending, unpricedSwaps: ledger.unpriced.length,
     excludedSwaps: [...ledger.pending.map(txId => ({ txId, kind: 'pending' })), ...ledger.unpriced.map(txId => ({ txId, kind: 'unpriced' }))],
     exclusionsIncomplete: false, settlement: { status: pending ? 'pending' : 'complete', checkedAt: ledger.checkedAt,
-      nextCheckAt: ledger.nextCheckAt, remaining: pending, passCount: 0 } };
+      nextCheckAt: ledger.nextCheckAt, ...(ledger.deferred ? { deferred: true, deferredReason: ledger.deferredReason } : {}),
+      remaining: pending, passCount: 0 } };
   return { ...merged, finalized: financialDaySnapshotFinalized(day, merged, now) };
 }
 

@@ -202,3 +202,13 @@ requests per 30-second pass. Saved totals and verification survive closed days;
 only pending IDs are checked later. No new actions scan, history backfill, or
 provider budget is introduced. Independent SIPOL block boundaries expose missing
 or unattributed blocks; such rankings remain explicitly incomplete.
+
+### Verification starvation fix (October 29, 2026)
+
+An empty ranking can mean completed saved swaps have not passed their status
+check, rather than that none completed. At 18:26 UTC, ZEC had 4,824 complete
+candidates and zero checks because historical work had exhausted the shared
+bulk subset. The saved-ID verifier now uses the normal allowance under strict
+transaction-only admission, retaining five lookups per pass and all total caps.
+Durable deferral metadata gives the UI the real earliest retry time if admission
+or the provider still pauses verification. See [the verification contract](financials.md#saved-candidate-verification-starvation-october-29-2026).

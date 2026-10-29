@@ -201,6 +201,30 @@ an omitted candidate that should now rank. Pool reuse combines exact prefixes an
 sealed UTC totals across the local window; missing boundaries use bounded source
 acquisition without modifying completed Pool Analysis history.
 
+### Saved-candidate verification starvation (October 29, 2026)
+
+At 18:26 UTC, the ZEC ledger contained 4,824 completed candidates with zero
+verification checks. Two sampled transactions were already successful in
+Midgard. Block and pool-fee capture were current; verification was being denied
+by the exhausted 5,000-request daily bulk allowance. The old classifier charged
+all `/actions` requests to that subset, including bounded saved-ID lookups.
+
+The verifier now declares an explicit verification purpose and uses its own
+ordinary-failure cooldown scope. Only `/actions` with one 64-hex transaction ID,
+one integer `limit` from 1 to 50, and no other query parameters or fragment can
+use the normal allowance. Scans, filters, pagination and malformed requests stay
+bulk. The existing five-lookups-per-30-second cap, shared total minute/hour/day
+limits, credential-wide pacing and provider-wide cooldowns remain authoritative.
+This does not increase quotas or reset counters.
+
+A durable verifier-wide pause records admission deferral and its actual retry
+horizon, including for candidates arriving after the pause. Deferral never
+increments completed-check counts. Both pool and Financials settlement metadata
+can explain a request-budget pause or provider cooldown; the UI labels the
+retry horizon as the earliest retry rather than promising an immediate check.
+Saved candidates resume through normal bounded verification, with no day rescan
+or historical backfill.
+
 The following sections record the earlier UTC/input-volume implementation and
 its operational history; the local-day fee cache supersedes that ranking basis.
 
@@ -285,8 +309,9 @@ Provider and request-budget deferrals preserve state and honor the advertised
 retry time. Completed-day reads cost zero upstream calls.
 
 Migration 069 adds an atomic Postgres request budget shared by backend processes
-for each Midgard provider. All `/actions` and Financials day acquisition requests
-consume a bulk subset of the total budget. Defaults are 60/minute, 2,000/hour and
+for each Midgard provider. Actions scans and Financials day acquisition requests
+consume a bulk subset of the total budget. Saved-candidate verification has the
+strict transaction-ID exception described below. Defaults are 60/minute, 2,000/hour and
 20,000/UTC day total, with bulk capped at 30/minute, 1,000/hour and 5,000/UTC day.
 These are application safety limits, **not published Liquify public-gateway quotas**.
 Bulk therefore cannot consume the whole allowance for normal reads. Admission is

@@ -2,6 +2,8 @@ import { priceFinancialSwapRows, priceFinancialSwapRowsAtPrices } from './financ
 export { priceFinancialSwapRows, priceFinancialSwapRowsAtPrices } from './financials-swap-pricing.js';
 import { midgardActionTimestampSeconds } from '../../../shared/dynamic-fees/affiliate-volume.js';
 import { loadPoolSwapVerificationCandidates } from './financials-pool-swaps.js';
+import { readFinancialSwapVerificationPause, deferFinancialSwapVerification, clearFinancialSwapVerificationPause,
+  financialSwapVerificationSchedule } from './financials-swap-verification-pause.js';
 
 export const FINANCIAL_SWAP_CANDIDATE_RANK = 25;
 const VERIFY_BACKOFF_MS = [10 * 60_000, 30 * 60_000, 3600_000, 6 * 3600_000, 24 * 3600_000];
@@ -146,6 +148,7 @@ export function financialSwapSettlement(actions, txId) {
 export async function verifyFinancialSwapCandidates(client, { getJson, now = Date.now, maxRequests = 5, signal, poolScopes = false } = {}) {
   if (signal?.aborted) return 0;
   const atStart = now();
+  const pause = await readFinancialSwapVerificationPause(client, atStart);
   const { rows: candidates } = await client.query(`with windows as (
       select start_at as window_from, start_at + interval '24 hours' as window_to
       from generate_series(date_trunc('day', $1::timestamptz at time zone 'UTC') at time zone 'UTC' - interval '3 days',
@@ -213,6 +216,9 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
     ) delete from financials_swap_verification_windows saved using windows
       where saved.window_from = windows."from" and saved.window_to = windows."to" and not (windows.ids ? saved.tx_id)`,
     [JSON.stringify([...rememberedWindows.values()])]);
+  // Keep window eligibility checkpointed during a pause, including arrivals
+  // since the last batch. Admission resumes only at the stored retry horizon.
+  if (pause) return 0;
   const rows = [...due.values()].sort((a, b) => a.rank - b.rank || candidateOrder(a, b)).slice(0, Math.max(1, Math.min(25, Math.trunc(maxRequests) || 1)));
   let checked = 0;
   for (const row of rows) {
@@ -222,12 +228,17 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
       actions = (await getJson(`/actions?${new URLSearchParams({ txid: row.tx_id, limit: '50' })}`))?.actions;
       if (!Array.isArray(actions)) throw new Error('Invalid swap candidate lookup');
     } catch (error) {
-      if (signal?.aborted || error.code === 'MIDGARD_BUDGET_DEFERRED' || error.skipProvider) break;
+      if (signal?.aborted || error.code === 'MIDGARD_BUDGET_ABORTED') break;
+      if (error.code === 'MIDGARD_BUDGET_DEFERRED' || error.skipProvider) {
+        await deferFinancialSwapVerification(client, error, row.tx_id, now());
+        break;
+      }
       await client.query(`update financials_swap_candidates set last_error = $2, next_check_at = $3::timestamptz
         where tx_id = $1`, [row.tx_id, error.message, new Date(now() + 60_000).toISOString()]);
       continue;
     }
     const at = now();
+    if (!checked) await clearFinancialSwapVerificationPause(client, at);
     const { related, action } = financialSwapSettlement(actions, row.tx_id);
     const ranked = action?.type === 'swap' ? financialSwapRow(action).row : null;
     const valid = ranked && ranked.feeRune !== null;
@@ -303,6 +314,7 @@ export const financialSwapLedgerCovers = (startedAt, dayOrBounds) =>
 
 /** Select the whole exact start-time window, then price and rank it. */
 export async function readFinancialSwapLedgerDay(client, dayOrBounds, now = Date.now()) {
+  const pause = await readFinancialSwapVerificationPause(client, now);
   const from = typeof dayOrBounds === 'string' ? Date.parse(`${dayOrBounds}T00:00:00Z`) / 1000 : dayOrBounds.from;
   const to = typeof dayOrBounds === 'string' ? from + 86400 : dayOrBounds.to;
   const { rows } = await client.query(`select tx_id, status, verified_row, last_error, checks, updated_at,
@@ -325,5 +337,5 @@ export async function readFinancialSwapLedgerDay(client, dayOrBounds, now = Date
       .map(row => priced.get(row.tx_id)),
     pending: pending.map(row => row.tx_id), unpriced,
     checkedAt: checked.length ? new Date(Math.max(...checked)).toISOString() : null,
-    nextCheckAt: due.length ? new Date(Math.max(now, Math.min(...due))).toISOString() : null };
+    ...financialSwapVerificationSchedule(due, pause, now) };
 }

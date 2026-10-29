@@ -19,6 +19,19 @@ function normalizedBase(value) {
   } catch { return ''; }
 }
 
+// Only the saved-candidate verifier may use the live allowance for actions.
+// A purpose flag alone must never admit history scans, filters or pagination.
+function isBoundedTransactionVerification(path, purpose) {
+  if (purpose !== 'verification') return false;
+  const route = new URL(path, 'https://midgard.invalid');
+  const params = route.searchParams;
+  return /^\/(?:v\d+\/)?actions\/?$/.test(route.pathname) && !route.hash
+    && [...params.keys()].length === 2
+    && params.getAll('txid').length === 1 && params.getAll('limit').length === 1
+    && /^[a-f\d]{64}$/i.test(params.get('txid'))
+    && /^(?:[1-9]|[1-4]\d|50)$/.test(params.get('limit'));
+}
+
 /** Identify the actual configured provider, never a request's query/address.
  * Versions share a budget; public and dedicated credentials do not. The hash
  * keeps dedicated URLs/credentials out of operational rows and error text. */
@@ -53,7 +66,9 @@ export function midgardBudgetContext(url, options = {}) {
     base, path,
     providerKey: `midgard:${parsed.hostname.toLowerCase()}:${createHash('sha256').update(identity).digest('hex').slice(0, 32)}`,
     budgetProfile: portal ? 'liquify-portal' : 'default',
-    budgetClass: options.midgardBudgetClass === 'bulk' || /^\/(?:v\d+\/)?actions\/?(?:[?#]|$)/.test(path) ? 'bulk' : 'live'
+    budgetClass: options.midgardBudgetClass === 'bulk'
+      || (/^\/(?:v\d+\/)?actions\/?(?:[?#]|$)/.test(path)
+        && !isBoundedTransactionVerification(path, options.midgardBudgetClass)) ? 'bulk' : 'live'
   };
 }
 

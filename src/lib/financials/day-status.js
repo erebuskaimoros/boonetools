@@ -30,7 +30,15 @@ export function financialDayStatus(detail) {
 
   const notes = [];
   const checkedAt = localTimestamp(settlement?.checkedAt);
+  const deferred = settlement?.status === 'pending' && settlement?.deferred === true;
   if (settlement?.status === 'pending') {
+    if (deferred) {
+      notes.push(settlement.deferredReason === 'request-budget'
+        ? 'Verification checks paused by the shared request budget.'
+        : settlement.deferredReason === 'provider-cooldown'
+          ? 'Verification checks paused while the data provider is cooling down.'
+          : 'Verification checks are paused.');
+    }
     notes.push(ledger ? 'Saved swap candidates are checked after completion; the day is not rescanned.'
       : 'Only saved pending IDs are rechecked; the day is not rescanned.');
     if (!checkedAt) notes.push(ledger ? 'No completed candidate checks yet.' : 'First complete pending-ID check has not finished.');
@@ -41,7 +49,10 @@ export function financialDayStatus(detail) {
   }
   if (notes.length && checkedAt) notes.push(`${ledger ? 'Latest candidate check' : 'Last complete pending-ID check'}: ${checkedAt}.`);
   const nextCheckAt = localTimestamp(settlement?.nextCheckAt);
-  if (settlement?.status === 'pending' && nextCheckAt) notes.push(`Next ${ledger ? 'candidate' : 'pending-ID'} check scheduled for ${nextCheckAt}.`);
+  if (settlement?.status === 'pending' && nextCheckAt) {
+    notes.push(deferred ? `Earliest retry: ${nextCheckAt}.`
+      : `Next ${ledger ? 'candidate' : 'pending-ID'} check scheduled for ${nextCheckAt}.`);
+  }
 
   return {
     warning: warnings.join(' '),
