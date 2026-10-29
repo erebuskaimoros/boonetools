@@ -185,11 +185,21 @@ triggered by a single unresolved action.
 Before the October 22 background-roster update, today's completed prefix
 refreshed at most every fifteen minutes while viewed.
 It scans only the new action interval and merges the prior and new top tens;
-pool totals refresh for all discovered pools. Up to 512 unresolved transaction
+pool totals refresh for every discovered pool outside Pool Analysis. Up to 512 unresolved transaction
 identities are retained to reconcile reappearing actions. Legacy count-only
 exclusions and overflow stay explicitly provisional; rare stale duplicates outside
 retained identities can conservatively overcount exclusions. Legacy in-progress cursors
 resume in place; subsequent completed prefixes use delta acquisition.
+
+Day-detail reads rank Pool Analysis's own totals over the stored list: the
+`pool_analysis_daily` row for a closed day (partial until Pool Analysis completes
+it), or each tracked pool's latest `pool_analysis_intraday_snapshots` prefix at
+or before `through` for a partial day. The collector requests Midgard pool
+history only for pools absent from `pool_analysis_sync_state`, so stored rows
+cover delisted pools such as BNB.BNB, plus legacy snapshots. This replaced an
+exact-match cache: at 00:19 UTC on October 28, 2026, Pool Analysis had not yet
+completed October 27, so the closing pass fell through to Midgard, accepted
+stale zero buckets and dropped BTC.BTC and ETH.ETH from that day.
 
 For untracked historical dates, public reads renew a two-minute visitor lease; the worker checks that lease before
 each source step. Leaving/closing the panel or hiding the tab pauses unfinished

@@ -419,9 +419,10 @@ start a new historical backfill. Older untracked dates retain visitor leases.
 Background rosters reuse their saved top ten and scan only the next action
 interval after a complete prefix. Quarter-hour horizons have a three-minute
 settling allowance so Pool Analysis's normal `:02/:17/:32/:47` publication can
-supply the same exact UTC-day pool prefixes. A matching cached pool costs no
-provider request; misses use the unchanged budgeted provider. A midnight prefix
-belongs to the new day and is never substituted for yesterday's full-day total.
+supply the latest UTC-day pool prefix at `through`. Pools in
+`pool_analysis_sync_state` cost no provider request: reads rank their Pool
+Analysis daily row (closed day) or latest prefix at or before `through` over the
+stored list. Only untracked (for example delisted) pools use the budgeted provider.
 Completed days stop acquisition permanently after the verified horizon reaches
 the next UTC midnight. Pending/unpriced exclusions remain visible: sealing the
 acquired window is not a claim that all late settlements were resolved.
@@ -432,7 +433,7 @@ scan and may wait on an existing quota deadline. Subsequent visits read the
 stored lists while background progress continues, including with no open tab.
 Validate migration 072, current-day background ownership, saved progress across
 collector restart, closing-day completion, and zero reacquisition of sealed
-days. Check `financials-pool-prefix` acquisition hits and the existing Midgard
+days. Check that today's top pools match Pool Analysis and the existing Midgard
 budget counters. Do not trigger cold historical dates as a deployment smoke test.
 
 #### Targeted pending settlement (October 24, 2026)

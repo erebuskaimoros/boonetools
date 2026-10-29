@@ -154,7 +154,7 @@ function dayPayload(day, state, now) {
     partial: state.through < state.to, unpricedSwaps: state.unpriced, pendingSwaps: state.pending,
     excludedSwaps: state.exclusions || [], exclusionsIncomplete: Boolean(state.exclusionsIncomplete),
     finalized: state.through === state.to && !state.unpriced && !state.pending && !state.exclusionsIncomplete && now / 1000 >= state.to + 2 * DAY,
-    swaps: state.swaps, pools: state.poolRows.filter(row => row.volumeUsd > 0).sort((a, b) => b.volumeUsd - a.volumeUsd || a.asset.localeCompare(b.asset)).slice(0, 10),
+    swaps: state.swaps, pools: topPools(state.poolRows),
     swapVolumeBasis: 'input-notional-usd', poolVolumeBasis: 'executed-leg-usd', source: 'liquify-midgard'
   };
   payload.settlement = financialDaySettlement(day, { ...payload, settlement: state.settlement });
@@ -211,6 +211,9 @@ function topSwaps(rows) {
   return [...new Map(rows.map(row => [row.txId, row])).values()]
     .sort((a, b) => b.volumeUsd - a.volumeUsd || a.txId.localeCompare(b.txId)).slice(0, 10);
 }
+
+const topPools = rows => rows.filter(row => row.volumeUsd > 0)
+  .sort((a, b) => b.volumeUsd - a.volumeUsd || a.asset.localeCompare(b.asset)).slice(0, 10);
 
 function poolsFromEarnings(payload, from, through) {
   const pools = new Set();
@@ -315,20 +318,39 @@ export async function advanceFinancialDay(day, previous, getJson, now = Date.now
       state.tokens.push(token); state.token = token;
     }
   } else if (state.phase === 'pools') {
-    const asset = state.pools.find(pool => !state.poolRows.some(row => row.asset === pool));
-    if (asset) {
-      const params = new URLSearchParams({ ...financialDetailHistoryQuery(state.from, state.through), pool: asset });
-      state.poolRows.push(financialPoolVolume(await getJson(`/history/swaps?${params}`), state, asset));
+    // Reads take Pool Analysis's own copy of every pool it tracks.
+    const missing = state.pools.filter(pool => !options.trackedPools?.has(pool) && !state.poolRows.some(row => row.asset === pool));
+    if (missing.length) {
+      const params = new URLSearchParams({ ...financialDetailHistoryQuery(state.from, state.through), pool: missing[0] });
+      state.poolRows.push(financialPoolVolume(await getJson(`/history/swaps?${params}`), state, missing[0]));
     }
-    if (state.poolRows.length === state.pools.length) { state.phase = 'done'; state.observedAt = new Date(now).toISOString(); }
+    if (missing.length <= 1) { state.phase = 'done'; state.observedAt = new Date(now).toISOString(); }
   }
   const payload = state.phase !== 'done' ? null : dayPayload(day, state, now);
   return { state, payload };
 }
 
+/** Stored rows only cover pools Pool Analysis does not track, plus legacy snapshots. */
+async function financialDayPools(db, day, from, payload, complete) {
+  const { rows } = complete
+    ? await db.query(`select asset, volume_usd_e2::text, volume_rune_e8::text from pool_analysis_daily where day = $1::date`, [day])
+    // Per tracked pool, so each newest prefix is one primary-key probe.
+    : await db.query(`select tracked.asset, latest.volume_usd_e2::text, latest.volume_rune_e8::text
+      from pool_analysis_sync_state tracked cross join lateral (select volume_usd_e2, volume_rune_e8
+        from pool_analysis_intraday_snapshots where asset = tracked.asset
+          and bucket_end >= $1::timestamptz and bucket_end <= $2::timestamptz
+        order by bucket_end desc limit 1) latest`, [iso(from), payload.through]);
+  const pools = new Map((payload.pools || []).map(row => [row.asset, row]));
+  for (const row of rows) {
+    if (row.asset && row.volume_usd_e2 != null && row.volume_rune_e8 != null) pools.set(row.asset,
+      { asset: row.asset, volumeUsd: Number(row.volume_usd_e2) / 100, volumeRune: Number(row.volume_rune_e8) / 1e8 });
+  }
+  return topPools([...pools.values()]);
+}
+
 export async function readFinancialDay(day, options = {}) {
   const now = options.now?.() ?? Date.now();
-  financialDetailDay(day, now);
+  const { from } = financialDetailDay(day, now);
   const db = options.client || await import('../db/pool.js');
   const { rows } = await db.query(`insert into financials_day_details (day) values ($1::date)
     on conflict (day) do update set requested_at = now()
@@ -341,7 +363,8 @@ export async function readFinancialDay(day, options = {}) {
     const eligibleAt = Math.max(Date.parse(settlement.nextCheckAt) || 0, new Date(row?.available_at).getTime() || 0);
     if (eligibleAt > now) settlement.nextCheckAt = new Date(eligibleAt).toISOString();
   }
-  return { day, ...(row?.payload_json || {}), loading: !row?.payload_json,
+  const pools = row?.payload_json && await financialDayPools(db, day, from, row.payload_json, complete);
+  return { day, ...(row?.payload_json || {}), ...(pools && { pools }), loading: !row?.payload_json,
     ...(complete ? { finalized: financialDaySnapshotFinalized(day, row.payload_json, now), settlement } : {}),
     refreshing: Boolean(row?.payload_json && !complete && new Date(row.available_at).getTime() <= now),
     retryAt: working && row?.last_error ? new Date(row.available_at).toISOString() : null,
@@ -387,6 +410,8 @@ export async function refreshFinancialDayQueue(client, options = {}) {
     ...row, requestedAt: row.requested_at ? new Date(row.requested_at).getTime() : now,
     state: row.state_json || financialDayStateFromSnapshot(row.day, row.payload_json, now)
   }));
+  const trackedPools = jobs.length ? new Set((await client.query('select asset from pool_analysis_sync_state')).rows
+    .map(row => row.asset).filter(Boolean)) : undefined;
   const maxRequests = Math.max(1, Math.min(10, Number(options.maxRequests) || 10));
   let requests = 0;
   while (jobs.length && requests < maxRequests && !options.signal?.aborted) {
@@ -395,7 +420,7 @@ export async function refreshFinancialDayQueue(client, options = {}) {
     if (!job.background && (options.now?.() ?? Date.now()) - job.requestedAt >= FINANCIAL_DAY_VISITOR_LEASE_MS) continue;
     requests++;
     try {
-      const result = await advanceFinancialDay(job.day, job.state, options.getJson, options.now?.() ?? Date.now(), { background: job.background });
+      const result = await advanceFinancialDay(job.day, job.state, options.getJson, options.now?.() ?? Date.now(), { background: job.background, trackedPools });
       const savedAt = options.now?.() ?? Date.now();
       const availableAt = financialDayNextWorkAt(job.day, result.payload, savedAt, { background: job.background }) ?? savedAt;
       const saved = await client.query(`update financials_day_details set state_json = $2::jsonb,
