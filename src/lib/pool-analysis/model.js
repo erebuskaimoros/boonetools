@@ -60,13 +60,13 @@ export const POOL_ANALYSIS_COLUMNS = Object.freeze([
   { id: 'priceUsd', label: 'USD PRICE', defaultDirection: 'desc' },
   { id: 'oraclePriceUsd', label: 'ORACLE', defaultDirection: 'desc' },
   { id: 'depthUsd', label: 'DEPTH', defaultDirection: 'desc' },
-  { id: 'balanceRuneBase', label: 'BALANCES', defaultDirection: 'desc' },
+  { id: 'balanceRuneBase', label: 'BALANCES', defaultDirection: 'desc', description: 'Current asset and RUNE balances; sorted by the RUNE balance' },
   { id: 'periodVolumeUsd', label: 'VOLUME', defaultDirection: 'desc' },
   { id: 'periodFeesUsd', label: 'FEES', defaultDirection: 'desc' },
-  { id: 'volumeDepthPercent', label: 'VOLUME / DEPTH', defaultDirection: 'desc' },
-  { id: 'feeDepthPercent', label: 'FEES / DEPTH', defaultDirection: 'desc' },
-  { id: 'feeVolumePercent', label: 'FEES / VOLUME', defaultDirection: 'desc' },
-  { id: 'annualizedFeeRatePercent', label: 'EST APR', defaultDirection: 'desc' }
+  { id: 'volumeDepthPercent', label: 'VOLUME / DEPTH', defaultDirection: 'desc', description: 'Full selected-period volume in RUNE / current two-sided depth in RUNE' },
+  { id: 'feeDepthPercent', label: 'FEES / DEPTH', defaultDirection: 'desc', description: 'Selected-period fees in RUNE / current two-sided depth in RUNE' },
+  { id: 'feeVolumePercent', label: 'FEES / VOLUME', defaultDirection: 'desc', description: 'Selected-period fees / volume using matching RUNE amounts' },
+  { id: 'annualizedFeeRatePercent', label: 'EST APR', defaultDirection: 'desc', description: 'Selected-period fees annualized over the requested window / current two-sided depth, using RUNE amounts' }
 ]);
 
 export function poolAnalysisColumns(_periodId = '30d') {
@@ -94,7 +94,7 @@ function normalizeCoverage(value = {}, expectedDays = 0) {
     firstDay: date(value.first_day),
     lastDay: date(value.last_day),
     observedDays: Math.max(0, Number(value.observed_days) || 0),
-    expectedDays: Math.max(0, Number(value.expected_days) || expectedDays),
+    expectedDays: Math.max(0, finite(value.expected_days) ?? expectedDays),
     missingDays: Math.max(0, Number(value.missing_days) || 0)
   };
 }
@@ -156,7 +156,7 @@ export function normalizePoolAnalysisSummary(payload = {}) {
     const oneSidedDepthUsd = finite(pool.depth_usd);
     const totalDepthUsd = finite(pool.total_depth_usd);
     const balanceRuneBase = baseString(pool.balance_rune_e8);
-    const volumeDepthScale = totalDepthUsd === null ? 0.5 : 1;
+    const volumeDepthScale = Object.hasOwn(pool, 'total_depth_usd') ? 1 : 0.5;
     const legacy30d = {
       volume_rune_e8: pool.period_volume_rune_e8,
       volume_usd: pool.period_volume_usd,
@@ -208,6 +208,10 @@ export function normalizePoolAnalysisSummary(payload = {}) {
 
 function sortValue(pool, column) {
   if (column === 'asset') return pool.asset;
+  if (column === 'balanceRuneBase') {
+    const balance = baseString(pool.balanceRuneBase);
+    return balance === null ? null : BigInt(balance);
+  }
   return pool[column] ?? null;
 }
 
@@ -222,6 +226,7 @@ export function sortPoolAnalysisRows(rows = [], sort = {}) {
     const rightMissing = rightValue === null || rightValue === undefined || rightValue === '';
     if (leftMissing !== rightMissing) return leftMissing ? 1 : -1;
     if (!leftMissing && leftValue !== rightValue) {
+      if (typeof leftValue === 'bigint') return (leftValue < rightValue ? -1 : 1) * direction;
       return typeof leftValue === 'string'
         ? leftValue.localeCompare(rightValue) * direction
         : (Number(leftValue) - Number(rightValue)) * direction;
@@ -301,4 +306,11 @@ export function formatPoolAnalysisNumber(value, options = {}) {
 export function formatPoolAnalysisPercent(value) {
   const numeric = finite(value);
   return numeric === null ? '—' : `${numeric.toFixed(Math.abs(numeric) < 1 ? 2 : 1)}%`;
+}
+
+export function formatPoolAnalysisTurnover(value, periodId = '24h') {
+  const period = POOL_ANALYSIS_TABLE_PERIODS.find((candidate) => candidate.id === periodId);
+  if (!period || period.days <= 1) return formatPoolAnalysisPercent(value);
+  const numeric = finite(value);
+  return numeric === null ? '—' : `${formatPoolAnalysisNumber(numeric / 100, { maximumFractionDigits: 0 })}x`;
 }

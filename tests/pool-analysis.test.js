@@ -104,6 +104,21 @@ test('Pool Analysis upgrades legacy one-sided summary fields to two-sided table 
   assert.equal(dashboard.pools[0].periodMetrics['30d'].feeDepthPercent, 1.5);
 });
 
+test('missing USD prices do not halve modern two-sided RUNE turnover ratios', () => {
+  const dashboard = normalizePoolAnalysisSummary({ pools: [{
+    asset: 'ETH.ETH', status: 'Available', depth_usd: null, total_depth_usd: null,
+    balance_rune_e8: '100000000000',
+    period_metrics: { '30d': {
+      volume_rune_e8: '300000000000', volume_depth_percent: 150,
+      fees_rune_e8: '3000000000', fee_depth_percent: 1.5
+    } }
+  }] });
+  const row = dashboard.pools[0];
+  assert.equal(row.depthUsd, null);
+  assert.equal(row.volumeDepthPercent, 150);
+  assert.equal(row.feeDepthPercent, 1.5);
+});
+
 test('Pool Analysis exposes exactly the consolidated semantic columns and requested chart ranges', () => {
   assert.deepEqual(POOL_ANALYSIS_RANGES, [
     { id: '30d', label: '30D' },
@@ -220,7 +235,7 @@ test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the exclude
   assert.match(component, /Pricing and two-sided depth are current/);
   assert.doesNotMatch(component, /data-label=\{`(?:VOLUME|FEES) · \$\{tablePeriod\.label\}`\}/);
   assert.match(component, /FEES = POOL-GENERATED LIQUIDITY FEES/);
-  assert.match(component, /VOLUME \/ DEPTH = AVG DAILY VOLUME \/ CURRENT TWO-SIDED DEPTH/);
+  assert.match(component, /VOLUME \/ DEPTH = PERIOD VOLUME \/ CURRENT TWO-SIDED DEPTH/);
   assert.match(component, /FEES \/ DEPTH = PERIOD FEES \/ CURRENT TWO-SIDED DEPTH/);
   assert.match(component, /SYSTEM-INCOME DISTRIBUTION OUT OF SCOPE/);
   assert.doesNotMatch(component, /app\.thorswap\.finance/);

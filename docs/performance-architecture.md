@@ -106,10 +106,12 @@ storage in migrations 059/060. Its fifteen-minute job requests today's per-pool
 Midgard swap totals, reuses current core pool depth, and publishes 24-hour, 7-day, 30-day,
 90-day, and 1-year table aggregates in one database read. Each window uses
 completed UTC days and supplies volume, pool-generated liquidity fees,
-coverage, ratios, and annualized generated-fee rates; volume/depth is
-normalized to average observed-day volume over current two-sided depth;
+coverage, ratios, and annualized generated-fee rates; volume/depth uses
+selected-period volume over current two-sided depth;
 fees/depth uses selected-period generated fees over that same current depth,
-while pricing, balances, and total two-sided depth remain current. The read model
+while pricing, balances, and total two-sided depth remain current. Ratios use
+matching RUNE amounts; USD activity totals use historical prices, while depth
+uses the current price. The read model
 retains one-sided `depth_usd` for compatibility and publishes
 `total_depth_usd` for the table. Downstream system-income
 distribution is deliberately outside this read model. A separately triggered

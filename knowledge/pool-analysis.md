@@ -26,6 +26,39 @@ distribution. The dashboard is visible in navigation.
 
 ## Storage and operations
 
+### Table metric correction — October 29, 2026
+
+The Volume / Depth heading hid a daily normalization: the selected window's
+volume was divided by observed days before comparing with current two-sided
+depth. The correction uses the entire selected period, consistent with
+the adjacent Volume and Fees / Depth columns. The legacy top-level metric
+now matches the default 30-day period. All percentage calculations retain
+their RUNE basis; historical USD activity totals divided by current USD depth
+are a different valuation and need not reproduce those percentages.
+Volume / Depth displays a percentage for 24H and a rounded whole-number
+multiple for longer windows (for example, 23,851% becomes 239x). Sorting
+continues to use the underlying unrounded ratio.
+
+Regression tests also cover observed zero fees/volume (zero rather than
+unavailable, while an empty denominator remains unavailable), exact numeric
+RUNE balance sorting, and zero expected days for pools first tracked today.
+An explicit null `total_depth_usd` now remains a modern two-sided payload;
+missing USD pricing must not trigger legacy conversion and halve valid
+RUNE-based turnover. Column tooltips identify the RUNE basis and exact bounds.
+APR still annualizes over the requested period and requires at least 90%
+observed days; this investigation does not change that existing policy.
+Deploy the backend before the frontend. The next ordinary Pool Analysis
+publication applies the corrected formulas to saved aggregates. These fixes
+do not acquire or rewrite history; keep source freshness warnings intact.
+
+At 09:11 UTC, all 44 production sync states reported an unavailable or
+unsynchronized Midgard aggregation watermark. This is separate from the
+table calculation defects. A read-only audit of the last year's 15,722
+nonpartial daily records found no missing USD volumes or positive fees
+without a positive RUNE/USD valuation. Local checks: 94 Pool Analysis tests
+passed, three optional database tests skipped, and Svelte diagnostics had
+zero errors (56 existing warnings).
+
 Migration 059 adds `pool_analysis_depth_daily`; migration 060 adds durable
 per-day completion. The fifteen-minute job refreshes today's swap totals and
 uses the existing fresh THORNode pool field for today's partial depth. Its

@@ -120,9 +120,9 @@ function historicalDepthUsd(row) {
 }
 
 function divideBase(numerator, denominator, multiplier = 1) {
-  const top = positive(numerator);
+  const top = finite(numerator);
   const bottom = positive(denominator);
-  return top === null || bottom === null ? null : (top / bottom) * multiplier;
+  return top === null || top < 0 || bottom === null ? null : (top / bottom) * multiplier;
 }
 
 function annualize(value, coveredDays, periodDays = POOL_ANALYSIS_PERIOD_DAYS) {
@@ -248,7 +248,7 @@ export function buildPoolAnalysisRows({
           fee_depth_percent: divideBase(feesRune, balanceRune, 50),
           fee_volume_percent: divideBase(feesRune, volumeRune, 100),
           volume_depth_percent: coveredDays > 0
-            ? divideBase(volumeRune, balanceRune, 50 / coveredDays)
+            ? divideBase(volumeRune, balanceRune, 50)
             : null,
           annualized_fees_rune: annualizedFeesRune,
           annualized_fees_usd: annualize(aggregate.fees_usd, coveredDays, period.days),
@@ -285,7 +285,7 @@ export function buildPoolAnalysisRows({
         period_fees_usd: defaultMetrics.fees_usd,
         fee_depth_percent: defaultMetrics.fee_depth_percent,
         fee_volume_percent: defaultMetrics.fee_volume_percent,
-        volume_depth_percent: divideBase(volume24hRune, balanceRune, 50),
+        volume_depth_percent: defaultMetrics.volume_depth_percent,
         annualized_fees_rune: defaultMetrics.annualized_fees_rune,
         annualized_fees_usd: defaultMetrics.annualized_fees_usd,
         annualized_fee_rate_percent: defaultMetrics.annualized_fee_rate_percent,

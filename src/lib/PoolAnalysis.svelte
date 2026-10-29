@@ -18,6 +18,7 @@
     filterPoolAnalysisRows,
     formatPoolAnalysisNumber,
     formatPoolAnalysisPercent,
+    formatPoolAnalysisTurnover,
     formatPoolAnalysisUsd,
     normalizePoolAnalysisSeries,
     normalizePoolAnalysisSummary,
@@ -372,12 +373,12 @@
               {#each tableColumns as column}
                 <th aria-sort={column.sortable === false ? undefined : sortAria(column.id)}>
                   {#if column.sortable === false}
-                    <span class="static-head" title={column.label}>{column.label}</span>
+                    <span class="static-head" title={column.description || column.label}>{column.label}</span>
                   {:else}
                     <button
                       class="sort-button"
                       class:active={sort.column === column.id}
-                      title={column.label}
+                      title={column.description || column.label}
                       on:click={() => selectSort(column.id)}
                     >
                       <span>{column.label}</span><i>{sortIndicator(column.id)}</i>
@@ -428,10 +429,10 @@
                     {#if !timedPeriods && pool.coverage.missingDays > 0}<small>{pool.coverage.observedDays}/{pool.coverage.expectedDays}D</small>{/if}
                   </span>
                 </td>
-                <td class="number" data-label="VOLUME / DEPTH">{formatPoolAnalysisPercent(pool.volumeDepthPercent)}</td>
-                <td class="number" data-label="FEES / DEPTH">{formatPoolAnalysisPercent(pool.feeDepthPercent)}</td>
-                <td class="number" data-label="FEES / VOLUME">{formatPoolAnalysisPercent(pool.feeVolumePercent)}</td>
-                <td class="number" data-label="EST APR">{formatPoolAnalysisPercent(pool.annualizedFeeRatePercent)}</td>
+                <td class="number" data-label="VOLUME / DEPTH" title={periodBounds(pool)}>{formatPoolAnalysisTurnover(pool.volumeDepthPercent, tablePeriodId)}</td>
+                <td class="number" data-label="FEES / DEPTH" title={periodBounds(pool)}>{formatPoolAnalysisPercent(pool.feeDepthPercent)}</td>
+                <td class="number" data-label="FEES / VOLUME" title={periodBounds(pool)}>{formatPoolAnalysisPercent(pool.feeVolumePercent)}</td>
+                <td class="number" data-label="EST APR" title={periodBounds(pool)}>{formatPoolAnalysisPercent(pool.annualizedFeeRatePercent)}</td>
               </tr>
               {#if selectedAsset === pool.asset}
                 <tr class="detail-row">
@@ -556,10 +557,11 @@
   <footer class="method-line">
     <span>METHOD</span>
     <span>VOLUME = EXECUTED POOL LEGS</span>
-    <span>VOLUME / DEPTH = AVG DAILY VOLUME / CURRENT TWO-SIDED DEPTH</span>
+    <span>VOLUME / DEPTH = PERIOD VOLUME / CURRENT TWO-SIDED DEPTH</span>
     <span>FEES = POOL-GENERATED LIQUIDITY FEES</span>
     <span>FEES / DEPTH = PERIOD FEES / CURRENT TWO-SIDED DEPTH</span>
     <span>EST APR = ANNUALIZED FEES / CURRENT TWO-SIDED DEPTH</span>
+    <span>RATIOS USE RUNE AMOUNTS · USD TOTALS USE HISTORICAL PRICES</span>
     <span>SYSTEM-INCOME DISTRIBUTION OUT OF SCOPE</span>
     <span>GAPS ARE NOT INTERPOLATED</span>
     <span>TIMES · {localTimeZone()} · DAILY BUCKETS UTC</span>
