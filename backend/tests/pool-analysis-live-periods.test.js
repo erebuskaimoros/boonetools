@@ -135,7 +135,7 @@ test('a missed XRP 24h boundary is fetched exactly so the table includes live fe
   assert.ok(metric.fees_usd > 4200 && metric.fees_usd < 4400);
 });
 
-test('boundary lookup includes only 24h adjacent samples needed to prove an isolated gap', async () => {
+test('boundary lookup loads only exact window boundaries without adjacent samples', async () => {
   const { loadPoolAnalysisBoundarySnapshots } = await import('../src/shared/pool-analysis-store.js');
   let queryParams;
   await loadPoolAnalysisBoundarySnapshots({ query: async (_sql, params) => {
@@ -144,9 +144,7 @@ test('boundary lookup includes only 24h adjacent samples needed to prove an isol
   } }, asset, cutoff, [{ id: '24h', days: 1 }, { id: '7d', days: 7 }]);
   assert.equal(queryParams[0], asset);
   assert.deepEqual(queryParams[1], [
-    '2026-09-04T12:00:00.000Z',
     '2026-09-04T12:15:00.000Z',
-    '2026-09-04T12:30:00.000Z',
     '2026-08-29T12:15:00.000Z'
   ]);
 });
@@ -178,17 +176,21 @@ test('HTTP response ages rolling timestamps but does not call labelled completed
   assert.equal(response.body.pools[0].period_metrics['7d'].stale, false);
 });
 
-test('ingestion reuses durable same-quarter sample, makes one source call, and retains successful aggregate on failure', async () => {
+test('ingestion recovers a cold 24H boundary once, reuses both durable prefixes, and retains the aggregate on failure', async () => {
   const { ingestPoolAnalysisHistory } = await import('../src/shared/pool-analysis-ingestion.js');
   let watermark = cutoff;
   let saved;
+  const snapshots = [];
   let published;
   let calls = 0;
   let error;
   const options = { rolling: true, assets: [asset], now: '2026-09-05T12:40:00Z', healthNow: '2026-09-05T12:40:00Z', coreSnapshot: null,
-    loadPendingDays: async () => [], loadCompletedDays: async () => [completed('2026-09-04')], loadBoundarySnapshots: async () => [],
+    loadPendingDays: async () => [], loadCompletedDays: async () => [completed('2026-09-04')], loadBoundarySnapshots: async () => snapshots,
     loadRollingEdges: async (_client, _asset, end) => saved?.cutoff === end ? saved : null,
-    saveIntradaySnapshot: async (client, head) => { saved = { asset, cutoff: Date.parse(head.interval_end) / 1000, head }; },
+    saveIntradaySnapshot: async (client, head) => {
+      snapshots.push({ ...head, bucket_end: head.interval_end });
+      if (Date.parse(head.interval_end) / 1000 === cutoff) saved = { asset, cutoff, head };
+    },
     saveRollingSnapshot: async (_client, _asset, periods) => { published = periods; }, markRollingFailure: async (_client, _asset, message) => { error = message; },
     upsert: async (_client, rows) => rows.length, updateSyncState: async () => {},
     fetchSwapHistory: async () => assert.fail('No duplicate live-day query'),
@@ -199,16 +201,15 @@ test('ingestion reuses durable same-quarter sample, makes one source call, and r
       return fetcher(route);
     } };
   await ingestPoolAnalysisHistory({}, options);
-  assert.equal(calls, 1);
-  assert.equal(published.find((period) => period.period_id === '24h').window_mode, 'completed-days',
-    'a cold ledger must not repeatedly fetch yesterday on every live poll');
+  assert.equal(calls, 2, 'one current prefix plus one exact 24H recovery for a cold ledger');
+  assert.equal(published.find((period) => period.period_id === '24h').window_mode, 'rolling');
   watermark += 100;
   await ingestPoolAnalysisHistory({}, options);
-  assert.equal(calls, 1);
+  assert.equal(calls, 2, 'both durable prefixes are reused on the next poll');
   const previous = published;
   watermark += 900;
   await ingestPoolAnalysisHistory({}, options);
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.equal(published, previous);
   assert.match(error, /Upstream unavailable/);
 });

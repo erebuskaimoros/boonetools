@@ -52,16 +52,18 @@ test('quarter-hour periods distinguish retained daily history from ready rolling
   assert.equal(dashboard.pools[0].snapshotReady, false);
   assert.equal(dashboard.pools[0].snapshotResolutionSeconds, 900);
   assert.equal(poolAnalysisWindowLabel(selectPoolAnalysisPeriod(dashboard.pools[0], '24h'), dashboard.period), 'ROLLING · 15M');
-  assert.equal(poolAnalysisWindowLabel(dashboard.pools[0], dashboard.period), 'DAILY · BUILDING HISTORY');
+  assert.equal(poolAnalysisWindowLabel(dashboard.pools[0], dashboard.period), 'FALLBACK · COMPLETED DAYS');
   assert.match(poolAnalysisPeriodDescription(dashboard.period, '30d'), /15-minute history/);
   assert.match(poolAnalysisPeriodDescription(dashboard.period, '30d'), /30 completed UTC days/);
 });
 
-test('Pool Analysis keeps snapshot status notes out of table cells', async () => {
+test('Pool Analysis marks affected fee cells while keeping healthy cells compact', async () => {
   const source = await readFile(
     new URL('../src/lib/PoolAnalysis.svelte', import.meta.url),
     'utf8'
   );
   assert.doesNotMatch(source, /<small class="period-mode">/);
   assert.doesNotMatch(source, /<small class="period-cutoff">/);
+  assert.match(source, /\{#if activityStatus\}<small class="activity-status">\{activityStatus\}<\/small>\{\/if\}/);
+  assert.match(source, /\{#if fallbackCount > 0\}/);
 });

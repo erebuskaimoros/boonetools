@@ -35,11 +35,24 @@ export function poolAnalysisPeriodDescription(metadata = {}, periodId = '30d') {
 
 export function poolAnalysisWindowLabel(pool = {}, metadata = {}) {
   if (metadata.mode === 'bucketed') {
-    return pool.windowMode === 'rolling' && pool.snapshotReady
-      ? `ROLLING · ${Math.round((pool.snapshotResolutionSeconds || 900) / 60)}M`
-      : 'DAILY · BUILDING HISTORY';
+    if (pool.windowMode === 'rolling' && pool.snapshotReady) {
+      return `ROLLING · ${Math.round((pool.snapshotResolutionSeconds || 900) / 60)}M`;
+    }
+    if (pool.windowMode === 'completed-days') {
+      return `FALLBACK · COMPLETED ${pool.selectedPeriodDays === 1 ? 'DAY' : 'DAYS'}`;
+    }
+    return 'UNAVAILABLE';
   }
   return metadata.mode === 'rolling' ? 'ROLLING' : 'DAILY';
+}
+
+export function poolAnalysisActivityStatus(pool = {}, metadata = {}) {
+  if (!['rolling', 'bucketed'].includes(metadata.mode)) return '';
+  if (finite(pool.periodFeesUsd) === null) return 'UNAVAILABLE';
+  if (metadata.mode === 'bucketed' && pool.windowMode === 'completed-days') return 'FALLBACK';
+  if (pool.periodIncomplete || pool.coverage?.missingDays > 0) return 'INCOMPLETE';
+  if (pool.periodStale) return 'STALE';
+  return '';
 }
 
 export const POOL_ANALYSIS_COLUMNS = Object.freeze([

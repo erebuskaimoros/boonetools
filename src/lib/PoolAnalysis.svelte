@@ -19,6 +19,7 @@
     formatPoolAnalysisUsd,
     normalizePoolAnalysisSeries,
     normalizePoolAnalysisSummary,
+    poolAnalysisActivityStatus,
     poolAnalysisColumns,
     poolAnalysisLineMetric,
     poolAnalysisPeriodDescription,
@@ -69,6 +70,7 @@
     filterPoolAnalysisRows(tablePools, { search, status: statusFilter }),
     sort
   );
+  $: fallbackCount = filteredPools.filter((pool) => poolAnalysisActivityStatus(pool, dashboard.period) === 'FALLBACK').length;
   $: displayedPoints = selectedSeries?.asset === selectedAsset ? selectedSeries.points : [];
   $: lineMetric = poolAnalysisLineMetric(lineMetricId);
   $: rollingPoints = rollingHistory?.asset === selectedAsset ? rollingHistory.points : [];
@@ -244,7 +246,7 @@
 
   function periodBounds(pool) {
     if (!timedPeriods) return '';
-    const state = pool.periodIncomplete ? 'UNAVAILABLE · ' : pool.periodStale ? 'STALE · ' : '';
+    const state = pool.periodIncomplete ? 'INCOMPLETE · ' : pool.periodStale ? 'STALE · ' : '';
     return `${poolAnalysisWindowLabel(pool, dashboard.period)} · ${state}${displayTimestamp(pool.windowStart)} → ${displayTimestamp(pool.windowEnd)}`;
   }
 
@@ -337,6 +339,13 @@
       </div>
     </div>
 
+    {#if fallbackCount > 0}
+      <TerminalAlert tone="warn" tag="FALLBACK">
+        The trailing {tablePeriod.label} window is unavailable for {fallbackCount} displayed {fallbackCount === 1 ? 'pool' : 'pools'}.
+        Marked rows use completed UTC {tablePeriod.days === 1 ? 'day totals' : 'days'}. Expand a row for the exact dates.
+      </TerminalAlert>
+    {/if}
+
     {#if loading && !dashboard.pools.length}
       <div class="loading-state" aria-live="polite">▓░░░░ SYNCING POOL SNAPSHOT<span>_</span></div>
     {:else}
@@ -371,6 +380,7 @@
           </thead>
           <tbody>
             {#each filteredPools as pool, index (pool.asset)}
+              {@const activityStatus = poolAnalysisActivityStatus(pool, dashboard.period)}
               <tr class="pool-row" class:expanded={selectedAsset === pool.asset}>
                 <td class="pool-cell" data-label="POOL">
                   <button
@@ -402,9 +412,12 @@
                   <small>{balanceLabel(pool.balanceRuneBase, 'RUNE')}</small>
                 </td>
                 <td class="number" data-label="VOLUME" title={periodBounds(pool)}>{formatPoolAnalysisUsd(pool.periodVolumeUsd, { compact: true })}</td>
-                <td class="number" data-label="FEES" title={`${periodBounds(pool)}${pool.usdFeeEstimate ? ' · USD fees use each source interval’s mean RUNE price' : ''}`} class:coverage-warning={pool.periodStale || pool.periodIncomplete || pool.coverage.missingDays > 0}>
-                  {formatPoolAnalysisUsd(pool.periodFeesUsd, { compact: true })}
-                  {#if !timedPeriods && pool.coverage.missingDays > 0}<small>{pool.coverage.observedDays}/{pool.coverage.expectedDays}D</small>{/if}
+                <td class="number" data-label="FEES" title={`${periodBounds(pool)}${pool.usdFeeEstimate ? ' · USD fees use each source interval’s mean RUNE price' : ''}`} class:coverage-warning={Boolean(activityStatus) || pool.coverage.missingDays > 0}>
+                  <span class="fee-value">
+                    {formatPoolAnalysisUsd(pool.periodFeesUsd, { compact: true })}
+                    {#if activityStatus}<small class="activity-status">{activityStatus}</small>{/if}
+                    {#if !timedPeriods && pool.coverage.missingDays > 0}<small>{pool.coverage.observedDays}/{pool.coverage.expectedDays}D</small>{/if}
+                  </span>
                 </td>
                 <td class="number" data-label="VOLUME / DEPTH">{formatPoolAnalysisPercent(pool.volumeDepthPercent)}</td>
                 <td class="number" data-label="FEES / DEPTH">{formatPoolAnalysisPercent(pool.feeDepthPercent)}</td>
@@ -602,6 +615,8 @@
   .oracle-cell small.negative { color: var(--term-error, #dc3545); }
   .period-bounds { font-size: 11px; overflow-wrap: anywhere; }
   .coverage-warning { color: var(--term-amber, #d4a017); }
+  .fee-value { display: block; }
+  .coverage-warning .activity-status { color: var(--term-amber, #d4a017); font-size: 11px; line-height: 1.4; white-space: normal; }
   .empty-row { height: 100px; color: var(--term-text-5, #444); text-align: center; letter-spacing: .08em; }
 
   .detail-row > td { height: auto; padding: 0; background: var(--term-surface-deep, #050505); text-align: left; white-space: normal; }

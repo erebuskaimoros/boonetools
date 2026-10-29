@@ -185,6 +185,56 @@ test('PostgreSQL preserves Pool Analysis provenance through cached and midnight 
         });
       });
 
+      await t.test('missing 24H recovery survives reconnect without refetching or rewriting completed history', async () => {
+        const asset = 'ZEC.ZEC';
+        const at = Date.parse('2026-10-28T23:45:00Z') / 1000;
+        const boundary = at - 86400;
+        const current = { totalVolume: '50000000000', totalVolumeUSD: '30000', totalFees: '200000000', runePriceUSD: '0.6' };
+        const prefix = { totalVolume: '70000000000', totalVolumeUSD: '42000', totalFees: '700000000', runePriceUSD: '0.6' };
+        let original;
+        await withClient(async (client) => {
+          await upsertPoolAnalysisDays(client, [{ ...parsePoolAnalysisSwapInterval({
+            startTime: midnight(boundary), endTime: midnight(at),
+            totalVolume: '100000000000', totalVolumeUSD: '60000', totalFees: '1000000000', runePriceUSD: '0.6'
+          }, { asset }), completed_at: iso(midnight(at) + 60) }]);
+          original = await dailyRow(client, asset, '2026-10-27');
+        });
+        for (let attempt = 0; attempt < 2; attempt++) await withClient(async (client) => {
+          const requests = [];
+          const options = {
+            ...ingestionOptions(asset, at, requests, true),
+            loadPendingDays: async () => [],
+            fetchMidgard: async (route) => {
+              requests.push(route);
+              if (route === '/health') return { database: true, inSync: true,
+                lastAggregated: { height: 28000000, timestamp: at + 20 } };
+              assert.equal(attempt, 0, 'reconnected collection must reuse both durable prefixes');
+              const query = new URL(route, 'https://fixture.invalid').searchParams;
+              const end = Number(query.get('to'));
+              assert.equal(query.get('pool'), asset);
+              assert.ok([at, boundary].includes(end));
+              assert.equal(query.get('from'), String(midnight(end)));
+              assert.equal(query.has('interval'), false);
+              return { meta: { startTime: query.get('from'), endTime: end, ...(end === at ? current : prefix) } };
+            }
+          };
+          assertSuccessful(await ingestPoolAnalysisHistory(client, options), attempt === 0 ? 2 : 0);
+          assert.equal(requests.length, attempt === 0 ? 3 : 1);
+          const repaired = await loadPoolAnalysisRollingEdges(client, asset, boundary);
+          assert.equal(repaired.head.fees_rune_e8, prefix.totalFees);
+          assert.deepEqual(await dailyRow(client, asset, '2026-10-27'), original);
+          const metric = (await loadPoolAnalysisRollingAggregates(client, iso(at + 60)))
+            .find((row) => row.asset === asset && row.period_id === '24h');
+          assert.equal(metric.window_mode, 'rolling');
+          assert.equal(metric.window_start, iso(boundary));
+          assert.equal(metric.window_end, iso(at));
+          assert.equal(metric.fees_rune_e8, '500000000');
+          assert.equal(metric.fees_usd, 3);
+          assert.equal(metric.volume_usd, 480);
+          assert.equal(metric.stale, false);
+        });
+      });
+
       await t.test('a cached provisional reinsert cannot overwrite a completed historical daily row', async () => {
         await withClient(async (client) => {
           const asset = 'DOGE.DOGE';

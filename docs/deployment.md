@@ -204,6 +204,18 @@ Let normal scheduled runs publish, then verify successful acquisition and fresh
 rolling `window_end` values through the following scheduled publication. Use
 the source-window timestamp as well as the read model's publication timestamp.
 
+### Pool Analysis missing 24H window recovery
+
+Deploy backend then frontend through the guarded release commands. No migration,
+environment change, timer change or historical backfill is required. Let the next
+ordinary Pool Analysis refresh recover missing 24H starting prefixes. Each repair
+is one exact bounded request, saved for reuse, with existing provider limits intact.
+Verify that recovered rows have `window_mode=rolling`, `snapshot_ready=true`, and
+`window_end - window_start = 24 hours`; compare fees with the exact source window.
+Failed recovery must retain truthful completed-day bounds and a visible fallback
+notice in the table. Check a saved boundary is reused without another acquisition.
+See [the incident and recovery contract](../knowledge/pool-analysis.md#missing-rolling-boundaries--october-28-2026).
+
 ### Pool Analysis same-window refresh
 
 Cached quarter-hour heads and derived midnight zero heads retain swap-source

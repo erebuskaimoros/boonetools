@@ -118,3 +118,29 @@ snapshot requirements are unchanged. Genuine missing days after tracking began
 still warn, independently of source-staleness and sync-error warnings. No
 schema change, provider acquisition, cache clearing or historical rewrite is
 needed; the existing UI consumes the corrected missing/incomplete flags.
+
+## Missing rolling boundaries — October 28, 2026
+
+Midgard health failures on October 27–28 left several consecutive quarter-hour
+prefixes absent. At October 28 23:45 UTC, ZEC's selected 24H table substituted
+October 27's $438.73 in fees although the actual trailing window contained
+1,631.52503442 RUNE in fees (about $1,025). Daily history agreed with Midgard;
+the discrepancy came from selecting a different window. The former recovery
+gate required both adjacent prefixes, so multi-poll outages never qualified.
+
+Recovery now requests only the exact missing 24H starting prefix when a valid,
+completed starting day exists. It does not require adjacent polls, interpolate
+amounts, rescan completed days, or backfill other periods. The repaired prefix
+is persisted and reused across runs. Midnight windows need no prefix request.
+Each pool needs at most one extra request in a sweep; existing provider admission,
+concurrency and cooldown controls still apply. Failed recovery leaves the
+completed-day fallback with its actual bounds; unavailable data stays unavailable.
+
+The table visibly marks fallback rows and explains that their totals cover
+completed days rather than the selected trailing window. Hover/detail bounds
+use the user's timezone; UTC accounting buckets remain unchanged.
+
+Deploy backend then frontend. No migration, cache reset, historical rewrite or
+timer change is needed. Verify an ordinary scheduled publication, exact rolling
+24H bounds and saved-boundary reuse. The regression fixture preserves the ZEC
+incident's amounts and proves recovery without needing surrounding samples.
