@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { refreshFinancialDayQueue } from '../src/shared/financials-day-detail.js';
-import { createFinancialDaySource } from '../src/shared/financials-day-source.js';
 
 const day = '2026-10-22';
 const from = Date.parse(`${day}T00:00:00Z`) / 1000;
@@ -37,16 +36,3 @@ for (const [label, rosterDay] of [['today', day], ['the day that just closed', '
     assert.equal(writes.length, 1, 'the cursor is checkpointed before the next request');
   });
 }
-
-test('live pool rankings reuse an exact saved UTC-day prefix instead of refetching Midgard', async () => {
-  const through = from + 12 * 3600;
-  const route = `/history/swaps?interval=5min&from=${from}&count=144&pool=BTC.BTC`;
-  const get = createFinancialDaySource({ client: { query: async () => ({ rows: [{
-    asset: 'BTC.BTC', bucket_end: new Date(through * 1000).toISOString(),
-    volume_rune_e8: '1234567890123456', volume_usd_e2: '987654321',
-    observed_at: new Date(now).toISOString()
-  }] }) }, getJson: () => assert.fail('an exact locally stored prefix must cost zero provider requests') });
-  const result = await get(route);
-  assert.deepEqual(result.intervals, [{ startTime: String(from), endTime: String(through),
-    totalVolume: '1234567890123456', totalVolumeUSD: '987654321' }]);
-});

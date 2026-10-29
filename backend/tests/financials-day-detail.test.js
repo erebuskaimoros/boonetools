@@ -132,6 +132,64 @@ test('live refresh scans only the new disjoint interval, merges top ten, and res
   assert.deepEqual(payload.pools.map(row => row.asset), ['BTC.BTC', 'ETH.ETH'], 'retain prior pools even when absent from new earnings');
 });
 
+const storedDay = (through, pools) => ({ payload_json: { day, through: new Date(through * 1000).toISOString(),
+  swaps: [], pools, pendingSwaps: 0, unpricedSwaps: 0 }, phase: 'done', pages: '1', last_error: null,
+  available_at: new Date(now).toISOString() });
+
+test('a closed day ranks Pool Analysis daily totals over its stored pool snapshot', async () => {
+  // 2026-10-27's stored top ten lost BTC.BTC and ETH.ETH to stale zero buckets.
+  // Pool Analysis keeps the completed day from the same Midgard pool history.
+  const client = { query: async sql => {
+    if (/financials_day_details/.test(sql)) return { rows: [storedDay(to, [
+      { asset: 'TRON.TRX', volumeUsd: 6611915.06, volumeRune: 10492844.57621485 },
+      { asset: 'BNB.BNB', volumeUsd: 5000, volumeRune: 8000 }])] };
+    if (/pool_analysis_daily/.test(sql)) return { rows: [
+      { asset: 'ETH.ETH', volume_usd_e2: '1516321771', volume_rune_e8: '2400000000000000' },
+      { asset: 'BTC.BTC', volume_usd_e2: '787593530', volume_rune_e8: '1246000000000000' },
+      { asset: 'TRON.TRX', volume_usd_e2: '661191506', volume_rune_e8: '1049284457621485' },
+      { asset: 'GAIA.ATOM', volume_usd_e2: '0', volume_rune_e8: '0' }] };
+    throw new Error(`Unexpected query: ${sql}`);
+  } };
+  const result = await readFinancialDay(day, { now: () => now, client });
+  assert.deepEqual(result.pools.map(row => [row.asset, row.volumeUsd, row.volumeRune]), [
+    ['ETH.ETH', 15163217.71, 24000000], ['BTC.BTC', 7875935.3, 12460000],
+    ['TRON.TRX', 6611915.06, 10492844.57621485], ['BNB.BNB', 5000, 8000]]);
+});
+
+test('a partial day ranks each pool\'s latest Pool Analysis prefix at or before its snapshot horizon', async () => {
+  const through = from + 14 * 3600;
+  const client = { query: async (sql, args) => {
+    if (/financials_day_details/.test(sql)) return { rows: [storedDay(through, [])] };
+    if (/pool_analysis_intraday_snapshots/.test(sql)) {
+      assert.ok(args.some(value => new Date(value).getTime() === through * 1000), 'bounded by the stored snapshot horizon');
+      return { rows: [{ asset: 'BTC.BTC', volume_usd_e2: '400000000', volume_rune_e8: '630000000000000' }] };
+    }
+    throw new Error(`Unexpected query: ${sql}`);
+  } };
+  const result = await readFinancialDay(day, { now: () => (through + 600) * 1000, client });
+  assert.deepEqual(result.pools.map(row => [row.asset, row.volumeUsd, row.volumeRune]), [['BTC.BTC', 4000000, 6300000]]);
+});
+
+test('the collector requests Midgard pool history only for pools Pool Analysis does not track', async () => {
+  const state = { day, from, to, through: to, phase: 'pools', swaps: [], pools: ['BNB.BNB', 'BTC.BTC'], poolRows: [],
+    tokens: [], pages: 1, unpriced: 0, pending: 0, exclusions: [] };
+  const writes = [], requests = [];
+  const client = { query: async (sql, args) => {
+    if (/pool_analysis_sync_state/.test(sql)) return { rows: [{ asset: 'BTC.BTC' }] };
+    if (sql.trimStart().startsWith('select')) return { rows: [{ day, state_json: state, payload_json: null, background: true }] };
+    if (sql.trimStart().startsWith('update')) writes.push(args);
+    return { rows: [] };
+  } };
+  await refreshFinancialDayQueue(client, { now: () => now, getJson: async route => {
+    requests.push(new URL(route, 'https://example.test').searchParams.get('pool'));
+    return { intervals: [{ startTime: from, endTime: to, totalVolumeUSD: '500000', totalVolume: '800000000000' }] };
+  } });
+  assert.deepEqual(requests, ['BNB.BNB']);
+  const saved = JSON.parse(writes[0][1]);
+  assert.equal(saved.phase, 'done');
+  assert.deepEqual(saved.poolRows.map(row => row.asset), ['BNB.BNB']);
+});
+
 test('unchanged live watermark costs only health and preserves the previous observed snapshot', async () => {
   const state = financialDayStateFromSnapshot(day, { through: new Date((from + 3600) * 1000).toISOString(),
     observedAt: new Date((from + 4000) * 1000).toISOString(), swaps: [], pools: [], pendingSwaps: 0, unpricedSwaps: 0 }, now);
@@ -219,6 +277,14 @@ test('short budget retries resume at the provider horizon while unclassified fai
   assert.equal(financialDayRetryAt(new Error('Temporary failure'), now), now + 60_000);
 });
 
+// Reads and the collector consult Pool Analysis; its DDL stays inside the rollback-only schema.
+async function poolAnalysisTables(client, readFile) {
+  for (const migration of ['051_pool_analysis.sql', '066_pool_analysis_intraday_snapshots.sql']) {
+    const sql = await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8');
+    await client.query(sql.replace(/^begin;|commit;\s*$/gi, '').replaceAll('public.', ''));
+  }
+}
+
 test('Postgres migration, cold enqueue, resumable worker, last-good errors and final cache work together', {
   skip: !process.env.ACQUISITION_TEST_DATABASE_URL
 }, async () => {
@@ -235,6 +301,7 @@ test('Postgres migration, cold enqueue, resumable worker, last-good errors and f
     await client.query(`set local search_path to financial_day_test_${process.pid}`);
     await client.query(await readFile(new URL('../migrations/068_financials_day_details.sql', import.meta.url), 'utf8'));
     await client.query(await readFile(new URL('../migrations/072_financials_background_rosters.sql', import.meta.url), 'utf8'));
+    await poolAnalysisTables(client, readFile);
     // This test isolates the visitor lane; the managed current day is cooling.
     await client.query(`insert into financials_day_details (day, background, available_at)
       values ((now() at time zone 'UTC')::date, true, now() + interval '1 day')`);
@@ -284,6 +351,7 @@ test('Postgres queue freezes provisional closed days, pauses abandoned scans and
     await client.query("set local time zone 'America/New_York'");
     await client.query(await readFile(new URL('../migrations/068_financials_day_details.sql', import.meta.url), 'utf8'));
     await client.query(await readFile(new URL('../migrations/072_financials_background_rosters.sql', import.meta.url), 'utf8'));
+    await poolAnalysisTables(client, readFile);
     await client.query(`insert into financials_day_details (day, background, available_at)
       values ((now() at time zone 'UTC')::date, true, now() + interval '1 day')`);
     const complete = { day, through: new Date(to * 1000).toISOString(), observedAt: new Date(now).toISOString(),
