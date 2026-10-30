@@ -369,6 +369,26 @@ test('live status confirms a genuine stall with a fresh synced RPC observation',
   assert.equal(snapshot.payload.network.summary.tone, 'err');
 });
 
+test('a fresh listener head proves liveness without probing RPC providers', async () => {
+  let probes = 0;
+  const build = (head) => buildStatusLiveSnapshot({
+    generatedAt: '2026-07-18T12:00:10Z',
+    loadNetworkSnapshot: async () => sources().networkSnapshot,
+    loadLatestChainHead: async () => head,
+    loadRpcHead: async () => { probes += 1; return { height: 1000, time: '2026-07-18T12:00:05Z', verified_at: '2026-07-18T12:00:10Z', catching_up: false }; },
+    persistHead: async () => {}
+  });
+  const fresh = await build({ height: 1000, time: '2026-07-18T12:00:05Z', source: 'liquify-ws' });
+  assert.equal(probes, 0);
+  assert.equal(fresh.payload.network.consensus.state, 'signing');
+  // An aged head (possible stall or lagging listener) still needs an RPC observation.
+  await build({ height: 1000, time: '2026-07-18T11:59:40Z', source: 'liquify-ws' });
+  assert.equal(probes, 1);
+  // So does a head behind the core snapshot's chain height.
+  await build({ height: 999, time: '2026-07-18T12:00:05Z', source: 'liquify-ws' });
+  assert.equal(probes, 2);
+});
+
 test('RPC failure cannot turn a stale durable header into a consensus stall', async () => {
   const snapshot = await buildStatusLiveSnapshot({
     generatedAt: '2026-07-18T12:05:00Z',
