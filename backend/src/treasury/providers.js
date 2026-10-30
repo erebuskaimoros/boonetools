@@ -2,7 +2,7 @@ import { config } from '../lib/config.js';
 import { fetchMidgard } from '../shared/midgard.js';
 import { fetchThorchain } from '../shared/thornode.js';
 import { isThorNodeCoreSnapshotStale } from '../shared/thornode-core-snapshot.js';
-import { loadAcquisition, saveAcquisition } from '../shared/acquisition-cache.js';
+import { acquireCached, loadAcquisition, saveAcquisition } from '../shared/acquisition-cache.js';
 
 const REQUEST_TIMEOUT_MS = 6_000;
 const EVM_RPC_ENDPOINTS = Object.freeze({
@@ -192,6 +192,18 @@ export async function fetchLiquidityProvider(asset, address, options = {}) {
     if (Number(error?.status) === 404 || /404|not found/i.test(message(error))) return null;
     throw error;
   }
+}
+
+export const TREASURY_LP_RECORD_TTL_MS = 60 * 60 * 1000;
+
+/** LP units change only on deposits and withdrawals; callers reprice from current pool depth. */
+export async function fetchCachedLiquidityProvider(asset, address, options = {}) {
+  return (await acquireCached(options.client, {
+    namespace: 'thornode:liquidity-provider:v1', identity: { asset, address }, source: 'thornode',
+    ttlMs: options.lpRecordTtlMs || TREASURY_LP_RECORD_TTL_MS, nowMs: options.nowMs,
+    load: async () => ({ lp: await fetchLiquidityProvider(asset, address, options) }),
+    validate: (payload) => Boolean(payload) && typeof payload === 'object' && 'lp' in payload
+  })).payload.lp;
 }
 
 function normalizeContract(asset) {

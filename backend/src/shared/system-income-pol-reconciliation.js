@@ -2,8 +2,31 @@ import { config } from '../lib/config.js';
 import { fetchThorchain } from './thornode.js';
 import { coreSnapshotValue, getThorNodeCoreSnapshot } from './thornode-core-snapshot.js';
 import { saveSystemIncomePolPositions } from './system-income-pol-store.js';
+import { loadAcquisition, saveAcquisition } from './acquisition-cache.js';
+import { lpRedeemValues } from '../../../shared/thorchain-lp.js';
 
 const RECONCILIATION_COOLDOWN_SCOPE = 'system-income-pol-reconciliation';
+const LP_NAMESPACE = 'sipol:module-lp:v1';
+// Module LP units change only through deployments, which the block ledger
+// records. THORNode is still rechecked at least this often.
+export const SYSTEM_INCOME_POL_LP_RECHECK_MS = 30 * 60_000;
+const NO_POSITION = { units: '0', rune_redeem_value: '0', asset_redeem_value: '0' };
+
+// Pools with a deployment in (fromHeight, toHeight], or null when the ledger
+// has a gap there and so cannot prove that no deployment happened.
+export async function poolsDeployedSince(client, fromHeight, toHeight) {
+  if (!(fromHeight > 0) || fromHeight >= toHeight) return new Set();
+  const { rows } = await client.query(
+    `select count(distinct blocks.height)::bigint as blocks,
+            array_remove(array_agg(distinct item->>'asset'), null) as assets
+       from system_income_pol_blocks blocks
+       left join lateral jsonb_array_elements(coalesce(blocks.deployments, '[]'::jsonb)) item on true
+      where blocks.height > $1 and blocks.height <= $2`,
+    [fromHeight, toHeight]
+  );
+  if (Number(rows[0]?.blocks) !== toHeight - fromHeight) return null;
+  return new Set(rows[0]?.assets || []);
+}
 
 function integer(value, fallback = '0') {
   const normalized = String(value ?? '').trim();
@@ -134,29 +157,46 @@ export async function reconcileSystemIncomePolState(client, options = {}) {
     throw new Error('SIPOL module balance response is invalid');
   }
   const activePools = pools.filter((pool) => integer(pool?.pol_reserve_rune_deposited) > 0n);
+  const height = thorHeight(lastblock);
+  if (height <= 0) throw new Error('SIPOL reconciliation requires a current THORChain height');
+  const nowMs = Number(options.nowMs ?? Date.now());
+  const identity = (pool) => ({ asset: pool.asset, address: module.address });
+  const cached = new Map(await Promise.all(activePools.map(async (pool) => [pool.asset,
+    (await (options.loadCachedLp || loadAcquisition)(client, LP_NAMESPACE, identity(pool), { nowMs }))?.payload])));
+  const cachedHeights = [...cached.values()].map((record) => Number(record?.height)).filter((value) => value > 0);
+  const deployed = cachedHeights.length
+    ? await (options.poolsDeployedSince || poolsDeployedSince)(client, Math.min(...cachedHeights), height)
+    : null;
   const lpRows = await mapWithConcurrency(
     activePools,
     config.systemIncomePolLpConcurrency,
     async (pool) => {
+      const record = cached.get(pool.asset);
+      if (record && deployed && !deployed.has(pool.asset) && Number(record.height) <= height) {
+        // Units are unchanged since the cached observation; redeem values follow current depth.
+        return [pool.asset, record.lp ? { ...record.lp, ...lpRedeemValues(record.lp.units, pool) } : NO_POSITION];
+      }
       const endpoint = `/thorchain/pool/${encodeURIComponent(pool.asset)}/liquidity_provider/${module.address}`;
+      let lp = null;
       try {
-        return [pool.asset, await fetchThor(endpoint, {
+        lp = await fetchThor(endpoint, {
           cooldownClient: client,
           cooldownScope: RECONCILIATION_COOLDOWN_SCOPE,
           timeoutMs: config.systemIncomePolTimeoutMs
-        })];
+        });
       } catch (error) {
-        if (Number(error?.status) === 404 || /404|not found/i.test(error?.message || '')) {
-          return [pool.asset, { units: '0', rune_redeem_value: '0', asset_redeem_value: '0' }];
-        }
-        throw error;
+        if (!(Number(error?.status) === 404 || /404|not found/i.test(error?.message || ''))) throw error;
       }
+      await (options.saveCachedLp || saveAcquisition)(client, {
+        namespace: LP_NAMESPACE, identity: identity(pool), payload: { height, lp }, source: 'thornode',
+        observedAt: new Date(nowMs).toISOString(),
+        expiresAt: new Date(nowMs + SYSTEM_INCOME_POL_LP_RECHECK_MS).toISOString()
+      });
+      return [pool.asset, lp || NO_POSITION];
     }
   );
   const nowValue = typeof options.now === 'function' ? options.now() : options.now;
   const observedAt = nowValue || core?.payload?.field_meta?.pools?.fetched_at || new Date();
-  const height = thorHeight(lastblock);
-  if (height <= 0) throw new Error('SIPOL reconciliation requires a current THORChain height');
   const built = buildSystemIncomePolPositionRows({
     height,
     observedAt,

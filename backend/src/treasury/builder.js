@@ -16,9 +16,10 @@ import {
   toTreasuryLpPosition,
   trackedEvmAssetsByChain
 } from '../../../shared/treasury/model.js';
+import { lpRedeemValues } from '../../../shared/thorchain-lp.js';
 import {
+  fetchCachedLiquidityProvider,
   fetchExternalHoldings,
-  fetchLiquidityProvider,
   fetchMemberPoolAssets,
   fetchTcyStaker,
   fetchThorBalance,
@@ -169,16 +170,20 @@ async function resolveLpDiscovery(entries, previousDiscovery, fallbackAssets, op
 }
 
 async function loadLpPositions(entries, discovery, previousEntries, assetPrices, runePrice, options, warnings, states) {
+  const poolsByAsset = new Map((options.pools || []).map((pool) => [pool?.asset, pool]));
   const jobs = entries.flatMap(({ section, entry, key }) =>
     (discovery[key]?.assets || []).map((asset) => ({ section, entry, key, asset }))
   );
   const results = await mapWithConcurrency(jobs, LP_LOOKUP_CONCURRENCY, async (job) => {
     try {
-      const value = await options.providers.fetchLiquidityProvider(
+      const record = await options.providers.fetchLiquidityProvider(
         job.asset,
         job.entry.address,
         options.providerOptions
       );
+      // A cached record's units stay exact; its redeem values follow current depth.
+      const pool = poolsByAsset.get(job.asset);
+      const value = record?.units && pool?.pool_units ? { ...record, ...lpRedeemValues(record.units, pool) } : record;
       return { ...job, ok: true, value };
     } catch (error) {
       return { ...job, ok: false, error: errorMessage(error) };
@@ -286,7 +291,7 @@ export async function buildTreasurySnapshot(options = {}) {
   const segmentStates = {};
   const providers = {
     fetchExternalHoldings,
-    fetchLiquidityProvider,
+    fetchLiquidityProvider: fetchCachedLiquidityProvider,
     fetchMemberPoolAssets,
     fetchTcyStaker,
     fetchThorBalance,
@@ -447,7 +452,7 @@ export async function buildTreasurySnapshot(options = {}) {
     previousEntries,
     poolState.assetPrices,
     runePrice,
-    { providers, providerOptions },
+    { providers, providerOptions, pools: Array.isArray(core.pools) ? core.pools : [] },
     warnings,
     segmentStates
   );

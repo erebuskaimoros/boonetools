@@ -11,6 +11,20 @@ import { loadLatestChainHead, notifyChainHead, upsertChainHeader } from '../shar
 import { fetchCurrentRpcHead } from '../shared/chain-head-probe.js';
 
 const LOCK_KEY = 'boonetools:status-live';
+// Comfortably inside the 30-second consensus delay threshold.
+const STREAM_HEAD_FRESH_MS = 20_000;
+
+// The websocket listener stores every finalized header. A fresh stored head that
+// is not behind the core snapshot already shows the chain advancing, so the RPC
+// probe is only needed to confirm a possible stall or a lagging listener.
+export function freshStreamHead(storedBlock, networkSnapshot, nowMs) {
+  const blockMs = Date.parse(storedBlock?.time || '');
+  const lastblock = Array.isArray(networkSnapshot?.lastblock) ? networkSnapshot.lastblock : [];
+  const coreHeight = Math.max(0, ...lastblock.map((row) => Number(row?.thorchain) || 0));
+  const ageMs = nowMs - blockMs;
+  return Number.isFinite(blockMs) && ageMs >= -5_000 && ageMs < STREAM_HEAD_FRESH_MS
+    && Number(storedBlock?.height) >= coreHeight ? storedBlock : null;
+}
 
 function compactRunResult(result) {
   if (!result?.model) return result;
@@ -48,26 +62,28 @@ export async function buildStatusLiveSnapshot(options = {}) {
   const loadRpcHead = options.loadRpcHead || (
     typeof options.client?.query === 'function' ? fetchCurrentRpcHead : async () => null
   );
-  let latestBlock = null;
+  let latestBlock = freshStreamHead(storedBlock, networkSnapshot, Date.parse(options.generatedAt || '') || Date.now());
   let probeWarning = '';
-  try {
-    latestBlock = await loadRpcHead({ client: options.client, minimumHeight: storedBlock?.height });
-    if (latestBlock && latestBlock.height < (storedBlock?.height || 0)) {
-      throw new Error('RPC chain head is behind the durable watermark');
+  if (!latestBlock) {
+    try {
+      latestBlock = await loadRpcHead({ client: options.client, minimumHeight: storedBlock?.height });
+      if (latestBlock && latestBlock.height < (storedBlock?.height || 0)) {
+        throw new Error('RPC chain head is behind the durable watermark');
+      }
+      // The REST fallback keeps SSE and the core snapshot's durable watermark
+      // current during a broken/replaying WebSocket connection. Header upserts
+      // preserve richer event-derived income, fees and swap flags already stored.
+      const persistHead = options.persistHead || (async (client, head) => {
+        const stored = await upsertChainHeader(client, { ...head, blockTime: head.time });
+        if (stored) await notifyChainHead(client, stored);
+      });
+      if (latestBlock && (options.persistHead || typeof options.client?.query === 'function')) {
+        await persistHead(options.client, latestBlock);
+      }
+    } catch {
+      latestBlock = null;
+      probeWarning = 'Current RPC chain head could not be verified; consensus status is unavailable.';
     }
-    // The REST fallback keeps SSE and the core snapshot's durable watermark
-    // current during a broken/replaying WebSocket connection. Header upserts
-    // preserve richer event-derived income, fees and swap flags already stored.
-    const persistHead = options.persistHead || (async (client, head) => {
-      const stored = await upsertChainHeader(client, { ...head, blockTime: head.time });
-      if (stored) await notifyChainHead(client, stored);
-    });
-    if (latestBlock && (options.persistHead || typeof options.client?.query === 'function')) {
-      await persistHead(options.client, latestBlock);
-    }
-  } catch {
-    latestBlock = null;
-    probeWarning = 'Current RPC chain head could not be verified; consensus status is unavailable.';
   }
   if (networkSnapshot?.stale) {
     throw new Error('Network providers did not produce a fresh live status snapshot');

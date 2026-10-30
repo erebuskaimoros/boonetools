@@ -1,3 +1,5 @@
+import { safeShare } from '../thorchain-lp.js';
+
 export const POL_TRACKER_SCHEMA_VERSION = 3;
 export const POL_TRACKER_START_DATE = '2025-02-01';
 export const POL_TRACKER_TREASURY_MODULE = 'thor1vmafl8f3s6uuzwnxkqz0eza47v6ecn0t086r2p';
@@ -19,17 +21,6 @@ function positive(value) {
 
 function e8Product(amount, price) {
   return (positive(amount) * positive(price)) / E8;
-}
-
-// Mirrors THORNode common.GetSafeShare: cap the ownership ratio and round the
-// final positive integer division half up.
-function safeShare(part, total, allocation) {
-  const denominator = positive(total);
-  const depth = positive(allocation);
-  let units = positive(part);
-  if (units === 0n || denominator === 0n || depth === 0n) return 0n;
-  if (units >= denominator) return depth;
-  return ((depth * units) + (denominator / 2n)) / denominator;
 }
 
 function synthBackingValue(pool) {

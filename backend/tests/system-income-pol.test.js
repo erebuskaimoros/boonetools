@@ -335,7 +335,9 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
       }
       return { units: '2', rune_redeem_value: '20', asset_redeem_value: '2' };
     },
-    savePositions: async (_client, rows, meta) => saved.push({ rows, meta })
+    savePositions: async (_client, rows, meta) => saved.push({ rows, meta }),
+    loadCachedLp: async () => null,
+    saveCachedLp: async () => {}
   });
 
   assert.deepEqual(calls.map((call) => call.path), [
@@ -354,6 +356,47 @@ test('SIPOL reconciliation reuses thornode-core pools and makes only narrow modu
   assert.equal(saved[0].meta.runePriceUsdE8, '200000000');
   assert.equal(saved[0].meta.polReserveSystemIncomeBps, '2000');
   assert.equal(saved[0].meta.totalPoolDepthRuneE8, '20000');
+});
+
+test('SIPOL reconciliation reuses module LP units until a deployment, ledger gap or recheck', async () => {
+  const pool = { asset: 'BTC.BTC', status: 'Available', balance_rune: '1000', balance_asset: '100',
+    pool_units: '100', pol_reserve_rune_deposited: '25' };
+  const run = async ({ cachedLp, deployed }) => {
+    const lpCalls = [];
+    const savedCache = [];
+    const saved = [];
+    await reconcileSystemIncomePolState({ id: 'db' }, {
+      getCoreSnapshot: async () => ({ payload: { lastblock: [{ chain: 'THOR', thorchain: '1000' }],
+        network: { rune_price_in_tor: '200000000' }, mimir: {}, pools: [pool] } }),
+      fetchThorchain: async (path) => {
+        if (path === '/thorchain/balance/module/pol_reserve') return { address: 'thor1pol', coins: [] };
+        lpCalls.push(path);
+        return { units: '3', rune_redeem_value: '30', asset_redeem_value: '3' };
+      },
+      loadCachedLp: async () => cachedLp,
+      poolsDeployedSince: async (_client, from, to) => {
+        assert.deepEqual([from, to], [900, 1000]);
+        return deployed;
+      },
+      saveCachedLp: async (_client, record) => savedCache.push(record),
+      savePositions: async (_client, rows) => saved.push(...rows)
+    });
+    return { lpCalls, savedCache, row: saved[0] };
+  };
+  const cachedLp = { payload: { height: 900, lp: { units: '2', rune_redeem_value: '1', asset_redeem_value: '1' } } };
+
+  const reused = await run({ cachedLp, deployed: new Set() });
+  assert.deepEqual(reused.lpCalls, []);
+  // Two of 100 pool units, valued at current depth with THORNode's half-up safe share.
+  assert.equal(reused.row.rune_held_e8, '20');
+  assert.equal(reused.row.asset_held_e8, '2');
+
+  for (const deployed of [new Set(['BTC.BTC']), null]) {
+    const refreshed = await run({ cachedLp, deployed });
+    assert.equal(refreshed.lpCalls.length, 1, deployed ? 'a new deployment changes units' : 'a ledger gap cannot prove none');
+    assert.equal(refreshed.savedCache[0].payload.height, 1000);
+    assert.equal(refreshed.row.units_e8, '3');
+  }
 });
 
 test('SIPOL APR annualizes complete capital-weighted hours and reports seeded coverage', () => {
