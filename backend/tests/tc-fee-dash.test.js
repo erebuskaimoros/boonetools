@@ -1,12 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import {
-  computeFeesPerBillionUsd,
-  computeIncomeVolumeBps,
-  normalizeTcFeeDashRow,
-  summarizeTcFeeDashRows
-} from '../src/shared/tc-fee-dash.js';
+import { normalizeTcFeeDashRow } from '../src/shared/tc-fee-dash.js';
 import {
   buildTcFeeDailyRowsFromMidgard,
   buildTcFeeDailyRowsFromDune,
@@ -15,15 +10,6 @@ import {
   parseMidgardSwapVolumeDays,
   parseCmcGlobalVolumeDays
 } from '../src/shared/tc-fee-dash-ingestion.js';
-
-test('computeFeesPerBillionUsd normalizes TC fees against global exchange volume', () => {
-  assert.equal(Math.round(computeFeesPerBillionUsd(375_700, 1_033_000_000_000)), 364);
-});
-
-test('computeIncomeVolumeBps normalizes income against native THORChain volume', () => {
-  assert.equal(computeIncomeVolumeBps(25_000, 10_000_000), 25);
-  assert.equal(computeIncomeVolumeBps(25_000, 0), null);
-});
 
 test('normalizeTcFeeDashRow converts DB row shape to API row shape', () => {
   const row = normalizeTcFeeDashRow({
@@ -58,33 +44,6 @@ test('normalizeTcFeeDashRow converts DB row shape to API row shape', () => {
   assert.equal(row.incomeVolumeBps, 150.28);
   assert.equal(Math.round(row.feesPerBillionUsd), 364);
   assert.equal(row.dailyRangeHighFeesPerBillionUsd, 711);
-});
-
-test('summarizeTcFeeDashRows returns weighted aggregate and peak window', () => {
-  const rows = [
-    {
-      windowLabel: 'low',
-      tcFeesUsd: 103_500,
-      globalExchangeVolumeUsd: 1_242_000_000_000,
-      thorchainVolumeUsd: 50_000_000,
-      feesPerBillionUsd: computeFeesPerBillionUsd(103_500, 1_242_000_000_000)
-    },
-    {
-      windowLabel: 'high',
-      tcFeesUsd: 749_000,
-      globalExchangeVolumeUsd: 1_479_000_000_000,
-      thorchainVolumeUsd: 75_000_000,
-      feesPerBillionUsd: computeFeesPerBillionUsd(749_000, 1_479_000_000_000)
-    }
-  ];
-  const summary = summarizeTcFeeDashRows(rows);
-
-  assert.equal(summary.windowCount, 2);
-  assert.equal(summary.totalTcFeesUsd, 852_500);
-  assert.equal(summary.totalThorchainVolumeUsd, 125_000_000);
-  assert.ok(Math.abs(summary.weightedIncomeVolumeBps - 68.2) < 0.00000001);
-  assert.equal(summary.peak.windowLabel, 'high');
-  assert.equal(Math.round(summary.weightedFeesPerBillionUsd), 313);
 });
 
 test('TC Fee Dash ingestion builds daily DB rows from Dune query rows', () => {

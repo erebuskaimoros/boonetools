@@ -6,11 +6,10 @@ import {
   buildIncomeVolumeRollingAverageSeries,
   buildRollingAverageSeries,
   buildTcFeeChartSeries,
-  computeFeesPerBillionUsd,
-  computeIncomeVolumeBps,
   normalizeTcFeeRows,
   summarizeTcFeeRows
 } from '../src/lib/tc-fee-dash/model.js';
+import { computeFeesPerBillionUsd, computeIncomeVolumeBps } from '../shared/tc-fee-dash.js';
 import {
   buildSystemIncomeDistribution,
   formatSystemIncomePercent,
@@ -87,6 +86,7 @@ test('computeIncomeVolumeBps normalizes liquidity fee income against THORChain v
   assert.equal(computeIncomeVolumeBps(25_000, 10_000_000), 25);
   assert.equal(computeIncomeVolumeBps(0, 10_000_000), 0);
   assert.equal(computeIncomeVolumeBps(25_000, 0), null);
+  assert.equal(computeIncomeVolumeBps(-1, 10_000_000), null);
 });
 
 test('normalizeTcFeeRows computes metric values and sorts by window start', () => {
@@ -404,6 +404,7 @@ test('summarizeTcFeeRows returns weighted aggregate and peak window', () => {
       windowStart: '2025-09-23',
       tcFeesUsd: 103_500,
       globalExchangeVolumeUsd: 1_242_000_000_000,
+      thorchainVolumeUsd: 50_000_000,
       feeBps: 1
     },
     {
@@ -411,12 +412,15 @@ test('summarizeTcFeeRows returns weighted aggregate and peak window', () => {
       windowStart: '2025-09-30',
       tcFeesUsd: 749_000,
       globalExchangeVolumeUsd: 1_479_000_000_000,
+      thorchainVolumeUsd: 75_000_000,
       feeBps: 15
     }
   ]);
 
   assert.equal(summary.windowCount, 2);
   assert.equal(summary.totalTcFeesUsd, 852_500);
+  assert.equal(summary.totalThorchainVolumeUsd, 125_000_000);
+  assert.ok(Math.abs(summary.weightedIncomeVolumeBps - 68.2) < 0.00000001);
   assert.equal(summary.peak.windowLabel, 'high');
   assert.equal(Math.round(summary.weightedFeesPerBillionUsd), 313);
 });
