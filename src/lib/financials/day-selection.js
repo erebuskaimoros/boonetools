@@ -5,9 +5,15 @@ export function financialDetailPicker({ now = Date.now(), timeZone = localTimeZo
   return { min: '2021-04-13', max: localDateKey(now, timeZone) };
 }
 
-// A chart click supplies a calendar label, not a midnight instant to convert.
-// Details may cover a local date absent from the chart's UTC daily labels.
-export function selectFinancialDetailDay(day, { now = Date.now(), timeZone = localTimeZone() } = {}) {
-  try { return financialCalendarWindow(day, now, timeZone).day; }
+// Historical chart clicks retain their calendar label. The current UTC bucket
+// opens local today, even while the chart and visitor have different dates.
+export function selectFinancialDetailDay(day, { now = Date.now(), timeZone = localTimeZone(), source = 'picker' } = {}) {
+  try {
+    if (source === 'chart') {
+      const chartDay = financialCalendarWindow(day, now, 'UTC').day;
+      if (chartDay === localDateKey(now, 'UTC')) day = localDateKey(now, timeZone);
+    }
+    return financialCalendarWindow(day, now, timeZone).day;
+  }
   catch { return ''; }
 }

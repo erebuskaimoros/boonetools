@@ -30,10 +30,10 @@
   let selectedDay = '';
   let detailTimeZone = localTimeZone();
   let detailPicker = financialDetailPicker({ timeZone: detailTimeZone });
-  function selectDay(day) {
+  function selectDay(day, source = 'picker') {
     detailTimeZone = localTimeZone();
     detailPicker = financialDetailPicker({ timeZone: detailTimeZone });
-    selectedDay = selectFinancialDetailDay(day, { timeZone: detailTimeZone });
+    selectedDay = selectFinancialDetailDay(day, { timeZone: detailTimeZone, source });
   }
   let historyPoints = [], historyRequest, historyLoading = false, historyError = '';
   async function loadRollingHistory(ids) {
@@ -236,7 +236,7 @@
       <TerminalAlert tone="err" tag="ERR">{chartError} <button class="inline-action" on:click={loadChart}>retry chart</button></TerminalAlert>
     {:else if ChartComponent}
       {#if !hourly && (historyLoading || historyError)}<p class="muted-text">{historyError || 'Loading rolling-average lookback…'}</p>{/if}
-      <svelte:component this={ChartComponent} {points} {historyPoints} {grain} onGrainChange={selectGrain} onRollingChange={loadRollingHistory} {currency} {hidden} {zoomWindow} {loading} {hasData} onZoom={(window) => zoomWindow = window} onSelect={selectDay} />
+      <svelte:component this={ChartComponent} {points} {historyPoints} {grain} onGrainChange={selectGrain} onRollingChange={loadRollingHistory} {currency} {hidden} {zoomWindow} {loading} {hasData} onZoom={(window) => zoomWindow = window} onSelect={(day) => selectDay(day, 'chart')} />
     {:else}
       <div class="chart-loading" role="status">Loading chart renderer…</div>
     {/if}

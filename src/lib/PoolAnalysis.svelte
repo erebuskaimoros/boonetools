@@ -39,7 +39,9 @@
   let chartGrain = 'day';
   const detailTimeZone = localTimeZone();
   $: dayPicker = financialDetailPicker({ timeZone: detailTimeZone });
-  function selectDay(day) { selectedDay = selectFinancialDetailDay(day, { timeZone: detailTimeZone }); }
+  function selectDay(day, source = 'picker') {
+    selectedDay = selectFinancialDetailDay(day, { timeZone: detailTimeZone, source });
+  }
   let selectedSeries = null;
   let rangeId = '30d';
   let lineMetricId = 'cumulativeFees';
@@ -500,7 +502,7 @@
                       <div class="chart-frame">
                         <TimeSeriesChart points={displayedPoints}
                           options={{ lineMetric: lineMetricId, hidden, selectWithZoom: true }} historyPoints={rollingPoints}
-                          onSelect={(day) => { if (chartGrain === 'day') selectDay(day); }} onGrainChange={(grain) => chartGrain = grain}
+                          onSelect={(day) => { if (chartGrain === 'day') selectDay(day, 'chart'); }} onGrainChange={(grain) => chartGrain = grain}
                           onRollingChange={(ids) => rollingAverages = ids} onHiddenChange={(ids) => hidden = ids} buildOption={buildPoolAnalysisOption}
                           {zoomWindow} onZoom={(window) => zoomWindow = window}
                           loading={seriesLoading} hasData={displayedPoints.length > 0}
@@ -510,6 +512,7 @@
                       </div>
 
                       <div class="swap-day-picker">
+                        <span>Chart: UTC days</span>
                         <label for="pool-swap-day">Click a daily bar or choose a local day</label>
                         <input id="pool-swap-day" type="date" value={selectedDay} min={dayPicker.min} max={dayPicker.max}
                           on:change={(event) => selectDay(event.currentTarget.value)} />

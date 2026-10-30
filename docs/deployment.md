@@ -540,6 +540,13 @@ the table says it ranks fees. Daily chart aggregates remain labeled UTC days.
 No provider-budget reset, manual cache deletion, or forced full-history backfill
 is part of this rollout.
 
+The current UTC chart bar opens the viewer's local today in both Financials and
+Pool Analysis, including evenings when UTC has already rolled into tomorrow.
+Historical chart labels retain their calendar-date selection; manual picker
+entries still reject future local dates. The click correction is frontend-only.
+Verify a UTC/local date mismatch and confirm the top swaps load for local today;
+the chart's UTC bucket amounts and backend windows are unchanged.
+
 #### Forward-only per-pool fee rankings (October 29, 2026)
 
 Deploy backend before frontend. Migration 077 marks `pool_started_at` during the

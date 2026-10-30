@@ -20,6 +20,31 @@ test('local picker accepts dates east of UTC and rejects tomorrow west of UTC in
   assert.equal(selectFinancialDetailDay('2021-04-12', east), '');
 });
 
+test('the current UTC chart bar opens local today across the evening date boundary', () => {
+  const options = { now: Date.parse('2026-10-30T02:55:00Z'), timeZone: 'America/New_York', source: 'chart' };
+  assert.equal(selectFinancialDetailDay('2026-10-30', options), '2026-10-29',
+    'clicking the current partial UTC bar must open today instead of clearing the swap list');
+  assert.equal(selectFinancialDetailDay('2026-10-29', options), '2026-10-29');
+  assert.equal(selectFinancialDetailDay('2026-10-28', options), '2026-10-28',
+    'historical chart labels preserve the existing calendar-day selection');
+  assert.equal(selectFinancialDetailDay('2026-10-31', options), '', 'future UTC bars are invalid');
+  assert.equal(selectFinancialDetailDay('2026-10-30', { ...options, source: 'picker' }), '',
+    'manual date entry must still reject tomorrow locally');
+});
+
+test('current UTC chart selection follows local today east of UTC and after DST changes', () => {
+  const east = { now: Date.parse('2026-10-29T12:30:00Z'), timeZone: 'Pacific/Kiritimati', source: 'chart' };
+  assert.equal(selectFinancialDetailDay('2026-10-29', east), '2026-10-30');
+  assert.equal(selectFinancialDetailDay('2026-10-30', east), '',
+    'a future UTC chart bucket stays invalid even if that local day has already begun');
+  assert.equal(selectFinancialDetailDay('2026-11-02', {
+    now: Date.parse('2026-11-02T04:30:00Z'), timeZone: 'America/New_York', source: 'chart'
+  }), '2026-11-01');
+  assert.equal(selectFinancialDetailDay('2026-11-02', {
+    now: Date.parse('2026-11-02T05:30:00Z'), timeZone: 'America/New_York', source: 'chart'
+  }), '2026-11-02');
+});
+
 test('frontend day request includes the selected browser timezone', async t => {
   const urls = [];
   t.mock.method(globalThis, 'fetch', async url => {
