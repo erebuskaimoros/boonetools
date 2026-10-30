@@ -42,6 +42,30 @@ test('one verified anchor reconstructs a contiguous chunk and persists method pl
   assert.equal(db.writes[0].emissions_evidence.reserve_before_rewards_e8, '2534440353693046');
 });
 
+test('the live tail waits to share one anchor while backlog and aged tails proceed', async () => {
+  const nowMs = Date.parse('2026-10-30T03:00:00Z');
+  const live = (height, ageMs) => ({ ...row(height), block_time_s: (nowMs - ageMs) / 1000 });
+  const repair = async (rows) => {
+    const anchors = [];
+    const result = await repairFinancialReserveEmissions(database(rows), { now: () => nowMs,
+      fetchAnchor: async (height) => { anchors.push(height); return anchor(height); } });
+    return { anchors, result };
+  };
+
+  // Two fresh live blocks wait; the older backlog island still gets its anchor.
+  const waiting = await repair([live(28204120, 6_000), live(28204119, 12_000), row(28204110), row(28204109)]);
+  assert.deepEqual(waiting.anchors, [28204110]);
+  assert.equal(waiting.result.waiting, 2);
+  assert.equal(waiting.result.complete, true);
+
+  // A tail that has waited long enough, or grown to a full batch, is anchored once.
+  const aged = await repair([live(28204120, 6_000), live(28204119, 121_000)]);
+  assert.deepEqual(aged.anchors, [28204120]);
+  const full = await repair(Array.from({ length: 20 }, (_, index) => live(28204150 - index, 6_000)));
+  assert.deepEqual(full.anchors, [28204150]);
+  assert.equal(full.result.reconstructed, 20);
+});
+
 test('a repeated unsupported observation is deferred in one bounded database write', async () => {
   const db = database(Array.from({ length: 100 }, (_, offset) => row(28204118 - offset, { rewardEventCount: 0 })));
   const result = await repairFinancialReserveEmissions(db, { fetchAnchor: async () => { throw new Error('must not acquire'); } });

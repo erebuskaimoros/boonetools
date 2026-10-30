@@ -63,6 +63,12 @@ async function persistReplay(client, rows, replay, anchor, now) {
   return result.rowCount || 0;
 }
 
+// One anchor (three height-pinned RPC queries) covers a whole contiguous run.
+// Wait for the newest run to grow before anchoring it instead of anchoring
+// every live block on its own, unless its oldest block has waited this long.
+export const RESERVE_LIVE_BATCH_BLOCKS = 20;
+export const RESERVE_LIVE_BATCH_MAX_WAIT_MS = 2 * 60_000;
+
 function invalidAnchor(error) {
   return /unsupported reserve|invalid (?:historical )?reserve|rpc did not return the requested reserve|historical reserve rune balance unavailable/i.test(error.message || '');
 }
@@ -84,7 +90,7 @@ export async function repairFinancialReserveEmissions(client, options = {}) {
   const result = { requested: 0, reconstructed: 0, deferred: 0, chunks: 0, complete: false, errors: [] };
   if (options.signal?.aborted) return result;
   const { rows } = await client.query(
-    `select height::text, reserve_observation
+    `select height::text, reserve_observation, extract(epoch from block_time)::float8 as block_time_s
      from financials_reward_blocks
      where height >= $1 and ($2::bigint is null or block_time >= to_timestamp($2))
        and reserve_observation is not null
@@ -113,6 +119,14 @@ export async function repairFinancialReserveEmissions(client, options = {}) {
     current.push(row);
   }
   if (current.length) chunks.push(current);
+  const liveBatchBlocks = Math.max(1, Math.trunc(options.liveBatchBlocks ?? RESERVE_LIVE_BATCH_BLOCKS));
+  const liveBatchMaxWaitMs = Math.max(0, Number(options.liveBatchMaxWaitMs ?? RESERVE_LIVE_BATCH_MAX_WAIT_MS));
+  const newest = chunks[0];
+  const newestWaitedMs = now() - Number(newest?.at(-1)?.block_time_s) * 1000;
+  if (newest && newest[0] === rows[0] && newest.length < liveBatchBlocks && newestWaitedMs < liveBatchMaxWaitMs) {
+    chunks.shift();
+    result.waiting = newest.length;
+  }
   // Anchors are the expensive step and one covers up to chunkSize blocks, so
   // anchor the largest chunk first (stable sort: ties stay newest-first). Pure
   // newest-first let a few live blocks spend the budget and starve a backlog.
@@ -151,6 +165,6 @@ export async function repairFinancialReserveEmissions(client, options = {}) {
     }
     result.reconstructed += await persistReplay(client, chunk, replay, anchor, now);
   }
-  result.complete = rows.length < limit && result.reconstructed === rows.length && result.deferred === 0;
+  result.complete = rows.length < limit && result.reconstructed + (result.waiting || 0) === rows.length && result.deferred === 0;
   return result;
 }
