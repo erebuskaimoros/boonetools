@@ -5,6 +5,7 @@ import {
   MIDGARD_BASE,
   MidgardClient
 } from '../src/lib/api/midgard.js';
+import { MIDGARD_ENDPOINTS, fetchMidgardJSON } from '../src/lib/utils/api.js';
 
 const TEST_MIDGARD_FALLBACK_BASE = 'https://midgard-fallback.example/v2';
 
@@ -103,6 +104,59 @@ test('getActions falls back when the primary origin ignores a small limit', asyn
       `${MIDGARD_BASE}/actions?type=swap&limit=3`,
       `${TEST_MIDGARD_FALLBACK_BASE}/actions?type=swap&limit=3`
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('getActions stops when the primary origin is rate-limited', async () => {
+  const client = new MidgardClient();
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+
+    if (url === `${MIDGARD_BASE}/actions?address=thor1bond&type=bond&limit=50&offset=0`) {
+      return createJsonResponse({ error: 'rate limited' }, 429, 'Too Many Requests');
+    }
+
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+
+  try {
+    await assert.rejects(
+      () => client.getActions({
+        address: 'thor1bond',
+        type: 'bond',
+        limit: 50,
+        offset: 0
+      }, { cache: false }),
+      /429|Too Many Requests/
+    );
+    assert.deepEqual(calls, [
+      `${MIDGARD_BASE}/actions?address=thor1bond&type=bond&limit=50&offset=0`
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchMidgardJSON stops on a primary rate limit without probing fallback', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+
+  globalThis.fetch = async (url) => {
+    calls.push(url);
+    return createJsonResponse({ error: 'rate limited' }, 429);
+  };
+
+  try {
+    await assert.rejects(
+      () => fetchMidgardJSON('/v2/pools'),
+      /rate limited|429/i
+    );
+    assert.deepEqual(calls, [`${MIDGARD_ENDPOINTS.primary}/v2/pools`]);
   } finally {
     globalThis.fetch = originalFetch;
   }

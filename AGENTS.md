@@ -15,6 +15,19 @@
 - See [development-workflow.md](docs/development-workflow.md) for setup,
   focused checks, linked-worktree guidance, and release verification.
 
+## Tests
+
+- Test behavior through the module that owns it: models, chart builders,
+  handlers and jobs. Do not add tests that regex-match `.svelte` markup, CSS,
+  user-facing copy, deploy scripts or migration SQL; verify UI changes in the
+  browser instead.
+- Routes and navigation are covered by the registry table in
+  `tests/navigation-search.test.js`; systemd units and job wiring by the rules in
+  `backend/tests/production-units.test.js`. Update those tables or rules instead
+  of adding per-feature assertions.
+- Put a bug-reproducing test in the existing test file for that module, not in
+  a new `*-regression.test.js` file.
+
 ## Shared Context
 
 - Resolve the primary checkout with `git worktree list --porcelain`, then locate

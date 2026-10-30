@@ -1,22 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { normalizePoolAnalysisSummary, selectPoolAnalysisPeriod, poolAnalysisPeriodDescription, poolAnalysisWindowLabel } from '../src/lib/pool-analysis/model.js';
-
-test('Pool Analysis initially selects 24H activity without changing the chart range', async () => {
-  const source = await readFile(new URL('../src/lib/PoolAnalysis.svelte', import.meta.url), 'utf8');
-  const initialPeriod = source.match(/let tablePeriodId = '([^']+)'/)?.[1];
-  assert.equal(initialPeriod, '24h');
-  assert.match(source, /let rangeId = '30d'/);
-  const dashboard = normalizePoolAnalysisSummary({ pools: [{ asset: 'BTC.BTC', period_metrics: {
-    '24h': { volume_usd: 123, fees_usd: 4 },
-    '30d': { volume_usd: 3690, fees_usd: 120 }
-  } }] });
-  const initialRow = selectPoolAnalysisPeriod(dashboard.pools[0], initialPeriod);
-  assert.equal(initialRow.selectedPeriodDays, 1);
-  assert.equal(initialRow.periodVolumeUsd, 123);
-  assert.equal(initialRow.periodFeesUsd, 4);
-});
 
 test('selected Pool Analysis periods retain exact bounds and stale/incomplete state', () => {
   const payload = { pools: [{ asset: 'BTC.BTC', period_metrics: {
@@ -32,7 +16,6 @@ test('selected Pool Analysis periods retain exact bounds and stale/incomplete st
   assert.equal(day.usdFeeEstimate, true);
   assert.equal(dashboard.pools[0].periodIncomplete, true);
 });
-
 
 test('period descriptions distinguish exact rolling windows from completed-day legacy data', () => {
   assert.equal(poolAnalysisPeriodDescription({ mode: 'rolling' }, '24h'), 'the preceding 24 hours');
@@ -55,15 +38,4 @@ test('quarter-hour periods distinguish retained daily history from ready rolling
   assert.equal(poolAnalysisWindowLabel(dashboard.pools[0], dashboard.period), 'FALLBACK · COMPLETED DAYS');
   assert.match(poolAnalysisPeriodDescription(dashboard.period, '30d'), /15-minute history/);
   assert.match(poolAnalysisPeriodDescription(dashboard.period, '30d'), /30 completed UTC days/);
-});
-
-test('Pool Analysis marks affected fee cells while keeping healthy cells compact', async () => {
-  const source = await readFile(
-    new URL('../src/lib/PoolAnalysis.svelte', import.meta.url),
-    'utf8'
-  );
-  assert.doesNotMatch(source, /<small class="period-mode">/);
-  assert.doesNotMatch(source, /<small class="period-cutoff">/);
-  assert.match(source, /\{#if activityStatus\}<small class="activity-status">\{activityStatus\}<\/small>\{\/if\}/);
-  assert.match(source, /\{#if fallbackCount > 0\}/);
 });

@@ -117,26 +117,3 @@ test('Bond tab restores all eight tracker metric cards above the history plot', 
   assert.match(html, /19\.12%/);
   assert.match(html.toLowerCase(), /halted/);
 });
-
-test('Bond history exposes the same native and calendar chart tools as Bond Tracker', async () => {
-  const source = await readFile(new URL('../src/lib/position-tracker/BondHistory.svelte', import.meta.url), 'utf8');
-  assert.match(source, /<EventTimeSeriesChart\b/);
-  assert.match(source, /bind:hidden=/, 'native and calendar legends must share visibility');
-  assert.match(source, /refreshKey/, 'refreshing the dashboard must also reload its history');
-});
-
-test('Bond History provides the shared currency selector in its own header controls', async () => {
-  const source = await readFile(new URL('../src/lib/position-tracker/BondHistory.svelte', import.meta.url), 'utf8');
-  const ast = parse(source);
-  let selectorInHeader = false;
-  function visit(node, inHeader = false) {
-    const header = inHeader || node.attributes?.some((attribute) => attribute.name === 'class'
-      && attribute.value?.some((part) => part.type === 'Text' && part.data.split(/\s+/).includes('block-actions')));
-    if (node.type === 'InlineComponent' && node.name === 'CurrencySelector' && header) selectorInHeader = true;
-    for (const child of node.children || []) visit(child, header);
-  }
-  visit(ast.html);
-  assert.ok(selectorInHeader, 'currency selection must be available beside Bond History without scrolling to the page header');
-  assert.ok(ast.instance.content.body.some((node) => node.type === 'ImportDeclaration'
-    && node.source.value.endsWith('/components/CurrencySelector.svelte')), 'reuse the selector bound to the page currency store');
-});

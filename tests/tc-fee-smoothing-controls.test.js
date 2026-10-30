@@ -28,9 +28,6 @@ test('fee share menu has only exclusive 7D/30D choices with a clear-to-raw state
     assert.doesNotMatch(body, /90-day|BTC|ETH|STABLECOINS|OTHER/);
     assert.match(body, /Clear it to restore/);
   }
-  assert.match(controlSource, /value = value === days \? 0 : days/);
-  assert.match(controlSource, /event.key === 'Escape'/);
-  assert.match(controlSource, /trigger\?\.focus\(\)/);
 });
 
 test('shared toolbar retains legacy overlays by default and allows a static composition key', () => {
@@ -42,14 +39,4 @@ test('shared toolbar retains legacy overlays by default and allows a static comp
   const composition = render(Tools, { props: { series, showRollingControls: false, interactiveLegend: false } }).body;
   assert.doesNotMatch(composition, /<input\b|ROLLING AVGS/);
   assert.match(composition, /class="series-label/);
-});
-
-test('only the composition opts out of generic overlays and keeps its custom control in the toolbar', async () => {
-  const component = await source('tc-fee-dash/PoolFeeShareChart.svelte');
-  assert.match(component, /showRollingControls=\{false\} interactiveLegend=\{false\}/);
-  assert.match(component, /<FeeShareRollingControl slot="legend-extra" bind:value=\{smoothingDays\}/);
-  assert.match(component, /feeHistory: history/);
-  const shared = await source('charts/TimeSeriesChart.svelte');
-  assert.match(shared, /export let showRollingControls = true/);
-  assert.match(shared, /export let interactiveLegend = true/);
 });

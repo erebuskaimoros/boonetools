@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 
 import {
   POOL_DISLOCATION_MODEL_KEY,
@@ -645,45 +644,4 @@ test('summary retains recent trading state through a failed refresh and expires 
   assert.equal(expired.body.pools[0].trading_status_known, false);
   assert.equal(expired.body.sources.trading.status, 'error');
   assert.match(expired.body.warnings[0], /unavailable or stale/);
-});
-
-test('migration, job registry, timer, and deploy encode the production contract', async () => {
-  const [
-    migration,
-    provenanceMigration,
-    referenceCorrectionMigration,
-    registry,
-    service,
-    backfillService,
-    repairService,
-    timer,
-    repairTimer,
-  ] = await Promise.all([
-    readFile(new URL('../migrations/031_pool_dislocation.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../migrations/033_pool_dislocation_provenance.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../migrations/034_pool_dislocation_exact_binance_markets.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pool-dislocation.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pool-dislocation-backfill.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pool-dislocation-repair.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pool-dislocation.timer', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pool-dislocation-repair.timer', import.meta.url), 'utf8'),
-  ]);
-  assert.match(migration, /primary key \(observed_at, asset\)/i);
-  assert.match(provenanceMigration, /historical_backfill/);
-  assert.match(provenanceMigration, /kline-close/);
-  assert.match(referenceCorrectionMigration, /WBTCUSDT/);
-  assert.match(referenceCorrectionMigration, /BSC\.BTCB/);
-  assert.match(referenceCorrectionMigration, /binance_price_usd = null/);
-  assert.match(registry, /'pool-dislocation-backfill': runPoolDislocationBackfill/);
-  assert.match(registry, /'pool-dislocation-repair': runPoolDislocationRepair/);
-  assert.match(registry, /'pool-dislocation-scheduler': runPoolDislocationScheduler/);
-  assert.match(service, /pool-dislocation-scheduler/);
-  assert.match(service, /After=.*boonetools-thornode-core-snapshot\.service/);
-  assert.match(backfillService, /pool-dislocation-backfill/);
-  assert.match(backfillService, /TimeoutStartSec=2h/);
-  assert.match(repairService, /pool-dislocation-repair/);
-  assert.match(repairService, /TimeoutStartSec=10m/);
-  assert.match(timer, /OnCalendar=\*-\*-\* \*:0\/5:00 UTC/);
-  assert.match(repairTimer, /OnCalendar=\*-\*-\* \*:2\/15:00 UTC/);
 });

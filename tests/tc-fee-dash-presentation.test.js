@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 
 import { tcFeeNavigatorIndexFromPixel } from '../src/lib/tc-fee-dash/charts.js';
 import {
@@ -25,20 +24,4 @@ test('TC fee chart primitives keep halt colors and navigator bounds stable', () 
   assert.equal(tcFeeNavigatorIndexFromPixel(-10, 100, 11), 0);
   assert.equal(tcFeeNavigatorIndexFromPixel(50, 100, 11), 5);
   assert.equal(tcFeeNavigatorIndexFromPixel(120, 100, 11), 10);
-});
-
-test('TC fee dashboard renders two current system-income distribution cards', async () => {
-  const source = await readFile(new URL('../src/lib/TCFeeDash.svelte', import.meta.url), 'utf8');
-
-  assert.match(source, /SYSTEM INCOME DISTRIBUTION/);
-  assert.match(source, /05A[\s\S]*ACTIVE ALLOCATION/);
-  assert.match(source, /05B[\s\S]*DISTRIBUTION FLOW/);
-  assert.match(source, /buildSystemIncomeDistribution/);
-  assert.match(source, /createSystemIncomeDistributionChart/);
-  assert.match(source, /fetchJSONWithFallback\('\/thorchain\/network'\)/);
-  assert.match(source, /fetchJSONWithFallback\('\/thorchain\/nodes'\)/);
-  assert.match(source, /buildSystemIncomeDistribution\(mimir, constants, network, nodes\)/);
-  assert.match(source, /Bond Providers and Liquidity Providers/);
-  assert.match(source, /clearInterval\(distributionRefreshTimer\)/);
-  assert.doesNotMatch(source, /Bond Providers receive the remainder/);
 });

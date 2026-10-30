@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
 import { buildPoolAnalysisOption } from '../src/lib/pool-analysis/charts.js';
 import { POOL_ROLLING_AVERAGES, buildPoolRollingAverages, mergePoolRollingHistory } from '../src/lib/pool-analysis/rolling-averages.js';
 import { createTimeSeriesController } from '../src/lib/charts/controller.js';
@@ -91,18 +90,6 @@ test('partial windows are labeled without extrapolation and missing warmup remai
   assert.match(option.tooltip.formatter([{ dataIndex: 9 }]), /7D AVG FEES: \$6.00 · PARTIAL WINDOW/);
   assert.match(option.tooltip.formatter([{ dataIndex: 9 }]), /30D AVG FEES: unavailable/);
   assert.equal(buildPoolAnalysisOption([], { rollingAverages: ids }).series.length, 9);
-});
-
-test('Pool rolling menu is multi-select and history loading never replaces the selected chart range', async () => {
-  const source = await readFile(new URL('../src/lib/PoolAnalysis.svelte', import.meta.url), 'utf8');
-  const menu = await readFile(new URL('../src/lib/charts/ChartTools.svelte', import.meta.url), 'utf8');
-  assert.match(menu, /type="checkbox" checked=\{rolling.includes/);
-  assert.match(menu, /event.key === 'Escape'/);
-  assert.match(source, /onRollingChange=\{/);
-  const loader = source.slice(source.indexOf('async function loadRollingHistory'), source.indexOf('function resetZoom'));
-  assert.match(loader, /fetchPoolAnalysisSeries\(asset, 'all'/);
-  assert.match(loader, /sequence !== rollingSequence \|\| asset !== selectedAsset/);
-  assert.doesNotMatch(loader, /(?:selectedSeries|rangeId|zoomWindow)\s*=/);
 });
 
 test('real ECharts adds and removes all six overlays while retaining UTC zoom and correct axes', async () => {

@@ -87,8 +87,6 @@ test('WhaleWatching retains full token identifiers for native and trade logos', 
   assertAssetLogos((asset) => getAssetIcon(asset.replace('.', '~')));
   assert.equal(chainIcons.ZEC, '/assets/chains/ZEC.svg');
   assert.equal(getAssetIcon('UNKNOWN.UNKNOWN'), '/assets/coins/fallback-logo.svg');
-  const source = readFileSync(new URL('../src/lib/WhaleWatching.svelte', import.meta.url), 'utf8');
-  for (const side of ['from', 'to']) assert.ok(source.includes(`getAssetIcon(whale.${side}.originalAsset)`));
 });
 
 test('RunePool resolves token artwork from full asset IDs, not display labels or chains', () => {
@@ -96,9 +94,6 @@ test('RunePool resolves token artwork from full asset IDs, not display labels or
   assertAssetLogos((asset) => getPoolLogo({ asset, pool: asset.split('.')[1].split('-')[0] }));
   assert.equal(getPoolLogo({ pool: 'BTC' }), '/assets/coins/bitcoin-btc-logo.svg');
   assert.equal(getPoolLogo({ pool: 'UNKNOWN' }), '/assets/coins/fallback-logo.svg');
-  const source = readFileSync(new URL('../src/lib/RunePool.svelte', import.meta.url), 'utf8');
-  assert.match(source, /asset:\s*pos\.pool/);
-  assert.match(source, /src=\{getPoolLogo\(pool\)\}/);
 });
 
 test('TokenWhitelist identifies the Base VVV contract with its shared local logo', () => {
