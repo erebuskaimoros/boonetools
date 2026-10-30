@@ -3,7 +3,7 @@ import { config } from '../lib/config.js';
 import { safeNumber, sleep } from '../lib/utils.js';
 import { executeDuneQueryRows, isDuneLimitError, summarizeDuneError } from './dune.js';
 import { fetchMidgard, fetchMidgardSwapHistory } from './midgard.js';
-import { computeFeesPerBillionUsd } from './tc-fee-dash.js';
+import { computeFeesPerBillionUsd } from '../../../shared/tc-fee-dash.js';
 import { requestProviderJson } from '../lib/provider-json.js';
 import { isProviderRateLimitError } from '../../../shared/provider-policy.js';
 import { LLAMA_API } from '../../../shared/external-providers.js';

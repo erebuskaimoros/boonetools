@@ -1,8 +1,10 @@
 import { safeNumber } from '../lib/utils.js';
 import { buildTcFeeComposition } from './tc-fee-composition.js';
-
-const BILLION = 1_000_000_000;
-const BASIS_POINTS = 10_000;
+import {
+  computeFeesPerBillionUsd,
+  computeIncomeVolumeBps,
+  summarizeTcFeeRows
+} from '../../../shared/tc-fee-dash.js';
 
 function toDateKey(value) {
   if (!value) return '';
@@ -10,18 +12,6 @@ function toDateKey(value) {
     return value.toISOString().slice(0, 10);
   }
   return String(value).slice(0, 10);
-}
-
-export function computeFeesPerBillionUsd(tcFeesUsd, globalExchangeVolumeUsd) {
-  const fees = safeNumber(tcFeesUsd);
-  const volume = safeNumber(globalExchangeVolumeUsd);
-  return fees > 0 && volume > 0 ? (fees / volume) * BILLION : 0;
-}
-
-export function computeIncomeVolumeBps(incomeUsd, thorchainVolumeUsd) {
-  const income = safeNumber(incomeUsd);
-  const volume = safeNumber(thorchainVolumeUsd);
-  return income >= 0 && volume > 0 ? (income / volume) * BASIS_POINTS : null;
 }
 
 export function normalizeTcFeeDashRow(row) {
@@ -51,51 +41,6 @@ export function normalizeTcFeeDashRow(row) {
     dailyRangeHighFeesPerBillionUsd: safeNumber(row.daily_range_high_fees_per_billion_usd),
     sourceLabel: String(row.source_label || ''),
     sourceThread: String(row.source_thread || '')
-  };
-}
-
-export function summarizeTcFeeDashRows(rows) {
-  if (!rows.length) {
-    return {
-      windowCount: 0,
-      totalTcFeesUsd: 0,
-      totalGlobalExchangeVolumeUsd: 0,
-      totalThorchainVolumeUsd: 0,
-      weightedFeesPerBillionUsd: 0,
-      weightedIncomeVolumeBps: null,
-      latest: null,
-      peak: null
-    };
-  }
-
-  const totalTcFeesUsd = rows.reduce((sum, row) => sum + row.tcFeesUsd, 0);
-  const totalGlobalExchangeVolumeUsd = rows.reduce(
-    (sum, row) => sum + row.globalExchangeVolumeUsd,
-    0
-  );
-  const totalThorchainVolumeUsd = rows.reduce(
-    (sum, row) => sum + row.thorchainVolumeUsd,
-    0
-  );
-  const peak = rows.reduce((best, row) => (
-    row.feesPerBillionUsd > best.feesPerBillionUsd ? row : best
-  ), rows[0]);
-
-  return {
-    windowCount: rows.length,
-    totalTcFeesUsd,
-    totalGlobalExchangeVolumeUsd,
-    totalThorchainVolumeUsd,
-    weightedFeesPerBillionUsd: computeFeesPerBillionUsd(
-      totalTcFeesUsd,
-      totalGlobalExchangeVolumeUsd
-    ),
-    weightedIncomeVolumeBps: computeIncomeVolumeBps(
-      totalTcFeesUsd,
-      totalThorchainVolumeUsd
-    ),
-    latest: rows.at(-1),
-    peak
   };
 }
 
@@ -151,7 +96,7 @@ export async function buildTcFeeDashPayload(client, options = {}) {
         thorchainVolumeBasis: 'executed-leg-usd',
         incomeVolumeScope: 'Midgard liquidity fees divided by Midgard THORChain executed-leg swap volume',
         updatedAt,
-        ...summarizeTcFeeDashRows(rows)
+        ...summarizeTcFeeRows(rows)
       },
       rows,
       feeComposition: {
