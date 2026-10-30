@@ -11,11 +11,10 @@ import {
   withEventTransaction
 } from '../lib/provenance.js';
 import { sleep } from '../lib/utils.js';
-import { executeDuneQueryRows, formatDuneDateTime } from './dune.js';
 import { fetchThorchainRpc } from './rpc.js';
 import { fetchThorchain } from './thornode.js';
 import { resolveThorchainBlockTime } from './chain-data.js';
-import { loadVoteQueryProgress, saveVoteQueryProgress, loadVoteScan, saveVoteScan, voteScanWindow } from './node-vote-acquisition.js';
+import { loadVoteScan, saveVoteScan, voteScanWindow } from './node-vote-acquisition.js';
 
 const THORNODE_TIMEOUT_MS = 8000;
 const TX_SEARCH_MAX_PAGE_SIZE = 100;
@@ -156,18 +155,6 @@ function toIsoOrNull(value) {
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
-function parseJsonObject(value, fallback = {}) {
-  if (value && typeof value === 'object') {
-    return value;
-  }
-  try {
-    const parsed = JSON.parse(String(value || ''));
-    return parsed && typeof parsed === 'object' ? parsed : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
 function buildEventKey({ txId, height, txIndex, eventIndex, eventType, attrs }) {
   if (txId) {
     return `${txId}:${eventIndex}`;
@@ -268,58 +255,6 @@ export function parseNodeVoteCosmosTxResponse(txResponse) {
     blockTime: txResponse?.timestamp || null,
     source: 'rpc'
   });
-}
-
-export function buildNodeVoteRowsFromDune(rows) {
-  return (Array.isArray(rows) ? rows : [])
-    .map((row) => {
-      const mimirKey = String(row?.mimir_key || '').trim().toUpperCase();
-      const nodeAddress = String(row?.node_address || '').trim();
-      const eventKey = String(row?.event_key || '').trim();
-      const blockTime = toIsoOrNull(row?.block_time);
-
-      if (!eventKey || !mimirKey || !nodeAddress || !blockTime) {
-        return null;
-      }
-
-      return {
-        event_key: eventKey,
-        tx_id: String(row?.tx_id || '').toUpperCase(),
-        height: Number(row?.height || 0) || 0,
-        block_time: blockTime,
-        event_index: String(row?.event_index || '0'),
-        node_address: nodeAddress,
-        node_operator_address: String(row?.node_operator_address || ''),
-        node_status: String(row?.node_status || ''),
-        mimir_key: mimirKey,
-        vote_value: String(row?.vote_value ?? '').trim(),
-        vote_value_numeric: numericVoteValue(row?.vote_value),
-        source: 'dune',
-        raw_event: {
-          ...parseJsonObject(row?.raw_event),
-          dune_query_id: config.nodeVotesDuneQueryId
-        },
-        observed_at: toIsoOrNull(row?.observed_at) || new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-    })
-    .filter(Boolean);
-}
-
-async function fetchNodeVoteDuneRows(startTime, endTime) {
-  const result = await executeDuneQueryRows(config.nodeVotesDuneQueryId, {
-    start_time: formatDuneDateTime(startTime),
-    end_time: formatDuneDateTime(endTime)
-  });
-  const total = Number(result.metadata?.total_row_count ?? result.metadata?.row_count ?? result.rows.length);
-  if (total > result.rows.length || result.raw?.next_uri || result.raw?.next_offset) {
-    throw new Error('Truncated Dune node-vote result');
-  }
-
-  return {
-    executionId: result.executionId,
-    rows: buildNodeVoteRowsFromDune(result.rows)
-  };
 }
 
 export async function upsertNodeVotes(client, rows) {
@@ -917,17 +852,6 @@ export async function runNodeVoteBackfill(client, options = {}) {
   const fullStartTime = sixMonthsAgo(new Date(latestTime)).toISOString();
   let savedPrimary = await loadVoteScan(client, 'mimir');
   let savedUpgrade = await loadVoteScan(client, 'upgrades');
-  let queryProgress = await loadVoteQueryProgress(client);
-  const legacyQueryThrough = toIsoOrNull(previousSyncState?.end_time);
-  if (!queryProgress && previousSyncState?.stats_json?.source === 'dune'
-    && !previousSyncState.stats_json.dune_error && legacyQueryThrough
-    && Date.parse(legacyQueryThrough) <= Date.parse(latestTime)) {
-    queryProgress = await saveVoteQueryProgress(client, {
-      queriedFrom: toIsoOrNull(previousSyncState.stats_json.start_time || previousSyncState.start_time),
-      queriedThrough: legacyQueryThrough, executionId: previousSyncState.stats_json.dune_execution_id || '',
-      seededFrom: 'node_vote_sync_state'
-    });
-  }
   const window = voteScanWindow({ previous: savedPrimary,
     endTime: latestTime, startTime: options.startTime, fullStartTime });
   const upgradeWindow = voteScanWindow({ previous: savedUpgrade,
@@ -952,9 +876,7 @@ export async function runNodeVoteBackfill(client, options = {}) {
   let rows = [];
   let startHeight = 0;
   let endHeight = 0;
-  let source = 'dune';
-  let duneExecutionId = '';
-  let duneError = '';
+  let source = 'rpc';
   let cosmosRestError = '';
   let txSearchTotal = 0;
   let txCount = 0;
@@ -963,52 +885,28 @@ export async function runNodeVoteBackfill(client, options = {}) {
   let upgradeError = '';
 
   let primaryError = '';
-  let duneAvailable = false;
-  let pendingQueryProgress = null;
-  const previousQueryTime = Date.parse(queryProgress?.queriedThrough || '');
-  const duneStartTime = options.startTime || new Date(Number.isFinite(previousQueryTime)
-    ? Math.max(Date.parse(fullStartTime), previousQueryTime - Math.max(1, config.nodeVotesBackfillLookbackDays) * 86_400_000)
-    : Date.parse(fullStartTime)).toISOString();
-  // Query progress only records a successful Dune request. Its index has no
-  // completeness watermark, so it is separate from verified RPC coverage.
-  if (options.fetchDuneRows || (config.duneApiKey && config.nodeVotesDuneQueryId)) {
+  try {
+    const result = await (options.fetchRpcRows || fetchNodeVoteRowsFromRpc)(startTime, latestTime, scanOptions);
+    primaryRange = { startTime, ...result };
+    rows = result.rows;
+    startHeight = result.startHeight;
+    endHeight = result.endHeight;
+    txSearchTotal = result.total;
+    txCount = result.txs.length;
+  } catch (error) {
+    primaryError = error?.message || String(error);
     try {
-      const result = await (options.fetchDuneRows || fetchNodeVoteDuneRows)(duneStartTime, latestTime);
+      const result = await (options.fetchCosmosRows || fetchNodeVoteRowsFromCosmos)(startTime, latestTime, scanOptions);
       rows = result.rows;
-      duneExecutionId = result.executionId;
-      txSearchTotal = rows.length;
-      txCount = rows.length;
-      source = 'dune';
-      duneAvailable = true;
-      pendingQueryProgress = { queriedFrom: duneStartTime, queriedThrough: latestTime, executionId: result.executionId };
-    } catch (error) { duneError = error?.message || String(error); }
-  }
-  if (!duneAvailable) {
-    try {
-      const result = await (options.fetchRpcRows || fetchNodeVoteRowsFromRpc)(startTime, latestTime, scanOptions);
-      primaryRange = { startTime, ...result };
-      rows = result.rows;
-      startHeight = result.startHeight;
-      endHeight = result.endHeight;
       txSearchTotal = result.total;
       txCount = result.txs.length;
-      source = 'rpc';
-    } catch (error) {
-      primaryError = error?.message || String(error);
-      try {
-        const result = await (options.fetchCosmosRows || fetchNodeVoteRowsFromCosmos)(startTime, latestTime, scanOptions);
-        rows = result.rows;
-        txSearchTotal = result.total;
-        txCount = result.txs.length;
-        source = 'cosmos-rest';
-      } catch (error) { cosmosRestError = error?.message || String(error); }
-    }
+      source = 'cosmos-rest';
+    } catch (error) { cosmosRestError = error?.message || String(error); }
   }
 
-  // Dune query 7619989 only contains set_node_mimir events. Upgrade stance
-  // changes must therefore be searched independently even when Dune returns a
-  // healthy, non-empty result. Separate proposal/approval/rejection searches
-  // avoid relying on a non-portable OR expression in CometBFT's query grammar.
+  // Upgrade stance changes are searched separately from set_node_mimir votes.
+  // Separate proposal/approval/rejection searches avoid relying on a
+  // non-portable OR expression in CometBFT's query grammar.
   let upgradeRows = [];
   try {
     const upgradeResult = await (options.fetchUpgradeRows || fetchNodeUpgradeRowsFromRpc)(upgradeWindow.startTime, latestTime,
@@ -1022,7 +920,7 @@ export async function runNodeVoteBackfill(client, options = {}) {
   } catch (error) {
     // Current upgrade state is independently overlaid from THORNode's
     // authoritative proposal response. A temporary archive-index failure must
-    // not discard an otherwise healthy Dune/Cosmos Mimir ingestion pass.
+    // not discard an otherwise healthy RPC/Cosmos Mimir ingestion pass.
     upgradeError = error?.message || String(error);
   }
   const mergedRows = new Map();
@@ -1037,7 +935,6 @@ export async function runNodeVoteBackfill(client, options = {}) {
   rows = await (options.enrichRows || enrichRowsWithNodeMetadata)(rows);
 
   const inserted = await (options.upsertVotes || upsertNodeVotes)(client, rows);
-  if (pendingQueryProgress) queryProgress = await saveVoteQueryProgress(client, pendingQueryProgress);
   if (primaryRange) savedPrimary = await saveVoteScan(client, 'mimir', { ...primaryRange, source: 'rpc' });
   if (upgradeRange) savedUpgrade = await saveVoteScan(client, 'upgrades', { ...upgradeRange, source: 'rpc' });
   let protocolMimir = null;
@@ -1056,15 +953,11 @@ export async function runNodeVoteBackfill(client, options = {}) {
   const stats = {
     mode: window.mode,
     source,
-    dune_query_id: config.nodeVotesDuneQueryId || '',
-    dune_execution_id: duneExecutionId,
-    dune_error: duneError,
     cosmos_rest_error: cosmosRestError,
     mimir_error: primaryError,
-    mimir_history_status: primaryError ? 'degraded' : duneAvailable ? 'query-complete' : savedPrimary?.historyComplete === false ? 'partial' : 'complete',
+    mimir_history_status: primaryError ? 'degraded' : savedPrimary?.historyComplete === false ? 'partial' : 'complete',
     mimir_coverage_verified: Boolean(primaryRange),
     mimir_coverage: savedPrimary,
-    mimir_query_progress: queryProgress,
     lookback_days: window.mode === 'incremental' ? 1 / 24 : 0,
     start_height: startHeight,
     end_height: endHeight,
@@ -1095,7 +988,7 @@ export async function runNodeVoteBackfill(client, options = {}) {
     endHeight,
     startTime: displayStartTime,
     endTime: latestTime,
-    complete: !duneAvailable && !primaryError && !upgradeError && !protocolMimirError
+    complete: !primaryError && !upgradeError && !protocolMimirError
       && savedPrimary?.historyComplete !== false && savedUpgrade?.historyComplete !== false && protocolMimir?.history_complete !== false,
     stats
   });

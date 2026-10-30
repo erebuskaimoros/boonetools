@@ -479,7 +479,7 @@
       <div class="head-left">
         <span class="prompt">$</span>
         <span class="cmd">tc-fees</span>
-        <span class="arg">--denom cmc-plus-dune</span>
+        <span class="arg">--denom cmc-plus-dex</span>
       </div>
       <div class="head-right">
         <span class="status">
@@ -496,7 +496,7 @@
     <h1 class="title">TC FEE <span class="accent">CAPTURE</span><span class="cursor">_</span></h1>
     <p class="lede">
       Protocol fee-capture efficiency — THORChain system fees collected per $1B of global
-      exchange volume (CoinMarketCap spot + Dune DEX), with native income-to-volume yield
+      exchange volume (CoinMarketCap spot + DEX), with native income-to-volume yield
       shown below. Higher values mean the network is extracting more revenue per unit of activity.
     </p>
     <div class="rule"></div>
@@ -659,7 +659,7 @@
     <div class="block-head">
       <div class="block-title">
         <span class="block-marker">▌</span>
-        <span>FEES PER $1B CMC + DUNE EXCHANGE VOLUME</span>
+        <span>FEES PER $1B CMC + DEX EXCHANGE VOLUME</span>
       </div>
       <div class="meta-strip">
         <span>[{granularity}]</span>
@@ -704,7 +704,7 @@
         on:dblclick={chartDblClick}
         role="presentation"
       >
-        <canvas bind:this={chartCanvas} aria-label="TC fees per $1B CMC plus Dune exchange volume over time"></canvas>
+        <canvas bind:this={chartCanvas} aria-label="TC fees per $1B CMC plus DEX exchange volume over time"></canvas>
         {#if brush.active && brush.chartType === 'fees'}
           {@const left = Math.min(brush.startX, brush.currentX)}
           {@const width = Math.abs(brush.currentX - brush.startX)}

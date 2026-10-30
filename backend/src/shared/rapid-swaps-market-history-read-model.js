@@ -33,7 +33,7 @@ export async function refreshRapidSwapMarketHistoryReadModel(options = {}) {
     allowStale: true
   }).catch(() => null);
   const startTime = options.marketHistoryStartTime || laterStartTime(
-    config.rapidSwapsDuneStartTime,
+    config.rapidSwapsHistoryStartTime,
     trackerModel?.payload?.tracker_started_at
   );
   return buildAndPublishReadModel({
@@ -49,7 +49,6 @@ export async function refreshRapidSwapMarketHistoryReadModel(options = {}) {
         startTime,
         fetchDune: options.fetchMarketHistoryDune,
         fetchMidgard: options.fetchMarketHistoryMidgard,
-        duneTimeoutMs: options.marketHistoryDuneTimeoutMs,
         midgardTimeoutMs: options.marketHistoryMidgardTimeoutMs
       });
       return {

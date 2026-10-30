@@ -2,7 +2,6 @@ import { backfillOperatorFees } from '../shared/bond-operator-fees.js';
 import { getClient, query } from '../db/pool.js';
 import { upsertRows } from '../db/sql.js';
 import { error, isValidThorAddress, json } from '../lib/http.js';
-import { config } from '../lib/config.js';
 import { requestFromProviders } from '../lib/provider-client.js';
 import { COINGECKO_BASE } from '../../../shared/external-providers.js';
 import {
@@ -11,7 +10,6 @@ import {
   isTransientHistoricalFetchError
 } from '../shared/bond-history.js';
 import { enqueueBondHistoryRefresh } from '../shared/bond-history-refresh-queue.js';
-import { executeDuneQueryRows, summarizeDuneError } from '../shared/dune.js';
 import { fetchStockPrices } from '../shared/stock-prices.js';
 import { fetchChurns, fetchNodes } from '../shared/thornode.js';
 import { processChurn, scanBondActionWindow } from '../shared/bond-history-acquisition.js';
@@ -62,29 +60,6 @@ function normalizeBondTxEvent(bondAddress, action) {
     node_address: nodeAddress.startsWith('thor1') ? nodeAddress : '',
     action_type: String(action?.type || 'bond'),
     raw_action: action || {},
-    updated_at: new Date().toISOString()
-  };
-}
-
-function normalizeDuneBondTxEvent(bondAddress, row) {
-  const actionHeight = Number(row?.action_height);
-  const txId = String(row?.tx_id || '');
-  if (!txId || !Number.isFinite(actionHeight) || actionHeight <= 0) {
-    return null;
-  }
-
-  const nodeAddress = String(row?.node_address || '');
-  return {
-    bond_address: bondAddress,
-    tx_id: txId,
-    action_height: Math.trunc(actionHeight),
-    node_address: nodeAddress.startsWith('thor1') ? nodeAddress : '',
-    action_type: String(row?.action_type || 'bond'),
-    raw_action: {
-      source: 'dune',
-      dune_query_id: config.bondTxEventsDuneQueryId,
-      row
-    },
     updated_at: new Date().toISOString()
   };
 }
@@ -150,19 +125,6 @@ async function scanAndCacheBondTxEvents(bondAddress) {
       events: await loadBondTxEvents(bondAddress, client), complete: Boolean(previous.complete), error: previous.error || ''
     };
     const rows = [];
-    let duneSeededAt = null;
-    let duneError = '';
-    // Dune seeds old events once. Only Midgard's own verified window can establish
-    // its durable incremental boundary; a last matching event is not coverage.
-    if (!previous && config.duneApiKey && config.bondTxEventsDuneQueryId) {
-      try {
-        const result = await executeDuneQueryRows(config.bondTxEventsDuneQueryId, {
-          bond_address: bondAddress, start_time: config.bondTxEventsDuneStartTime, limit: config.bondTxEventsDuneLimit
-        }, { limit: config.bondTxEventsDuneLimit });
-        rows.push(...result.rows.map((row) => normalizeDuneBondTxEvent(bondAddress, row)).filter(Boolean));
-        duneSeededAt = new Date().toISOString();
-      } catch (error) { duneError = summarizeDuneError(error).message; }
-    }
     let scan;
     try {
       scan = await scanBondActionWindow(bondAddress, {
@@ -176,13 +138,13 @@ async function scanAndCacheBondTxEvents(bondAddress) {
     }
     rows.push(...scan.actions.map((action) => normalizeBondTxEvent(bondAddress, action)).filter(Boolean));
     const rowsByKey = new Map(rows.map((row) => [`${row.tx_id}:${row.action_height}`, row]));
-    const error = scan.error || (duneError ? `Dune seed failed; served Midgard (${duneError})` : '');
+    const error = scan.error || '';
     await client.query('begin');
     try {
       await upsertRows(client, 'bond_tx_events', [...rowsByKey.values()], {
         conflictColumns: ['bond_address', 'tx_id', 'action_height'], jsonColumns: ['raw_action']
       });
-      await saveBondTxEventSyncState(client, bondAddress, { ...scan, error, duneSeededAt });
+      await saveBondTxEventSyncState(client, bondAddress, { ...scan, error });
       await client.query('commit');
     } catch (error) { await client.query('rollback'); throw error; }
     return { events: await loadBondTxEvents(bondAddress, client), complete: scan.complete, error };

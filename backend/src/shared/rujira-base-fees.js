@@ -3,7 +3,6 @@ import { query } from '../db/pool.js';
 import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
 import { chunkArray, safeNumber, sleep, toIsoString } from '../lib/utils.js';
-import { executeDuneQueryRows, summarizeDuneError } from './dune.js';
 import { fetchMidgard } from './midgard.js';
 import { isProviderRateLimitError } from '../../../shared/provider-policy.js';
 import { loadRujiraRunePrices } from './rujira-rune-prices.js';
@@ -34,43 +33,6 @@ const KNOWN_REVENUE_COLLECTORS = Object.freeze({
 });
 
 const BASE_FEE_EVENT_KEY_VERSION = 'rujira-base-fee:v2';
-const DUNE_BASE_FEE_CLASSIFICATIONS = Object.freeze({
-  base_collector_conversion: {
-    included: true,
-    sourceContract: BASE_LAYER_REVENUE_COLLECTOR
-  },
-  app_revenue_conversion: {
-    included: true,
-    requireSourceContract: true
-  },
-  fin_base_layer_execution: {
-    included: true,
-    requireSourceContract: true
-  },
-  ghost_base_layer_execution: {
-    included: true,
-    requireSourceContract: true
-  },
-  app_layer_contract_execution: {
-    included: true,
-    requireSourceContract: true
-  },
-  mixed_app_layer_context: {
-    included: true,
-    requireSourceContract: true
-  },
-  ruji_swap_revenue_excluded: {
-    included: false,
-    sourceContract: RUJI_SWAP_REVENUE_COLLECTOR
-  },
-  direct_ruji_swap_excluded: {
-    included: false,
-    sourceContract: RUJIRA_THORCHAIN_SWAP_CONTRACT
-  },
-  mixed_or_excluded_context: {
-    included: false
-  }
-});
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -122,44 +84,11 @@ function normalizeRujiraBaseFeeIdentity(input, fallback = '') {
   };
 }
 
-function parseStrictBoolean(value) {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') {
-    if (value === 1) return true;
-    if (value === 0) return false;
-  }
-  const text = String(value || '').trim().toLowerCase();
-  if (['true', '1', 'yes'].includes(text)) return true;
-  if (['false', '0', 'no'].includes(text)) return false;
-  return null;
-}
-
-function isFiniteNonNegativeNumber(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric >= 0;
-}
-
-function closeEnough(left, right) {
-  const difference = Math.abs(Number(left) - Number(right));
-  const scale = Math.max(Math.abs(Number(left)), Math.abs(Number(right)), 1);
-  return difference <= Math.max(1e-10, scale * 1e-6);
-}
-
 function makeLegacySourceProvenance(contextOrigin, sourceEventKey) {
   return {
     legacy: {
       context_origin: String(contextOrigin || ''),
       source_event_key: String(sourceEventKey || '')
-    }
-  };
-}
-
-function makeDuneSourceProvenance(sourceEventKey) {
-  return {
-    dune: {
-      query_id: String(config.rujiraBaseFeesDuneQueryId || ''),
-      context_origin: 'dune-wasm-tx',
-      source_event_keys: [String(sourceEventKey || '')].filter(Boolean)
     }
   };
 }
@@ -195,28 +124,6 @@ function addDays(value, days) {
   const date = new Date(value);
   date.setUTCDate(date.getUTCDate() + days);
   return date;
-}
-
-function addHours(value, hours) {
-  const date = new Date(value);
-  date.setUTCHours(date.getUTCHours() + hours);
-  return date;
-}
-
-function parseUtcDateTime(value) {
-  const text = String(value || '').trim();
-  if (!text) return null;
-  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)
-    ? `${text.replace(' ', 'T')}Z`
-    : text;
-  const date = new Date(normalized);
-  return Number.isFinite(date.getTime()) ? date : null;
-}
-
-function formatDuneDateTime(value) {
-  const date = value instanceof Date ? value : parseUtcDateTime(value);
-  if (!date) return '';
-  return date.toISOString().slice(0, 19).replace('T', ' ');
 }
 
 function baseRuneToNumber(value) {
@@ -1283,9 +1190,7 @@ function normalizeBaseFeeEventForStorage(event) {
     ? { ...event.source_provenance }
     : {};
   if (!sourceProvenance[source]) {
-    sourceProvenance[source] = source === 'dune'
-      ? makeDuneSourceProvenance(originalEventKey).dune
-      : makeLegacySourceProvenance(event?.context_origin, originalEventKey).legacy;
+    sourceProvenance[source] = makeLegacySourceProvenance(event?.context_origin, originalEventKey).legacy;
   }
 
   const liquidityFeeBase = identity.liquidity_fee_base || '0';
@@ -1406,248 +1311,6 @@ export async function saveRujiraBaseFeeEvents(client, events) {
   }
 
   return normalized.length;
-}
-
-function rejectDuneBaseFeeEvent(reason) {
-  return { row: null, reason };
-}
-
-function normalizeDuneRujiraBaseFeeEvent(row) {
-  const sourceEventKey = String(row?.event_key || '').trim();
-  const parsedBlockTime = parseUtcDateTime(row?.block_time);
-  const identity = normalizeRujiraBaseFeeIdentity({
-    height: row?.height,
-    swap_id: row?.swap_id || row?.tx_id,
-    pool: row?.pool,
-    chain: row?.chain,
-    from_address: row?.from_address,
-    to_address: row?.to_address,
-    memo: row?.memo,
-    liquidity_fee_base: row?.liquidity_fee_base
-  });
-  const classification = String(row?.classification || '').trim().toLowerCase();
-  const policy = DUNE_BASE_FEE_CLASSIFICATIONS[classification];
-  const included = parseStrictBoolean(row?.included);
-  const sourceContract = String(row?.source_contract || '').trim().toLowerCase();
-  const source = String(row?.source || '').trim().toLowerCase();
-  const coin = String(row?.coin || '').trim();
-
-  if (!sourceEventKey) return rejectDuneBaseFeeEvent('missing event_key');
-  if (!parsedBlockTime) return rejectDuneBaseFeeEvent('invalid block_time');
-  if (!identity.height) return rejectDuneBaseFeeEvent('missing height');
-  if (!/^[A-F0-9]{64}(?:-[0-9]+)?$/.test(identity.swap_id)) return rejectDuneBaseFeeEvent('invalid swap_id');
-  if (!identity.pool || !identity.pool.includes('.')) return rejectDuneBaseFeeEvent('invalid pool');
-  if (identity.chain !== 'THOR') return rejectDuneBaseFeeEvent('unexpected swap chain');
-  if (identity.from_address !== RUJIRA_THORCHAIN_SWAP_CONTRACT) {
-    return rejectDuneBaseFeeEvent('unexpected swap sender');
-  }
-  if (source && source !== 'dune') return rejectDuneBaseFeeEvent('unexpected source');
-  if (!policy) return rejectDuneBaseFeeEvent('unsupported classification');
-  if (included === null || included !== policy.included) {
-    return rejectDuneBaseFeeEvent('classification/included mismatch');
-  }
-  if (policy.sourceContract && sourceContract !== policy.sourceContract) {
-    return rejectDuneBaseFeeEvent('classification/source_contract mismatch');
-  }
-  if (policy.requireSourceContract && !sourceContract.startsWith('thor1')) {
-    return rejectDuneBaseFeeEvent('missing source_contract');
-  }
-  const allowsMissingMemo = classification === 'direct_ruji_swap_excluded' && !included;
-  if (!identity.to_address
-    || (!identity.memo && !allowsMissingMemo)
-    || identity.memo.startsWith('%%skipped%%')) {
-    return rejectDuneBaseFeeEvent('missing swap destination or memo');
-  }
-  if (!coin) return rejectDuneBaseFeeEvent('missing swap coin');
-  if (!identity.liquidity_fee_base) return rejectDuneBaseFeeEvent('invalid liquidity_fee_base');
-  if (sourceContract === RUJI_SWAP_REVENUE_COLLECTOR && classification !== 'ruji_swap_revenue_excluded') {
-    return rejectDuneBaseFeeEvent('RUJI Swap collector must be excluded');
-  }
-  if (sourceContract === RUJIRA_THORCHAIN_SWAP_CONTRACT && classification !== 'direct_ruji_swap_excluded') {
-    return rejectDuneBaseFeeEvent('direct RUJI Swap path must be excluded');
-  }
-  if (sourceContract === BASE_LAYER_REVENUE_COLLECTOR && classification !== 'base_collector_conversion') {
-    return rejectDuneBaseFeeEvent('Base Layer collector classification mismatch');
-  }
-  if (!isFiniteNonNegativeNumber(row?.liquidity_fee_rune)
-    || !isFiniteNonNegativeNumber(row?.rune_price_usd)
-    || !isFiniteNonNegativeNumber(row?.liquidity_fee_usd)) {
-    return rejectDuneBaseFeeEvent('invalid fee or price value');
-  }
-
-  const liquidityFeeRune = baseRuneToNumber(identity.liquidity_fee_base);
-  const runePriceUsd = Number(row.rune_price_usd);
-  const liquidityFeeUsd = liquidityFeeRune * runePriceUsd;
-  if (!closeEnough(row.liquidity_fee_rune, liquidityFeeRune)) {
-    return rejectDuneBaseFeeEvent('liquidity_fee_rune does not match base amount');
-  }
-  if (!closeEnough(row.liquidity_fee_usd, liquidityFeeUsd)) {
-    return rejectDuneBaseFeeEvent('liquidity_fee_usd does not match RUNE/USD price');
-  }
-
-  return {
-    row: {
-      event_key: identity.canonical_key,
-      canonical_key: identity.canonical_key,
-      height: identity.height,
-      block_time: toIsoString(parsedBlockTime),
-      swap_id: identity.swap_id,
-      pool: identity.pool,
-      chain: identity.chain,
-      from_address: identity.from_address,
-      to_address: identity.to_address,
-      coin,
-      memo: identity.memo,
-      liquidity_fee_base: identity.liquidity_fee_base,
-      liquidity_fee_rune: liquidityFeeRune,
-      rune_price_usd: runePriceUsd,
-      liquidity_fee_usd: liquidityFeeUsd,
-      classification,
-      included,
-      source_contract: sourceContract,
-      source_label: sourceLabelForClassification(classification, sourceContract),
-      source_denom: String(row?.source_denom || '').trim(),
-      context_origin: 'dune-wasm-tx',
-      source: 'dune',
-      source_provenance: makeDuneSourceProvenance(sourceEventKey),
-      raw_event: {
-        source: 'dune',
-        query_id: config.rujiraBaseFeesDuneQueryId,
-        source_event_key: sourceEventKey,
-        row
-      },
-      context_json: {
-        source: 'dune',
-        query_id: config.rujiraBaseFeesDuneQueryId,
-        source_event_key: sourceEventKey,
-        classification,
-        included,
-        source_contract: sourceContract,
-        source_label: sourceLabelForClassification(classification, sourceContract),
-        source_denom: String(row?.source_denom || '').trim()
-      },
-      updated_at: new Date().toISOString()
-    },
-    reason: ''
-  };
-}
-
-function duneRowsAgree(left, right) {
-  return [
-    'height',
-    'block_time',
-    'swap_id',
-    'pool',
-    'chain',
-    'from_address',
-    'to_address',
-    'coin',
-    'memo',
-    'liquidity_fee_base',
-    'liquidity_fee_rune',
-    'rune_price_usd',
-    'liquidity_fee_usd',
-    'classification',
-    'included',
-    'source_contract',
-    'source_denom'
-  ].every((key) => left[key] === right[key]);
-}
-
-function mergeDuplicateDuneRows(existing, incoming) {
-  const sourceEventKeys = new Set([
-    ...(existing.source_provenance?.dune?.source_event_keys || []),
-    ...(incoming.source_provenance?.dune?.source_event_keys || [])
-  ]);
-  existing.source_provenance.dune.source_event_keys = [...sourceEventKeys].sort();
-  return existing;
-}
-
-function normalizeDuneRujiraBaseFeeRows(rows = []) {
-  const accepted = new Map();
-  const rejected = [];
-
-  for (const rawRow of Array.isArray(rows) ? rows : []) {
-    const normalized = normalizeDuneRujiraBaseFeeEvent(rawRow);
-    if (!normalized.row) {
-      rejected.push({ reason: normalized.reason, row: rawRow });
-      continue;
-    }
-
-    const existing = accepted.get(normalized.row.canonical_key);
-    if (existing && !duneRowsAgree(existing, normalized.row)) {
-      rejected.push({ reason: 'conflicting duplicate canonical event', row: rawRow });
-      continue;
-    }
-    accepted.set(normalized.row.canonical_key, existing
-      ? mergeDuplicateDuneRows(existing, normalized.row)
-      : normalized.row);
-  }
-
-  return {
-    rows: [...accepted.values()],
-    rejected
-  };
-}
-
-export function buildRujiraBaseFeeRowsFromDune(rows = []) {
-  return normalizeDuneRujiraBaseFeeRows(rows).rows;
-}
-
-async function upsertRujiraBaseFeeDuneBlocks(client, rows, executionId) {
-  const byHeight = new Map();
-  for (const row of rows) {
-    const existing = byHeight.get(row.height);
-    if (!existing || String(row.block_time || '') < String(existing.block_time || '')) {
-      byHeight.set(row.height, {
-        height: row.height,
-        block_time: row.block_time,
-        status: 'fetched',
-        attempts: 0,
-        next_retry_at: new Date().toISOString(),
-        error: '',
-        scan_json: {
-          source: 'dune',
-          dune_query_id: config.rujiraBaseFeesDuneQueryId,
-          dune_execution_id: executionId,
-          event_count: rows.filter((candidate) => candidate.height === row.height).length
-        },
-        fetched_at: new Date().toISOString(),
-        parsed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      });
-    }
-  }
-
-  await upsertRows(client, 'rujira_base_fee_blocks', [...byHeight.values()], {
-    columns: [
-      'height',
-      'block_time',
-      'status',
-      'attempts',
-      'next_retry_at',
-      'error',
-      'scan_json',
-      'fetched_at',
-      'parsed_at',
-      'updated_at'
-    ],
-    conflictColumns: ['height'],
-    updateColumns: [
-      'block_time',
-      'status',
-      'attempts',
-      'next_retry_at',
-      'error',
-      'scan_json',
-      'fetched_at',
-      'parsed_at',
-      'updated_at'
-    ],
-    jsonColumns: ['scan_json']
-  });
-
-  return byHeight.size;
 }
 
 export async function markRujiraBaseFeeBlockFetched(client, height, payload = {}) {
@@ -2118,7 +1781,7 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
           }
         : null,
       rateLimitedUntil: toIsoString(sync.rate_limited_until),
-      duneQueryId: usesDune ? sync.stats_json?.dune_query_id || config.rujiraBaseFeesDuneQueryId : '',
+      duneQueryId: usesDune ? sync.stats_json?.dune_query_id || '' : '',
       duneExecutionId: usesDune ? sync.stats_json?.dune_execution_id || '' : '',
       duneNextStartTime: usesDune ? sync.stats_json?.dune_next_start_time || '' : '',
       matchedSwapFeeEventCount: Number(stats.events.included_events) || 0,
@@ -2174,126 +1837,6 @@ export async function writeRujiraBaseFeeListenerHeartbeat(payload = {}) {
   });
 }
 
-export async function runRujiraBaseFeesDuneIngestion(client) {
-  if (!config.duneApiKey || !config.rujiraBaseFeesDuneQueryId) {
-    await saveActionSyncState(client, {
-      next_page_token: '',
-      complete: false,
-      rate_limited_until: null,
-      stats_json: {
-        source: 'dune',
-        skipped: true,
-        reason: !config.duneApiKey ? 'missing_dune_api_key' : 'missing_dune_rujira_base_fees_query_id',
-        dune_query_id: config.rujiraBaseFeesDuneQueryId
-      }
-    });
-    return {
-      skipped: true,
-      reason: !config.duneApiKey ? 'missing_dune_api_key' : 'missing_dune_rujira_base_fees_query_id',
-      source: 'dune',
-      upserted: 0
-    };
-  }
-
-  const syncState = await loadActionSyncState(client);
-  const previousStats = syncState?.stats_json || {};
-  const configuredStart = parseUtcDateTime(config.rujiraBaseFeesDuneStartTime) || new Date('2026-04-30T00:00:00.000Z');
-  const startTime = parseUtcDateTime(previousStats.dune_next_start_time) || configuredStart;
-  const headEndTime = addHours(new Date(), -Math.max(0, config.rujiraBaseFeesDuneHeadLagHours));
-
-  if (startTime >= headEndTime) {
-    await saveActionSyncState(client, {
-      next_page_token: '',
-      complete: true,
-      rate_limited_until: null,
-      stats_json: {
-        ...previousStats,
-        source: 'dune',
-        skipped: true,
-        reason: 'caught_up_to_dune_head_lag',
-        dune_query_id: config.rujiraBaseFeesDuneQueryId,
-        dune_next_start_time: formatDuneDateTime(startTime),
-        dune_head_lag_hours: config.rujiraBaseFeesDuneHeadLagHours
-      }
-    });
-    return {
-      skipped: true,
-      reason: 'caught_up_to_dune_head_lag',
-      source: 'dune',
-      upserted: 0
-    };
-  }
-
-  const windowEnd = new Date(Math.min(
-    addDays(startTime, Math.max(1, config.rujiraBaseFeesDuneDaysPerRun)).getTime(),
-    headEndTime.getTime()
-  ));
-  const limit = Math.max(1, Math.trunc(Number(config.rujiraBaseFeesDuneLimit) || 5000));
-  const result = await executeDuneQueryRows(config.rujiraBaseFeesDuneQueryId, {
-    start_time: formatDuneDateTime(startTime),
-    end_time: formatDuneDateTime(windowEnd),
-    limit
-  }, {
-    limit
-  });
-  const normalizedDuneRows = normalizeDuneRujiraBaseFeeRows(result.rows);
-  if (normalizedDuneRows.rejected.length) {
-    const reasons = [...new Set(normalizedDuneRows.rejected.map((entry) => entry.reason))];
-    throw new Error(
-      `Dune generated-fee validation rejected ${normalizedDuneRows.rejected.length} row(s): ${reasons.join(', ')}`
-    );
-  }
-  const rows = normalizedDuneRows.rows;
-
-  if (rows.length) {
-    await saveRujiraBaseFeeEvents(client, rows);
-  }
-  const heights = rows.length ? await upsertRujiraBaseFeeDuneBlocks(client, rows, result.executionId) : 0;
-  const lastBlockTime = rows
-    .map((row) => parseUtcDateTime(row.block_time))
-    .filter(Boolean)
-    .sort((a, b) => b.getTime() - a.getTime())[0];
-  const hitLimit = result.rows.length >= limit;
-  const nextStartTime = hitLimit && lastBlockTime ? lastBlockTime : windowEnd;
-
-  await saveActionSyncState(client, {
-    next_page_token: '',
-    complete: nextStartTime >= headEndTime,
-    rate_limited_until: null,
-    stats_json: {
-      source: 'dune',
-      dune_query_id: config.rujiraBaseFeesDuneQueryId,
-      dune_execution_id: result.executionId,
-      start_time: formatDuneDateTime(startTime),
-      end_time: formatDuneDateTime(windowEnd),
-      dune_next_start_time: formatDuneDateTime(nextStartTime),
-      rows: result.rows.length,
-      accepted_rows: rows.length,
-      duplicate_rows_collapsed: result.rows.length - rows.length,
-      upserted: rows.length,
-      heights,
-      included_events: rows.filter((row) => row.included).length,
-      excluded_events: rows.filter((row) => !row.included).length,
-      hit_limit: hitLimit
-    }
-  });
-
-  return {
-    source: 'dune',
-    dune_query_id: config.rujiraBaseFeesDuneQueryId,
-    dune_execution_id: result.executionId,
-    start_time: formatDuneDateTime(startTime),
-    end_time: formatDuneDateTime(windowEnd),
-    rows: result.rows.length,
-    accepted_rows: rows.length,
-    duplicate_rows_collapsed: result.rows.length - rows.length,
-    upserted: rows.length,
-    heights,
-    next_start_time: formatDuneDateTime(nextStartTime),
-    hit_limit: hitLimit
-  };
-}
-
 async function runRujiraBaseFeesLegacyIngestion(client, initialStats = {}) {
   const stats = {
     ...initialStats,
@@ -2335,39 +1878,5 @@ async function runRujiraBaseFeesLegacyIngestion(client, initialStats = {}) {
 }
 
 export async function runRujiraBaseFeesIngestion(client) {
-  if (config.rujiraBaseFeesDuneQueryId) {
-    try {
-      const duneSource = await runRujiraBaseFeesDuneIngestion(client);
-      if (!duneSource?.skipped) {
-        return {
-          dune_source: duneSource,
-          pricing: {
-            skipped: true,
-            reason: 'dune_rows_include_usd_prices'
-          },
-          provider_cooldown: false
-        };
-      }
-
-      return runRujiraBaseFeesLegacyIngestion(client, {
-        dune_source: duneSource,
-        fallback_source: 'legacy',
-        fallback_reason: duneSource.reason || 'dune_skipped'
-      });
-    } catch (error) {
-      const duneError = summarizeDuneError(error);
-      return runRujiraBaseFeesLegacyIngestion(client, {
-        dune_source: {
-          source: 'dune',
-          status: 'error',
-          dune_query_id: config.rujiraBaseFeesDuneQueryId,
-          error: duneError
-        },
-        fallback_source: 'legacy',
-        fallback_reason: 'dune_error'
-      });
-    }
-  }
-
   return runRujiraBaseFeesLegacyIngestion(client);
 }

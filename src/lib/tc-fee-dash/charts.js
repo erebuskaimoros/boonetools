@@ -316,13 +316,13 @@ export function createTcFeeChart(canvas, { series, rollingSeries }) {
               const lines = [
                 `fees / $1B: ${formatUSD(row.feesPerBillionUsd)}`,
                 `TC fees: ${formatUSD(row.tcFeesUsd)}`,
-                `CMC + Dune volume: ${formatTcFeeUsdCompact(row.globalExchangeVolumeUsd)}`
+                `CMC + DEX volume: ${formatTcFeeUsdCompact(row.globalExchangeVolumeUsd)}`
               ];
               if (row.feeBps > 0) {
                 lines.splice(1, 0, `fee setting: ${formatNumber(row.feeBps, { maximumFractionDigits: 0 })} bps`);
               }
               if (row.cmcVolume24hUsd > 0) lines.push(`CMC volume: ${formatTcFeeUsdCompact(row.cmcVolume24hUsd)}`);
-              if (row.defillamaDexVolumeUsd > 0) lines.push(`Dune DEX volume: ${formatTcFeeUsdCompact(row.defillamaDexVolumeUsd)}`);
+              if (row.defillamaDexVolumeUsd > 0) lines.push(`DEX volume: ${formatTcFeeUsdCompact(row.defillamaDexVolumeUsd)}`);
               if (row.hasHaltDays) lines.push(`${row.haltLabel || 'chain halt'}: excluded from rolling averages`);
               return lines;
             }

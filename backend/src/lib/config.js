@@ -47,7 +47,6 @@ const rpcFallbackRestUrl = optional(process.env.RPC_FALLBACK_REST_URL) || NATIVE
 const rpcArchiveRestUrl = optional(process.env.RPC_ARCHIVE_REST_URL) || 'https://rpc.thorchain.liquify.com';
 const bifrostScannerInfoUrl = optional(process.env.BIFROST_SCANNER_INFO_URL)
   || 'https://vanaheimex.com/api/nodesInfo';
-const duneApiBaseUrl = optional(process.env.DUNE_API_BASE_URL) || 'https://api.dune.com';
 const binanceApiBaseUrl = optional(process.env.BINANCE_API_BASE_URL) || 'https://data-api.binance.vision';
 const cmcApiKey = optional(process.env.CMC_API_KEY || process.env.CMC_PRO_API_KEY);
 const providerCooldownEnabled = readBool(
@@ -131,15 +130,7 @@ export const config = Object.freeze({
   rapidSwapsPendingCandidateBatch: readInt('RAPID_SWAPS_PENDING_CANDIDATE_BATCH', 100),
   rapidSwapsListenerBlockStallMs: readInt('RAPID_SWAPS_LISTENER_BLOCK_STALL_SECONDS', 3 * 60) * 1000,
   rapidSwapsWsIngestionEnabled: readBool('RAPID_SWAPS_WS_INGESTION_ENABLED', false),
-  rapidSwapsDuneQueryId: optional(process.env.RAPID_SWAPS_DUNE_QUERY_ID) || '7619996',
-  rapidSwapsDuneStartTime: optional(process.env.RAPID_SWAPS_DUNE_START_TIME) || '2026-04-01T00:00:00Z',
-  rapidSwapsDuneDaysPerRun: readInt('RAPID_SWAPS_DUNE_DAYS_PER_RUN', 3),
-  rapidSwapsDuneHeadLagHours: readInt('RAPID_SWAPS_DUNE_HEAD_LAG_HOURS', 6),
-  rapidSwapsDuneLimit: readInt('RAPID_SWAPS_DUNE_LIMIT', 5000),
-  rapidSwapsDuneScanIntervalMs: readInt('RAPID_SWAPS_DUNE_SCAN_INTERVAL_SECONDS', 6 * 60 * 60) * 1000,
-  rapidSwapsLiveTailIntervalMs: readInt('RAPID_SWAPS_LIVE_TAIL_INTERVAL_SECONDS', 5 * 60) * 1000,
-  rapidSwapsLiveTailPages: readInt('RAPID_SWAPS_LIVE_TAIL_PAGES', 2),
-  rapidSwapsMarketHistoryDuneQueryId: optional(process.env.RAPID_SWAPS_MARKET_HISTORY_DUNE_QUERY_ID) || '7620035',
+  rapidSwapsHistoryStartTime: optional(process.env.RAPID_SWAPS_HISTORY_START_TIME) || '2026-04-01T00:00:00Z',
   appLayerLiveStateTtlMs: readInt('APP_LAYER_LIVE_STATE_TTL_SECONDS', 2 * 60) * 1000,
   appLayerStaticStateTtlMs: readInt('APP_LAYER_STATIC_STATE_TTL_SECONDS', 15 * 60) * 1000,
   appLayerRouteConcurrency: readInt('APP_LAYER_ROUTE_CONCURRENCY', 4),
@@ -158,11 +149,6 @@ export const config = Object.freeze({
   rujiraBaseFeesRpcBatchSize: readInt('RUJIRA_BASE_FEES_RPC_BATCH_SIZE', 10),
   rujiraBaseFeesRequestDelayMs: readInt('RUJIRA_BASE_FEES_REQUEST_DELAY_MS', 250),
   rujiraBaseFeesRateLimitCooldownMs: readInt('RUJIRA_BASE_FEES_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000,
-  rujiraBaseFeesDuneQueryId: optional(process.env.RUJIRA_BASE_FEES_DUNE_QUERY_ID) || '7620091',
-  rujiraBaseFeesDuneStartTime: optional(process.env.RUJIRA_BASE_FEES_DUNE_START_TIME) || '2026-04-30T00:00:00Z',
-  rujiraBaseFeesDuneDaysPerRun: readInt('RUJIRA_BASE_FEES_DUNE_DAYS_PER_RUN', 3),
-  rujiraBaseFeesDuneHeadLagHours: readInt('RUJIRA_BASE_FEES_DUNE_HEAD_LAG_HOURS', 6),
-  rujiraBaseFeesDuneLimit: readInt('RUJIRA_BASE_FEES_DUNE_LIMIT', 5000),
   rujiraReservePaymentsMidgardUrls: readList('RUJIRA_RESERVE_PAYMENTS_MIDGARD_URLS', midgardUrls),
   rujiraReservePaymentsRpcUrls: readList('RUJIRA_RESERVE_PAYMENTS_RPC_URLS', [
     rpcRestUrl,
@@ -176,12 +162,6 @@ export const config = Object.freeze({
   rujiraReservePaymentsBlockMaxHeights: readInt('RUJIRA_RESERVE_PAYMENTS_BLOCK_MAX_HEIGHTS', 150),
   rujiraReservePaymentsRequestDelayMs: readInt('RUJIRA_RESERVE_PAYMENTS_REQUEST_DELAY_MS', 100),
   rujiraReservePaymentsRateLimitCooldownMs: readInt('RUJIRA_RESERVE_PAYMENTS_RATE_LIMIT_COOLDOWN_SECONDS', 60 * 60) * 1000,
-  rujiraReservePaymentsDuneQueryId: optional(process.env.RUJIRA_RESERVE_PAYMENTS_DUNE_QUERY_ID) || '7620011',
-  rujiraReservePaymentsDuneStartTime: optional(process.env.RUJIRA_RESERVE_PAYMENTS_DUNE_START_TIME) || '2026-04-30T00:00:00Z',
-  rujiraReservePaymentsDuneHeadLagHours: readInt('RUJIRA_RESERVE_PAYMENTS_DUNE_HEAD_LAG_HOURS', 6),
-  bondTxEventsDuneQueryId: optional(process.env.BOND_TX_EVENTS_DUNE_QUERY_ID) || '7620042',
-  bondTxEventsDuneStartTime: optional(process.env.BOND_TX_EVENTS_DUNE_START_TIME) || '2022-01-01T00:00:00Z',
-  bondTxEventsDuneLimit: readInt('BOND_TX_EVENTS_DUNE_LIMIT', 1000),
   nodeVotesRpcUrls: readList('NODE_VOTES_RPC_URLS', [
     rpcArchiveRestUrl,
     rpcRestUrl,
@@ -193,10 +173,7 @@ export const config = Object.freeze({
   nodeVotesRequestDelayMs: readInt('NODE_VOTES_REQUEST_DELAY_MS', 150),
   nodeVotesBlockTimeConcurrency: readInt('NODE_VOTES_BLOCK_TIME_CONCURRENCY', 4),
   nodeVotesNodeMetadataConcurrency: readInt('NODE_VOTES_NODE_METADATA_CONCURRENCY', 4),
-  nodeVotesDuneQueryId: optional(process.env.NODE_VOTES_DUNE_QUERY_ID) || '7619989',
   nodeVotesWsIngestionEnabled: readBool('NODE_VOTES_WS_INGESTION_ENABLED', true),
-  duneApiKey: optional(process.env.DUNE_API_KEY),
-  duneApiBaseUrl,
   binanceApiBaseUrl,
   binanceApiBaseUrls: readList('BINANCE_API_BASE_URLS', [binanceApiBaseUrl]),
   poolDislocationBackfillRequestDelayMs: readInt('POOL_DISLOCATION_BACKFILL_REQUEST_DELAY_MS', 100),
@@ -255,14 +232,10 @@ export const config = Object.freeze({
   systemIncomePolRepairConcurrency: readInt('SYSTEM_INCOME_POL_REPAIR_CONCURRENCY', 6),
   systemIncomePolLpConcurrency: readInt('SYSTEM_INCOME_POL_LP_CONCURRENCY', 4),
   systemIncomePolTimeoutMs: readInt('SYSTEM_INCOME_POL_TIMEOUT_MS', 12_000),
-  dunePerformance: optional(process.env.DUNE_PERFORMANCE) || 'small',
-  duneExecutionPollMs: readInt('DUNE_EXECUTION_POLL_MS', 5000),
-  duneExecutionTimeoutMs: readInt('DUNE_EXECUTION_TIMEOUT_MS', 10 * 60 * 1000),
   cmcApiKey,
   cmcGlobalMetricsHistoricalUrl: optional(process.env.CMC_GLOBAL_METRICS_HISTORICAL_URL)
     || 'https://api.coinmarketcap.com/data-api/v3/global-metrics/quotes/historical',
   cmcGlobalMetricsInterval: optional(process.env.CMC_GLOBAL_METRICS_INTERVAL) || '1d',
-  tcFeeDashDuneQueryId: optional(process.env.TC_FEE_DASH_DUNE_QUERY_ID) || '7619850',
   tcFeeDashStartDate: optional(process.env.TC_FEE_DASH_START_DATE) || '2022-06-22',
   tcFeeDashEndDate: optional(process.env.TC_FEE_DASH_END_DATE),
   tcFeeDashDaysPerRun: readInt('TC_FEE_DASH_DAYS_PER_RUN', 90),

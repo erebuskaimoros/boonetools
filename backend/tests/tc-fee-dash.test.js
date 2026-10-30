@@ -2,14 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { normalizeTcFeeDashRow } from '../src/shared/tc-fee-dash.js';
-import {
-  buildTcFeeDailyRowsFromMidgard,
-  buildTcFeeDailyRowsFromDune,
-  mergeTcFeeRowsForDays,
-  parseDefiLlamaDexVolumeDays,
-  parseMidgardSwapVolumeDays,
-  parseCmcGlobalVolumeDays
-} from '../src/shared/tc-fee-dash-ingestion.js';
+import { buildTcFeeDailyRowsFromMidgard, mergeTcFeeRowsForDays, parseDefiLlamaDexVolumeDays, parseMidgardSwapVolumeDays, parseCmcGlobalVolumeDays } from '../src/shared/tc-fee-dash-ingestion.js';
 
 test('normalizeTcFeeDashRow converts DB row shape to API row shape', () => {
   const row = normalizeTcFeeDashRow({
@@ -44,74 +37,6 @@ test('normalizeTcFeeDashRow converts DB row shape to API row shape', () => {
   assert.equal(row.incomeVolumeBps, 150.28);
   assert.equal(Math.round(row.feesPerBillionUsd), 364);
   assert.equal(row.dailyRangeHighFeesPerBillionUsd, 711);
-});
-
-test('TC Fee Dash ingestion builds daily DB rows from Dune query rows', () => {
-  const cmcVolumesByDate = new Map([[
-    '2022-06-22',
-    {
-      cmcVolume24hUsd: 1_000_000_000_000,
-      raw: { timestamp: '2022-06-22T00:00:00.000Z' }
-    }
-  ]]);
-  const rows = buildTcFeeDailyRowsFromDune([{
-    day: '2022-06-22',
-    tc_fees_rune: 8155.28511795,
-    rune_price_usd: 2.5,
-    tc_fees_usd: 20388.212794875,
-    market_volume_24h_usd: 0,
-    dex_volume_usd: 1_050_000_000,
-    exchange_volume_usd: 1_050_000_000,
-    source_label: 'Dune thorchain.defi_daily_earnings + dex.trades',
-    denominator_basis: 'Dune indexed DEX trade volume'
-  }], {
-    queryId: '7619850',
-    cmcVolumesByDate,
-    thorchainVolumesByDate: new Map([['2022-06-22', {
-      thorchainVolumeUsd: 12_500_000,
-      raw: { totalVolumeUSD: '1250000000' }
-    }]])
-  });
-
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].id, 'day:2022-06-22');
-  assert.equal(rows[0].period, 'day');
-  assert.equal(rows[0].window_end, '2022-06-23');
-  assert.equal(rows[0].tc_fees_rune, 8155.28511795);
-  assert.ok(Math.abs(rows[0].tc_fees_usd - 20388.212794875) < 0.00000001);
-  assert.equal(rows[0].cmc_volume_24h_usd, 1_000_000_000_000);
-  assert.equal(rows[0].global_exchange_volume_usd, 1_001_050_000_000);
-  assert.equal(rows[0].thorchain_volume_usd, 12_500_000);
-  assert.equal(rows[0].source_thread, 'https://dune.com/queries/7619850');
-  assert.equal(rows[0].source_json.cmc.timestamp, '2022-06-22T00:00:00.000Z');
-  assert.equal(rows[0].source_json.denominatorBasis, 'CMC historical global volume plus Dune indexed DEX trade volume');
-  assert.equal(Math.round(rows[0].source_json.feesPerBillionUsd), 20);
-});
-
-test('TC Fee Dash ingestion preserves zero-fee Dune days', () => {
-  const cmcVolumesByDate = new Map([[
-    '2026-05-16',
-    {
-      cmcVolume24hUsd: 100_000_000_000,
-      raw: { timestamp: '2026-05-16T00:00:00.000Z' }
-    }
-  ]]);
-  const rows = buildTcFeeDailyRowsFromDune([{
-    day: '2026-05-16',
-    tc_fees_rune: 0,
-    rune_price_usd: 0.58,
-    tc_fees_usd: 0,
-    dex_volume_usd: 5_000_000_000
-  }], {
-    queryId: '7619850',
-    cmcVolumesByDate
-  });
-
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].window_start, '2026-05-16');
-  assert.equal(rows[0].tc_fees_rune, 0);
-  assert.equal(rows[0].tc_fees_usd, 0);
-  assert.equal(rows[0].global_exchange_volume_usd, 105_000_000_000);
 });
 
 test('TC Fee Dash ingestion builds zero-fee fallback rows from Midgard', () => {
@@ -155,7 +80,7 @@ test('TC Fee Dash ingestion builds zero-fee fallback rows from Midgard', () => {
   assert.equal(rows[0].source_json.denominatorBasis, 'CMC historical global volume plus DeFiLlama DEX volume');
 });
 
-test('TC Fee Dash ingestion fills missing Dune days from fallback rows', () => {
+test('TC Fee Dash day merge fills missing primary days from fallback rows', () => {
   const primaryRows = [{
     window_start: '2026-05-15',
     tc_fees_usd: 5631.69

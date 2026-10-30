@@ -259,15 +259,15 @@ test('scheduled swap-history snapshot supports bounded hourly and calendar-week 
   const calls = [];
   const payload = await buildRapidSwapMarketHistoryPayload({
     now: new Date('2026-07-20T12:34:00Z'),
-    startTime: '2026-04-01T00:00:00Z',
-    fetchDune: async ({ interval, from, to }) => {
-      calls.push({ interval, from, to });
+    startTime: '2026-07-10T00:00:00Z',
+    fetchMidgard: async ({ interval, from, to }) => {
+      calls.push({ interval, from: Number(from), to: Number(to) });
       const step = interval === 'hour' ? 3600 : 86400;
       return {
-        meta: { source: 'dune' },
+        meta: { source: 'midgard' },
         intervals: [0, 1, 2].map((offset) => ({
-          startTime: String(from + offset * step),
-          endTime: String(from + (offset + 1) * step),
+          startTime: String(Number(from) + offset * step),
+          endTime: String(Number(from) + (offset + 1) * step),
           totalVolumeUSD: '100',
           totalCount: '2'
         }))
@@ -275,7 +275,7 @@ test('scheduled swap-history snapshot supports bounded hourly and calendar-week 
     }
   });
   assert.deepEqual(calls.map((call) => call.interval), ['hour', 'day']);
-  assert.ok(calls.every((call) => call.from >= Date.parse('2026-04-01T00:00:00Z') / 1000));
+  assert.ok(calls.every((call) => call.from >= Date.parse('2026-07-10T00:00:00Z') / 1000));
   assert.equal(payload.segments.hour.intervals.length, 3);
   assert.equal(payload.segments.day.intervals.length, 3);
 
@@ -284,7 +284,7 @@ test('scheduled swap-history snapshot supports bounded hourly and calendar-week 
     as_of: '2026-07-20T12:00:00Z',
     segments: {
       day: {
-        source: 'dune',
+        source: 'midgard',
         intervals: [0, 1].map((offset) => ({
           startTime: String(monday + offset * 86400),
           endTime: String(monday + (offset + 1) * 86400),
@@ -304,12 +304,11 @@ test('scheduled swap-history snapshot supports bounded hourly and calendar-week 
   assert.equal(weekly.intervals[0].totalCount, '4');
 });
 
-test('Midgard swap-history fallback chunks ranges at the provider interval cap', async () => {
+test('Midgard swap-history chunks ranges at the provider interval cap', async () => {
   const calls = [];
   const payload = await buildRapidSwapMarketHistoryPayload({
     now: new Date('2026-07-20T12:00:00Z'),
     startTime: '2026-07-01T00:00:00Z',
-    fetchDune: async () => { throw new Error('dune billing limit'); },
     fetchMidgard: async ({ interval, from, to }) => {
       const step = interval === 'hour' ? 3600 : 86400;
       calls.push({ interval, from: Number(from), to: Number(to), step });
@@ -335,7 +334,7 @@ test('Midgard swap-history fallback chunks ranges at the provider interval cap',
   assert.equal(payload.segments.day.meta.chunks, 1);
 });
 
-test('swap-history segment fallback preserves its source watermark and remains visibly stale', async () => {
+test('a failed swap-history refresh preserves its source watermark and remains visibly stale', async () => {
   const priorObservedAt = '2026-07-19T12:00:00.000Z';
   const hourStart = Date.parse('2026-07-19T10:00:00Z') / 1000;
   const dayStart = Date.parse('2026-07-19T00:00:00Z') / 1000;
@@ -360,7 +359,6 @@ test('swap-history segment fallback preserves its source watermark and remains v
         }
       }
     },
-    fetchDune: async () => { throw new Error('dune down'); },
     fetchMidgard: async () => { throw new Error('midgard down'); }
   });
 
@@ -413,13 +411,13 @@ test('swap-history refresh fetches overlap windows and merges them into retained
         }
       }
     },
-    fetchDune: async ({ interval, from, to }) => {
-      calls.push({ interval, from, to });
+    fetchMidgard: async ({ interval, from, to }) => {
+      calls.push({ interval, from: Number(from), to: Number(to) });
       const step = interval === 'hour' ? 3600 : 86400;
       return {
         intervals: [{
           startTime: String(from),
-          endTime: String(from + step),
+          endTime: String(Number(from) + step),
           totalVolumeUSD: '9',
           totalCount: '3'
         }]
@@ -438,26 +436,21 @@ test('swap-history refresh fetches overlap windows and merges them into retained
   assert.ok(payload.segments.hour.intervals.some((row) => row.totalVolumeUSD === '9'));
 });
 
-test('swap-history provider deadlines fall back cleanly without object-string warnings', async () => {
+test('swap-history provider deadlines keep prior segments without object-string warnings', async () => {
+  const observedAt = '2026-07-19T12:00:00.000Z';
+  const segment = (interval, startTime, step) => ({ interval, source: 'midgard', observed_at: observedAt,
+    intervals: [{ startTime: String(startTime), endTime: String(startTime + step), totalVolumeUSD: '1', totalCount: '1' }] });
   const payload = await buildRapidSwapMarketHistoryPayload({
     now: new Date('2026-07-20T12:00:00Z'),
     startTime: '2026-07-01T00:00:00Z',
-    duneTimeoutMs: 5,
-    fetchDune: async () => new Promise(() => {}),
-    fetchMidgard: async ({ interval, from }) => {
-      const step = interval === 'hour' ? 3600 : 86400;
-      return {
-        intervals: [{
-          startTime: String(from),
-          endTime: String(Number(from) + step),
-          totalVolumeUSD: '1',
-          totalCount: '1'
-        }]
-      };
-    }
+    previous: { as_of: observedAt, source_updated_at: observedAt, segments: {
+      hour: segment('hour', Date.parse('2026-07-19T10:00:00Z') / 1000, 3600),
+      day: segment('day', Date.parse('2026-07-19T00:00:00Z') / 1000, 86400)
+    } },
+    midgardTimeoutMs: 5,
+    fetchMidgard: async () => new Promise(() => {})
   });
-  assert.equal(payload.segments.hour.source, 'midgard');
-  assert.equal(payload.segments.day.source, 'midgard');
+  assert.equal(payload.stale, true);
   assert.match(payload.warning, /timed out after 5ms/);
   assert.doesNotMatch(payload.warning, /\[object Object\]/);
 });

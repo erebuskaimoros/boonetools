@@ -4,7 +4,6 @@ import { refreshRapidSwapMarketHistoryReadModel } from '../shared/rapid-swaps-ma
 import { getReadModel } from '../shared/read-models.js';
 
 export const RAPID_SWAPS_MARKET_HISTORY_LOCK_KEY = 'boonetools:rapid-swaps-market-history';
-export const RAPID_SWAPS_MARKET_HISTORY_DUNE_TIMEOUT_MS = 3 * 60_000;
 export const RAPID_SWAPS_MARKET_HISTORY_MIDGARD_TIMEOUT_MS = 45_000;
 
 export async function runRapidSwapsMarketHistory(options = {}) {
@@ -17,7 +16,6 @@ export async function runRapidSwapsMarketHistory(options = {}) {
   return lockRunner(RAPID_SWAPS_MARKET_HISTORY_LOCK_KEY, async (client) => {
     try {
       return await refresh({
-        marketHistoryDuneTimeoutMs: RAPID_SWAPS_MARKET_HISTORY_DUNE_TIMEOUT_MS,
         marketHistoryMidgardTimeoutMs: RAPID_SWAPS_MARKET_HISTORY_MIDGARD_TIMEOUT_MS,
         ...refreshOptions,
         client

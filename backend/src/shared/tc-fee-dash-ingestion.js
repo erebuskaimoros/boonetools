@@ -1,7 +1,6 @@
 import { upsertRows } from '../db/sql.js';
 import { config } from '../lib/config.js';
-import { safeNumber, sleep } from '../lib/utils.js';
-import { executeDuneQueryRows, isDuneLimitError, summarizeDuneError } from './dune.js';
+import { safeNumber } from '../lib/utils.js';
 import { fetchMidgard, fetchMidgardSwapHistory } from './midgard.js';
 import { computeFeesPerBillionUsd } from '../../../shared/tc-fee-dash.js';
 import { requestProviderJson } from '../lib/provider-json.js';
@@ -66,20 +65,6 @@ function shortDateLabel(date) {
 
 function isRateLimitError(error) {
   return isProviderRateLimitError(error);
-}
-
-function isDuneBackfillError(error) {
-  const text = `${error?.message || ''} ${error?.body || ''}`;
-  return /Dune/i.test(text);
-}
-
-function firstValue(row, names) {
-  for (const name of names) {
-    if (row?.[name] !== undefined && row?.[name] !== null) {
-      return row[name];
-    }
-  }
-  return undefined;
 }
 
 function isCmcProApiUrl() {
@@ -229,83 +214,6 @@ function thorchainVolumeForDay(volumesByDate, day) {
   };
 }
 
-export function buildTcFeeDailyRowsFromDune(duneRows = [], options = {}) {
-  const queryId = String(options.queryId || config.tcFeeDashDuneQueryId || '');
-  const queryUrl = queryId ? `https://dune.com/queries/${queryId}` : '';
-  const cmcVolumesByDate = options.cmcVolumesByDate || new Map();
-  const thorchainVolumesByDate = options.thorchainVolumesByDate || new Map();
-
-  return duneRows.map((row) => {
-    const day = dateKey(parseDateKey(firstValue(row, ['day', 'window_start', 'date'])));
-    const cmcVolume = cmcVolumesByDate.get(day);
-    const thorchainVolume = thorchainVolumeForDay(thorchainVolumesByDate, day);
-    const tcFeesRune = safeNumber(firstValue(row, ['tc_fees_rune', 'tcFeesRune', 'liquidity_fees']));
-    const tcFeesUsd = safeNumber(firstValue(row, ['tc_fees_usd', 'tcFeesUsd', 'liquidity_fees_usd']));
-    const runePriceUsd = safeNumber(firstValue(row, ['rune_price_usd', 'runePriceUsd']))
-      || (tcFeesRune > 0 ? tcFeesUsd / tcFeesRune : 0);
-    const duneMarketVolume24hUsd = safeNumber(firstValue(row, [
-      'market_volume_24h_usd',
-      'cmc_volume_24h_usd',
-      'cex_volume_usd'
-    ]));
-    const cmcApiVolume24hUsd = safeNumber(cmcVolume?.cmcVolume24hUsd);
-    const hasCmcApiVolume = cmcApiVolume24hUsd > 0;
-    const cmcVolume24hUsd = cmcApiVolume24hUsd || duneMarketVolume24hUsd;
-    const dexVolumeUsd = safeNumber(firstValue(row, [
-      'dex_volume_usd',
-      'defillama_dex_volume_usd',
-      'dune_dex_volume_usd'
-    ]));
-    const duneExchangeVolumeUsd = safeNumber(firstValue(row, [
-      'exchange_volume_usd',
-      'global_exchange_volume_usd'
-    ]));
-    const exchangeVolumeUsd = hasCmcApiVolume
-      ? cmcVolume24hUsd + dexVolumeUsd
-      : duneExchangeVolumeUsd || duneMarketVolume24hUsd + dexVolumeUsd;
-    const denominatorBasis = hasCmcApiVolume
-      ? 'CMC historical global volume plus Dune indexed DEX trade volume'
-      : String(firstValue(row, ['denominator_basis']) || 'Dune indexed exchange volume');
-
-    return {
-      id: `day:${day}`,
-      period: 'day',
-      window_start: day,
-      window_end: addDays(day, 1),
-      window_label: shortDateLabel(day),
-      fee_bps: 0,
-      tc_fees_rune: tcFeesRune,
-      rune_price_usd: runePriceUsd,
-      tc_fees_usd: tcFeesUsd,
-      cmc_volume_24h_usd: cmcVolume24hUsd,
-      defillama_dex_volume_usd: dexVolumeUsd,
-      global_exchange_volume_usd: exchangeVolumeUsd,
-      thorchain_volume_usd: thorchainVolume.value,
-      daily_median_fees_per_billion_usd: null,
-      daily_range_low_fees_per_billion_usd: null,
-      daily_range_high_fees_per_billion_usd: null,
-      source_label: hasCmcApiVolume
-        ? 'Dune TC fees + CMC volume + Dune DEX volume'
-        : String(firstValue(row, ['source_label']) || 'Dune TC Fee Dash source query'),
-      source_thread: queryUrl,
-      source_json: {
-        dune: row,
-        cmc: cmcVolume?.raw || null,
-        midgardSwaps: thorchainVolume.raw,
-        duneQueryId: queryId,
-        feesPerBillionUsd: computeFeesPerBillionUsd(tcFeesUsd, exchangeVolumeUsd),
-        denominatorBasis
-      },
-      fetched_at: new Date().toISOString()
-    };
-  }).filter((row) => (
-    row.tc_fees_rune >= 0 &&
-    row.rune_price_usd > 0 &&
-    row.tc_fees_usd >= 0 &&
-    row.global_exchange_volume_usd > 0
-  ));
-}
-
 export function buildTcFeeDailyRowsFromMidgard(earningsIntervals = [], runeIntervals = [], options = {}) {
   const cmcVolumesByDate = options.cmcVolumesByDate || new Map();
   const dexVolumesByDate = options.dexVolumesByDate || new Map();
@@ -407,36 +315,6 @@ export function mergeTcFeeRowsForDays(days, primaryRows = [], fallbackRows = [])
     rows,
     primaryMissingDays,
     missingDays
-  };
-}
-
-export async function fetchDuneTcFeeRows(startDate, count, options = {}) {
-  const endDate = addDays(startDate, count - 1);
-  const result = await (options.executeDune || executeDuneQueryRows)(config.tcFeeDashDuneQueryId, {
-    start_date: startDate,
-    end_date: endDate
-  }, {
-    limit: Math.max(count + 10, 100)
-  });
-  if (config.tcFeeDashRequestDelayMs > 0 && !options.skipDelay) {
-    await sleep(config.tcFeeDashRequestDelayMs);
-  }
-  const [cmcVolumesByDate, thorchainVolumesByDate] = await Promise.all([
-    (options.fetchCmc || fetchCmcGlobalVolumeDays)(startDate, count, options),
-    (options.fetchSwapVolumes || fetchMidgardSwapVolumeDays)(startDate, count)
-  ]);
-
-  return {
-    executionId: result.executionId,
-    acquisition: { startDate, count, cmcVolumesByDate, thorchainVolumesByDate },
-    duneRows: result.rows.length,
-    cmcRows: cmcVolumesByDate.size,
-    thorchainVolumeRows: thorchainVolumesByDate.size,
-    rows: buildTcFeeDailyRowsFromDune(result.rows, {
-      queryId: config.tcFeeDashDuneQueryId,
-      cmcVolumesByDate,
-      thorchainVolumesByDate
-    })
   };
 }
 
@@ -584,43 +462,11 @@ async function putCooldown(client, error) {
       JSON.stringify({
         rate_limited_at: new Date().toISOString(),
         rate_limit_error: error.message || String(error),
-        source: 'dune+cmc'
+        source: 'midgard+cmc+defillama'
       })
     ]
   );
   return until;
-}
-
-async function markDuneBackfillSkipped(client, syncState, payload = {}) {
-  const reason = isDuneLimitError(payload.error) ? 'dune_limit_error' : 'dune_error';
-  const duneError = summarizeDuneError(payload.error);
-  const stats = {
-    source: 'dune+cmc',
-    status: 'degraded',
-    skipped: true,
-    reason,
-    fallback_source: 'existing_cache',
-    dune_query_id: config.tcFeeDashDuneQueryId,
-    dune_error: duneError,
-    start_date: payload.startDate || dateKey(syncState.next_date),
-    end_date: payload.endDate || '',
-    requested_days: payload.dayCount || 0,
-    next_date: dateKey(syncState.next_date),
-    observed_at: new Date().toISOString()
-  };
-
-  await client.query(
-    `update tc_fee_dash_sync_state
-     set updated_at = now(),
-         stats_json = coalesce(stats_json, '{}'::jsonb) || $2::jsonb
-     where sync_key = $1`,
-    [SYNC_KEY, JSON.stringify(stats)]
-  );
-
-  return {
-    ...stats,
-    error: duneError.message
-  };
 }
 
 function isCoolingDown(syncState) {
@@ -708,20 +554,6 @@ export async function runTcFeeDashDailyBackfill(client) {
   const volumeBackfill = await backfillMissingThorchainVolumes(client);
   if (volumeBackfill) return volumeBackfill;
 
-  if (!config.duneApiKey) {
-    return {
-      skipped: true,
-      reason: 'missing_dune_api_key',
-      next_date: dateKey(syncState.next_date)
-    };
-  }
-  if (!config.tcFeeDashDuneQueryId) {
-    return {
-      skipped: true,
-      reason: 'missing_dune_tc_fee_query_id',
-      next_date: dateKey(syncState.next_date)
-    };
-  }
   if (isCmcProApiUrl() && !config.cmcApiKey) {
     return {
       skipped: true,
@@ -755,8 +587,7 @@ export async function runTcFeeDashDailyBackfill(client) {
       complete: true,
       stats: {
         complete_at: new Date().toISOString(),
-        source: 'dune+cmc',
-        dune_query_id: config.tcFeeDashDuneQueryId
+        source: 'midgard+cmc+defillama'
       }
     });
     return {
@@ -773,75 +604,25 @@ export async function runTcFeeDashDailyBackfill(client) {
   const days = dateRange(startDate, dayCount);
 
   try {
-    const result = await fetchDuneTcFeeRows(startDate, dayCount);
-    let fallback = null;
-    let merged = mergeTcFeeRowsForDays(days, result.rows, []);
-
-    if (merged.missingDays.length > 0) {
-      fallback = await fetchMidgardTcFeeRows(startDate, dayCount, { acquisition: result.acquisition });
-      merged = mergeTcFeeRowsForDays(days, result.rows, fallback.rows);
-    }
-
+    const result = await fetchMidgardTcFeeRows(startDate, dayCount);
+    const merged = mergeTcFeeRowsForDays(days, [], result.rows);
     return persistDailyRows(client, {
       rows: merged.rows,
       days,
       startDate,
       endDate,
-      source: fallback ? 'dune+cmc+midgard_fallback' : 'dune+cmc',
+      source: 'midgard+cmc+defillama',
       sourceStats: {
         missingDays: merged.missingDays,
-        dune_query_id: config.tcFeeDashDuneQueryId,
-        dune_execution_id: result.executionId,
-        dune_rows: result.duneRows,
+        earnings_rows: result.earningsRows,
+        rune_rows: result.runeRows,
+        swap_rows: result.swapRows,
         cmc_rows: result.cmcRows,
-        midgard_swap_rows: result.thorchainVolumeRows,
-        dune_missing_days: merged.primaryMissingDays.length,
-        dune_missing_day_list: merged.primaryMissingDays,
-        ...(fallback ? {
-          fallback_source: 'midgard+cmc+defillama',
-          fallback_earnings_rows: fallback.earningsRows,
-          fallback_rune_rows: fallback.runeRows,
-          fallback_swap_rows: fallback.swapRows,
-          fallback_cmc_rows: fallback.cmcRows,
-          fallback_dex_rows: fallback.dexRows,
-          ...(fallback.dexError ? { fallback_dex_error: fallback.dexError } : {})
-        } : {})
+        dex_rows: result.dexRows,
+        ...(result.dexError ? { dex_error: result.dexError } : {})
       }
     });
   } catch (error) {
-    if (isDuneBackfillError(error)) {
-      try {
-        const fallback = await fetchMidgardTcFeeRows(startDate, dayCount);
-        const merged = mergeTcFeeRowsForDays(days, [], fallback.rows);
-        return persistDailyRows(client, {
-          rows: merged.rows,
-          days,
-          startDate,
-          endDate,
-          source: 'midgard+cmc+defillama',
-          sourceStats: {
-            missingDays: merged.missingDays,
-            fallback_reason: 'dune_error',
-            dune_error: summarizeDuneError(error),
-            fallback_earnings_rows: fallback.earningsRows,
-            fallback_rune_rows: fallback.runeRows,
-            fallback_swap_rows: fallback.swapRows,
-            fallback_cmc_rows: fallback.cmcRows,
-            fallback_dex_rows: fallback.dexRows,
-            ...(fallback.dexError ? { fallback_dex_error: fallback.dexError } : {})
-          }
-        });
-      } catch (fallbackError) {
-        return markDuneBackfillSkipped(client, syncState, {
-          error,
-          fallbackError,
-          startDate,
-          endDate: days.at(-1),
-          dayCount
-        });
-      }
-    }
-
     if (isRateLimitError(error)) {
       const until = await putCooldown(client, error);
       return {

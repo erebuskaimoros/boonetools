@@ -1,6 +1,4 @@
-import { summarizeDuneError } from './dune.js';
 import { fetchMidgardSwapHistory } from './midgard.js';
-import { fetchRapidSwapMarketHistoryFromDune } from './rapid-swaps.js';
 
 const HOUR_SECONDS = 60 * 60;
 const DAY_SECONDS = 24 * HOUR_SECONDS;
@@ -133,50 +131,28 @@ function mergeIntervals(previousIntervals, refreshedIntervals, from, to) {
 }
 
 async function fetchSegment(interval, from, to, options = {}) {
-  const fetchDune = options.fetchDune || fetchRapidSwapMarketHistoryFromDune;
   const fetchMidgard = options.fetchMidgard || fetchMidgardSwapHistory;
   try {
     const payload = await withTimeout(
-      fetchDune({ interval, from, to }),
-      options.duneTimeoutMs,
-      `Dune swap-history ${interval}`
+      fetchMidgardRange(fetchMidgard, interval, from, to),
+      options.midgardTimeoutMs,
+      `Midgard swap-history ${interval}`
     );
     const intervals = normalizedIntervals(payload);
-    if (!intervals.length) throw new Error(`Dune swap-history ${interval} returned no intervals`);
+    if (!intervals.length) throw new Error(`Midgard swap-history ${interval} returned no intervals`);
     return {
       interval,
       from,
       to,
-      source: 'dune',
+      source: 'midgard',
       meta: payload.meta || {},
       intervals,
       warning: ''
     };
-  } catch (duneError) {
-    try {
-      const payload = await withTimeout(
-        fetchMidgardRange(fetchMidgard, interval, from, to),
-        options.midgardTimeoutMs,
-        `Midgard swap-history ${interval}`
-      );
-      const intervals = normalizedIntervals(payload);
-      if (!intervals.length) throw new Error(`Midgard swap-history ${interval} returned no intervals`);
-      const duneWarning = summarizeDuneError(duneError);
-      return {
-        interval,
-        from,
-        to,
-        source: 'midgard',
-        meta: payload.meta || {},
-        intervals,
-        warning: `Dune unavailable: ${duneWarning.message}`
-      };
-    } catch (midgardError) {
-      const error = new Error(`Swap-history ${interval} refresh failed: ${midgardError.message || midgardError}`);
-      error.duneError = duneError;
-      error.midgardError = midgardError;
-      throw error;
-    }
+  } catch (midgardError) {
+    const error = new Error(`Swap-history ${interval} refresh failed: ${midgardError.message || midgardError}`);
+    error.midgardError = midgardError;
+    throw error;
   }
 }
 

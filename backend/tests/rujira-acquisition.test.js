@@ -36,24 +36,6 @@ test('Reserve block acquisition reuses the exact locally stored timestamp', asyn
   } finally { globalThis.fetch = original; }
 });
 
-test('Reserve Dune acquisition resumes durable coverage rather than restarting from April', async () => {
-  const original = globalThis.fetch;
-  let parameters;
-  globalThis.fetch = async (url, options) => {
-    if (String(url).endsWith('/execute')) {
-      parameters = JSON.parse(options.body).query_parameters;
-      return response({ execution_id: 'test-execution', state: 'QUERY_STATE_COMPLETED' });
-    }
-    return response({ state: 'QUERY_STATE_COMPLETED', result: { rows: [], metadata: { total_row_count: 0 } } });
-  };
-  try {
-    const client = { query: async (sql) => ({ rows: sql.includes('from rujira_reserve_payment_sync_state')
-      ? [{ stats_json: { covered_through: '2026-08-30T00:00:00Z' } }] : [], rowCount: 0 }) };
-    await runRujiraReservePaymentsIngestion(client, { runScheduledSettlements: async () => ({}) });
-    assert.ok(parameters.start_time >= '2026-08-29 00:00:00', parameters.start_time);
-  } finally { globalThis.fetch = original; }
-});
-
 test('Reserve and Base Fee prices use completed buckets before making another provider request', async () => {
   const original = globalThis.fetch;
   let externalCalls = 0;
@@ -67,36 +49,4 @@ test('Reserve and Base Fee prices use completed buckets before making another pr
     await refreshRujiraBaseFeePrices(client, options);
     assert.equal(externalCalls, 0);
   } finally { globalThis.fetch = original; }
-});
-
-test('failed or truncated Dune execution never advances its separate progress cursor', async () => {
-  const { runRujiraReservePaymentsDuneIngestion } = await import('../src/shared/rujira-reserve-payments.js');
-  for (const executeDune of [
-    async () => { throw new Error('Dune failure'); },
-    async () => ({ rows: [], metadata: { total_row_count: 100 }, raw: {} }),
-    async () => ({ rows: [], metadata: {}, raw: {} }),
-    async () => ({ rows: [{ malformed: true }], metadata: { total_row_count: 1 }, raw: {} })
-  ]) {
-    let saved = 0;
-    await assert.rejects(runRujiraReservePaymentsDuneIngestion({ query: async () => ({ rows: [], rowCount: 0 }) }, {
-      now: '2026-09-02T12:00:00Z', executeDune,
-      loadDuneProgress: async () => ({ stats_json: { covered_through: '2026-08-30T00:00:00Z' } }),
-      saveDuneProgress: async () => { saved++; }
-    }));
-    assert.equal(saved, 0);
-  }
-});
-
-test('a verified empty Dune window advances coverage without claiming event-derived progress', async () => {
-  const { runRujiraReservePaymentsDuneIngestion } = await import('../src/shared/rujira-reserve-payments.js');
-  let saved;
-  const result = await runRujiraReservePaymentsDuneIngestion({ query: async () => ({ rows: [], rowCount: 0 }) }, {
-    now: '2026-09-02T12:00:00Z',
-    loadDuneProgress: async () => ({ stats_json: { covered_through: '2026-08-30T00:00:00Z' } }),
-    executeDune: async () => ({ executionId: 'empty', rows: [], metadata: { total_row_count: 0 } }),
-    saveDuneProgress: async (_client, key, value) => { saved = { key, value }; }
-  });
-  assert.equal(result.start_time, '2026-08-29T00:00:00.000Z');
-  assert.equal(saved.key, 'rujira-reserve-payment-dune:v1');
-  assert.equal(saved.value.stats_json.covered_through, '2026-09-02T00:00:00.000Z');
 });

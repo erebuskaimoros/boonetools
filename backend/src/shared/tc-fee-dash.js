@@ -91,7 +91,7 @@ export async function buildTcFeeDashPayload(client, options = {}) {
           : 'tc_fees_per_billion_global_exchange_volume',
         period,
         volumeScope: period === 'day'
-          ? 'CMC historical global volume plus Dune indexed DEX exchange volume'
+          ? 'CMC historical global volume plus indexed DEX exchange volume'
           : 'Global exchange volume, CEX plus DEX',
         thorchainVolumeBasis: 'executed-leg-usd',
         incomeVolumeScope: 'Midgard liquidity fees divided by Midgard THORChain executed-leg swap volume',

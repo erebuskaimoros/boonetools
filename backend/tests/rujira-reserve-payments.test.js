@@ -408,50 +408,6 @@ test('parseRujiraReservePaymentBlock does not label an unmatched transfer as RES
   assert.equal(parsed.scan.unmatched_transfer_event_count, 1);
 });
 
-test('buildRujiraReservePaymentRowsFromDune requires the explicit Reserve path and RUNE coin', async () => {
-  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
-  const {
-    BASE_LAYER_REVENUE_COLLECTOR,
-    TC_RESERVE_MODULE,
-    buildRujiraReservePaymentRowsFromDune
-  } = await import('../src/shared/rujira-reserve-payments.js');
-
-  const valid = {
-    event_key: 'dune-valid-reserve-payment',
-    height: 25982820,
-    block_time: '2026-04-30T18:32:34.605Z',
-    tx_id: 'DUNE123',
-    sender: BASE_LAYER_REVENUE_COLLECTOR,
-    recipient: TC_RESERVE_MODULE,
-    memo: 'RESERVE',
-    amount_base: '609308000',
-    amount_rune: 999,
-    rune_price_usd: 0.5,
-    amount_usd: 3.04654,
-    coin: '609308000 THOR.RUNE'
-  };
-
-  const rows = buildRujiraReservePaymentRowsFromDune([
-    valid,
-    { ...valid, event_key: 'missing-sender', sender: '' },
-    { ...valid, event_key: 'missing-recipient', recipient: '' },
-    { ...valid, event_key: 'missing-memo', memo: '' },
-    { ...valid, event_key: 'missing-coin', coin: '' },
-    { ...valid, event_key: 'wrong-recipient', recipient: 'thor1unrelated' },
-    { ...valid, event_key: 'wrong-memo', memo: 'ADD:THOR.RUNE' },
-    { ...valid, event_key: 'non-rune-coin', coin: '609308000 BTC.BTC' },
-    { ...valid, event_key: 'mismatched-amount', amount_base: '609308001' }
-  ]);
-
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].sender, BASE_LAYER_REVENUE_COLLECTOR);
-  assert.equal(rows[0].recipient, TC_RESERVE_MODULE);
-  assert.equal(rows[0].memo, 'RESERVE');
-  assert.equal(rows[0].coin, '609308000 THOR.RUNE');
-  assert.equal(rows[0].amount_base, '609308000');
-  assert.equal(rows[0].amount_rune, 6.09308);
-});
-
 test('parseRujiraReservePaymentSchedule finds the collector in a shared scheduler entry', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const {
@@ -559,69 +515,6 @@ test('payment block processing keeps the known catch-up repair pending until bot
   ]);
 });
 
-test('Dune-era settlement ingestion also discovers recent Midgard contract executions', async () => {
-  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
-  const { runRujiraReservePaymentsScheduledSettlementIngestion } = await import(
-    '../src/shared/rujira-reserve-payments.js'
-  );
-  const calls = [];
-
-  const result = await runRujiraReservePaymentsScheduledSettlementIngestion({}, {}, {
-    ingestMidgardCandidates: async (_client, options) => {
-      calls.push('midgard');
-      assert.equal(options.maxPages, 1);
-      return { heights: 1 };
-    },
-    ingestScheduledCandidates: async () => {
-      calls.push('scheduled');
-      return { selected: 1 };
-    },
-    processBlocks: async () => {
-      calls.push('blocks');
-      return { events: 2 };
-    },
-    refreshPrices: async () => {
-      calls.push('prices');
-      return { priced_events: 2 };
-    }
-  });
-
-  assert.deepEqual(calls, ['midgard', 'scheduled', 'blocks', 'prices']);
-  assert.equal(result.midgard_candidates.heights, 1);
-  assert.equal(result.block_scan.events, 2);
-});
-
-test('Dune-era scheduled settlement scanning survives an ordinary Midgard candidate error', async () => {
-  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
-  const { runRujiraReservePaymentsScheduledSettlementIngestion } = await import(
-    '../src/shared/rujira-reserve-payments.js'
-  );
-  const calls = [];
-
-  const result = await runRujiraReservePaymentsScheduledSettlementIngestion({}, {}, {
-    ingestMidgardCandidates: async () => {
-      calls.push('midgard');
-      throw new Error('temporary Midgard failure');
-    },
-    ingestScheduledCandidates: async () => {
-      calls.push('scheduled');
-      return { selected: 1 };
-    },
-    processBlocks: async () => {
-      calls.push('blocks');
-      return { events: 2 };
-    },
-    refreshPrices: async () => {
-      calls.push('prices');
-      return { priced_events: 2 };
-    }
-  });
-
-  assert.deepEqual(calls, ['midgard', 'scheduled', 'blocks', 'prices']);
-  assert.equal(result.midgard_candidates.error, 'temporary Midgard failure');
-  assert.equal(result.block_scan.events, 2);
-});
-
 test('legacy fallback survives a cooled-down Midgard candidate lane and continues RPC settlement work', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { runRujiraReservePaymentsLegacyIngestion } = await import(
@@ -670,31 +563,4 @@ test('legacy fallback preserves completed settlement work when Midgard pricing i
 
   assert.equal(result.block_scan.events, 2);
   assert.match(result.pricing.error, /cooling down during price refresh/);
-});
-
-test('successful Dune Reserve ingestion still runs the scheduled settlement scanner', async () => {
-  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
-  const { runRujiraReservePaymentsIngestion } = await import('../src/shared/rujira-reserve-payments.js');
-  const calls = [];
-  const duneSource = { source: 'dune', upserted: 12 };
-
-  const result = await runRujiraReservePaymentsIngestion({}, {
-    runDune: async () => {
-      calls.push('dune');
-      return duneSource;
-    },
-    runScheduledSettlements: async (_client, initialStats) => {
-      calls.push('scheduled-settlements');
-      assert.equal(initialStats.dune_source, duneSource);
-      return { ...initialStats, block_scan: { events: 2 } };
-    },
-    runLegacy: async () => {
-      calls.push('legacy');
-      return {};
-    }
-  });
-
-  assert.deepEqual(calls, ['dune', 'scheduled-settlements']);
-  assert.equal(result.dune_source, duneSource);
-  assert.equal(result.block_scan.events, 2);
 });
