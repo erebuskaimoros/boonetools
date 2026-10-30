@@ -16,24 +16,27 @@ import { verifyFinancialSwapCandidates } from '../shared/financials-swap-candida
 import { acquisitionMetrics } from '../lib/acquisition-metrics.js';
 import { createFinancialsHourlyService } from '../shared/financials-hourly.js';
 import { FINANCIALS_HOURLY_MODEL_KEY } from '../../../shared/financials/hourly.js';
+import { createFinancialsRequestCache } from '../shared/financials-request-cache.js';
 
 // Liquify's block-results archive currently starts on October 6. Begin at the
 // next complete UTC day, including the full first REVSHARE day (October 7).
 // Older days stay unavailable; a signed Midgard residual is not a fallback.
 const REWARD_HISTORY_FROM = Date.parse('2026-10-07T00:00:00Z') / 1000;
 
-export function createFinancialsProviderRequest(client, { transport = requestFromProviders, midgardBases = config.midgardUrls } = {}) {
+export function createFinancialsProviderRequest(client, { transport = requestFromProviders, midgardBases = config.midgardUrls,
+  now = Date.now } = {}) {
   const request = createBackendProviderServices({ transport, services: { midgard: midgardBases } });
+  const cachedRequest = createFinancialsRequestCache({ now });
   return (path, { service = 'midgard', lane = 'history', midgardBudgetClass, signal } = {}) => {
     if (!['midgard', 'rpc'].includes(service)) throw new Error('Financials provider is not allowlisted');
-    return request(service, path, { timeoutMs: 60_000, request: { signal },
+    return cachedRequest(path, { service, midgardBudgetClass, signal }, () => request(service, path, { timeoutMs: 60_000, request: { signal },
       // Preserve the existing 650ms start-rate limit separately on each RPC
       // provider, instead of serializing both behind the Midgard queue.
       providerMinIntervalMs: service === 'rpc' ? 650 : 0,
       ...(midgardBudgetClass ? { midgardBudgetClass } : {}),
       headers: { Accept: 'application/json', 'x-client-id': 'BooneTools-Financials' },
       ...providerLifecycleHooks({ client, scope: `financials-${lane}` })
-    });
+    }));
   };
 }
 

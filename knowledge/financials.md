@@ -296,6 +296,30 @@ value). Rows stored earlier get a one-time `/actions?txid=` fill into
 
 ### Request efficiency and bounded acquisition (October 18, 2026)
 
+October 29 request-efficiency audit: the production journal recorded 6,223
+Financials action attempts, 3,859 Financials health attempts, and 3,808 Pool
+Analysis swap-history attempts over the observed UTC-day portion. These are
+logged attempts (including failures), not a provider invoice or a claim that
+every request was redundant. The 5,000 bulk / 20,000 total daily limits below
+are application configuration, not measured Liquify account entitlements.
+
+Financials shares successful Midgard health observations across its daily,
+hourly, and day-detail consumers until the next five-minute bucket can exist.
+A delayed, unhealthy, or malformed watermark gets only a short retry window;
+provider/budget failures retain their advertised retry horizon. Bulk-only
+deferral must never suppress live allowance. A deterministic healthy-source
+hour needs 12 upstream health reads rather than 180 daily/hourly polls, while
+detecting every new bucket on its first eligible poll. Actual savings depend
+on source lag and failures.
+
+Overlapping UTC/local-day scans also reuse identical action pages briefly.
+The cache is bounded in both size and age; it does not reuse transaction-ID
+verification, mix timestamp/cursor parameters, or change settlement finality.
+All cache misses retain the shared transport, admission, pacing, and cooldown
+rules. Acquisition hit/miss/coalesced counters expose the effect in collector
+logs. No saved history, ledger watermark, migration, quota, or production
+counter is reset by these optimizations.
+
 A completed UTC-day snapshot is retained without automatic rescanning, even when
 pending or unpriced actions remain. Acquisition completion is not financial
 finality: the UI identifies exclusions and late settlements can change the true

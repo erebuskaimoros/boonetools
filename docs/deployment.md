@@ -571,6 +571,22 @@ coverage and fallback snapshots must be visibly qualified, never presented as a
 complete current ranking. Check a midnight crossing, DST local day, and a cold
 swap snapshot with independently available pool totals.
 
+#### Financials Midgard request reuse (October 29, 2026)
+
+Backend-only release; no migration, provider warmup, counter reset, or history
+rescan. The dependency-aware restart picks up the collector's shared health
+polling and bounded action-page cache. Inspect the Financials acquisition
+metrics for health/scan-page cache hits, misses, and coalesced callers, then
+confirm daily/hourly cutoffs continue advancing through a five-minute boundary.
+An already exhausted budget remains exhausted until its recorded retry time;
+the rollout must not clear it or advertise that a pause was lifted.
+
+Verification calls by transaction ID remain uncached. Check that live health
+reads are not blocked by a bulk-only deferral and that a delayed source is
+rechecked promptly. Compare request attempts over similar source-health periods;
+do not treat deterministic healthy-source test savings as guaranteed daily
+production savings. Frontend assets and read-model schemas are unchanged.
+
 #### Saved swap verification admission (October 29, 2026)
 
 Deploy backend before frontend. Migration 078 adds the verifier-wide pause
