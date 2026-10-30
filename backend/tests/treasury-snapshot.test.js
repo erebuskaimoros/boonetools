@@ -310,3 +310,24 @@ test('a validated empty module coin list does not trigger a bank fallback', asyn
   assert.equal(calls.some((address) => address.startsWith('thor1module')), false);
   assert.deepEqual(snapshot.sections[0].entries[0].balances, []);
 });
+
+test('Treasury LP records are fetched once per hour and an absent position is cached too', async () => {
+  const { fetchCachedLiquidityProvider } = await import('../src/treasury/providers.js');
+  const { acquisitionDatabase } = await import('./fixtures/acquisition-db.js');
+  const client = acquisitionDatabase();
+  let calls = 0;
+  const options = (nowMs, response) => ({ client, nowMs, fetchThorchain: async () => {
+    calls += 1;
+    if (response instanceof Error) throw response;
+    return response;
+  } });
+  const start = Date.parse('2026-10-30T00:00:00Z');
+  const record = { asset: 'BTC.BTC', units: '25', rune_redeem_value: '1', asset_redeem_value: '1' };
+  assert.deepEqual(await fetchCachedLiquidityProvider('BTC.BTC', 'thor1t', options(start, record)), record);
+  assert.deepEqual(await fetchCachedLiquidityProvider('BTC.BTC', 'thor1t', options(start + 59 * 60_000, null)), record);
+  assert.equal(calls, 1);
+  const missing = Object.assign(new Error('not found'), { status: 404 });
+  assert.equal(await fetchCachedLiquidityProvider('ETH.ETH', 'thor1t', options(start, missing)), null);
+  assert.equal(await fetchCachedLiquidityProvider('ETH.ETH', 'thor1t', options(start + 60_000, missing)), null);
+  assert.equal(calls, 2);
+});
