@@ -2,8 +2,6 @@ import { backfillOperatorFees } from '../shared/bond-operator-fees.js';
 import { getClient, query } from '../db/pool.js';
 import { upsertRows } from '../db/sql.js';
 import { error, isValidThorAddress, json } from '../lib/http.js';
-import { requestFromProviders } from '../lib/provider-client.js';
-import { COINGECKO_BASE } from '../../../shared/external-providers.js';
 import {
   hasBondHistoryValue,
   isPoisonedBondHistoryRow,
@@ -11,6 +9,8 @@ import {
 } from '../shared/bond-history.js';
 import { enqueueBondHistoryRefresh } from '../shared/bond-history-refresh-queue.js';
 import { fetchStockPrices } from '../shared/stock-prices.js';
+import { fetchCachedCurrencyRates } from '../shared/currency-rates.js';
+import { coreSnapshotValue, getThorNodeCoreSnapshot, isThorNodeCoreSnapshotStale } from '../shared/thornode-core-snapshot.js';
 import { fetchChurns, fetchNodes } from '../shared/thornode.js';
 import { processChurn, scanBondActionWindow } from '../shared/bond-history-acquisition.js';
 
@@ -19,18 +19,15 @@ const BOND_HISTORY_SCOPE_HISTORICAL = 'historical';
 const BOND_HISTORY_SCOPE_LEGACY = 'legacy';
 const BOND_TX_EVENT_SYNC_TTL_MS = 6 * 60 * 60 * 1000;
 
-function fetchCoinGecko(path) {
-  return requestFromProviders({
-    bases: [COINGECKO_BASE],
-    path,
-    timeoutMs: 10_000,
-    headers: { Accept: 'application/json' }
-  });
+async function currentNodes() {
+  const core = await getThorNodeCoreSnapshot().catch(() => null);
+  const nodes = isThorNodeCoreSnapshotStale(core, ['nodes']) ? null : coreSnapshotValue(core, 'nodes');
+  return Array.isArray(nodes) ? nodes : fetchNodes();
 }
 
 async function getCurrentNodeAddresses(bondAddress) {
   const target = String(bondAddress || '').toLowerCase();
-  const nodes = await fetchNodes();
+  const nodes = await currentNodes();
   const nodeAddresses = [];
 
   for (const node of nodes || []) {
@@ -262,28 +259,19 @@ async function getAllNodeAddresses(bondAddress) {
 
 async function fetchRatesJson() {
   try {
-    const [fiatResponse, cryptoResponse, stockResponse] = await Promise.allSettled([
-      fetchCoinGecko('/api/v3/simple/price?ids=thorchain&vs_currencies=eur,gbp,jpy,btc,xau'),
-      fetchCoinGecko('/api/v3/simple/price?ids=monero,zcash&vs_currencies=usd'),
+    const [currencyResponse, stockResponse] = await Promise.allSettled([
+      fetchCachedCurrencyRates(),
       fetchStockPrices(['SPY', 'VT', 'GC=F'])
     ]);
 
     const rates = {};
 
-    if (fiatResponse.status === 'fulfilled') {
-      const data = fiatResponse.value;
-      const thorchain = data?.thorchain;
-      if (thorchain?.eur) rates.EUR = thorchain.eur;
-      if (thorchain?.gbp) rates.GBP = thorchain.gbp;
-      if (thorchain?.jpy) rates.JPY = thorchain.jpy;
-      if (thorchain?.btc) rates.BTC = thorchain.btc;
-      if (thorchain?.xau) rates.XAU = thorchain.xau;
-    }
-
-    if (cryptoResponse.status === 'fulfilled') {
-      const data = cryptoResponse.value;
-      if (data?.monero?.usd) rates.XMR_USD = data.monero.usd;
-      if (data?.zcash?.usd) rates.ZEC_USD = data.zcash.usd;
+    if (currencyResponse.status === 'fulfilled') {
+      const currency = currencyResponse.value;
+      for (const key of ['EUR', 'GBP', 'JPY', 'BTC', 'XAU']) if (currency[key]) rates[key] = currency[key];
+      // Shared rates price RUNE in XMR and ZEC; history rows keep those coins' USD prices.
+      if (currency.USD && currency.XMR) rates.XMR_USD = currency.USD / currency.XMR;
+      if (currency.USD && currency.ZEC) rates.ZEC_USD = currency.USD / currency.ZEC;
     }
 
     if (stockResponse.status === 'fulfilled') {

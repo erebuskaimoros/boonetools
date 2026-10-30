@@ -592,6 +592,19 @@ test('current node-vote chain state preserves independent Mimir and constants fr
   assert.equal(state.constantsUpdatedAt, '2026-08-20T17:45:00Z');
 });
 
+test('node-vote chain state reads fresh snapshot upgrade proposals before calling THORNode', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { loadCurrentNodeVoteChainState } = await import('../src/handlers/node-votes.js');
+  const payload = (meta) => ({ payload: { mimir: {}, constants: {}, nodes: [], node_mimirs: { mimirs: [] },
+    upgrade_proposals: [], field_meta: { upgrade_proposals: meta } } });
+  let fetches = 0;
+  const fetchUpgradeProposals = async () => { fetches += 1; return []; };
+  await loadCurrentNodeVoteChainState({ coreSnapshot: payload({ status: 'cached' }), fetchUpgradeProposals });
+  assert.equal(fetches, 0);
+  await loadCurrentNodeVoteChainState({ coreSnapshot: payload({ status: 'error' }), fetchUpgradeProposals });
+  assert.equal(fetches, 1, 'a failed snapshot field falls back to THORNode');
+});
+
 test('buildVoteGroups counts economic consensus from live active node mimirs', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { buildVoteGroups } = await import('../src/handlers/node-votes.js');

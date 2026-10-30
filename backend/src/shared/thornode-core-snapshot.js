@@ -27,6 +27,7 @@ export const THORNODE_CORE_FIELDS = Object.freeze([
   { key: 'pools', path: '/thorchain/pools', cadenceMs: 120_000, valid: Array.isArray, provider: 'thornode' },
   { key: 'oracle_prices', path: '/thorchain/oracle/prices', cadenceMs: 120_000, valid: oraclePricesValue, provider: 'thornode' },
   { key: 'nodes', path: '/thorchain/nodes', cadenceMs: 300_000, valid: Array.isArray, provider: 'thornode' },
+  { key: 'upgrade_proposals', path: '/thorchain/upgrade_proposals', cadenceMs: 300_000, normalize: upgradeProposalsValue, valid: Array.isArray, provider: 'thornode' },
   { key: 'bifrost_scanners', path: '/api/nodesInfo', cadenceMs: 300_000, valid: isBifrostScannerInfo, provider: BIFROST_SCANNER_PROVIDER },
   { key: 'constants', path: '/thorchain/constants', cadenceMs: 900_000, valid: objectValue, provider: 'thornode' },
   { key: 'churns', path: '/churns', cadenceMs: 600_000, valid: Array.isArray, provider: 'midgard' }
@@ -75,6 +76,12 @@ async function selectThorNodeSource(fetchThor, options, minimumHeight) {
   const invalid = validate(lastblock);
   if (invalid) throw new Error(invalid);
   return { base, lastblock };
+}
+
+// THORNode answers null when no upgrade is proposed; store that as an empty list.
+function upgradeProposalsValue(value) {
+  if (value === null) return [];
+  return Array.isArray(value?.upgrade_proposals) ? value.upgrade_proposals : value;
 }
 
 function objectOrArray(value) {
@@ -200,14 +207,15 @@ export async function buildThorNodeCoreSnapshot(options = {}) {
             ? await fetchScanners({ cooldownClient: options.client })
             : field.key === 'lastblock'
               ? thorSource.lastblock
-              : await fetchThor(field.path, {
+              : (field.normalize || ((value) => value))(await fetchThor(field.path, {
                 // A healthy head from one source cannot validate another
                 // source's Mimir, nodes, or inbound state after fallback.
                 bases: thorSource.base ? [thorSource.base] : options.thornodeBases,
                 cooldownClient: options.client,
                 sharedCooldown: options.sharedCooldown,
-                validateResponse: (value) => field.valid(value) ? null : `Invalid ${field.path} response`
-              });
+                validateResponse: (value) => field.valid(field.normalize ? field.normalize(value) : value)
+                  ? null : `Invalid ${field.path} response`
+              }));
         if (!field.valid(value)) throw new Error(`Invalid ${field.path} response`);
         return { field, ok: true, value };
       } catch (error) {

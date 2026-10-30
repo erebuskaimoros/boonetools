@@ -1099,7 +1099,9 @@ export async function loadCurrentNodeVoteChainState(options = {}) {
   const nodeMetadataByAddress = buildNodeMetadataByAddress(nodes);
   const upgradeProposals = options.upgradeProposals !== undefined
     ? options.upgradeProposals
-    : await (options.fetchUpgradeProposals || fetchCurrentUpgradeProposals)();
+    : Array.isArray(core?.upgrade_proposals) && !isThorNodeCoreSnapshotStale(model, ['upgrade_proposals'])
+      ? core.upgrade_proposals
+      : await (options.fetchUpgradeProposals || fetchCurrentUpgradeProposals)();
   const upgradeState = normalizeUpgradeProposalState(upgradeProposals, nodeMetadataByAddress);
   const currentNodeMimirsAvailable = (
     Boolean(mimir) &&

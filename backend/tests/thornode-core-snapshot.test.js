@@ -78,6 +78,25 @@ test('durable core snapshot staggers fields by their volatility', async () => {
   assert.deepEqual(second.nodes, first.nodes);
 });
 
+test('upgrade proposals join the core snapshot every five minutes and store no proposal as empty', async () => {
+  const fetchAll = (calls) => async (path) => {
+    calls.push(path);
+    return path === '/thorchain/upgrade_proposals' ? null : payloadFor(path);
+  };
+  const providers = { fetchMidgardChurns: async () => [], fetchMidgardNetwork: async () => ({}),
+    fetchBifrostScannerInfo: async () => scannerPayload() };
+  const first = await buildThorNodeCoreSnapshot({ ...providers, now: () => START, fetchThorchain: fetchAll([]) });
+  assert.deepEqual(first.upgrade_proposals, []);
+  const minuteCalls = [];
+  const minute = await buildThorNodeCoreSnapshot({ ...providers, previousSnapshot: first,
+    now: () => new Date(START.getTime() + 60_001), fetchThorchain: fetchAll(minuteCalls) });
+  assert.equal(minuteCalls.includes('/thorchain/upgrade_proposals'), false);
+  const laterCalls = [];
+  await buildThorNodeCoreSnapshot({ ...providers, previousSnapshot: minute,
+    now: () => new Date(START.getTime() + 300_001), fetchThorchain: fetchAll(laterCalls) });
+  assert.equal(laterCalls.includes('/thorchain/upgrade_proposals'), true);
+});
+
 test('durable core snapshot preserves values but marks provider-total failure stale', async () => {
   const first = await buildThorNodeCoreSnapshot({
     now: () => START,
