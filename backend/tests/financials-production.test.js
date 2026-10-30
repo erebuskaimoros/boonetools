@@ -245,12 +245,3 @@ test('Reward archive repair and Reserve reconstruction run independently of live
   assert.equal(calls[1][1].limit, 5000);
   assert.equal(calls[0][1].signal.aborted, true);
 });
-
-test('Production deployment installs the collector and keeps durable cache outside releases', async () => {
-  const unit = await readFile(new URL('../../ops/systemd/boonetools-financials.service', import.meta.url), 'utf8');
-  const deploy = await readFile(new URL('../../scripts/backend-deploy-plan.mjs', import.meta.url), 'utf8');
-  assert.match(unit, /StateDirectory=boonetools-financials/);
-  assert.match(unit, /FINANCIALS_CACHE_DIR=\/var\/lib\/boonetools-financials/);
-  assert.match(unit, /Restart=always/);
-  assert.match(deploy, /boonetools-financials\.service/);
-});

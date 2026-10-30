@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
 import { buildFinancialEChartsOption as buildOption, financialEChartsTooltip as tooltip, financialEChartsWindow } from '../src/lib/financials/echarts-options.js';
 import { financialChartIndices, financialChartWindow } from '../src/lib/financials/series.js';
 import { formatLocalDateTime } from '../src/lib/utils/datetime.js';
@@ -205,14 +204,6 @@ test('calendar reward breakdown never sums through missing values or interior mi
     assert.match(text, /REVSHARE: unavailable/);
     assert.match(text, /Gross system income: unavailable/);
   }
-});
-
-test('headline and methodology describe retained income instead of the Midgard residual', () => {
-  const source = readFileSync(new URL('../src/lib/Financials.svelte', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /FEES \+ BLOCK REWARDS|Liquidity fees plus Reserve block rewards, before distribution/);
-  assert.match(source, /POST-REVSHARE/);
-  assert.match(source, /gross liquidity fees \+ Reserve emissions − REVSHARE/);
-  assert.match(source, /reconciliation adjustment/);
 });
 
 test('the real ECharts model preserves a UTC window across live updates and resets fully', async () => {

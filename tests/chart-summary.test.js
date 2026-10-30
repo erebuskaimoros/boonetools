@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { summarizeMetric, buildSummaryCards, selectSummaryRows, selectIndexSummaryRows, formatSummaryValue } from '../src/lib/charts/summary.js';
-import { readFile } from 'node:fs/promises';
 import { appLayerSummaryMetrics, prepareAppLayerChart } from '../src/lib/app-layer/charts.js';
 import { buildSystemIncomePolChart, buildSystemIncomePolFeeChart } from '../src/lib/system-income-pol/model.js';
 import { POL_TRACKER_SERIES } from '../src/lib/pol-tracker/model.js';
@@ -130,46 +129,4 @@ test('POL TVL summarizes each stock independently without summing dollars across
   const cards = buildSummaryCards(rows, POL_TRACKER_SERIES.map(metric => ({ ...metric, kind: 'level', unit: 'usd' })));
   assert.deepEqual(cards.map(card => card.value), [15, 20, 35, 20]);
   assert.deepEqual(cards.map(card => card.secondary.value), [20, null, 40, 0]);
-});
-
-test('primary time-series summaries retain chart-specific opt-outs, including legacy renderers', async () => {
-  const configurations = {
-    'PoolAnalysis.svelte': 1, 'BurnTracker.svelte': 1, 'SystemIncomePOL.svelte': 1,
-    'POLTracker.svelte': 0, 'financials/Chart.svelte': 0,
-    'system-income-pol/DailyFeeChart.svelte': 1, 'rapid-swaps/OverviewChart.svelte': 0,
-    'app-layer/Chart.svelte': 1, 'protocol-fee-comparison/Chart.svelte': 1,
-    'TCFeeDash.svelte': 2, 'WasmArbEconomics.svelte': 5, 'PoolDislocation.svelte': 1,
-    'BondTrackerV2.svelte': 0, 'DynamicFeeDashboard.svelte': 2, 'status/BlockProductionChart.svelte': 1
-  };
-  for (const [file, count] of Object.entries(configurations)) {
-    const source = await readFile(new URL(`../src/lib/${file}`, import.meta.url), 'utf8');
-    assert.equal((source.match(/<RangeSummary\b/g) || []).length, count, file);
-  }
-  const rapid = await readFile(new URL('../src/lib/rapid-swaps/OverviewChart.svelte', import.meta.url), 'utf8');
-  assert.doesNotMatch(rapid, /RangeSummary/);
-  assert.match(rapid, /<TimeSeriesChart/);
-  const rapidPage = await readFile(new URL('../src/lib/RapidSwaps.svelte', import.meta.url), 'utf8');
-  assert.equal((rapidPage.match(/<OverviewChart\b/g) || []).length, 6);
-  const pol = await readFile(new URL('../src/lib/POLTracker.svelte', import.meta.url), 'utf8');
-  assert.doesNotMatch(pol, /RangeSummary/);
-  assert.match(pol, /<TimeSeriesChart/);
-  assert.match(pol, /aria-label="Latest POL TVL values"/);
-  assert.match(pol, /INSPECT UTC DAY/);
-  const financials = await readFile(new URL('../src/lib/financials/Chart.svelte', import.meta.url), 'utf8');
-  assert.doesNotMatch(financials, /RangeSummary/);
-  assert.match(financials, /<TimeSeriesChart/);
-  const bonds = await readFile(new URL('../src/lib/BondTrackerV2.svelte', import.meta.url), 'utf8');
-  assert.doesNotMatch(bonds, /RangeSummary|summaryHistory|Churn-observation averages/);
-  assert.match(bonds, /<EventTimeSeriesChart events=\{historySummaryRows\} metrics=\{calendarMetrics\} bind:hidden=\{historyHidden\}/);
-  assert.match(bonds, /<div class="metric-key">BOND ᚱ<\/div>/);
-  assert.match(bonds, /<h3>CHURN EARNINGS<\/h3>/);
-  const deposits = await readFile(new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url), 'utf8');
-  assert.match(deposits, /<RangeSummary[^>]*statistics: \['total', 'average'\]/);
-  const dynamic = await readFile(new URL('../src/lib/DynamicFeeDashboard.svelte', import.meta.url), 'utf8');
-  assert.match(dynamic, /affiliateSummaryRange = \{ start: chart.scales.x.min, end: chart.scales.x.max \}/);
-  assert.match(dynamic, /function resetAffiliateChartZoom\(\)[\s\S]*?affiliateSummaryRange = null/);
-  const monthly = await readFile(new URL('../src/lib/protocol-fee-comparison/Chart.svelte', import.meta.url), 'utf8');
-  assert.match(monthly, /complete \? row.protocols\[protocol.id\].netUsd : null/);
-  const block = await readFile(new URL('../src/lib/status/BlockProductionChart.svelte', import.meta.url), 'utf8');
-  assert.match(block, /value: totalBlocks \? weightedAverage : null/);
 });

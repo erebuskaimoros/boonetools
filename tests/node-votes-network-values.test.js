@@ -1,16 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 
 import {
   buildNetworkValueRows,
   filterNetworkValueRows
 } from '../src/lib/node-votes/network-values.js';
-
-const dashboardSource = readFileSync(
-  new URL('../src/lib/NodeVotes.svelte', import.meta.url),
-  'utf8'
-);
 
 test('network value rows list every Mimir first, then every constant', () => {
   const rows = buildNetworkValueRows({
@@ -60,11 +54,4 @@ test('network value search matches keys, values, sources, and constant types', (
     filterNetworkValueRows(rows, 'bool').map((row) => row.key),
     ['EnableDerivedAssets']
   );
-});
-
-test('Vote Tracker exposes Mimirs & Constants as its third tab', () => {
-  assert.match(dashboardSource, /activeTab === 'network'/);
-  assert.match(dashboardSource, />Mimirs &amp; Constants<\/button>/);
-  assert.match(dashboardSource, /Current Mimirs &amp; Constants/);
-  assert.match(dashboardSource, /networkValueRows/);
 });

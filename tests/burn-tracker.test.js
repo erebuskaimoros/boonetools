@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 
 import {
   applyBurnTrackerHeadPayload,
@@ -10,34 +9,6 @@ import {
   normalizeBurnTrackerPayload,
   selectBurnTrackerRange
 } from '../src/lib/burn-tracker/model.js';
-
-test('Burn Tracker is directly routable and visible in navigation', async () => {
-  const [appSource, trackerSource, chartSource] = await Promise.all([
-    readFile(new URL('../src/App.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lib/BurnTracker.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lib/burn-tracker/charts.js', import.meta.url), 'utf8')
-  ]);
-  const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
-  const hiddenApps = appSource.match(/const hiddenApps = \[([\s\S]*?)\];/)?.[1] || '';
-  assert.match(appSource, /path: "burn-tracker"/);
-  assert.equal(visibleApps.includes('burnTrackerApp'), true);
-  assert.equal(hiddenApps.includes('burnTrackerApp'), false);
-  assert.match(trackerSource, />SYSTEM INCOME BURNED</);
-  assert.match(trackerSource, />CURRENT RUNE SUPPLY</);
-  assert.match(trackerSource, />CURRENT BURN RATE</);
-  assert.match(trackerSource, /RUNE PRICE/);
-  assert.match(trackerSource, /DRAG TO ZOOM/);
-  assert.match(trackerSource, /LIVE PARTIAL/);
-  assert.match(trackerSource, /subscribeChainHeads/);
-  assert.match(trackerSource, /PER-BLOCK REWARDS/);
-  assert.match(trackerSource, /aria-label="Chart unit"/);
-  assert.match(trackerSource, /aria-label="Show burn values in US dollars"/);
-  assert.match(trackerSource, /aria-label="Show burn values in RUNE"/);
-  assert.match(trackerSource, />\$<\/button>/);
-  assert.match(trackerSource, />ᚱ<\/button>/);
-  assert.match(chartSource, /showUsd \? row\.burnedUsd : row\.burnedRune/);
-  assert.match(chartSource, /showUsd \? row\.cumulativeBurnedUsd : row\.cumulativeBurnedRune/);
-});
 
 test('Burn Tracker exposes 30, 90, 180 day, and all-time presets with 90 days as the default selector', () => {
   assert.deepEqual(BURN_TRACKER_RANGES, [

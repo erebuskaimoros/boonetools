@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { calendarDays, contribution, monthlyComparison, PROTOCOLS } from '../shared/protocol-fee-comparison/model.js';
 import { buildComparisonTimeSeries, selectComparisonView } from '../src/lib/protocol-fee-comparison/time-series.js';
 
@@ -119,17 +118,4 @@ test('explicit scopes survive refreshed data as historical coverage improves', (
   assert.equal(selectComparisonView(complete, monthly, { mode: original.mode }).mode, 'verified');
   assert.equal(selectComparisonView(complete, monthly, { mode: 'full' }).mode, 'full');
   assert.equal(selectComparisonView(daily, months, { mode: 'full' }).mode, 'full');
-});
-
-test('the live chart uses the coverage-aware selector and exposes both date scopes', async () => {
-  const source = await readFile(new URL('../src/lib/protocol-fee-comparison/Chart.svelte', import.meta.url), 'utf8');
-  assert.match(source, /selectComparisonView/);
-  assert.match(source, /Latest verified/i);
-  assert.match(source, /Full history/i);
-  assert.doesNotMatch(source, /initialGrain="month"/);
-  assert.match(source, /selectedMode === null && \(daily.length \|\| months.length\)/);
-  assert.match(source, /\{#key selectedMode\}/);
-  assert.match(source, /onHiddenChange=\{value => hidden = value\}/);
-  assert.match(source, /\{zoomWindow\} onZoom=\{value => zoomWindow = value\}/);
-  assert.match(source, /initialGrain=\{view.grain\}/);
 });

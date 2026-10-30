@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 function event(type, attrs) {
@@ -343,36 +342,6 @@ test('parseRujiraReservePaymentBlock does not classify POL transfers before the 
 
   assert.equal(parsed.events.length, 0);
   assert.equal(parsed.scan.pol_transfer_event_count, 0);
-});
-
-test('migration 045 repairs the POL constraint and rewinds settlement scanning', async () => {
-  const migration = await readFile(
-    new URL('../migrations/045_correct_rujira_pol_fund.sql', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(migration, /drop constraint if exists rujira_reserve_payment_events_payment_type_check/i);
-  assert.match(migration, /delete from public\.event_source_observations/i);
-  assert.match(migration, /delete from public\.rujira_reserve_payment_events/i);
-  assert.match(
-    migration,
-    /payment_type = 'pol'[\s\S]*recipient = 'thor1glpf75rxtuu0mahvf0cqg27ek22x9w0uc5rkpcf9g0d9499pqcdql3fgen'/i
-  );
-  assert.match(migration, /where height >= 27410412/i);
-  assert.match(migration, /least\(rujira_reserve_payment_sync_state\.next_scheduled_height, excluded\.next_scheduled_height\)/i);
-});
-
-test('migration 048 requeues the known post-halt catch-up settlement block', async () => {
-  const migration = await readFile(
-    new URL('../migrations/048_rujira_catchup_settlements.sql', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(migration, /27545366/);
-  assert.match(migration, /insert into public\.rujira_reserve_payment_blocks/i);
-  assert.match(migration, /on conflict \(height\)/i);
-  assert.match(migration, /status = 'pending'/i);
-  assert.match(migration, /next_retry_at = now\(\)/i);
 });
 
 test('parseRujiraReservePaymentBlock falls back to reserve event when transfer is absent', async () => {

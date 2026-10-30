@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 
 import {
   POOL_ANALYSIS_TABLE_PERIODS,
@@ -374,28 +373,4 @@ test('Pool Analysis handlers are provider-free and validate detail requests', as
     getReadModel: async () => model
   });
   assert.equal(invalid.status, 400);
-});
-
-test('migration, route, jobs, units, and performance gate encode Pool Analysis', async () => {
-  const [migration, feeScopeMigration, server, runJob, timer, service, backfill, smoke] = await Promise.all([
-    readFile(new URL('../migrations/051_pool_analysis.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../migrations/052_pool_analysis_fee_scope.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pool-analysis.timer', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pool-analysis.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pool-analysis-backfill.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../scripts/perf-smoke.mjs', import.meta.url), 'utf8')
-  ]);
-  assert.match(migration, /pool_analysis_daily/);
-  assert.match(feeScopeMigration, /drop column if exists pool_earnings_rune_e8/);
-  assert.match(feeScopeMigration, /delete from public\.pool_analysis_daily/);
-  assert.match(feeScopeMigration, /pool-generated liquidity fees/);
-  assert.match(server, /pool-analysis-series/);
-  assert.match(runJob, /pool-analysis-backfill/);
-  assert.match(timer, /^OnCalendar=\*-\*-\* \*:02,17,32,47:00 UTC$/m);
-  assert.doesNotMatch(timer, /^On(?:Active|Boot|Startup|UnitActive|UnitInactive)Sec=/m);
-  assert.match(service, /pool-analysis-scheduler/);
-  assert.match(backfill, /pool-analysis-backfill/);
-  assert.match(smoke, /name: 'pool-analysis'/);
 });

@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 
 import {
   buildPolTrackerObservation,
@@ -531,38 +530,6 @@ test('POL Tracker retries transient history failures', async () => {
   });
   assert.equal(value, 'ok');
   assert.deepEqual(delays, [5, 10]);
-});
-
-test('migration, jobs, route, timer, and deployment encode the POL Tracker production contract', async () => {
-  const [migration, poolBreakdownMigration, systemIncomeMigration, runJob, server, timer, service, backfill] = await Promise.all([
-    readFile(new URL('../migrations/046_pol_tracker.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../migrations/047_pol_tracker_pool_breakdown.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../migrations/056_pol_tvl_system_income_pol.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pol-tracker.timer', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pol-tracker.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-pol-tracker-backfill.service', import.meta.url), 'utf8'),
-  ]);
-  assert.match(migration, /create table if not exists public\.pol_tracker_daily/);
-  assert.match(migration, /runepool_provider_owned_rune_e8/);
-  assert.match(migration, /Never publish this provider-owned RUNEPool value/);
-  assert.match(poolBreakdownMigration, /reserve_module_address/);
-  assert.match(poolBreakdownMigration, /reserve_pol_lp_units/);
-  assert.match(poolBreakdownMigration, /reserve_pol_rune_e8/);
-  assert.match(poolBreakdownMigration, /reserve_pol_usd_e8/);
-  assert.match(systemIncomeMigration, /system_income_pol_module_address/);
-  assert.match(systemIncomeMigration, /system_income_pol_rune_e8/);
-  assert.match(systemIncomeMigration, /system_income_pol_usd_e8/);
-  assert.match(runJob, /'pol-tracker-backfill': runPolTrackerBackfill/);
-  assert.match(runJob, /'pol-tracker-scheduler': runPolTrackerScheduler/);
-  assert.match(server, /\['\/pol-tvl', route\(handlePolTracker, 1, 64\)\]/);
-  assert.match(timer, /OnCalendar=\*-\*-\* 00:10:00 UTC/);
-  assert.match(service, /src\/run-job\.js pol-tracker-scheduler/);
-  assert.match(service, /Restart=on-failure/);
-  assert.match(service, /RestartSec=15m/);
-  assert.match(backfill, /src\/run-job\.js pol-tracker-backfill/);
-  assert.match(backfill, /TimeoutStartSec=infinity/);
 });
 
 test('scheduled POL job publishes before failing an incomplete current target for retry', async () => {

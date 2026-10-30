@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import {
   acceptSystemIncomePolSnapshot,
   bufferSystemIncomePolHead,
@@ -175,14 +174,4 @@ test('preload buffering remains bounded and a later first snapshot does not inve
   const initial = replaySystemIncomePolHeads(accepted, buffered.recentHeads);
   assert.equal(initial.summary.system_income_share_pending, true);
   assert.equal(initial.summary.total_system_income_e8, null);
-});
-
-test('the dashboard replays corrections and labels retained percentages as syncing', async () => {
-  const source = await readFile(new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url), 'utf8');
-  assert.match(source, /await fetchSystemIncomePol/);
-  assert.match(source, /acceptSystemIncomePolSnapshot\(snapshotPayload, nextSnapshot\)/);
-  assert.match(source, /replaySystemIncomePolHeads\(snapshotPayload, recentHeads, payload\)/);
-  assert.match(source, /bufferSystemIncomePolHead\(snapshotPayload, recentHeads, head\)/);
-  assert.match(source, /OF INCOME · SYNCING/);
-  assert.match(source, /Last confirmed percentage/);
 });

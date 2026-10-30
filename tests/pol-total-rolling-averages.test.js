@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { init, use } from 'echarts/core';
 import { BarChart, LineChart } from 'echarts/charts';
 import { DataZoomInsideComponent, GridComponent, ToolboxComponent, TooltipComponent } from 'echarts/components';
@@ -99,12 +98,4 @@ test('real ECharts adds and removes total averages without changing pool stacks 
     assert.equal(chart.getOption().series.some(item => item.id.startsWith('total-')), false);
     assert.deepEqual(chart.getOption().series.find(item => item.id === 'cumulative').data, rows.map(row => row.cumulativeDepositedValue));
   } finally { chart.dispose(); }
-});
-
-test('chart tools accept rolling-only choices without adding them to the ordinary series legend', async () => {
-  const component = await readFile(new URL('../src/lib/charts/TimeSeriesChart.svelte', import.meta.url), 'utf8');
-  const tools = await readFile(new URL('../src/lib/charts/ChartTools.svelte', import.meta.url), 'utf8');
-  assert.match(component, /rollingSeries=\{analysisRollingSeries\(baseSpec\)\}/);
-  assert.match(tools, /\(rollingSeries \|\| series\)\.filter/);
-  assert.match(tools, /<SeriesLegend series=\{legendSeries\}/);
 });

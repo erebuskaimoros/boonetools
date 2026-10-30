@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { compile, parse } from 'svelte/compiler';
 import { render } from 'svelte/server';
@@ -9,9 +9,11 @@ import { searchTools, isNavigationSearchShortcut } from '../src/lib/navigation/s
 const appSource = readFileSync(new URL('../src/App.svelte', import.meta.url), 'utf8');
 const registry = parse(appSource).instance.content.body.filter(node =>
   node.type === 'VariableDeclaration' && node.kind === 'const' && node.declarations.some(({ id }) =>
-    /App$/.test(id.name) || id.name === 'apps')
+    /App$/.test(id.name) || ['apps', 'hiddenApps', 'routeAliases'].includes(id.name))
 ).map(node => appSource.slice(node.start, node.end)).join('\n');
-const apps = Array.from(runInNewContext(`${registry}; apps;`, { SHOW_LIMIT_ORDERS: false, SHOW_VOTE_TRACKER: true }));
+const routes = runInNewContext(`${registry}; ({ apps, hiddenApps, routeAliases });`,
+  { SHOW_LIMIT_ORDERS: false, SHOW_VOTE_TRACKER: true });
+const apps = Array.from(routes.apps);
 const paths = query => searchTools(apps, query).map(app => app.path);
 
 test('empty search preserves navigation order and only public production tools', () => {
@@ -19,6 +21,21 @@ test('empty search preserves navigation order and only public production tools',
   assert.equal(apps.length, 16);
   for (const hidden of ['bond-tracker', 'wasm-arb-economics', 'limit-orders']) {
     assert.equal(paths(hidden).includes(hidden), false);
+  }
+});
+
+// The one routing contract: update this table when a tool joins, leaves or hides from navigation.
+test('every tool routes to an existing component; direct-only tools and aliases stay out of navigation', () => {
+  assert.deepEqual(apps.map(app => app.path), [
+    'status', 'rapid-swaps', 'tc-fee-dash', 'pool-dislocation', 'pool-analysis', 'financials', 'pol-tvl',
+    'pol-tracker', 'burn-tracker', 'thorfolio', 'vault-explorer', 'treasury', 'adr26-dynamic-fees',
+    'vote-tracker', 'app-layer-base-layer', 'briefings'
+  ]);
+  assert.deepEqual(Array.from(routes.hiddenApps, app => app.path), ['wasm-arb-economics', 'bond-tracker']);
+  assert.deepEqual({ ...routes.routeAliases }, { 'bond-tracker-classic': 'bond-tracker' });
+  for (const app of [...apps, ...routes.hiddenApps]) {
+    const file = String(app.component).match(/import\("\.\/(.+?)"\)/)?.[1];
+    assert.ok(file && existsSync(new URL(`../src/${file}`, import.meta.url)), `${app.path} has no component`);
   }
 });
 

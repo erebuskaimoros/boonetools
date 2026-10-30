@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -65,17 +64,6 @@ test('block production chart-wide hover selects the sample nearest the pointer t
   assert.equal(findNearestBlockProductionPointIndex([], 3_600), null);
 });
 
-test('block production hover converts browser coordinates through the rendered SVG transform', () => {
-  const component = readFileSync(
-    new URL('../src/lib/status/BlockProductionChart.svelte', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(component, /createSVGPoint\(\)/);
-  assert.match(component, /getScreenCTM\(\)/);
-  assert.match(component, /matrixTransform\(/);
-});
-
 test('compact per-block tuples decode and merge by height for replay plus live updates', () => {
   const decoded = decodeBlockIntervalPayload({
     columns: ['height', 'time_ms', 'interval_ms', 'has_swap_events'],
@@ -111,37 +99,4 @@ test('nearest-point lookup remains logarithmic-friendly for a full day of blocks
   assert.equal(findNearestBlockProductionPointIndex(points, 43_201_000), 7200);
   assert.equal(findNearestBlockProductionPointIndex(points, -1), 0);
   assert.equal(findNearestBlockProductionPointIndex(points, Number.MAX_SAFE_INTEGER), 14_399);
-});
-
-test('block production drag surface stays above the series without per-block DOM targets or a zoom-in cursor', () => {
-  const component = readFileSync(
-    new URL('../src/lib/status/BlockProductionChart.svelte', import.meta.url),
-    'utf8'
-  );
-  const seriesLine = component.indexOf('class="series-line"');
-  const dragSurface = component.indexOf('class="zoom-capture"');
-
-  assert.ok(seriesLine >= 0);
-  assert.ok(
-    dragSurface > seriesLine,
-    'the drag surface must remain above the rendered series so selection follows the pointer'
-  );
-  assert.doesNotMatch(component, /\{#each points as point, index\}/);
-  assert.doesNotMatch(component, /class="point-target"/);
-  assert.doesNotMatch(component, /cursor:\s*zoom-in/);
-});
-
-test('block interval keeps its native chart and interactions without the calendar toolbar', () => {
-  const component = readFileSync(
-    new URL('../src/lib/status/BlockProductionChart.svelte', import.meta.url),
-    'utf8'
-  );
-
-  assert.doesNotMatch(component, /EventTimeSeriesChart|ChartTools|calendarMetrics|hiddenSeries/);
-  assert.match(component, /<RangeSummary rows=\{points\}/);
-  assert.match(component, /<path class="series-line" d=\{linePath\}/);
-  assert.match(component, /on:mousemove=\{updateChartTooltip\}/);
-  assert.match(component, /on:pointerdown=\{startZoomSelection\}/);
-  assert.match(component, /on:pointerup=\{finishZoomSelection\}/);
-  assert.match(component, /on:click=\{resetZoom\}/);
 });

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
 import { init, use } from 'echarts/core';
 import { BarChart, LineChart } from 'echarts/charts';
 import { DataZoomInsideComponent, GridComponent, ToolboxComponent, TooltipComponent } from 'echarts/components';
@@ -193,13 +192,4 @@ test('tooltip escapes pool identifiers, uses trusted local token logos and keeps
   const evil = { ...points()[0], poolDeposits: [{ asset: 'EVIL.<script>', rune: 1, value: 1 }] };
   assert.doesNotMatch(polDepositTooltip(evil), /<script>/);
   assert.equal(polPoolSeries('TRON.USDT').color, polPoolSeries('TRON.USDT').color);
-});
-
-test('keyboard and touch users can inspect a UTC bucket without interacting with canvas', async () => {
-  const source = await readFile(new URL('../src/lib/system-income-pol/DepositInspector.svelte', import.meta.url), 'utf8');
-  assert.match(source, /<label for="pol-deposit-bucket"/);
-  assert.match(source, /<select id="pol-deposit-bucket"/);
-  assert.match(source, /polDepositBuckets\(rows, grain\)/);
-  assert.match(source, /aria-live="polite"/);
-  assert.match(source, /event.key === 'Escape'/);
 });

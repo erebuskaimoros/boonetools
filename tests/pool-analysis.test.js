@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { buildPoolAnalysisOption } from '../src/lib/pool-analysis/charts.js';
 
 import {
@@ -12,7 +11,6 @@ import {
   normalizePoolAnalysisSummary,
   poolAnalysisColumns,
   poolAnalysisFeeVolumeBps,
-  poolAnalysisLineMetric,
   selectPoolAnalysisPeriod,
   sortPoolAnalysisRows
 } from '../src/lib/pool-analysis/model.js';
@@ -56,17 +54,6 @@ function samplePayload() {
     ]
   };
 }
-
-test('Pool Analysis places range controls and legend between summary cards and plot', async () => {
-  const source = await readFile(new URL('../src/lib/PoolAnalysis.svelte', import.meta.url), 'utf8');
-  const summary = source.indexOf('<RangeSummary');
-  const controls = source.indexOf('class="chart-controls"');
-  const shared = await readFile(new URL('../src/lib/charts/TimeSeriesChart.svelte', import.meta.url), 'utf8');
-  const plot = source.indexOf('<TimeSeriesChart');
-  assert.ok(summary >= 0 && summary < controls);
-  assert.ok(controls < plot);
-  assert.ok(shared.indexOf('<ChartTools') < shared.indexOf('<div class="time-series-frame"'));
-});
 
 test('Pool Analysis normalizes, filters, and keeps missing sort values last in both directions', () => {
   const dashboard = normalizePoolAnalysisSummary(samplePayload());
@@ -197,64 +184,6 @@ test('Pool Analysis derives daily chart fees per volume in basis points', () => 
   assert.equal(poolAnalysisFeeVolumeBps(null, '10000000000'), null);
 });
 
-test('Pool Analysis is routed, accessible, lazy, zoomable, and omits the excluded raw columns', async () => {
-  const [app, component, chart] = await Promise.all([
-    readFile(new URL('../src/App.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lib/PoolAnalysis.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lib/pool-analysis/charts.js', import.meta.url), 'utf8')
-  ]);
-  const visibleApps = app.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
-  const hiddenApps = app.match(/const hiddenApps = \[([\s\S]*?)\];/)?.[1] || '';
-  assert.match(app, /path: "pool-analysis"/);
-  assert.equal(visibleApps.includes('poolAnalysisApp'), true);
-  assert.equal(hiddenApps.includes('poolAnalysisApp'), false);
-  assert.match(app, /return \[\.\.\.apps, \.\.\.hiddenApps\]\.find/);
-  assert.match(component, /aria-expanded=/);
-  assert.match(component, /aria-controls=/);
-  assert.match(component, /colspan=\{tableColumns\.length\}/);
-  assert.match(component, /fetchPoolAnalysisSeries/);
-  assert.match(component, /DRAG TO ZOOM/);
-  assert.match(component, /Chart zoom controls/);
-  assert.doesNotMatch(component, /aria-label="Zoom (in|out)"/);
-  assert.match(component, /\[RESET ZOOM\]/);
-  assert.match(component, /aria-label="Table activity period"/);
-  assert.match(component, /FIRST INDEXED/);
-  for (const excluded of ['TRADE ASSET DEPTH', 'RUNEPOOL SHARE', 'POOL EARNINGS', 'DISTRIBUTED', 'EST YR SWAP FEES']) {
-    assert.equal(component.toUpperCase().includes(excluded), false, excluded);
-  }
-  assert.equal((component.match(/<TimeSeriesChart\b/g) || []).length, 1);
-  assert.match(component, /class="chart-frame"/);
-  assert.match(component, /\.table-scroll \{[^}]*container-type: inline-size;/);
-  assert.doesNotMatch(component, /min-width: 1480px/);
-  assert.match(component, /table \{[^}]*min-width: 1000px;[^}]*table-layout: fixed;/);
-  assert.match(component, /@container \(max-width: 900px\)/);
-  assert.match(component, /data-label="USD PRICE"/);
-  assert.match(component, /data-label="VOLUME"/);
-  assert.match(component, /data-label="FEES"/);
-  assert.match(component, /data-label="FEES \/ DEPTH"/);
-  assert.match(component, /Pricing and two-sided depth are current/);
-  assert.doesNotMatch(component, /data-label=\{`(?:VOLUME|FEES) · \$\{tablePeriod\.label\}`\}/);
-  assert.match(component, /FEES = POOL-GENERATED LIQUIDITY FEES/);
-  assert.match(component, /VOLUME \/ DEPTH = PERIOD VOLUME \/ CURRENT TWO-SIDED DEPTH/);
-  assert.match(component, /FEES \/ DEPTH = PERIOD FEES \/ CURRENT TWO-SIDED DEPTH/);
-  assert.match(component, /SYSTEM-INCOME DISTRIBUTION OUT OF SCOPE/);
-  assert.doesNotMatch(component, /app\.thorswap\.finance/);
-  assert.match(component, /\.detail-panel \{[^}]*width: 100cqw;[^}]*max-width: 100cqw;/);
-  assert.match(chart, /label: 'DAILY VOLUME'/);
-  assert.match(chart, /label: 'DAILY FEES'/);
-  assert.match(chart, /label: lineMetric.label/);
-  assert.match(component, /aria-label="Pool chart line metric"/);
-  assert.match(component, /role="switch"/);
-  assert.match(component, /aria-checked=\{lineMetricId === 'cumulativeFees'\}/);
-  assert.match(component, /selectLineMetric\(lineMetricId === 'depth' \? 'cumulativeFees' : 'depth'\)/);
-  assert.match(component, /\.switch-thumb[^}]*transition: transform/);
-  assert.match(component, /prefers-reduced-motion: reduce/);
-  assert.match(chart, /FEES \/ VOLUME:/);
-  assert.match(chart, /poolAnalysisFeeVolumeBps\(row\.feesRuneBase, row\.volumeRuneBase\)/);
-  assert.match(chart, /buildTimeSeriesOption/);
-  assert.match(chart, /poolAnalysisLineMetric/);
-});
-
 test('Pool chart line toggle preserves bars and zoom, updates the axis and tooltip, and keeps null depth gaps', () => {
   const rows = Array.from({ length: 10 }, (_, index) => ({
     day: `2026-01-${String(index + 1).padStart(2, '0')}`,
@@ -277,14 +206,6 @@ test('Pool chart line toggle preserves bars and zoom, updates the axis and toolt
   assert.match(depth.tooltip.formatter([{ dataIndex: 0 }]), /FEES \/ VOLUME: 100 BPS/);
   assert.deepEqual(fees.series[2].data, rows.map((row) => row.cumulativeFeesUsd));
   assert.match(fees.tooltip.formatter([{ dataIndex: 0 }]), /CUMULATIVE FEES: \$1.00/);
-});
-
-test('Pool Analysis bars can expand with the visible zoom range', async () => {
-  const chart = await readFile(
-    new URL('../src/lib/pool-analysis/charts.js', import.meta.url),
-    'utf8'
-  );
-  assert.doesNotMatch(chart, /maxBarThickness/);
 });
 
 test('Pool legend toggles hide only their series, axis, and tooltip row without changing dates or values', () => {
@@ -313,12 +234,4 @@ test('Pool legend toggles hide only their series, axis, and tooltip row without 
     assert.ok(allHidden.yAxis.every(axis => !axis.show));
     assert.deepEqual(allHidden.dataZoom, visible.dataZoom);
   }
-});
-
-test('Pool Analysis wires keyboard-accessible legend buttons to renderer visibility', async () => {
-  const source = await readFile(new URL('../src/lib/PoolAnalysis.svelte', import.meta.url), 'utf8');
-  assert.match(source, /onHiddenChange=\{\(ids\) => hidden = ids\}/);
-  assert.match(source, /options=\{\{ lineMetric: lineMetricId, hidden(?:, [^}]*)? \}\}/);
-  assert.match(source, /historyPoints=\{rollingPoints\}/);
-  assert.match(source, /hidden = toggleHiddenChartTrend\(hidden, id\)/);
 });

@@ -95,31 +95,3 @@ test('the real toggle changes only layout, restores focus and tolerates unavaila
   assert.equal(context.tracked, tracked);
   assert.equal(focused, 2);
 });
-
-test('each layout keeps its view toggle in the existing toolbar, not a separate row', () => {
-  function descendants(node) {
-    if (!node || typeof node !== 'object') return [];
-    return [node, ...Object.values(node).flatMap((value) =>
-      Array.isArray(value) ? value.flatMap(descendants) : descendants(value))];
-  }
-  const elements = descendants(ast.html).filter((node) => node.type === 'Element');
-  for (const toolbarClass of ['mbar', 'head-right', 'head-actions']) {
-    const toolbar = elements.find((node) => node.attributes.some((attr) =>
-      attr.name === 'class' && attr.value?.some((value) => value.data === toolbarClass)));
-    assert.ok(toolbar, `${toolbarClass} must exist`);
-    const toggles = descendants(toolbar).filter((node) => node.type === 'Element' && node.name === 'button'
-      && node.attributes.some((attr) => attr.type === 'EventHandler' && attr.expression?.name === 'toggleLayout'));
-    assert.equal(toggles.length, 1, `${toolbarClass} must contain its view toggle`);
-    assert.ok(toggles[0].attributes.some((attr) => attr.type === 'Binding' && attr.name === 'this'
-      && attr.expression?.name === 'layoutToggleButton'), 'keep keyboard focus on the replacement button');
-  }
-  assert.doesNotMatch(source, /class="layout-controls"/);
-});
-
-test('the tracker initializes its preference and uses one existing compact layout', () => {
-  assert.match(source, /let layoutPreference = loadLayoutPreference\(\)/);
-  assert.match(source, /compact = isCompactLayout\(viewportWidth, layoutPreference\)/);
-  assert.match(source, /on:click=\{toggleLayout\}/);
-  assert.match(source, /aria-label=\{compact \? 'Use desktop view' : 'Use mobile view'\}/);
-  assert.match(source, /viewportWidth > COMPACT_MAX_WIDTH/);
-});

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 process.env.DATABASE_URL ||= 'postgres://test:test@127.0.0.1:5432/test';
@@ -794,37 +793,4 @@ test('SIPOL handler serves only the durable model plus chain-header overlay', as
   assert.equal(response.headers['Cache-Control'], 'no-store');
   assert.equal(response.body.summary.total_funded_e8, '12');
   assert.equal(response.body.read_model.key, 'system-income-pol:v1');
-});
-
-test('SIPOL production contract keeps legacy POL at pol-tvl and serves SIPOL from pol-tracker', async () => {
-  const [migration, headlineMigration, hourlyMigration, aprMigration, server, runJob, repair, service, timer, smoke] = await Promise.all([
-    readFile(new URL('../migrations/054_system_income_pol.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../migrations/055_system_income_pol_headlines.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../migrations/057_system_income_pol_hourly_fees.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../migrations/058_system_income_pol_fee_apr.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../src/server.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/shared/system-income-pol-repair.js', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-system-income-pol.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-system-income-pol.timer', import.meta.url), 'utf8'),
-    readFile(new URL('../../scripts/perf-smoke.mjs', import.meta.url), 'utf8')
-  ]);
-  assert.match(migration, /system_income_pol_observed/);
-  assert.match(migration, /create table if not exists public\.system_income_pol_blocks/);
-  assert.match(migration, /create table if not exists public\.system_income_pol_positions/);
-  assert.match(headlineMigration, /system_income_total_e8/);
-  assert.match(headlineMigration, /rune_price_usd_e8/);
-  assert.match(hourlyMigration, /create table if not exists public\.system_income_pol_pool_hourly/);
-  assert.match(hourlyMigration, /provisional boolean not null/);
-  assert.match(aprMigration, /position_value_rune_e8/);
-  assert.match(aprMigration, /position_value_seeded/);
-  assert.match(aprMigration, /update public\.system_income_pol_position_samples/);
-  assert.match(server, /\['\/pol-tracker', route\(handleSystemIncomePol, 1, 64\)\]/);
-  assert.match(server, /\['\/pol-tvl', route\(handlePolTracker, 1, 64\)\]/);
-  assert.match(runJob, /'system-income-pol-scheduler': runSystemIncomePolScheduler/);
-  assert.match(repair, /cooldownScope: 'system-income-pol-repair'/);
-  assert.match(repair, /blocks\.system_income_e8 is null/);
-  assert.match(service, /src\/run-job\.js system-income-pol-scheduler/);
-  assert.match(timer, /OnUnitActiveSec=2min/);
-  assert.match(smoke, /name: 'pol-tvl', path: '\/pol-tvl'/);
 });

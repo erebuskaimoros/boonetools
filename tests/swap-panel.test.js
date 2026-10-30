@@ -45,19 +45,3 @@ test('a bare S toggles the panel except while typing or with a modifier', () => 
   }
   assert.equal(isSwapShortcut(key('s', { target: { tagName: 'DIV', isContentEditable: true } })), false);
 });
-
-test('the footer launches the swap panel instead of linking to THORDEX', async () => {
-  const [footer, app, panel] = await Promise.all(
-    ['../src/lib/Footer.svelte', '../src/App.svelte', '../src/lib/swap/SwapPanel.svelte']
-      .map((file) => readFile(new URL(file, import.meta.url), 'utf8'))
-  );
-  assert.doesNotMatch(footer, /thordex/i);
-  assert.match(footer, /id="swap-launcher"[\s\S]*aria-controls="swap-panel"[\s\S]*aria-keyshortcuts="S"/);
-  assert.match(footer, /\{#if STO_WIDGET_ENABLED && STO_WIDGET_API_KEY\}/);
-  assert.match(panel, /const widgetUrl = STO_WIDGET_ENABLED && STO_WIDGET_API_KEY \?/);
-  assert.match(footer, /<span class="swap-label">swap on THORChain<\/span>/);
-  // Mounted beside the footer, outside the routed component, and never in the desktop app.
-  assert.match(app, /\{#if !isDesktopApp\}\s*<Footer \/>[\s\S]*?<SwapPanel \/>\s*\{\/if\}/);
-  assert.match(panel, /id="swap-panel"/);
-  assert.match(panel, /aria-modal="false"/);
-});

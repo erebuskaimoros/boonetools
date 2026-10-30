@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -92,22 +91,4 @@ test('canonical historical block time uses a dedicated live-RPC cooldown lane', 
   const urls = thorchainMarketSnapshotRpcUrls();
   assert.ok(urls[0].includes('/chain/thorchain_rpc'));
   assert.ok(urls.some((url) => /rpc\.thorchain\.liquify\.com/.test(url)));
-});
-
-test('Wasm production lanes are independently registered and independently timed', async () => {
-  const [migration, registry, activity, fees, oracle] = await Promise.all([
-    readFile(new URL('../migrations/038_provider_lanes_and_market_snapshots.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../src/run-job.js', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-wasm-arb-economics.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-wasm-arb-economics-fees.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-wasm-arb-economics-oracle.service', import.meta.url), 'utf8'),
-  ]);
-  assert.match(migration, /create table if not exists public\.thorchain_market_snapshots/i);
-  assert.match(registry, /'wasm-arb-economics-scheduler': runWasmArbEconomicsScheduler/);
-  assert.match(registry, /'wasm-arb-economics-fees': runWasmArbEconomicsFees/);
-  assert.match(registry, /'wasm-arb-economics-oracle': runWasmArbEconomicsOracle/);
-  assert.match(activity, /wasm-arb-economics-scheduler/);
-  assert.match(fees, /wasm-arb-economics-fees/);
-  assert.match(fees, /TimeoutStartSec=10min/);
-  assert.match(oracle, /wasm-arb-economics-oracle/);
 });

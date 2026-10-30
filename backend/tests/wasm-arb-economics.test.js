@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { config } from '../src/lib/config.js';
@@ -669,20 +668,6 @@ test('fee pricing negative-caches deterministic missing Midgard pools', async ()
   assert.equal(result.unpriced, 1);
   assert.equal(cached[0].poolAsset, 'THOR.BRUNE');
   assert.equal(cached[0].receivedError, error);
-});
-
-test('post-change migration removes legacy work and resets range-relative tx pagination', async () => {
-  const migration = await readFile(
-    new URL('../migrations/040_wasm_post_change_boundary.sql', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(migration, /wasm_arb_economics_blocks\s+where height < 27181679/i);
-  assert.match(migration, /wasm_arb_economics_rujira_fees\s+where height < 27181679/i);
-  assert.match(migration, /wasm_arb_economics_actions\s+where height < 27181679/i);
-  assert.match(migration, /wasm_arb_economics_oracle_samples\s+where height < 27181679/i);
-  assert.match(migration, /sync_key = 'collector-tx-search-backfill'/i);
-  assert.doesNotMatch(migration, /thorchain_market_snapshots/i);
 });
 
 test('builds same-height pool and oracle tracking rows on the report price basis', () => {

@@ -290,3 +290,37 @@ test('Postgres a multi-lane catch-up batch cannot exceed ten acquisition steps',
     assert.equal(calls, 11);
   });
 });
+
+// The collector, not a visitor, keeps the current and just-closed rosters moving.
+const rosterNow = (from + 12 * 3600) * 1000;
+
+test('the collector starts a durable current-day roster without a visitor request', async () => {
+  const statements = [];
+  await detail.refreshFinancialDayQueue({ query: async (sql, args) => {
+    statements.push({ sql, args });
+    return { rows: [] };
+  } }, { now: () => rosterNow, maxRequests: 1, getJson: () => assert.fail('no selected job') });
+  assert.ok(statements.some(({ sql }) => /insert into financials_day_rankings/i.test(sql)),
+    'today must be scheduled by the collector, not the first visitor');
+});
+
+for (const [label, rosterDay] of [['today', day], ['the day that just closed', '2026-10-21']]) {
+  test(`a background roster for ${label} advances after its visitor lease expires`, async () => {
+    let requests = 0;
+    const writes = [];
+    const row = { day: rosterDay, background: true, state_json: null, payload_json: null,
+      requested_at: new Date(rosterNow - 10 * 60_000).toISOString() };
+    const client = { query: async (sql, args) => {
+      if (/^select/i.test(sql.trim())) return { rows: [row] };
+      if (/^update/i.test(sql.trim())) writes.push(args);
+      return { rows: [] };
+    } };
+    await detail.refreshFinancialDayQueue(client, { now: () => rosterNow, maxRequests: 1, getJson: async route => {
+      requests++;
+      assert.equal(route, '/health');
+      return { inSync: true, lastAggregated: { timestamp: rosterNow / 1000 } };
+    } });
+    assert.equal(requests, 1, 'background maintenance must not depend on an open browser tab');
+    assert.equal(writes.length, 1, 'the cursor is checkpointed before the next request');
+  });
+}

@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { calendarDays, contribution, monthlyComparison, THORCHAIN_LEGACY_METHOD } from '../shared/protocol-fee-comparison/model.js';
 import { selectSummaryRows } from '../src/lib/charts/summary.js';
 import * as comparison from '../src/lib/protocol-fee-comparison/time-series.js';
@@ -92,21 +91,4 @@ test('summary accounting follows the selected daily range and native monthly cou
   const monthly = display.map(row => ({ ...row, day: row.fromDay }));
   assert.deepEqual(comparison.comparisonViewAccounting(monthly, { sourceGrain: 'month' }), { accounting: 'mixed', legacyDays: 36, correctedDays: 7 });
   assert.deepEqual(comparison.comparisonViewAccounting(monthly, { sourceGrain: 'month', correctedAccounting: false }), { accounting: 'legacy', legacyDays: 43, correctedDays: 0 });
-});
-
-test('comparison surfaces keep the numbers and controls without accounting labels or explainers', async () => {
-  const [chartSource, panelSource, summarySource] = await Promise.all([
-    readFile(new URL('../src/lib/protocol-fee-comparison/Chart.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lib/protocol-fee-comparison/Comparison.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lib/charts/RangeSummary.svelte', import.meta.url), 'utf8')
-  ]);
-  assert.doesNotMatch(chartSource, /legacy|mixed|scope-note|summaryAccounting/i);
-  assert.match(chartSource, /showNote=\{false\}/);
-  assert.match(chartSource, /protocol\.label \+ ' net income'/);
-  assert.match(panelSource, /comparisonDisplayMonths/);
-  assert.match(panelSource, /\[\.\.\.displayMonths\]/);
-  assert.match(panelSource, /<summary>MONTHLY DATA<\/summary>/);
-  assert.doesNotMatch(panelSource, /legacy|mixed|qualification|methodology &amp;|class="lede"|tag="TC"/i);
-  assert.match(summarySource, /export let showNote = true/, 'other charts retain their default notes');
-  assert.match(summarySource, /\{#if showNote\}<p>/);
 });

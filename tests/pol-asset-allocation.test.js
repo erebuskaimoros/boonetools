@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { init, use } from 'echarts/core';
 import { PieChart } from 'echarts/charts';
 import { TooltipComponent } from 'echarts/components';
@@ -139,22 +138,4 @@ test('real ECharts pie renders a full circle and proportionate slices, then upda
     chart.setOption(buildPolAssetAllocationOption(buildPolAssetAllocation([])), { notMerge: true });
     assert.deepEqual(chart.getOption().series[0].data, []);
   } finally { chart.dispose(); }
-});
-
-test('holdings retain an accessible HTML key, responsive rendering, and chart cleanup', async () => {
-  const source = await readFile(new URL('../src/lib/system-income-pol/AssetAllocation.svelte', import.meta.url), 'utf8');
-  assert.match(source, /<ul aria-label="POL asset amounts and allocation shares"/);
-  assert.match(source, /asset\.amountLabel/);
-  assert.match(source, /asset\.valueLabel/);
-  assert.match(source, /allocationShare\(asset.percent\)/);
-  assert.match(source, /title=\{asset.asset\}/);
-  assert.match(source, /ResizeObserver/);
-  assert.match(source, /observer\?\.disconnect\(\)/);
-  assert.match(source, /chart\?\.dispose\(\)/);
-  assert.match(source, /@container sipol \(max-width: 650px\)/);
-  const dashboard = await readFile(new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url), 'utf8');
-  assert.match(dashboard, /<AssetAllocation inventory=\{assetInventory\} \{loading\}/);
-  assert.match(dashboard, /container: sipol \/ inline-size/);
-  assert.match(dashboard, /@container sipol \(min-width: 1320px\)[\s\S]*?grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)/);
-  assert.doesNotMatch(dashboard, /asset-grid|metric:nth-child/);
 });

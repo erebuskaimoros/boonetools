@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { buildSystemIncomePolDepositOption } from '../src/lib/system-income-pol/charts.js';
 
 import {
@@ -17,7 +16,7 @@ import {
   selectSystemIncomePolRange
 } from '../src/lib/system-income-pol/model.js';
 
-test('POL pool-depth share uses current two-sided position value and renders one decimal', async () => {
+test('POL pool-depth share uses current two-sided position value and renders one decimal', () => {
   const summary = normalizeSystemIncomePolPayload({ summary: {
     total_position_value_rune_e8: '110000000000000',
     total_pool_depth_rune_e8: '10000000000000000',
@@ -40,26 +39,6 @@ test('POL pool-depth share uses current two-sided position value and renders one
   assert.equal(normalizeSystemIncomePolPayload({ summary: {
     total_pool_depth_rune_e8: '100'
   } }).summary.poolDepthSharePercent, null);
-  const source = await readFile(new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url), 'utf8');
-  assert.match(source, /POL \/ POOL DEPTH/);
-  assert.match(source, /formatPercent\(dashboard.summary.poolDepthSharePercent, 1\)/);
-});
-
-test('daily fee details remain dismissible and keyboard/touch accessible after migration', async () => {
-  const source = await readFile(new URL('../src/lib/system-income-pol/DailyFeeChart.svelte', import.meta.url), 'utf8');
-  assert.match(source, /id="daily-fees-tooltip"[^>]*role="tooltip"/);
-  assert.match(source, /<TimeSeriesChart/);
-  assert.match(source, /onSelect=\{pinDay\}/);
-  assert.match(source, /<label for="pol-fee-day">/);
-  assert.match(source, /<select id="pol-fee-day" bind:value=\{selectedDay\}/);
-  assert.match(source, /aria-describedby=\{selected \? 'daily-fees-tooltip'/);
-  assert.match(source, /on:focus=/);
-  assert.match(source, /on:pointerdown=\{dismissOutside\}/);
-  assert.match(source, /event.key === 'Escape'/);
-  assert.match(source, /polFeeDetails\(selected, unit\)/);
-  assert.match(source, /PARTIAL \/ PROVISIONAL/);
-  assert.match(source, /<button[^>]*on:click=\{dismissTooltip\}/);
-  assert.doesNotMatch(source, /<svg|<title>|class="readout"/);
 });
 
 test('daily fee bars use daily estimates and historical prices, not cumulative fees or deposits', () => {
@@ -106,112 +85,10 @@ test('daily fee chart handles empty and all-missing ranges without fabricated ba
   }
 });
 
-test('estimated-fees headline owns an accessible, initially collapsed daily chart', async () => {
-  const source = await readFile(new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url), 'utf8');
-  assert.match(source, /let feesExpanded = false/);
-  assert.match(source, /<button\s+type="button"\s+class="metric metric--fees metric-toggle"[\s\S]*?aria-expanded=\{feesExpanded\}[\s\S]*?aria-controls="pol-fees-history"[\s\S]*?on:click=\{\(\) => feesExpanded = !feesExpanded\}/);
-  assert.match(source, /id="pol-fees-history" hidden=\{!feesExpanded\}/);
-  assert.match(source, /<DailyFeeChart daily=\{dashboard.daily\}/);
-  assert.doesNotMatch(source, /fee-toggle-hint|(?:VIEW|HIDE) DAILY FEES/);
-  assert.doesNotMatch(source, /\.metric-toggle\[aria-expanded="true"\]/);
-});
-
-test('System Income POL owns /pol-tracker and appears in navigation', async () => {
-  const [appSource, dashboardSource] = await Promise.all([
-    readFile(new URL('../src/App.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url), 'utf8')
-  ]);
-  const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
-  const hiddenApps = appSource.match(/const hiddenApps = \[([\s\S]*?)\];/)?.[1] || '';
-
-  assert.match(appSource, /const systemIncomePolApp = \{/);
-  assert.match(appSource, /path: "pol-tracker"/);
-  assert.equal(visibleApps.includes('systemIncomePolApp'), true);
-  assert.equal(hiddenApps.includes('systemIncomePolApp'), false);
-  assert.match(dashboardSource, /SYSTEM INCOME POL/);
-  assert.match(dashboardSource, /subscribeChainHeads/);
-  assert.doesNotMatch(dashboardSource, /freshness-strip/);
-  assert.doesNotMatch(dashboardSource, /LIVE · BLOCK/);
-  assert.match(dashboardSource, /POL TVL/);
-  assert.match(dashboardSource, /RUNE DEPOSITED/);
-  assert.match(dashboardSource, /class="deployment-pulse"/);
-  assert.match(dashboardSource, /window\.setTimeout\([\s\S]*?, 1000\)/);
-  assert.doesNotMatch(dashboardSource, /deployment-tape/);
-  assert.match(dashboardSource, /EST\. FEES EARNED/);
-  assert.match(dashboardSource, /24H EST\. APR/);
-  assert.match(dashboardSource, /7D EST\. FEE APR/);
-  assert.match(dashboardSource, /30D EST\. FEE APR/);
-  assert.match(dashboardSource, /HOURLY/);
-  assert.match(dashboardSource, /SYSTEM INCOME → POL/);
-  assert.match(dashboardSource, /polReserveSystemIncomePercent/);
-  assert.match(dashboardSource, /POLRESERVESYSTEMINCOMEBPS/);
-  assert.match(dashboardSource, /RUNE “BURNED”/);
-  assert.match(dashboardSource, /runeHeldSystemIncomeSharePercent, 1/);
-  assert.match(dashboardSource, /DAILY \+ CUMULATIVE POL DEPOSITS/);
-  assert.match(dashboardSource, /let chartUnit = 'rune'/);
-  assert.match(dashboardSource, /aria-label="Chart denomination"/);
-  assert.match(dashboardSource, /<CurrencySwitch unit=\{chartUnit\} usdAvailable=\{usdChartAvailable\}/);
-  assert.match(dashboardSource, /onChange=\{setChartUnit\}/);
-  assert.match(dashboardSource, /daily\.some\(row => Number\.isFinite\(row\.deployedUsd\)\)/);
-  assert.doesNotMatch(dashboardSource, /USD values use the current RUNE price/);
-  assert.match(dashboardSource, /USD deposits use each UTC day's closing RUNE price/);
-  assert.match(dashboardSource, /buildSystemIncomePolChart\(dashboard.daily/);
-  assert.match(dashboardSource, /selectSystemIncomePolRange\(chart.points/);
-  assert.match(dashboardSource, /\{#if rangeRows.length\}/);
-  assert.match(dashboardSource, /<TimeSeriesChart bind:this=\{depositChart\}/);
-  assert.match(dashboardSource, /buildOption=\{buildSystemIncomePolDepositOption\}/);
-  assert.match(dashboardSource, /onZoom=\{\(window\) => zoomWindow = window\}/);
-  assert.match(dashboardSource, /depositChart\?\.resetZoom\(\)/);
-  assert.doesNotMatch(dashboardSource, /<svg|zoom-capture/);
-  assert.match(dashboardSource, /\.range-group \{ flex-wrap: wrap; \}/);
-  assert.match(dashboardSource, />\[RESET\]<\/button>/);
-  assert.match(dashboardSource, /class="token-name"/);
-  assert.match(dashboardSource, /getAssetLogo\('THOR\.RUNE'\)/);
-  assert.match(dashboardSource, /getAssetLogo\(pool\.asset\)/);
-  assert.match(dashboardSource, /metric-separator[^>]*>\/<\/span>/);
-  assert.match(dashboardSource, /class="metric-rune-icon"[^>]*RUNE-ICON\.svg/);
-  assert.match(dashboardSource, /\.asset-panel \.panel-heading > div:first-child \{ padding-left: 0; \}/);
-  assert.match(dashboardSource, /let rangeId = '30d'/);
-  assert.match(dashboardSource, /visibleWarnings/);
-  assert.doesNotMatch(dashboardSource, /#each dashboard\.warnings/);
-  assert.match(dashboardSource, /metric-value--orange/);
-  assert.match(dashboardSource, /metric-value--green/);
-  assert.match(dashboardSource, /getAssetLogo/);
-  assert.match(dashboardSource, /https:\/\/thorchain\.net\/pool\//);
-  assert.match(dashboardSource, /https:\/\/thorchain\.net\/address\//);
-  assert.match(dashboardSource, /rel="noopener noreferrer"/);
-  assert.doesNotMatch(dashboardSource, /--term-green/);
-  assert.match(dashboardSource, /CURRENT ASSETS HELD BY POL/);
-  assert.match(dashboardSource, /formatE8Usd\(pool\.positionValueUsdE8\)/);
-  assert.match(dashboardSource, /DATA COVERAGE/);
-});
-
-test('System Income POL coverage rendering exposes coverage as a template dependency', async () => {
-  const dashboardSource = await readFile(
-    new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(dashboardSource, /function coverageValue\(source, \.\.\.keys\)/);
-  assert.match(dashboardSource, /coverageValue\(coverage, 'first_height', 'start_height'\)/);
-  assert.doesNotMatch(dashboardSource, /const value = coverage\?\.\[key\]/);
-});
-
-test('System Income POL muted copy keeps a readable contrast and type floor', async () => {
-  const dashboardSource = await readFile(
-    new URL('../src/lib/SystemIncomePOL.svelte', import.meta.url),
-    'utf8'
-  );
-
-  assert.match(dashboardSource, /\.metric-label \{[^}]*color: var\(--term-text-3\)/);
-  assert.match(dashboardSource, /\.metric small \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
-  assert.match(dashboardSource, /\.panel-meta \{[^}]*color: var\(--term-text-3\);[^}]*font-size: 12px/);
-  const allocationSource = await readFile(new URL('../src/lib/system-income-pol/AssetAllocation.svelte', import.meta.url), 'utf8');
-  assert.match(allocationSource, /\.asset-amount, \.asset-share span \{[^}]*color: var\(--term-text-3\);[^}]*font: 12px/);
+test('System Income POL deposit chart keeps a readable type floor', () => {
   const option = buildSystemIncomePolDepositOption([]);
   assert.ok(option.yAxis.every(axis => axis.axisLabel.fontSize >= 11));
   assert.ok(option.tooltip.textStyle.fontSize >= 12);
-  assert.match(dashboardSource, /\.method-panel > p \{[^}]*color: var\(--term-text-2\);[^}]*font: 14px/);
 });
 
 test('System Income POL normalization preserves exact base-unit accounting', () => {

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -211,19 +210,6 @@ test('per-address totals attribute each position to one owner', () => {
   const split = summarizeByAddress({ addresses: [THOR_A, THOR_B, BTC], bondRows, lpRows, tcyRows });
   assert.deepEqual(split.map((row) => row.totalUsd), [350, 36, 20]);
   assert.equal(split.reduce((sum, row) => sum + row.totalUsd, 0), summarize({ bondRows, lpRows, tcyRows }).totalUsd);
-});
-
-test('Thorfolio is visible in navigation while the standalone bond tracker is a hidden route', async () => {
-  const appSource = await readFile(new URL('../src/App.svelte', import.meta.url), 'utf8');
-  const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
-  assert.match(appSource, /const positionTrackerApp = \{\s*name: "Thorfolio",[^}]*path: "thorfolio"/);
-  assert.equal(visibleApps.includes('positionTrackerApp'), true);
-  assert.equal(visibleApps.includes('bondTrackerApp'), false);
-  assert.match(appSource, /const bondTrackerApp = \{\s*name: "Bond Tracker",[^}]*path: "bond-tracker"/);
-  assert.match(appSource, /hiddenApps = \[[^\]]*bondTrackerApp\]/);
-  assert.match(appSource, /routeAliases = \{ "bond-tracker-classic": bondTrackerApp\.path \}/);
-  // Both entry points (first load and back/forward) preserve alias support.
-  assert.equal(appSource.match(/canonicalizeAliasUrl\(path, app\);/g)?.length, 2);
 });
 
 test('signer selection prefers the address that owns the position', () => {

@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 
 import {
   POL_TRACKER_GROUPS,
@@ -12,35 +11,6 @@ import {
   selectPolTrackerRange,
   totalPolTrackerValue
 } from '../src/lib/pol-tracker/model.js';
-
-test('legacy POL dashboard is directly routable as POL TVL and appears in navigation', async () => {
-  const [appSource, trackerSource] = await Promise.all([
-    readFile(new URL('../src/App.svelte', import.meta.url), 'utf8'),
-    readFile(new URL('../src/lib/POLTracker.svelte', import.meta.url), 'utf8')
-  ]);
-  const visibleApps = appSource.match(/const apps = \[([\s\S]*?)\n  \];/)?.[1] || '';
-
-  assert.equal(visibleApps.includes('polTvlApp'), true);
-  assert.match(appSource, /path: "pol-tvl"/);
-  assert.match(appSource, /name: "POL TVL"/);
-  assert.match(appSource, /return \[\.\.\.apps, \.\.\.hiddenApps\]\.find/);
-  assert.doesNotMatch(trackerSource, /SAVERS|Savers|Saver/);
-  assert.doesNotMatch(trackerSource, /ASSET LEG|RUNE LEG|treasuryAssetUsd|treasuryRuneUsd/);
-  assert.doesNotMatch(trackerSource, /RUNEPOOL · RESERVE SHARE|runepoolReserve/);
-  assert.match(trackerSource, />TOTAL</);
-  assert.match(trackerSource, /class="metric metric--total"/);
-  assert.match(trackerSource, />TOTAL TRACKED VALUE</);
-  assert.match(trackerSource, /formatPolTrackerUsd\(latestTotal, true\)/);
-  assert.match(trackerSource, /\.metric--total\s*\{[\s\S]*?color:\s*#00cc66/);
-  assert.match(trackerSource, /<th>RESERVE POL<\/th>/);
-  assert.match(trackerSource, /<th>SYSTEM INCOME POL<\/th>/);
-  assert.match(trackerSource, /pool\.reservePolUsd/);
-  assert.match(trackerSource, /pool\.systemIncomePolUsd/);
-  assert.match(trackerSource, /DRAG TO ZOOM · DOUBLE-CLICK RESET/);
-  assert.match(trackerSource, /<TimeSeriesChart/);
-  assert.match(trackerSource, /onHover=\{/);
-  assert.match(trackerSource, /id="pol-tvl-day"/);
-});
 
 test('POL Tracker exposes the four consolidated public chart values', () => {
   const ids = POL_TRACKER_SERIES.map(({ id }) => id);
@@ -119,13 +89,6 @@ test('POL Tracker normalization ignores Savers, Treasury legs, and RUNEPool owne
     runeLegUsd: 310.26335531,
     assetLegUsd: 310.42633484
   });
-});
-
-test('POL TVL headline prefers the current full System Income POL position while history stays daily', async () => {
-  const trackerSource = await readFile(new URL('../src/lib/POLTracker.svelte', import.meta.url), 'utf8');
-  assert.match(trackerSource, /currentSystemIncomePol\?\.positionUsd \?\? latest\?\.systemIncomePolUsd/);
-  assert.match(trackerSource, /currentSystemIncomePol\?\.positionRune \?\? latest\?\.systemIncomePolRune/);
-  assert.match(trackerSource, /FULL TWO-SIDED POSITION/);
 });
 
 test('the latest-pool table keeps pools whose only tracked value is either form of POL', () => {

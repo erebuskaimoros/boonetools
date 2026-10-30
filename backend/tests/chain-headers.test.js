@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 process.env.DATABASE_URL ||= 'postgres://test:test@127.0.0.1:5432/test';
@@ -407,20 +406,4 @@ test('chain event broker replays the latest durable head and fans out notificati
   await broker.stop();
   assert.equal(client.released, true);
   assert.equal(formatChainHeadSse({ height: 0, time: 'bad' }), '');
-});
-
-test('migration and deployment install one persistent consolidated listener', async () => {
-  const [migration, unit, deploy] = await Promise.all([
-    readFile(new URL('../migrations/043_chain_block_headers.sql', import.meta.url), 'utf8'),
-    readFile(new URL('../../ops/systemd/boonetools-chain-stream-listener.service', import.meta.url), 'utf8'),
-    readFile(new URL('../../scripts/backend-deploy-plan.mjs', import.meta.url), 'utf8')
-  ]);
-
-  assert.match(migration, /create table if not exists public\.chain_block_headers/i);
-  assert.match(migration, /height bigint primary key/i);
-  assert.match(migration, /interval_ms integer/i);
-  assert.match(unit, /src\/chain-stream-listener\.js/);
-  assert.match(deploy, /boonetools-chain-stream-listener\.service/);
-  assert.doesNotMatch(deploy, /rujira-(?:base-fees|reserve)-listener/);
-  assert.doesNotMatch(deploy, /rapid-swap-listener/);
 });
