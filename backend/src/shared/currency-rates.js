@@ -1,4 +1,5 @@
 import { requestFromProviders } from '../lib/provider-client.js';
+import { acquireCached } from './acquisition-cache.js';
 
 import { COINGECKO_BASE } from '../../../shared/external-providers.js';
 const COINGECKO_PATH = '/api/v3/simple/price?ids=thorchain%2Cmonero%2Czcash&vs_currencies=usd%2Ceur%2Cgbp%2Cjpy%2Cbtc%2Cxau';
@@ -62,6 +63,16 @@ export async function fetchCoinGeckoCurrencyRates(options = {}) {
   });
 
   return normalizeCoinGeckoRates(payload);
+}
+
+/** One CoinGecko request per TTL shared across processes, including short-lived jobs. */
+export async function fetchCachedCurrencyRates(options = {}) {
+  return (await acquireCached(options.client, {
+    namespace: 'coingecko-currency-rates:v1', identity: 'current', source: 'coingecko',
+    ttlMs: CURRENCY_RATES_TTL_MS, nowMs: options.nowMs,
+    load: () => (options.fetchRates || fetchCoinGeckoCurrencyRates)(options),
+    validate: (rates) => positiveNumber(rates?.USD) != null
+  })).payload;
 }
 
 function isoTimestamp(timestampMs) {

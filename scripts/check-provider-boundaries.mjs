@@ -12,8 +12,7 @@ const CATALOGS = new Set(['shared/thorchain-providers.js', 'shared/external-prov
   'backend/src/vault-balances/chains.js', 'backend/src/vault-balances/evm.js', 'backend/src/vault-balances/tron.js']);
 // Exact attribution links, not provider requests; additional links need review.
 const ATTRIBUTIONS = new Map([
-  ['backend/src/protocol-fee-comparison/collector.js', new Set(['https://docs.fastnear.com/transfers/query'])],
-  ['backend/src/shared/tc-fee-dash-ingestion.js', new Set(['https://dune.com/queries/'])]
+  ['backend/src/protocol-fee-comparison/collector.js', new Set(['https://docs.fastnear.com/transfers/query'])]
 ]);
 const RAW_HTTP_MODULES = /^(?:node:)?https?$|^(?:axios|node-fetch|undici)(?:\/|$)/;
 const PUBLIC_BACKEND_IMPORTS = new Map([

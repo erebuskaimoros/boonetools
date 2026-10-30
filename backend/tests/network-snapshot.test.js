@@ -133,3 +133,13 @@ test('network snapshot surfaces scanner failure without marking THORNode state s
   assert.deepEqual(snapshot.bifrost_scanners, []);
   assert.match(snapshot.warnings.join(' '), /bifrost_scanners: scanner unavailable/);
 });
+
+test('browser node lists drop signer membership and honor a field projection', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { browserNodes } = await import('../src/handlers/network-snapshot.js');
+  const nodes = [{ node_address: 'thor1a', status: 'Active', total_bond: '5', signer_membership: ['pk1', 'pk2'] }];
+  assert.deepEqual(browserNodes(nodes), [{ node_address: 'thor1a', status: 'Active', total_bond: '5' }]);
+  assert.deepEqual(browserNodes(nodes, ['status', 'total_bond', 'missing']), [{ status: 'Active', total_bond: '5' }]);
+  assert.deepEqual(browserNodes(nodes, ['signer_membership']), [{}]);
+  assert.deepEqual(browserNodes(null), []);
+});

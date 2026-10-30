@@ -61,18 +61,6 @@ export async function saveVoteScan(client, lane, range) {
   return merged;
 }
 
-const QUERY_NAMESPACE = 'node-votes:dune-query-progress:v1';
-export async function loadVoteQueryProgress(client) {
-  return (await loadAcquisition(client, QUERY_NAMESPACE, 'mimir', { allowStale: true }))?.payload || null;
-}
-export async function saveVoteQueryProgress(client, progress) {
-  const previous = await loadVoteQueryProgress(client);
-  if (previous && Date.parse(previous.queriedThrough) > Date.parse(progress.queriedThrough)) return previous;
-  const payload = { ...progress, coverageVerified: false, kind: 'successful-query' };
-  await saveAcquisition(client, { namespace: QUERY_NAMESPACE, identity: 'mimir', source: 'dune', payload });
-  return payload;
-}
-
 // The cursor describes the entire successfully scanned range, including empty
 // ranges. Matches, display retention, and the other acquisition lanes cannot
 // advance it. Replay a short overlap for archive indexing delay.

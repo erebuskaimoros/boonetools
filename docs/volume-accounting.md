@@ -36,7 +36,7 @@ presenting them as THORChain leg volume.
 | Dynamic Fee pair epochs | Selected executed pair leg | Transaction route input |
 | Dynamic Fee affiliate history | Route notional allocated across `action.pools` | Raw route notional |
 | Rapid Swaps summaries, rankings, and adoption | RUNE route once; cross-asset route across both legs | Explicit `route_volume_usd` on each row |
-| TC Fee native income yield | Midgard executed-leg THORChain swap volume | CMC/Dune external market benchmarks |
+| TC Fee native income yield | Midgard executed-leg THORChain swap volume | CMC/DEX external market benchmarks |
 | Limit Order market chart | Backend pool history remains executed-leg volume | Cross-pair chart intentionally displays a labeled half-sum blend |
 
 The legacy Rapid Swaps database/API name `comparable_volume_usd` is retained

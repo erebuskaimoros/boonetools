@@ -136,6 +136,7 @@ function fromCoreReadModel(model) {
       : {},
     pools: Array.isArray(payload.pools) ? payload.pools : [],
     constants: payload.constants && typeof payload.constants === 'object' ? payload.constants : {},
+    version: payload.version && typeof payload.version === 'object' ? payload.version : {},
     node_mimirs: payload.node_mimirs ?? {},
     churns: Array.isArray(payload.churns) ? payload.churns : [],
     field_meta: payload.field_meta || {},

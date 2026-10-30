@@ -12,7 +12,6 @@ import {
   withEventTransaction
 } from '../lib/provenance.js';
 import { safeNumber, sleep, toIsoString } from '../lib/utils.js';
-import { executeDuneQueryRows, formatDuneDateTime, summarizeDuneError } from './dune.js';
 import { fetchMidgardActions, isMidgardRateLimitError } from './midgard.js';
 import { fetchThorchain } from './thornode.js';
 import { loadRujiraRunePrices } from './rujira-rune-prices.js';
@@ -22,7 +21,6 @@ import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-poo
 
 const ACTION_SYNC_KEY = 'rujira-reserve-payment-actions:v1';
 const SCHEDULE_SYNC_KEY = 'rujira-reserve-payment-schedule:v1';
-const DUNE_SYNC_KEY = 'rujira-reserve-payment-dune:v1';
 const ACTION_PAGE_LIMIT = 50;
 const RPC_REQUEST_TIMEOUT_MS = 10000;
 const CANONICAL_RESERVE_PAYMENT_EVENTS_CTE = `
@@ -164,15 +162,6 @@ function dateKey(value) {
   return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : '';
 }
 
-function startOfUtcWeek(value) {
-  const source = value instanceof Date ? value : new Date(value);
-  const date = new Date(Date.UTC(source.getUTCFullYear(), source.getUTCMonth(), source.getUTCDate()));
-  const day = date.getUTCDay();
-  const mondayOffset = day === 0 ? -6 : 1 - day;
-  date.setUTCDate(date.getUTCDate() + mondayOffset);
-  return date;
-}
-
 function addDays(value, days) {
   const date = new Date(value);
   date.setUTCDate(date.getUTCDate() + days);
@@ -191,14 +180,6 @@ function roundNumber(value, decimals = 8) {
   const numeric = Number(value) || 0;
   const factor = 10 ** decimals;
   return Math.round((numeric + Number.EPSILON) * factor) / factor;
-}
-
-function toIsoOrNull(value) {
-  if (!value) {
-    return null;
-  }
-  const parsed = Date.parse(String(value));
-  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }
 
 function normalizeBaseUnitAmount(value) {
@@ -751,14 +732,6 @@ export async function ingestRujiraReservePaymentMidgardCandidates(client, option
     complete,
     mode: alreadyComplete ? 'head_refresh' : 'backfill'
   };
-}
-
-function createHttpError(message, details = {}) {
-  const error = new Error(message);
-  error.status = details.status || 0;
-  error.url = details.url || '';
-  error.body = details.body || '';
-  return error;
 }
 
 function isProviderRateLimit(error) {
@@ -1668,137 +1641,6 @@ export async function writeRujiraReservePaymentListenerHeartbeat(payload = {}) {
   });
 }
 
-function normalizeDuneReservePaymentRow(row) {
-  const eventKey = String(row?.event_key || '').trim();
-  const blockTime = toIsoOrNull(row?.block_time);
-  const height = Math.max(0, Math.trunc(safeNumber(row?.height, 0)));
-  const sender = String(row?.sender || '').trim();
-  const recipient = String(row?.recipient || '').trim();
-  const memo = String(row?.memo || '').trim();
-  const amountBase = normalizeBaseUnitAmount(row?.amount_base);
-  const coin = String(row?.coin || '').trim();
-  const coinAmountBase = parseExplicitRuneAmount(coin);
-
-  if (
-    !eventKey ||
-    !blockTime ||
-    height <= 0 ||
-    sender !== BASE_LAYER_REVENUE_COLLECTOR ||
-    recipient !== TC_RESERVE_MODULE ||
-    memo !== 'RESERVE' ||
-    !amountBase ||
-    !coinAmountBase ||
-    amountBase !== coinAmountBase
-  ) {
-    return null;
-  }
-
-  const amountRune = baseRuneToNumber(amountBase);
-  if (amountRune <= 0) {
-    return null;
-  }
-
-  const runePriceUsd = Math.max(0, safeNumber(row?.rune_price_usd, 0));
-  const amountUsd = Math.max(0, safeNumber(row?.amount_usd, amountRune * runePriceUsd));
-
-  return {
-    event_key: eventKey,
-    height,
-    block_time: blockTime,
-    tx_id: String(row?.tx_id || ''),
-    payment_type: 'reserve',
-    sender,
-    recipient,
-    memo,
-    amount_base: amountBase,
-    amount_rune: amountRune,
-    rune_price_usd: runePriceUsd,
-    amount_usd: amountUsd,
-    coin,
-    source: 'dune',
-    raw_event: {
-      source: 'dune',
-      dune_query_id: config.rujiraReservePaymentsDuneQueryId,
-      row
-    },
-    updated_at: new Date().toISOString()
-  };
-}
-
-export function buildRujiraReservePaymentRowsFromDune(rows) {
-  return (Array.isArray(rows) ? rows : [])
-    .map(normalizeDuneReservePaymentRow)
-    .filter((row) => row && row.height > 0 && row.amount_rune > 0);
-}
-
-export async function runRujiraReservePaymentsDuneIngestion(client, options = {}) {
-  if (!config.duneApiKey || !config.rujiraReservePaymentsDuneQueryId) {
-    return {
-      skipped: true,
-      reason: !config.duneApiKey ? 'missing_dune_api_key' : 'missing_dune_rujira_reserve_payments_query_id',
-      source: 'dune',
-      rows: 0,
-      upserted: 0
-    };
-  }
-
-  const configuredStart = toIsoOrNull(config.rujiraReservePaymentsDuneStartTime) || '2026-04-30T00:00:00.000Z';
-  const progress = await (options.loadDuneProgress || loadSyncState)(client, DUNE_SYNC_KEY);
-  const coveredThrough = toIsoOrNull(progress?.stats_json?.covered_through);
-  const now = options.now ? new Date(typeof options.now === 'function' ? options.now() : options.now) : new Date();
-  const headEndMs = now.getTime() - Math.max(0, config.rujiraReservePaymentsDuneHeadLagHours) * 3600000;
-  if (coveredThrough && Date.parse(coveredThrough) >= headEndMs) {
-    return { skipped: true, source: 'dune', reason: 'caught_up_to_dune_head_lag', covered_through: coveredThrough };
-  }
-  // Revisit only a bounded late-arrival overlap, with a separate durable cursor
-  // that cannot be overwritten by Midgard's candidate/head scan.
-  const startMs = Math.max(Date.parse(configuredStart), coveredThrough ? Date.parse(coveredThrough) - 86400000 : 0);
-  const endMs = Math.min(headEndMs, (coveredThrough ? Date.parse(coveredThrough) : startMs) + 3 * 86400000);
-  const startTime = new Date(startMs).toISOString();
-  const endTime = new Date(endMs).toISOString();
-  const resultLimit = 32000;
-  const result = await (options.executeDune || executeDuneQueryRows)(config.rujiraReservePaymentsDuneQueryId, {
-    start_time: formatDuneDateTime(startTime), end_time: formatDuneDateTime(endTime)
-  }, { limit: resultLimit });
-  const totalRows = Number(result.metadata?.total_row_count);
-  if (!Array.isArray(result.rows) || !Number.isSafeInteger(totalRows) || totalRows < 0
-    || result.rows.length >= resultLimit || totalRows !== result.rows.length
-    || result.raw?.next_uri || result.raw?.next_offset != null) {
-    throw new Error('Reserve Dune window was incomplete or truncated; coverage was not advanced');
-  }
-  const rows = buildRujiraReservePaymentRowsFromDune(result.rows);
-  if (rows.length !== result.rows.length) {
-    throw new Error('Reserve Dune window contained invalid settlement rows; coverage was not advanced');
-  }
-
-  await (options.persistDuneRows || persistRujiraReservePaymentEvents)(client, rows);
-  const duplicateRowsDeleted = await pruneDuplicateRujiraReservePaymentEvents(client);
-
-  const heights = rows.map((row) => row.height).filter((height) => height > 0);
-  await (options.saveDuneProgress || saveSyncState)(client, DUNE_SYNC_KEY, {
-    complete: endMs >= headEndMs,
-    stats_json: {
-      source: 'dune', dune_query_id: config.rujiraReservePaymentsDuneQueryId,
-      dune_execution_id: result.executionId, start_time: startTime, end_time: endTime,
-      covered_through: endTime, overlap_hours: 24,
-      rows: result.rows.length, accepted_rows: rows.length, duplicate_rows_deleted: duplicateRowsDeleted
-    }
-  });
-
-  return {
-    source: 'dune',
-    dune_query_id: config.rujiraReservePaymentsDuneQueryId,
-    dune_execution_id: result.executionId,
-    start_time: startTime,
-    end_time: endTime,
-    rows: result.rows.length,
-    upserted: rows.length,
-    duplicate_rows_deleted: duplicateRowsDeleted,
-    min_height: heights.length ? Math.min(...heights) : 0,
-    max_height: heights.length ? Math.max(...heights) : 0
-  };
-}
-
 export async function runRujiraReservePaymentsLegacyIngestion(
   client,
   initialStats = {},
@@ -1874,104 +1716,8 @@ export async function runRujiraReservePaymentsLegacyIngestion(
   return stats;
 }
 
-export async function runRujiraReservePaymentsScheduledSettlementIngestion(
-  client,
-  initialStats = {},
-  options = {}
-) {
-  const stats = {
-    ...initialStats,
-    midgard_candidates: null,
-    scheduled_candidates: null,
-    block_scan: null,
-    pricing: null,
-    provider_cooldown: Boolean(initialStats.provider_cooldown)
-  };
-
-  const ingestMidgardCandidates = options.ingestMidgardCandidates
-    || ingestRujiraReservePaymentMidgardCandidates;
-  const ingestScheduledCandidates = options.ingestScheduledCandidates
-    || ingestRujiraReservePaymentScheduledCandidates;
-  const processBlocks = options.processBlocks || processRujiraReservePaymentBlocks;
-  const refreshPrices = options.refreshPrices || refreshRujiraReservePaymentPrices;
-
-  try {
-    // Dune covers historical Reserve payments but not the POL leg. Keep a
-    // bounded recent action scan so direct collector executions missed by the
-    // websocket listener still become RPC block candidates.
-    stats.midgard_candidates = await ingestMidgardCandidates(client, { maxPages: 1 });
-  } catch (error) {
-    const rateLimited = isProviderRateLimit(error);
-    stats.provider_cooldown ||= rateLimited;
-    stats.midgard_candidates = {
-      error: error.message,
-      ...(rateLimited
-        ? { rate_limited_until: await putCooldown(client, ACTION_SYNC_KEY, error) }
-        : {})
-    };
-  }
-
-  try {
-    stats.scheduled_candidates = await ingestScheduledCandidates(client);
-  } catch (error) {
-    if (!isProviderRateLimit(error)) throw error;
-    stats.provider_cooldown = true;
-    stats.scheduled_candidates = {
-      error: error.message,
-      rate_limited_until: await putCooldown(client, SCHEDULE_SYNC_KEY, error)
-    };
-  }
-
-  try {
-    stats.block_scan = await processBlocks(client);
-  } catch (error) {
-    if (!isProviderRateLimit(error)) throw error;
-    stats.provider_cooldown = true;
-    stats.block_scan = {
-      error: error.message,
-      rate_limited_until: await putCooldown(client, ACTION_SYNC_KEY, error)
-    };
-  }
-
-  stats.pricing = await refreshPrices(client);
-  return stats;
-}
-
 export async function runRujiraReservePaymentsIngestion(client, options = {}) {
-  const runDune = options.runDune || runRujiraReservePaymentsDuneIngestion;
   const runLegacy = options.runLegacy || runRujiraReservePaymentsLegacyIngestion;
-  const runScheduledSettlements = options.runScheduledSettlements || runRujiraReservePaymentsScheduledSettlementIngestion;
-  if (config.rujiraReservePaymentsDuneQueryId) {
-    let duneSource;
-    try {
-      duneSource = await runDune(client, options);
-    } catch (error) {
-      const duneError = summarizeDuneError(error);
-      return runLegacy(client, {
-        dune_source: {
-          source: 'dune',
-          status: 'error',
-          dune_query_id: config.rujiraReservePaymentsDuneQueryId,
-          error: duneError
-        },
-        fallback_source: 'legacy',
-        fallback_reason: 'dune_error'
-      });
-    }
-
-    if (!duneSource?.skipped) {
-      return runScheduledSettlements(client, {
-        dune_source: duneSource
-      });
-    }
-
-    return runLegacy(client, {
-      dune_source: duneSource,
-      fallback_source: 'legacy',
-      fallback_reason: duneSource.reason || 'dune_skipped'
-    });
-  }
-
   return runLegacy(client);
 }
 

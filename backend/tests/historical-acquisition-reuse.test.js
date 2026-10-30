@@ -1,24 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchDuneTcFeeRows, fetchMidgardTcFeeRows } from '../src/shared/tc-fee-dash-ingestion.js';
+import { fetchMidgardTcFeeRows } from '../src/shared/tc-fee-dash-ingestion.js';
 import { ingestBurnTrackerHistory } from '../src/shared/burn-tracker-ingestion.js';
 import { wasmRuntimeOptions, fetchPriceIntervals, priceRujiraFeeEvents, scanCandidateBlocks } from '../src/shared/wasm-arb-economics-ingestion.js';
-
-test('TC Fee fallback reuses successful same-window CMC and swap acquisitions', async () => {
-  let cmcCalls = 0;
-  let swapCalls = 0;
-  const cmc = new Map([['2026-09-01', { cmcVolume24hUsd: 100, raw: {} }]]);
-  const volumes = new Map([['2026-09-01', { thorchainVolumeUsd: 5, raw: { totalVolumeUSD: '500' } }]]);
-  const common = { skipDelay: true, fetchCmc: async () => { cmcCalls++; return cmc; } };
-  const primary = await fetchDuneTcFeeRows('2026-09-01', 1, { ...common,
-    executeDune: async () => ({ rows: [], executionId: 'test' }),
-    fetchSwapVolumes: async () => { swapCalls++; return volumes; } });
-  await fetchMidgardTcFeeRows('2026-09-01', 1, { ...common, acquisition: primary.acquisition,
-    fetchMidgard: async () => ({ intervals: [] }), fetchDex: async () => new Map(),
-    fetchSwapHistory: async () => { swapCalls++; return { intervals: [] }; } });
-  assert.equal(cmcCalls, 1);
-  assert.equal(swapCalls, 1);
-});
 
 test('Wasm independent lanes reuse a fresh durable head before provider lookup', async () => {
   let providerCalls = 0;

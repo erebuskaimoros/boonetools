@@ -7,7 +7,7 @@ The canonical standalone repository is:
 https://github.com/erebuskaimoros/boonetools
 ```
 
-This repo is a Svelte/Vite frontend with a small Node/Postgres backend for cached THORChain analytics. Dune is the source of truth for historical analytics; public THORChain endpoints are retained for live chain state, quotes, wallet balances, and other action-oriented reads that Dune cannot safely serve.
+This repo is a Svelte/Vite frontend with a small Node/Postgres backend for cached THORChain analytics. Historical analytics are acquired from THORNode RPC/REST and Midgard into Postgres; dashboards read those durable read models, while public THORChain endpoints serve live chain state, quotes, wallet balances, and other action-oriented reads. Dune acquisition was removed on 2026-10-30; previously stored Dune-sourced rows remain readable.
 
 ## Page-view analytics
 
@@ -141,17 +141,7 @@ cold misses return `202` and the Bond Tracker polls the cache-only status path
 while the worker materializes the first snapshot. `refresh=sync` is reserved
 for the worker and operational repair tooling.
 
-Current Dune source queries:
-
-- TC Fee Dash daily series: `7619850`
-- Vote Tracker node Mimir events: `7619989`
-- Rapid Swaps canonical rows: `7619996`
-- Rapid Swaps market-history denominator: `7620035`
-- App Layer generated base-layer fees: `7620091`
-- App Layer explicit Base Layer settlement: `7620011`
-- Bond Tracker bond/unbond tx discovery: `7620042`
-
-TC Fee Dash uses THORChain daily earnings from `thorchain.defi_daily_earnings`, CMC historical global market volume for the CEX/global leg, and Dune-indexed DEX exchange volume from `dex.trades`. It no longer fans out to Midgard or DeFiLlama for that daily series.
+TC Fee Dash daily rows use Midgard earnings and executed-leg swap volume, CMC historical global market volume for the CEX/global leg, and DefiLlama DEX volume. Older days keep the Dune-sourced values stored before Dune acquisition was removed.
 
 ## Generated Rujira Data
 

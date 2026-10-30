@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 
 import {
   CURRENCY_RATES_TTL_MS,
-  createCurrencyRatesService
+  createCurrencyRatesService,
+  fetchCachedCurrencyRates
 } from '../src/shared/currency-rates.js';
+import { acquisitionDatabase } from './fixtures/acquisition-db.js';
 
 test('currency rates are shared across visitors for ten minutes', async () => {
   let nowMs = Date.parse('2026-08-31T20:00:00Z');
@@ -79,4 +81,20 @@ test('provider failures are cached so visitor traffic cannot create a retry stor
   nowMs += 1;
   await service.getRates();
   assert.equal(providerCalls, 2);
+});
+
+test('short-lived jobs share one durable CoinGecko snapshot per ten-minute window', async () => {
+  const client = acquisitionDatabase();
+  let providerCalls = 0;
+  const options = { client, nowMs: Date.parse('2026-10-30T02:00:00Z'),
+    fetchRates: async () => { providerCalls += 1; return { USD: 1.2, EUR: 1.1, XMR: 0.004 }; } };
+  const [first, second] = await Promise.all([fetchCachedCurrencyRates(options), fetchCachedCurrencyRates(options)]);
+  assert.deepEqual(first, second);
+  // A later process reads the saved row instead of calling the provider again.
+  await fetchCachedCurrencyRates({ ...options, nowMs: options.nowMs + CURRENCY_RATES_TTL_MS - 1 });
+  assert.equal(providerCalls, 1);
+  await fetchCachedCurrencyRates({ ...options, nowMs: options.nowMs + CURRENCY_RATES_TTL_MS + 1 });
+  assert.equal(providerCalls, 2);
+  await assert.rejects(fetchCachedCurrencyRates({ ...options, client: acquisitionDatabase(),
+    fetchRates: async () => ({ EUR: 1 }) }), /Invalid acquisition response/);
 });

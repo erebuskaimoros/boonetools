@@ -28,6 +28,7 @@ import { midgard } from '../api/midgard.js';
 import { fromBaseUnit } from './blockchain.js';
 import { getAddressSuffix } from './formatting.js';
 import { getCurrentBlock, getSecondsPerBlock } from './network.js';
+import { fetchStatusLive } from '../status/api.js';
 
 // ============================================
 // Node Status Types
@@ -620,6 +621,67 @@ export async function getNextChurnHeight(options = {}) {
   };
 }
 
+function buildChurnState({ isHalted, lastChurnHeight, lastChurnTimestamp, nextChurnHeight,
+  churnIntervalBlocks, currentHeight, secondsPerBlock, recentChurns = [] }) {
+  const totalBlocks = Math.max(1, nextChurnHeight - lastChurnHeight);
+  const progressedBlocks = Math.max(0, Math.min(totalBlocks, currentHeight - lastChurnHeight));
+  const blocksRemaining = Math.max(0, nextChurnHeight - currentHeight);
+  const percentComplete = Math.round((progressedBlocks / totalBlocks) * 100);
+
+  // Calculate next churn timestamp
+  const nextChurnTimestamp = lastChurnTimestamp + (totalBlocks * secondsPerBlock);
+
+  // Calculate seconds remaining
+  const now = Date.now() / 1000;
+  const secondsRemaining = Math.max(0, nextChurnTimestamp - now);
+
+  // Determine if overdue
+  const isOverdue = secondsRemaining === 0 && blocksRemaining > 0 && !isHalted;
+
+  return {
+    isHalted,
+    lastChurnHeight,
+    lastChurnTimestamp,
+    nextChurnHeight,
+    nextChurnTimestamp,
+    churnIntervalBlocks,
+    currentHeight,
+    blocksRemaining,
+    secondsRemaining,
+    percentComplete,
+    secondsPerBlock,
+    isOverdue,
+    recentChurns
+  };
+}
+
+/**
+ * Churn timing from the backend's live status read model: one cached BooneTools
+ * request instead of RPC status, two block lookups and a Midgard churn call.
+ * Seconds per block is the observed average since the last churn.
+ */
+export function churnStateFromStatusLive(live) {
+  const payload = live?.churn ? live : live?.data;
+  const churn = payload?.churn;
+  const currentHeight = Number(payload?.network?.height);
+  const lastBlockMs = Date.parse(payload?.network?.consensus?.last_block_at || '');
+  const lastChurnHeight = Number(churn?.lastChurnHeight);
+  const lastChurnMs = Number(churn?.lastChurnTimestampMs);
+  const nextChurnHeight = Number(churn?.nextChurnHeight);
+  const elapsedBlocks = currentHeight - lastChurnHeight;
+  if (!churn || churn.estimated || !(lastChurnHeight > 0) || !(nextChurnHeight > 0) || !(elapsedBlocks > 0)
+    || !(lastChurnMs > 0) || !(lastBlockMs > lastChurnMs)) return null;
+  return buildChurnState({
+    isHalted: Boolean(churn.isPaused),
+    lastChurnHeight,
+    lastChurnTimestamp: lastChurnMs / 1000,
+    nextChurnHeight,
+    churnIntervalBlocks: Number(churn.churnIntervalBlocks) || 0,
+    currentHeight,
+    secondsPerBlock: (lastBlockMs - lastChurnMs) / 1000 / elapsedBlocks
+  });
+}
+
 /**
  * Get complete churn state with all calculated values
  *
@@ -628,6 +690,7 @@ export async function getNextChurnHeight(options = {}) {
  *
  * @param {Object} [options={}] - Fetch options
  * @param {number} [options.recentChurnsLimit=0] - If > 0, include recent churns array (avoids separate request)
+ * @param {boolean} [options.cache] - false bypasses caches and the live status read model
  * @returns {Promise<Object>} Complete churn state:
  *   - isHalted: Whether churning is paused by mimir
  *   - lastChurnHeight: Block height of last churn
@@ -659,6 +722,10 @@ export async function getNextChurnHeight(options = {}) {
  */
 export async function getChurnState(options = {}) {
   const { recentChurnsLimit = 0, ...fetchOptions } = options;
+  if (!recentChurnsLimit && fetchOptions.cache !== false) {
+    const live = await fetchStatusLive().then(churnStateFromStatusLive).catch(() => null);
+    if (live) return live;
+  }
 
   // Fetch most data in parallel (avoiding duplicate churns and status calls)
   const [churnsData, networkData, churnIntervalText, haltChurningText, currentHeight] = await Promise.all([
@@ -699,37 +766,10 @@ export async function getChurnState(options = {}) {
     nextChurnHeight = lastChurnHeight + churnIntervalBlocks;
   }
 
-  // Calculate derived values
-  const totalBlocks = Math.max(1, nextChurnHeight - lastChurnHeight);
-  const progressedBlocks = Math.max(0, Math.min(totalBlocks, currentHeight - lastChurnHeight));
-  const blocksRemaining = Math.max(0, nextChurnHeight - currentHeight);
-  const percentComplete = Math.round((progressedBlocks / totalBlocks) * 100);
-
-  // Calculate next churn timestamp
-  const nextChurnTimestamp = lastChurnTimestamp + (totalBlocks * secondsPerBlock);
-
-  // Calculate seconds remaining
-  const now = Date.now() / 1000;
-  const secondsRemaining = Math.max(0, nextChurnTimestamp - now);
-
-  // Determine if overdue
-  const isOverdue = secondsRemaining === 0 && blocksRemaining > 0 && !isHalted;
-
-  return {
-    isHalted,
-    lastChurnHeight,
-    lastChurnTimestamp,
-    nextChurnHeight,
-    nextChurnTimestamp,
-    churnIntervalBlocks,
-    currentHeight,
-    blocksRemaining,
-    secondsRemaining,
-    percentComplete,
-    secondsPerBlock,
-    isOverdue,
-    recentChurns
-  };
+  return buildChurnState({
+    isHalted, lastChurnHeight, lastChurnTimestamp, nextChurnHeight,
+    churnIntervalBlocks, currentHeight, secondsPerBlock, recentChurns
+  });
 }
 
 // ============================================

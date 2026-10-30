@@ -13,7 +13,7 @@ BooneTools now has a dedicated Hetzner-hosted backend stack for all current DB-b
 - compact Status, Treasury, Node Votes, App Layer, Rapid Swaps, TC Fee, Pool
   Analysis, and Wasm Arb Economics read models
 - local scheduler jobs for NodeOp and Rapid Swaps
-- Dune-backed historical/canonical ingestion with THORNode/Midgard live tails where current data matters
+- THORNode RPC/REST and Midgard ingestion into Postgres (Dune acquisition removed 2026-10-30)
 
 ## Layout
 
@@ -340,11 +340,6 @@ RAPID_SWAPS_NORMAL_HEAD_PAGES=4
 RAPID_SWAPS_LAGGING_HEAD_PAGES=2
 RAPID_SWAPS_CATCHUP_PAGES=2
 RAPID_SWAPS_RATE_LIMIT_COOLDOWN_SECONDS=3600
-DUNE_API_KEY=...
-RAPID_SWAPS_DUNE_QUERY_ID=7619996
-RAPID_SWAPS_DUNE_SCAN_INTERVAL_SECONDS=21600
-RAPID_SWAPS_LIVE_TAIL_INTERVAL_SECONDS=300
-RAPID_SWAPS_LIVE_TAIL_PAGES=2
 APP_LAYER_LIVE_STATE_TTL_SECONDS=120
 APP_LAYER_STATIC_STATE_TTL_SECONDS=900
 APP_LAYER_ROUTE_CONCURRENCY=4
@@ -439,13 +434,10 @@ idempotent without hiding the null reference. A source value that exists but
 falls outside the 30-second alignment contract uses the corresponding
 `*-unaligned` method instead and remains null in the dislocation series.
 
-Rapid Swaps is hybrid in the Dune-backed deployment. Dune query `7619996`
-remains the canonical source and runs on its own cadence, while the scheduler
-also tails a small number of recent Midgard pages every few minutes for fresh
-rows. The live tail upserts into `rapid_swaps`; later Dune scans overwrite the
-same `tx_id` rows with canonical Dune values. Provider `429` responses store a
-cooldown in `rapid_swap_sync_state` so timer runs skip without burning more
-quota.
+Rapid Swaps uses the Midgard canonical scan plan: a saved catch-up cursor,
+head pages while lagging, and listener-candidate resolution. Provider `429`
+responses store a cooldown in `rapid_swap_sync_state` so timer runs skip
+without burning more quota.
 
 The server env also carries the dedicated Postgres container settings:
 
@@ -549,9 +541,8 @@ Reserve payments a unique canonical identity plus per-provider observation
 history. Canonical upserts enforce source precedence and monotonic first/last
 seen timestamps atomically in Postgres.
 
-Node Votes retains Dune as the normal Mimir history source. Its successful
-query-progress record uses a bounded late-index overlap and does not claim
-verified chain coverage. Upgrade/protocol discovery tracks its own actual RPC
+Node Votes reads Mimir vote history from RPC `tx_search`, falling back to
+Cosmos REST, and records verified scan coverage. Upgrade/protocol discovery tracks its own actual RPC
 scan range, including empty scans, and preserves any older retention gap.
 RPC status and transaction pages stay on the same provider; a newer local
 head cannot prove an archive's coverage. Exact timestamps are shared, and
@@ -881,10 +872,8 @@ Migration `044_rujira_fee_share_settlements.sql` extends the App Layer payment
 ledger with typed `reserve` and `pol` settlement rows. It preserves the direct
 Reserve compatibility series, reparses scheduled blocks from the first split
 payout at height `27410412`, and rewinds the cadence cursor so deployments fill
-the post-cutover POL branch. The Reserve scheduler must continue its bounded
-RPC block scan even after a successful Dune run because Dune query `7620011`
-provides the Reserve branch, while scheduled block results provide POL-fund
-transfers. Lane 01 conservation adds back both destinations.
+the post-cutover POL branch. The Reserve scheduler's bounded RPC block scan
+provides both the Reserve branch and the POL-fund transfers. Lane 01 conservation adds back both destinations.
 
 Migration `045_correct_rujira_pol_fund.sql` corrects the full POL-fund target,
 removes any rows associated with the incomplete target from migration 044, and

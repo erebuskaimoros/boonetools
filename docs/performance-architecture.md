@@ -146,11 +146,11 @@ minute publisher consumes this same live read model instead of repeating the
 THORNode/Midgard network fan-out.
 
 Provider-backed Node Votes and Rapid market history have independent locks,
-processes, and deadlines. A slow Dune refresh therefore cannot hold the
+processes, and deadlines. A slow provider refresh therefore cannot hold the
 database-summary lock or delay App Layer, Rapid summary, or TC Fee snapshots.
 Rapid market history refreshes incremental overlap windows and retains the
 last successful segment and its original watermark when a provider fails.
-When Dune is unavailable, the Midgard fallback splits long history ranges into
+Midgard history requests split long ranges into
 sequential requests of at most 400 intervals, matching Midgard's provider cap.
 
 ## Response and failure contract

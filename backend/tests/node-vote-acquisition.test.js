@@ -220,37 +220,3 @@ test('verified recent progress preserves the older history gap across later incr
   assert.equal(record.historyGaps[0].startTime, '2026-03-02T12:00:00.000Z');
   assert.equal(record.historyGaps[0].endTime, '2026-08-26T07:02:24.000Z');
 });
-
-test('healthy Dune delivery advances query progress without duplicate Mimir RPC scans', async () => {
-  const { runNodeVoteBackfill } = await import('../src/shared/node-votes.js');
-  const { loadVoteScan } = await import('../src/shared/node-vote-acquisition.js');
-  const client = scanClient();
-  const duneStarts = [];
-  let rpcCalls = 0;
-  const options = failingPrimaryOptions({
-    fetchDuneRows: async (start) => { duneStarts.push(start); return { rows: [], executionId: 'query-complete' }; },
-    fetchRpcRows: async () => { rpcCalls++; throw new Error('RPC must not run for healthy Dune'); }
-  });
-  await runNodeVoteBackfill(client, options);
-  const result = await runNodeVoteBackfill(client, { ...options, endTime: '2026-09-02T13:00:00Z' });
-  assert.equal(rpcCalls, 0);
-  assert.equal(duneStarts[1], '2026-08-19T12:00:00.000Z');
-  assert.equal(await loadVoteScan(client, 'mimir'), null);
-  assert.equal(result.mimir_coverage_verified, false);
-  assert.equal(result.mimir_query_progress.queriedThrough, '2026-09-02T13:00:00.000Z');
-});
-
-test('rollout seeds non-certifying Dune query progress from a successful legacy Dune run', async () => {
-  const { runNodeVoteBackfill } = await import('../src/shared/node-votes.js');
-  const cache = acquisitionDatabase();
-  const client = { query: async (sql, params) => sql.includes('from node_vote_sync_state')
-    ? { rows: [{ end_time: '2026-09-01T12:00:00Z', start_time: '2026-03-01T12:00:00Z',
-      stats_json: { source: 'dune', dune_error: '', start_time: '2026-08-18T12:00:00Z', dune_execution_id: 'legacy' } }] }
-    : sql.includes('node_vote_sync_state') ? { rows: [] } : cache.query(sql, params) };
-  let queriedFrom;
-  const result = await runNodeVoteBackfill(client, failingPrimaryOptions({
-    fetchDuneRows: async (start) => { queriedFrom = start; return { rows: [], executionId: 'new' }; }
-  }));
-  assert.equal(queriedFrom, '2026-08-18T12:00:00.000Z');
-  assert.equal(result.mimir_coverage_verified, false);
-});

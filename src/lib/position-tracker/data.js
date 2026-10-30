@@ -282,7 +282,7 @@ export function loadBondHistory(address, { includeHistorical = false, fresh = fa
 export async function loadActionGates() {
   const [mimir, yieldGate] = await Promise.all([
     thornode.getAllMimir({ cache: false }).catch(() => ({})),
-    loadBondYieldGate(thornode)
+    loadBondYieldGate(thornode, { fresh: false })
   ]);
   const flag = (key) => Number(mimir?.[key]) >= 1;
   return {

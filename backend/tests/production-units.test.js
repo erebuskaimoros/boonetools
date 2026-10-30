@@ -6,7 +6,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 // automatically, so features do not need their own deploy-script assertions.
 const root = new URL('../../', import.meta.url);
 const systemd = new URL('ops/systemd/', root);
-const units = new Map(readdirSync(systemd).map((name) => [name, readFileSync(new URL(name, systemd), 'utf8')]));
+const units = new Map(readdirSync(systemd).filter((name) => /\.(?:service|timer)$/.test(name))
+  .map((name) => [name, readFileSync(new URL(name, systemd), 'utf8')]));
 const services = [...units.keys()].filter((name) => name.endsWith('.service'));
 const timers = [...units.keys()].filter((name) => name.endsWith('.timer'));
 const setting = (unit, key) => units.get(unit).match(new RegExp(`^${key}=(.+)$`, 'm'))?.[1];
