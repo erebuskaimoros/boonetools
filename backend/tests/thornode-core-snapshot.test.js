@@ -19,6 +19,7 @@ function payloadFor(path) {
   if (path === '/thorchain/network') return { rune_price_in_tor: '100000000' };
   if (path === '/thorchain/oracle/prices') return { prices: [{ symbol: 'RUNE', price: '1' }] };
   if (path === '/thorchain/constants') return { int_64_values: {} };
+  if (path === '/thorchain/version') return { current: '3.21.0' };
   return [];
 }
 

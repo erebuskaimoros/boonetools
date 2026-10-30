@@ -207,3 +207,12 @@ test('payout modal reviews a zero-value configuration and blocks signing before 
   assert.match(html, /Check payout settings before signing/);
   assert.match(html, /class="bracket-btn primary" disabled/);
 });
+
+test('the page-load gate reads shared snapshots while signing still bypasses them', async () => {
+  const display = clientFixture();
+  assert.equal((await loadBondYieldGate(display, { fresh: false })).bondYieldEnabled, true);
+  assert.ok(display.calls.every(({ options }) => options.coreSnapshot !== false && options.cache !== false));
+  const signing = clientFixture();
+  await loadBondYieldGate(signing);
+  assert.ok(signing.calls.every(({ options }) => options.coreSnapshot === false && options.cache === false));
+});

@@ -5,7 +5,7 @@
   import PoolFeeShareChart from './tc-fee-dash/PoolFeeShareChart.svelte';
   import { onDestroy, onMount, tick } from 'svelte';
   import { fetchTcFeeDash } from './tc-fee-dash/api.js';
-  import { clearCoreSnapshotCache } from '$lib/api/core-snapshot.js';
+  import { clearCoreSnapshotCache, loadCoreSnapshotField } from '$lib/api/core-snapshot.js';
   import { fetchJSONWithFallback } from '$lib/utils/api.js';
   import {
     aggregateTcFeeRows,
@@ -168,7 +168,9 @@
         fetchJSONWithFallback('/thorchain/mimir'),
         fetchJSONWithFallback('/thorchain/constants'),
         fetchJSONWithFallback('/thorchain/network'),
-        fetchJSONWithFallback('/thorchain/nodes')
+        // The pendulum reads only active bonds; the full node list is ~1.3 MB.
+        loadCoreSnapshotField('nodes', { fields: 'status,total_bond' })
+          .catch(() => fetchJSONWithFallback('/thorchain/nodes'))
       ]);
       systemIncomeDistribution = buildSystemIncomeDistribution(mimir, constants, network, nodes);
       await tick();

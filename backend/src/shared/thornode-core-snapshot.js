@@ -30,6 +30,7 @@ export const THORNODE_CORE_FIELDS = Object.freeze([
   { key: 'upgrade_proposals', path: '/thorchain/upgrade_proposals', cadenceMs: 300_000, normalize: upgradeProposalsValue, valid: Array.isArray, provider: 'thornode' },
   { key: 'bifrost_scanners', path: '/api/nodesInfo', cadenceMs: 300_000, valid: isBifrostScannerInfo, provider: BIFROST_SCANNER_PROVIDER },
   { key: 'constants', path: '/thorchain/constants', cadenceMs: 900_000, valid: objectValue, provider: 'thornode' },
+  { key: 'version', path: '/thorchain/version', cadenceMs: 900_000, valid: objectValue, provider: 'thornode' },
   { key: 'churns', path: '/churns', cadenceMs: 600_000, valid: Array.isArray, provider: 'midgard' }
 ]);
 

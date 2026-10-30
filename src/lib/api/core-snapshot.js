@@ -12,6 +12,7 @@ const FIELD_BY_PATH = Object.freeze({
   '/thorchain/network': 'network',
   '/thorchain/pools': 'pools',
   '/thorchain/constants': 'constants',
+  '/thorchain/version': 'version',
   '/thorchain/mimir/nodes_all': 'node_mimirs'
 });
 
@@ -35,21 +36,23 @@ function pathDescriptor(path) {
   return null;
 }
 
-async function loadField(field) {
-  const cached = cache.get(field);
+/** One snapshot field, optionally narrowed (for example `{ fields: 'status,total_bond' }` on nodes). */
+export async function loadCoreSnapshotField(field, query = {}) {
+  const key = JSON.stringify([field, query]);
+  const cached = cache.get(key);
   if (cached && Date.now() - cached.fetchedAt < CACHE_TTL_MS) return cached.value;
-  if (inflight.has(field)) return inflight.get(field);
+  if (inflight.has(key)) return inflight.get(key);
   const pending = booneToolsApi.get('/network-snapshot', {
-    query: { field },
+    query: { ...query, field },
     headers: { Accept: 'application/vnd.boonetools.v2+json' },
     normalizeEnvelope: false,
     errorMessage: `BooneTools core snapshot field ${field} is unavailable`
   }).then((envelope) => {
     const value = envelope?.data;
-    cache.set(field, { value, fetchedAt: Date.now() });
+    cache.set(key, { value, fetchedAt: Date.now() });
     return value;
-  }).finally(() => inflight.delete(field));
-  inflight.set(field, pending);
+  }).finally(() => inflight.delete(key));
+  inflight.set(key, pending);
   return pending;
 }
 
@@ -59,7 +62,7 @@ export async function resolveCoreSnapshotPath(path, options = {}) {
   }
   const descriptor = pathDescriptor(path);
   if (!descriptor) return { handled: false, value: null };
-  const fieldValue = await loadField(descriptor.field);
+  const fieldValue = await loadCoreSnapshotField(descriptor.field);
   if (descriptor.mimirKey) {
     const entry = Object.entries(fieldValue || {}).find(
       ([key]) => String(key).toUpperCase() === descriptor.mimirKey

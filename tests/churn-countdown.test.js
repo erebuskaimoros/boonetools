@@ -32,3 +32,19 @@ test('churn status presentation preserves consensus blocking and ordinary active
   assert.equal(getChurnDisplayState({ isInProgress: true }), 'CHURNING');
   assert.equal(getChurnDisplayState({}), 'ACTIVE');
 });
+
+test('Thorfolio churn timing comes from live status with the observed block average', async () => {
+  const { churnStateFromStatusLive } = await import('../src/lib/utils/nodes.js');
+  const lastChurnMs = Date.parse('2026-10-11T12:00:00Z');
+  const live = { network: { height: 28_215_000, consensus: { last_block_at: new Date(lastChurnMs + 10_000 * 6_200).toISOString() } },
+    churn: { isPaused: false, estimated: false, lastChurnHeight: 28_205_000, lastChurnTimestampMs: lastChurnMs,
+      nextChurnHeight: 28_248_200, churnIntervalBlocks: 43_200 } };
+  const state = churnStateFromStatusLive({ data: live });
+  assert.equal(state.secondsPerBlock, 6.2);
+  assert.equal(state.currentHeight, 28_215_000);
+  assert.equal(state.blocksRemaining, 33_200);
+  assert.equal(state.nextChurnTimestamp, lastChurnMs / 1000 + 43_200 * 6.2);
+  // Estimated or incomplete churn data falls back to direct provider reads.
+  assert.equal(churnStateFromStatusLive({ ...live, churn: { ...live.churn, estimated: true } }), null);
+  assert.equal(churnStateFromStatusLive({ ...live, network: { height: 28_205_000 } }), null);
+});

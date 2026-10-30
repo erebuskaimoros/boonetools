@@ -107,7 +107,9 @@ export async function buildVisitorSnapshot(kind, params = {}, options = {}) {
       }) };
     });
     return { vaults: comparedVaults, routerChecks: l1.payload.routerChecks, tradeUnits, securedAssets, pools: payload.pools, network: payload.network,
-      nodes: payload.nodes, inboundAddresses: payload.inbound_addresses, field_meta: fieldMeta };
+      // The page maps vault members to nodes and sums bonds; the full node list is ~1.3 MB.
+      nodes: (payload.nodes || []).map(({ node_address, status, total_bond, pub_key_set }) => ({ node_address, status, total_bond, pub_key_set })),
+      inboundAddresses: payload.inbound_addresses, field_meta: fieldMeta };
   }
   if (kind !== 'dynamic-fees') throw new Error('Invalid visitor snapshot kind');
   const recordsResponse = await current('records', '/thorchain/dynamic_l1_fees', (value) => Array.isArray(value?.entries));

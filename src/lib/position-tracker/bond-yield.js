@@ -98,9 +98,9 @@ export function validateBondYieldReview({ node, owner, signer, gates, bps, targe
   return { destination, asset: 'RUNE' };
 }
 
-/** Bypass both UI caches and dashboard snapshots before a signing decision. */
-export async function loadBondYieldGate(client) {
-  const options = { cache: false, coreSnapshot: false };
+/** Signing bypasses UI caches and dashboard snapshots; display gates may read the shared snapshot. */
+export async function loadBondYieldGate(client, { fresh = true } = {}) {
+  const options = fresh ? { cache: false, coreSnapshot: false } : {};
   const [version, mimir, constants] = await Promise.all([
     client.fetch('/thorchain/version', options).catch(() => null),
     client.fetch('/thorchain/mimir', options).catch(() => null),
