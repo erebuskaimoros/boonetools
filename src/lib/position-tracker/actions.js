@@ -11,12 +11,22 @@ export { pickSigner } from './actions-signer.js';
 
 async function ensureConnected(signer) {
   const uSwap = getUSwap();
-  if (uSwap.getWallet(signer.provider, signer.network)) return;
+  const connected = uSwap.getWallet(signer.provider, signer.network);
+  if (connected) {
+    if (connected.address !== signer.address) {
+      throw new Error('The connected wallet account changed. Review this action again before signing.');
+    }
+    return;
+  }
   if (signer.provider === 'KEYSTORE') {
     throw new Error('Keystore session expired. Reconnect the keystore wallet and try again.');
   }
-  const accounts = await connectWallet(signer.provider, [signer.network]);
+  const accounts = await connectWallet(signer.provider, [signer.network],
+    signer.provider === 'WALLETCONNECT' ? { restoreOnly: true } : undefined);
   if (!accounts.length) throw new Error(`Could not reconnect ${signer.provider} on ${signer.network}`);
+  if (!accounts.some((account) => account.provider === signer.provider && account.network === signer.network && account.address === signer.address)) {
+    throw new Error('The connected wallet account changed. Review this action again before signing.');
+  }
 }
 
 async function assetValueFor(asset, amount) {

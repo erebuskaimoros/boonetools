@@ -1,5 +1,7 @@
 <script>
+  import { tick } from 'svelte';
   import { walletAccounts, connectedWallets } from '../limit-orders/store.js';
+  import { walletConnectEnabled } from '../limit-orders/wallet-config.js';
   import { shortAddr } from './format.js';
 
   export let open = false;
@@ -7,6 +9,7 @@
   // Lineup follows swap.thorchain.org and the Rujira UI; `thor` marks wallets
   // that can sign THORChain MsgDeposit (bond, LP RUNE side, TCY).
   const WALLETS = [
+    { option: 'WALLETCONNECT', label: 'WalletConnect', thor: true, remote: true },
     { option: 'VULTISIG', label: 'Vultisig', thor: true },
     { option: 'KEPLR', label: 'Keplr', thor: true },
     { option: 'LEAP', label: 'Leap', thor: true },
@@ -22,18 +25,25 @@
   const DEFAULT_CHAINS = ['THOR', 'BTC', 'ETH'];
 
   let walletModule = null;
+  let walletLoading = false;
   let selected = null;
   let chains = [];
   let phrase = '';
   let connecting = false;
   let error = '';
+  let notice = '';
+  let pairing = false;
+  let connectButton;
 
-  $: if (open && !walletModule) loadModule();
+  $: if (open && !walletModule && !walletLoading) loadModule();
+  $: if (open && walletModule && walletConnectEnabled()) walletModule.preloadWalletConnect();
+  $: availableWallets = WALLETS.filter((wallet) => !wallet.remote || walletConnectEnabled());
   $: supported = selected && walletModule
     ? TRACKED_CHAINS.filter((chain) => (walletModule.supportedChains[selected.option] || []).includes(chain))
     : [];
 
   async function loadModule() {
+    walletLoading = true;
     try {
       walletModule = await import('../limit-orders/wallet.js');
     } catch (loadError) {
@@ -48,6 +58,7 @@
   function choose(wallet) {
     selected = wallet;
     error = '';
+    notice = '';
     phrase = '';
     const options = (walletModule?.supportedChains[wallet.option] || []).filter((chain) => TRACKED_CHAINS.includes(chain));
     chains = wallet.option === 'LEDGER'
@@ -61,35 +72,56 @@
   }
 
   async function connect() {
-    if (!selected || !chains.length) return;
+    if (!selected || !chains.length || !walletModule || connecting) return;
+    const wallet = selected;
+    const requestedChains = [...chains];
     connecting = true;
     error = '';
+    notice = '';
+    pairing = wallet.remote === true;
+    // Let WalletConnect's QR dialog own focus and pointer input while pairing.
+    if (pairing) await tick();
     try {
-      const config = selected.option === 'KEYSTORE' ? { phrase: phrase.trim().replace(/\s+/g, ' ') } : undefined;
-      const accounts = await walletModule.connectWallet(selected.option, chains, config);
+      const config = wallet.option === 'KEYSTORE' ? { phrase: phrase.trim().replace(/\s+/g, ' ') } : undefined;
+      const accounts = await walletModule.connectWallet(wallet.option, requestedChains, config);
       if (!accounts.length) throw new Error('The wallet did not return any accounts. Unlock it and approve the connection.');
+      const missing = requestedChains.filter((chain) => !accounts.some((account) => account.network === chain));
+      if (missing.length) notice = `Connected. ${wallet.label} did not connect ${missing.join(', ')}.`;
       phrase = '';
       selected = null;
     } catch (connectError) {
-      error = connectError?.message || String(connectError);
+      if (wallet.remote && walletModule.isWalletconnectDismissed(connectError)) {
+        notice = 'Connection cancelled. You can try again.';
+      } else {
+        error = wallet.remote
+          ? walletModule.describeWalletConnectError(connectError)
+          : connectError?.message || String(connectError);
+      }
     } finally {
       connecting = false;
+      pairing = false;
+      await tick();
+      connectButton?.focus();
     }
   }
 
   function disconnect(option) {
     walletModule?.disconnectWallet(option);
+    notice = '';
+    error = '';
   }
 
   function close() {
     open = false;
+    if (!walletModule) walletLoading = false;
     selected = null;
     phrase = '';
     error = '';
+    notice = '';
   }
 
   function onKeydown(event) {
-    if (open && event.key === 'Escape') close();
+    if (open && !pairing && event.key === 'Escape') close();
   }
 
   $: grouped = $connectedWallets.map((provider) => ({
@@ -101,7 +133,7 @@
 
 <svelte:window on:keydown={onKeydown} />
 
-{#if open}
+{#if open && !pairing}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <div class="ptrack-modal-backdrop" on:click|self={close}>
     <div class="ptrack-modal" role="dialog" aria-modal="true" aria-label="Wallet">
@@ -131,12 +163,12 @@
         <div class="modal-section">
           <h3 class="modal-label">{grouped.length ? 'add a wallet' : 'choose a wallet'}</h3>
           <div class="wallet-grid">
-            {#each WALLETS as wallet (wallet.option)}
-              <button class="wallet-btn" class:unavailable={!available(wallet, walletModule)} on:click={() => choose(wallet)}>
+            {#each availableWallets as wallet (wallet.option)}
+              <button class="wallet-btn" disabled={!walletModule || connecting} class:unavailable={!available(wallet, walletModule)} on:click={() => choose(wallet)}>
                 <b>{wallet.label}</b>
                 <span class="wallet-sub">
                   {wallet.thor ? 'THOR' : 'L1 only'}
-                  · {wallet.hardware ? (wallet.option === 'LEDGER' ? 'usb' : 'phrase') : available(wallet, walletModule) ? 'detected' : 'not detected'}
+                  · {wallet.remote ? 'THORWallet / mobile' : wallet.hardware ? (wallet.option === 'LEDGER' ? 'usb' : 'phrase') : available(wallet, walletModule) ? 'detected' : 'not detected'}
                 </span>
               </button>
             {/each}
@@ -158,26 +190,30 @@
           {#if selected.option === 'LEDGER'}
             <p class="hint">Open the matching app on your Ledger, then connect one chain at a time.</p>
           {/if}
+          {#if selected.remote}
+            <p class="hint">Scan the QR code with THORWallet or another WalletConnect wallet. On mobile, choose your wallet in the next window. Only chains approved by your wallet will connect.</p>
+          {/if}
           {#if selected.option === 'KEYSTORE'}
             <h3 class="modal-label">recovery phrase</h3>
             <textarea class="phrase" bind:value={phrase} rows="3" spellcheck="false" autocomplete="off" placeholder="12 or 24 words, kept in memory for this tab only"></textarea>
             <p class="hint warn-text">Only use a phrase on a device you trust. It never leaves this browser tab.</p>
           {/if}
-          {#if !available(selected, walletModule) && !selected.hardware}
+          {#if !available(selected, walletModule) && !selected.hardware && !selected.remote}
             <p class="hint warn-text">{selected.label} wasn't detected in this browser. Install or unlock the extension, then try again.</p>
           {/if}
           {#if error}<p class="hint err-text">{error}</p>{/if}
           <div class="modal-actions">
-            <button class="bracket-btn" on:click={() => (selected = null)}>
+            <button class="bracket-btn" disabled={connecting} on:click={() => (selected = null)}>
               <span class="bracket">[</span><span class="key">←</span><span class="bracket">]</span> back
             </button>
-            <button class="bracket-btn primary" disabled={connecting || !chains.length || (selected.option === 'KEYSTORE' && phrase.trim().split(/\s+/).length < 12)} on:click={connect}>
+            <button bind:this={connectButton} class="bracket-btn primary" disabled={connecting || !walletModule || !chains.length || (selected.option === 'KEYSTORE' && phrase.trim().split(/\s+/).length < 12)} on:click={connect}>
               <span class="bracket">[</span><span class="key">↵</span><span class="bracket">]</span> {connecting ? 'connecting…' : `connect ${chains.length} chain${chains.length === 1 ? '' : 's'}`}
             </button>
           </div>
         </div>
       {/if}
       {#if error && !selected}<p class="hint err-text">{error}</p>{/if}
+      {#if notice}<p class="hint warn-text" role="status">{notice}</p>{/if}
     </div>
   </div>
 {/if}

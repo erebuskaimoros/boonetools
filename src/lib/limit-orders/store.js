@@ -1,4 +1,5 @@
 import { derived, get, writable } from 'svelte/store';
+import { readSavedWalletConnectChains, WALLETCONNECT_PROVIDER, WALLET_STORAGE_KEY } from './wallet-config.js';
 
 // ============================================
 // UI State Stores
@@ -26,7 +27,7 @@ export const ordersPage = writable(0);
 // Wallet State Stores
 // ============================================
 
-const WALLET_STORAGE_KEY = 'boonetools-wallet-state';
+let walletConnectRestoreChains = readSavedWalletConnectChains();
 
 function normalizeChain(chain) {
   const value = String(chain ?? '').trim();
@@ -218,9 +219,11 @@ function loadWalletState() {
     const stored = localStorage.getItem(WALLET_STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      const accounts = uniqueAccounts(parsed?.accounts);
+      // Persisted WalletConnect addresses are hints until the SDK confirms that
+      // the session still exists. Never offer them as live transaction signers.
+      const accounts = uniqueAccounts(parsed?.accounts).filter((account) => account.provider !== WALLETCONNECT_PROVIDER);
       const selectedAccount = normalizeSelectedAccount(accounts, parsed?.selectedAccount ?? parsed?.selected);
-      const connectedWallets = normalizeConnectedWalletList(parsed?.connectedWallets);
+      const connectedWallets = normalizeConnectedWalletList(parsed?.connectedWallets).filter((provider) => provider !== WALLETCONNECT_PROVIDER);
       const chainAssignments = reconcileChainAssignments(accounts, normalizeChainAssignments(parsed?.chainAssignments));
       const tradeOwner = reconcileTradeOwner(accounts, normalizeAssignment(parsed?.tradeOwner));
 
@@ -277,7 +280,11 @@ function persistWalletState() {
       chainAssignments: assignments,
       connectedWallets: wallets,
       selectedAccount: selected,
-      tradeOwner: owner
+      tradeOwner: owner,
+      walletConnectChains: [...new Set([
+        ...walletConnectRestoreChains,
+        ...accounts.filter((account) => account.provider === WALLETCONNECT_PROVIDER).map((account) => account.network)
+      ])]
     }));
   } catch (_) {
     // ignore storage errors
@@ -289,6 +296,15 @@ selectedAccount.subscribe(persistWalletState);
 connectedWallets.subscribe(persistWalletState);
 chainAssignments.subscribe(persistWalletState);
 tradeOwner.subscribe(persistWalletState);
+
+export function getWalletConnectRestoreChains() {
+  return [...walletConnectRestoreChains];
+}
+
+export function finishWalletConnectRestore() {
+  walletConnectRestoreChains = [];
+  persistWalletState();
+}
 
 /** Whether any wallet is connected */
 export const isWalletConnected = derived(walletAccounts, ($accounts) => $accounts.length > 0);

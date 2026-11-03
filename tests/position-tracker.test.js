@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
+import { runInNewContext } from 'node:vm';
+import ts from 'typescript';
 
 import {
   addAddresses,
@@ -31,11 +34,249 @@ import {
   summarizeByAddress
 } from '../src/lib/position-tracker/model.js';
 import { pickSigner } from '../src/lib/position-tracker/actions-signer.js';
+import { createWalletConnectSession } from '../src/lib/limit-orders/wallet-connect-session.js';
+import { readSavedWalletConnectChains, WALLET_STORAGE_KEY } from '../src/lib/limit-orders/wallet-config.js';
 
 const THOR_A = 'thor12a6ggkqsmxdlwgqr9tfev2u32jc8x9pn4530hc';
 const THOR_B = 'thor1lhufh0mwasa0lk9udppdegmvnkgqt08f0m9p5g';
 const NODE = 'thor100m5hh9qayap0edmvl9h8er4z6uesnfazjmefg';
 const BTC = 'bc1qz375gdj6hdd7wr54nfnr2lvssfesna23njrx7a';
+
+async function walletFunction(name, bindings, modulePath = '../src/lib/limit-orders/wallet.js') {
+  const source = await readFile(new URL(modulePath, import.meta.url), 'utf8');
+  const parsed = ts.createSourceFile('wallet.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const declaration = parsed.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name);
+  assert.ok(declaration, `${name} must exist`);
+  const executable = declaration.getText(parsed).replace(/^export\s+/, '');
+  return runInNewContext(`${executable}\n${name}`, { console, ...bindings });
+}
+
+function walletSessionHarness(sdk, { restoreChains = [], enabled = true } = {}) {
+  const saved = [];
+  let finished = 0;
+  const session = createWalletConnectSession({
+    getSDK: () => sdk,
+    supportedChains: ['THOR', 'ETH'],
+    metadata: { name: 'BooneTools' },
+    isEnabled: () => enabled,
+    replaceAccounts: (accounts) => saved.push(accounts),
+    readRestoreChains: () => restoreChains,
+    finishRestore: () => finished++
+  });
+  return { session, saved, get finished() { return finished; } };
+}
+
+test('WalletConnect pairs once and only exposes accounts approved by that provider', async () => {
+  const calls = [];
+  let approved = false;
+  const sdk = {
+    async connectWalletconnect(chains, options) { calls.push({ chains: [...chains], options }); approved = true; return true; },
+    getAddress(chain) { return chain === 'THOR' ? THOR_A : '0xUnrelatedExtensionAccount'; },
+    getWallet(provider, chain) { return approved && provider === 'WALLETCONNECT' && chain === 'THOR' ? { address: THOR_A } : undefined; }
+  };
+  const { session, saved } = walletSessionHarness(sdk);
+  const connect = await walletFunction('connectWallet', {
+    WalletOption: { WALLETCONNECT: 'WALLETCONNECT' },
+    getUSwap: () => sdk,
+    walletConnectSession: session
+  });
+  const accounts = await connect('WALLETCONNECT', ['THOR', 'ETH']);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].chains, ['THOR', 'ETH']);
+  assert.deepEqual(JSON.parse(JSON.stringify(accounts)), [{ address: THOR_A, network: 'THOR', provider: 'WALLETCONNECT' }]);
+  assert.equal(saved.length, 1);
+});
+
+test('disconnecting WalletConnect ends that provider without disconnecting another wallet on the same chain', async () => {
+  const disconnected = [];
+  const removed = [];
+  const sdk = { getWallet: () => undefined, disconnectWallet: (provider) => disconnected.push(provider), disconnectChain: () => assert.fail('must not disconnect a shared chain') };
+  const session = createWalletConnectSession({
+    getSDK: () => sdk, supportedChains: ['THOR', 'ETH'], metadata: {}, isEnabled: () => true,
+    replaceAccounts: () => removed.push('WALLETCONNECT'), readRestoreChains: () => [], finishRestore: () => {}
+  });
+  const disconnect = await walletFunction('disconnectWallet', {
+    WalletOption: { WALLETCONNECT: 'WALLETCONNECT' },
+    walletConnectSession: session
+  });
+  await disconnect('WALLETCONNECT');
+  assert.deepEqual(disconnected, ['WALLETCONNECT']);
+  assert.deepEqual(removed, ['WALLETCONNECT']);
+});
+
+test('WalletConnect reconnect preserves other approved chains and avoids a second pairing', async () => {
+  let pairs = 0;
+  const wallets = new Map();
+  const sdk = {
+    getWallet: (_provider, chain) => wallets.get(chain),
+    async connectWalletconnect(chains) {
+      pairs++;
+      for (const chain of chains) wallets.set(chain, { address: chain === 'THOR' ? THOR_A : '0xWalletConnect' });
+      return true;
+    }
+  };
+  const { session, saved } = walletSessionHarness(sdk);
+  await session.connect(['THOR', 'ETH']);
+  const signingAccounts = await session.connect(['THOR'], { restoreOnly: true });
+  assert.equal(pairs, 1);
+  assert.deepEqual(signingAccounts.map((account) => account.network), ['THOR']);
+  assert.deepEqual(saved.at(-1).map((account) => account.network), ['THOR', 'ETH']);
+});
+
+test('WalletConnect reload restores only an approved session without showing QR pairing', async () => {
+  const optionsSeen = [];
+  let approved = false;
+  const sdk = {
+    getWallet: (_provider, chain) => approved && chain === 'THOR' ? { address: THOR_A } : undefined,
+    async connectWalletconnect(_chains, options) { optionsSeen.push(options); approved = true; return true; }
+  };
+  const harness = walletSessionHarness(sdk, { restoreChains: ['THOR', 'ETH'] });
+  const [first, second] = await Promise.all([harness.session.restore(), harness.session.restore()]);
+  assert.equal(optionsSeen.length, 1);
+  assert.equal(optionsSeen[0].restoreOnly, true);
+  assert.deepEqual(first, second);
+  assert.deepEqual(first.map((account) => account.network), ['THOR']);
+  assert.equal(harness.finished, 1);
+});
+
+test('WalletConnect expired saved session never populates accounts', async () => {
+  const sdk = {
+    getWallet: () => undefined,
+    async connectWalletconnect(_chains, options) {
+      assert.equal(options.restoreOnly, true);
+      throw new Error('wallet_walletconnect_connection_not_established');
+    }
+  };
+  const harness = walletSessionHarness(sdk, { restoreChains: ['THOR'] });
+  await assert.rejects(harness.session.restore(), /connection_not_established/);
+  assert.deepEqual(harness.saved.at(-1), []);
+  assert.equal(harness.finished, 1);
+});
+
+test('WalletConnect phone disconnect removes only the affected chains', async () => {
+  const wallets = new Map([['THOR', { address: THOR_A }], ['ETH', { address: '0xWalletConnect' }]]);
+  const events = [];
+  const sdk = {
+    getWallet: (_provider, chain) => wallets.get(chain),
+    disconnectWallet(provider, chains) {
+      events.push([provider, chains]);
+      for (const chain of chains) wallets.delete(chain);
+    }
+  };
+  const harness = walletSessionHarness(sdk);
+  harness.session.disconnected(['ETH']);
+  assert.deepEqual(events, [['WALLETCONNECT', ['ETH']]]);
+  assert.deepEqual(harness.saved.at(-1), [{ address: THOR_A, network: 'THOR', provider: 'WALLETCONNECT' }]);
+});
+
+test('WalletConnect disconnect during pairing discards late approval', async () => {
+  let finishPair;
+  let pairingStarted;
+  const started = new Promise((resolve) => { pairingStarted = resolve; });
+  let approved = false;
+  const sdk = {
+    getWallet: () => approved ? { address: THOR_A } : undefined,
+    async connectWalletconnect() {
+      pairingStarted();
+      await new Promise((resolve) => { finishPair = resolve; });
+      approved = true;
+      return true;
+    },
+    disconnectWallet: () => { approved = false; }
+  };
+  const harness = walletSessionHarness(sdk);
+  const connection = harness.session.connect(['THOR']);
+  await started;
+  harness.session.disconnect();
+  finishPair();
+  assert.deepEqual(await connection, []);
+  assert.deepEqual(harness.saved.at(-1), []);
+  assert.equal(approved, false);
+});
+
+test('WalletConnect cancellation preserves existing approved chains', async () => {
+  const sdk = {
+    getWallet: (_provider, chain) => chain === 'THOR' ? { address: THOR_A } : undefined,
+    async connectWalletconnect() { throw new Error('wallet_walletconnect_user_rejected'); }
+  };
+  const harness = walletSessionHarness(sdk);
+  await assert.rejects(harness.session.connect(['ETH']), /user_rejected/);
+  assert.deepEqual(harness.saved.at(-1), [{ address: THOR_A, network: 'THOR', provider: 'WALLETCONNECT' }]);
+});
+
+test('WalletConnect missing project configuration fails before invoking the SDK', async () => {
+  let pairs = 0;
+  const harness = walletSessionHarness({ connectWalletconnect: () => pairs++ }, { enabled: false });
+  await assert.rejects(harness.session.connect(['THOR']), /not configured/);
+  assert.equal(pairs, 0);
+});
+
+test('WalletConnect saved storage exposes only chain hints and rejects malformed records', () => {
+  assert.deepEqual(readSavedWalletConnectChains(memoryStorage({ [WALLET_STORAGE_KEY]: JSON.stringify({
+    accounts: [{ provider: 'WALLETCONNECT', network: 'THOR', address: THOR_A }, { provider: 'KEPLR', network: 'GAIA' }],
+    walletConnectChains: ['THOR', 'eth', null, 'https://example.org']
+  }) })), ['THOR', 'ETH']);
+  assert.deepEqual(readSavedWalletConnectChains(memoryStorage({ [WALLET_STORAGE_KEY]: 'broken' })), []);
+});
+
+test('WalletConnect saved addresses stay unavailable as signers until restoration succeeds', async () => {
+  const original = globalThis.localStorage;
+  const storage = memoryStorage({ [WALLET_STORAGE_KEY]: JSON.stringify({
+    accounts: [
+      { provider: 'WALLETCONNECT', network: 'THOR', address: THOR_A },
+      { provider: 'KEPLR', network: 'THOR', address: THOR_B }
+    ],
+    connectedWallets: ['WALLETCONNECT', 'KEPLR'],
+    selectedAccount: { provider: 'WALLETCONNECT', network: 'THOR', address: THOR_A }
+  }) });
+  globalThis.localStorage = storage;
+  try {
+    const store = await import(`../src/lib/limit-orders/store.js?walletconnect-restore-test=${Date.now()}`);
+    let accounts;
+    let providers;
+    store.walletAccounts.subscribe((value) => { accounts = value; })();
+    store.connectedWallets.subscribe((value) => { providers = value; })();
+    assert.deepEqual(accounts.map((account) => account.provider), ['KEPLR']);
+    assert.deepEqual(providers, ['KEPLR']);
+    assert.deepEqual(store.getWalletConnectRestoreChains(), ['THOR']);
+    assert.deepEqual(readSavedWalletConnectChains(storage), ['THOR']);
+    store.finishWalletConnectRestore();
+    assert.deepEqual(readSavedWalletConnectChains(storage), []);
+  } finally {
+    if (original === undefined) delete globalThis.localStorage;
+    else globalThis.localStorage = original;
+  }
+});
+
+test('WalletConnect signing reconnect restores only the reviewed account without QR pairing', async () => {
+  const signer = { provider: 'WALLETCONNECT', network: 'THOR', address: THOR_A };
+  const calls = [];
+  const ensureConnected = await walletFunction('ensureConnected', {
+    getUSwap: () => ({ getWallet: () => undefined }),
+    connectWallet: async (provider, chains, config) => { calls.push({ provider, chains: [...chains], config }); return [signer]; }
+  }, '../src/lib/position-tracker/actions.js');
+  await ensureConnected(signer);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].provider, 'WALLETCONNECT');
+  assert.deepEqual(calls[0].chains, ['THOR']);
+  assert.equal(calls[0].config.restoreOnly, true);
+});
+
+test('WalletConnect account mismatch aborts before any signing or broadcasting', async () => {
+  const signer = { provider: 'WALLETCONNECT', network: 'THOR', address: THOR_A };
+  for (const alreadyConnected of [true, false]) {
+    const ensureConnected = await walletFunction('ensureConnected', {
+      getUSwap: () => ({ getWallet: () => alreadyConnected ? { address: THOR_B } : undefined }),
+      connectWallet: async () => [{ ...signer, address: THOR_B }]
+    }, '../src/lib/position-tracker/actions.js');
+    const execute = await walletFunction('executePlan', {
+      ensureConnected,
+      getUSwap: () => assert.fail('must abort before transaction setup'),
+      withActiveProvider: () => assert.fail('must abort before signing')
+    }, '../src/lib/position-tracker/actions.js');
+    await assert.rejects(execute({ route: 'thor-deposit', chain: 'THOR' }, signer), /account changed/);
+  }
+});
 
 function memoryStorage(seed = {}) {
   const data = new Map(Object.entries(seed));

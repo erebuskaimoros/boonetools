@@ -38,10 +38,16 @@ function sourceFixture(t) {
     touch "$TEST_ROOT/read-widget-key"
     [[ "\${TEST_STO_READ_FAIL:-}" != 1 ]] || exit 1
     printf '%s' "$TEST_STO_KEY"
+  elif [[ "$*" == *'cat /opt/boonetools-frontend/config/walletconnect-project-id'* ]]; then
+    touch "$TEST_ROOT/read-walletconnect-id"
+    [[ "\${TEST_WC_READ_FAIL:-}" != 1 ]] || exit 1
+    printf '%s' "\${TEST_WC_ID:-}"
   elif [[ "$*" == *'bash -s'* ]]; then /bin/cat > "$TEST_ROOT/executed-helper"; fi\n`);
   putBin('npm', `test ! -e .env\ntest "$(cat backend/sentinel.txt)" = 'committed source'\ntest "$VITE_STO_WIDGET_API_KEY" = "$EXPECTED_STO_KEY"\nif [[ "$*" == 'run build' ]]; then mkdir dist; printf '<html>committed build</html>' > dist/index.html; if [[ "\${TEST_ADD_XATTR:-0}" == 1 ]]; then /usr/bin/xattr -w com.boonetools.packaging-test metadata-must-not-ship dist/index.html; fi; fi\n`);
+  const inheritedEnv = { ...process.env };
+  delete inheritedEnv.VITE_WALLETCONNECT_PROJECT_ID;
   const run = (script, args = [sha], env = {}) => spawnSync('bash', [join(root, 'scripts', script), ...args], {
-    cwd: root, encoding: 'utf8', env: { ...process.env, PATH: `${join(root, 'bin')}:${process.env.PATH}`, TEST_ROOT: root, CI_RESULT: 'success',
+    cwd: root, encoding: 'utf8', env: { ...inheritedEnv, PATH: `${join(root, 'bin')}:${process.env.PATH}`, TEST_ROOT: root, CI_RESULT: 'success',
       VITE_STO_WIDGET_API_KEY: '', TEST_STO_KEY: 'test-sto-key', EXPECTED_STO_KEY: 'test-sto-key', ...env }
   });
   return { root, git, sha, run };
@@ -134,6 +140,37 @@ test('frontend deploy fails before upload when the widget key is missing or malf
     assert.match(result.stderr, /Deploy aborted:.*STO widget key/);
     assert.equal(existsSync(join(root, 'upload.tar.gz')), false);
     assert.doesNotMatch(result.stdout + result.stderr, /invalid key/);
+  }
+});
+
+test('WalletConnect deployment configuration persists across builds and permits explicit disable', (t) => {
+  const { root, run } = sourceFixture(t);
+  const id = 'a123456789abcdef0123456789abcdef';
+  const npmFile = join(root, 'bin/npm');
+  writeFileSync(npmFile, readFileSync(npmFile, 'utf8').replace('set -eu', 'set -eu\ntest "${VITE_WALLETCONNECT_PROJECT_ID:-}" = "${EXPECTED_WC_ID:-}"'));
+  const configured = run('deploy-boonetools-frontend.sh', undefined, { TEST_WC_ID: id, EXPECTED_WC_ID: id });
+  assert.equal(configured.status, 0, configured.stderr);
+  assert.equal(existsSync(join(root, 'read-walletconnect-id')), true);
+  assert.doesNotMatch(configured.stdout + configured.stderr, new RegExp(id));
+  rmSync(join(root, 'read-walletconnect-id'));
+  const disabled = run('deploy-boonetools-frontend.sh', undefined, { VITE_WALLETCONNECT_PROJECT_ID: '', TEST_WC_READ_FAIL: '1' });
+  assert.equal(disabled.status, 0, disabled.stderr);
+  assert.equal(existsSync(join(root, 'read-walletconnect-id')), false);
+  const override = run('deploy-boonetools-frontend.sh', undefined, {
+    VITE_WALLETCONNECT_PROJECT_ID: id, EXPECTED_WC_ID: id, TEST_WC_READ_FAIL: '1'
+  });
+  assert.equal(override.status, 0, override.stderr);
+  assert.equal(existsSync(join(root, 'read-walletconnect-id')), false);
+});
+
+test('WalletConnect configuration read errors and malformed IDs abort before upload', (t) => {
+  const { root, run } = sourceFixture(t);
+  for (const env of [{ TEST_WC_READ_FAIL: '1' }, { TEST_WC_ID: 'invalid project ID' }, { VITE_WALLETCONNECT_PROJECT_ID: 'abc' }]) {
+    const result = run('deploy-boonetools-frontend.sh', undefined, env);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Deploy aborted:.*WalletConnect/);
+    assert.equal(existsSync(join(root, 'upload.tar.gz')), false);
+    assert.doesNotMatch(result.stdout + result.stderr, /invalid project ID/);
   }
 });
 

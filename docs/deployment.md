@@ -65,10 +65,20 @@ The STO widget's browser-visible affiliate key is read over SSH from
 `/opt/boonetools-frontend/config/sto-widget-api-key` unless
 `VITE_STO_WIDGET_API_KEY` is explicitly exported. Store only the key in that file,
 owned by root with mode 0600 in a mode-0700 configuration directory; never commit
-its value. The loader from the selected commit exports only this setting and
+its value. The loader from the selected commit exports only allowlisted settings and
 rejects missing/empty/whitespace-containing keys before building. It never sources
 server configuration as shell code. The built widget exposes the affiliate key
 to browsers by design; this file must not contain a backend credential.
+
+WalletConnect uses the browser-visible `VITE_WALLETCONNECT_PROJECT_ID`. If it is
+unset in the deployment environment, the loader reads the optional
+`/opt/boonetools-frontend/config/walletconnect-project-id` file over SSH. Store only
+the 32-character hexadecimal project ID with the same ownership/permissions as
+the STO configuration. A missing file disables WalletConnect; a read failure or
+malformed nonempty value aborts the build. An explicitly exported value overrides
+the server file, including an empty value to disable the feature. Future builds
+reuse the server setting; no local `.env` file is uploaded. See
+[WalletConnect setup and validation](walletconnect.md).
 
 Frontend packaging uses `COPYFILE_DISABLE=1` and `tar --no-xattrs` on both
 BSD/macOS and GNU/Linux tar. This excludes AppleDouble files and extended

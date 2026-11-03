@@ -1,5 +1,5 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, tick } from 'svelte';
   import { fade, fly } from 'svelte/transition';
   import { thornode } from '../api/thornode.js';
   import {
@@ -17,6 +17,7 @@
   } from '../limit-orders/store.js';
   import { getChainFromAsset } from '../utils/blockchain.js';
   import { hideBrokenImage } from '../utils/dom.js';
+  import { walletConnectEnabled } from '../limit-orders/wallet-config.js';
 
   export let open = false;
 
@@ -24,10 +25,12 @@
 
   let walletMod = null;
   let walletReady = false;
+  let walletLoading = false;
   let view = 'manage';
   let activeTab = 'l1';
 
   const wallets = [
+    { key: 'walletconnect', option: 'WALLETCONNECT', label: 'WalletConnect', type: 'remote' },
     { key: 'metamask', option: 'METAMASK', label: 'MetaMask', type: 'browser' },
     { key: 'vultisig', option: 'VULTISIG', label: 'Vultisig', type: 'browser' },
     { key: 'phantom', option: 'PHANTOM', label: 'Phantom', type: 'browser' },
@@ -47,6 +50,9 @@
   let selectedWalletChains = [];
   let connecting = false;
   let connectError = '';
+  let connectNotice = '';
+  let pairing = false;
+  let connectButton;
 
   let refreshingL1Balances = false;
   let refreshingTradeBalances = false;
@@ -75,11 +81,13 @@
 
   function close() {
     open = false;
+    if (!walletMod) walletLoading = false;
     view = 'manage';
     selectedWallet = null;
     selectedWalletChains = [];
     connecting = false;
     connectError = '';
+    connectNotice = '';
     lastRefreshKey = '';
     dispatch('close');
   }
@@ -90,6 +98,7 @@
     selectedWalletChains = [];
     connecting = false;
     connectError = '';
+    connectNotice = '';
   }
 
   function backToManage() {
@@ -105,7 +114,7 @@
   }
 
   function handleKeydown(event) {
-    if (event.key === 'Escape') close();
+    if (open && !pairing && event.key === 'Escape') close();
   }
 
   function handleBackdropKeydown(event) {
@@ -352,7 +361,10 @@
   function pickWallet(wallet) {
     selectedWallet = wallet;
     connectError = '';
-    selectedWalletChains = [];
+    connectNotice = '';
+    selectedWalletChains = wallet.type === 'remote'
+      ? (walletMod?.supportedChains[wallet.option] || []).filter((chain) => ['THOR', 'ETH'].includes(chain))
+      : [];
   }
 
   function toggleChain(chain) {
@@ -364,35 +376,54 @@
   }
 
   async function handleConnect() {
-    if (!selectedWallet || selectedWalletChains.length === 0 || !walletMod) return;
+    if (!selectedWallet || selectedWalletChains.length === 0 || !walletMod || connecting) return;
 
+    const wallet = selectedWallet;
+    const requestedChains = [...selectedWalletChains];
     connecting = true;
     connectError = '';
+    connectNotice = '';
+    pairing = wallet.type === 'remote';
+    if (pairing) await tick();
 
     try {
-      const accounts = await walletMod.connectWallet(selectedWallet.option, selectedWalletChains);
+      const accounts = await walletMod.connectWallet(wallet.option, requestedChains);
+      pairing = false;
       if (accounts.length > 0) {
         if (!$selectedAccount) {
           setSelectedAccount(accounts[0]);
         }
         dispatch('connected', { accounts });
         backToManage();
+        const missing = requestedChains.filter((chain) => !accounts.some((account) => account.network === chain));
+        if (missing.length) connectNotice = `Connected. ${wallet.label} did not connect ${missing.join(', ')}.`;
         lastRefreshKey = '';
         await refreshModalData();
       } else {
         connectError = 'No accounts returned. Is the wallet unlocked?';
       }
     } catch (error) {
-      connectError = error.message || 'Connection failed';
+      if (wallet.type === 'remote' && walletMod.isWalletconnectDismissed(error)) {
+        connectNotice = 'Connection cancelled. You can try again.';
+      } else {
+        connectError = wallet.type === 'remote'
+          ? walletMod.describeWalletConnectError(error)
+          : error.message || 'Connection failed';
+      }
+    } finally {
+      connecting = false;
+      pairing = false;
+      await tick();
+      connectButton?.focus();
     }
-
-    connecting = false;
   }
 
   async function handleDisconnect(walletOption) {
     if (!walletMod) return;
 
     walletMod.disconnectWallet(walletOption);
+    connectNotice = '';
+    connectError = '';
     lastRefreshKey = '';
     await refreshModalData();
   }
@@ -557,7 +588,8 @@
     withdrawing = false;
   }
 
-  $: if (open && !walletMod) {
+  $: if (open && !walletMod && !walletLoading) {
+    walletLoading = true;
     import('../limit-orders/wallet.js').then((mod) => {
       walletMod = mod;
       walletReady = true;
@@ -567,6 +599,8 @@
       connectError = error.message || 'Failed to load wallet module';
     });
   }
+  $: if (open && walletMod && walletConnectEnabled()) walletMod.preloadWalletConnect();
+  $: availableWallets = wallets.filter((wallet) => wallet.type !== 'remote' || walletConnectEnabled());
 
   $: refreshKey = open
     ? [
@@ -632,7 +666,7 @@
 
 <svelte:window on:keydown={handleKeydown} />
 
-{#if open}
+{#if open && !pairing}
   <div
     class="cw-backdrop"
     role="button"
@@ -640,9 +674,9 @@
     aria-label="Close wallet manager"
     on:click={handleBackdropClick}
     on:keydown={handleBackdropKeydown}
-    transition:fade={{ duration: 150 }}
+    transition:fade={{ duration: pairing ? 0 : 150 }}
   >
-    <div class="cw-dialog" transition:fly={{ y: 20, duration: 200 }}>
+    <div class="cw-dialog" transition:fly={{ y: 20, duration: pairing ? 0 : 200 }}>
       <div class="cw-header">
         <div class="cw-header-copy">
           <h3>
@@ -674,12 +708,14 @@
           </button>
         </div>
       </div>
+      {#if connectNotice}<p class="cw-connect-notice" role="status">{connectNotice}</p>{/if}
+      {#if connectError && !selectedWallet}<p class="cw-error" role="alert">{connectError}</p>{/if}
 
       {#if view === 'connect'}
         <div class="cw-connect-split">
           <!-- Left: Wallet Providers -->
           <div class="cw-providers">
-            {#each wallets as wallet}
+            {#each availableWallets as wallet}
               {@const isInstalled = installedWallets.some(w => w.option === wallet.option)}
               {@const isConnected = connectedSet.has(wallet.option)}
               <button
@@ -687,6 +723,7 @@
                 class:selected={selectedWallet?.option === wallet.option}
                 class:connected={isConnected}
                 type="button"
+                disabled={connecting || !walletReady}
                 on:click={() => {
                   if (isConnected) {
                     handleDisconnect(wallet.option);
@@ -700,6 +737,8 @@
                   <span class="cw-provider-row-name">{wallet.label}</span>
                   {#if isConnected}
                     <span class="cw-provider-row-status cw-provider-row-status--connected">Connected</span>
+                  {:else if wallet.type === 'remote'}
+                    <span class="cw-provider-row-status">THORWallet / mobile</span>
                   {:else if isInstalled}
                     <span class="cw-provider-row-status cw-provider-row-status--detected">Detected</span>
                   {:else if wallet.type === 'hardware'}
@@ -716,6 +755,9 @@
               <div class="cw-chain-panel-head">
                 <span class="cw-group-label">Select Chain</span>
               </div>
+              {#if selectedWallet.type === 'remote'}
+                <p class="cw-connect-help">Scan with THORWallet or another WalletConnect wallet, or choose your wallet on mobile. Your wallet approves the supported chains.</p>
+              {/if}
               <div class="cw-chains-grid">
                 {#each ((walletMod?.supportedChains || {})[selectedWallet.option] || []) as chain}
                   <button class="cw-chain-item" type="button" class:selected={selectedWalletChains.includes(chain)} on:click={() => toggleChain(chain)}>
@@ -729,7 +771,7 @@
                 <div class="cw-error">{connectError}</div>
               {/if}
 
-              <button class="cw-connect-btn" type="button" on:click={handleConnect} disabled={connecting || selectedWalletChains.length === 0}>
+              <button bind:this={connectButton} class="cw-connect-btn" type="button" on:click={handleConnect} disabled={connecting || !walletReady || selectedWalletChains.length === 0}>
                 {#if connecting}
                   <div class="cw-spinner"></div>
                   Connecting...
@@ -1083,6 +1125,20 @@
 {/if}
 
 <style>
+  .cw-connect-help,
+  .cw-connect-notice {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--term-text-3, #c8c8c8);
+  }
+
+  .cw-connect-notice {
+    margin: 0;
+    padding: 12px 20px;
+    color: var(--term-amber, #d4a017);
+    border-bottom: 1px solid var(--term-border, #1a1a1a);
+  }
+
   .cw-backdrop {
     position: fixed;
     inset: 0;

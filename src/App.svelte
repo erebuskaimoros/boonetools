@@ -7,6 +7,7 @@
   import { trackFirstPartyPageView } from './lib/page-view-analytics.js';
   import ToolNavigation from './lib/navigation/ToolNavigation.svelte';
   import { isNavigationSearchShortcut } from './lib/navigation/search.js';
+  import { hasSavedWalletConnectSession } from './lib/limit-orders/wallet-config.js';
   import './lib/styles/variables.css';
 
   const BASE_PATH = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
@@ -384,6 +385,14 @@
 
   onMount(() => {
     checkDesktopAppMode();
+
+    // Most visitors never connect a wallet; keep the SDK lazy for those visits.
+    // Restoration validates saved sessions without opening a pairing dialog.
+    if (hasSavedWalletConnectSession()) {
+      import('./lib/limit-orders/wallet.js')
+        .then((wallet) => wallet.restoreWalletConnectSessions())
+        .catch(() => console.warn('WalletConnect session could not be restored. Reconnect from the wallet menu.'));
+    }
 
     // Route based on URL path; `/` and unknown paths default to status.
     // Load known routes in place so nested paths such as `/briefings/*` survive.

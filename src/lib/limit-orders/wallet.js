@@ -16,10 +16,18 @@ import { ledgerWallet } from '@tcswap/wallets/ledger';
 import { okxWallet } from '@tcswap/wallets/okx';
 import { phantomWallet } from '@tcswap/wallets/phantom';
 import { vultisigWallet } from '@tcswap/wallets/vultisig';
+import { isWalletconnectDismissed, onWalletconnectDisconnect, preloadWalletconnect, walletconnectWallet } from '@tcswap/wallets/walletconnect';
 import { USwapApi } from '@tcswap/helpers/api';
+import { LIQUIFY_RPC } from '../../../shared/thorchain-providers.js';
+import { createWalletConnectSession } from './wallet-connect-session.js';
+import { walletConnectEnabled, walletConnectProjectId } from './wallet-config.js';
+export { walletConnectEnabled } from './wallet-config.js';
+export { isWalletconnectDismissed } from '@tcswap/wallets/walletconnect';
 import {
   connectWalletAccounts,
   disconnectWalletAccounts,
+  finishWalletConnectRestore,
+  getWalletConnectRestoreChains,
   selectedAccount
 } from './store.js';
 
@@ -42,7 +50,8 @@ const defaultWallets = {
   ...ledgerWallet,
   ...okxWallet,
   ...phantomWallet,
-  ...vultisigWallet
+  ...vultisigWallet,
+  ...walletconnectWallet
 };
 
 let instance = null;
@@ -76,6 +85,10 @@ export function getUSwap() {
   if (instance) return instance;
 
   instance = USwap({
+    config: {
+      apiKeys: { walletConnectProjectId },
+      rpcUrls: { [Chain.THORChain]: [LIQUIFY_RPC] }
+    },
     plugins: defaultPlugins,
     wallets: defaultWallets,
     getActiveWallet: getSelectedProvider
@@ -145,7 +158,49 @@ export const supportedChains = {
   [WalletOption.OKX]: okxWallet.connectOkx?.supportedChains || [],
   [WalletOption.PHANTOM]: phantomWallet.connectPhantom?.supportedChains || [],
   [WalletOption.VULTISIG]: vultisigWallet.connectVultisig?.supportedChains || [],
+  [WalletOption.WALLETCONNECT]: walletconnectWallet.connectWalletconnect.supportedChains,
 };
+
+const walletConnectMetadata = {
+  name: 'BooneTools',
+  description: 'THORChain tools, portfolio tracking and position management',
+  url: typeof window === 'undefined' ? 'https://boone.tools' : window.location.origin,
+  icons: ['https://boone.tools/favicon-512.png']
+};
+
+const walletConnectSession = createWalletConnectSession({
+  getSDK: getUSwap,
+  supportedChains: supportedChains[WalletOption.WALLETCONNECT],
+  metadata: walletConnectMetadata,
+  isEnabled: walletConnectEnabled,
+  replaceAccounts: (accounts) => accounts.length
+    ? connectWalletAccounts(WalletOption.WALLETCONNECT, accounts)
+    : disconnectWalletAccounts(WalletOption.WALLETCONNECT),
+  readRestoreChains: getWalletConnectRestoreChains,
+  finishRestore: finishWalletConnectRestore
+});
+
+onWalletconnectDisconnect((chains) => walletConnectSession.disconnected(chains));
+
+export function preloadWalletConnect() {
+  if (!walletConnectEnabled()) return;
+  getUSwap();
+  preloadWalletconnect({ metadata: walletConnectMetadata });
+}
+
+export function restoreWalletConnectSessions() {
+  return walletConnectSession.restore();
+}
+
+export function describeWalletConnectError(error) {
+  if (isWalletconnectDismissed(error)) return '';
+  const message = String(error?.message || error || '');
+  if (message.includes('chain_not_supported')) return 'Your wallet did not approve any of the selected chains.';
+  if (message.includes('project_id') || message.includes('not configured')) return 'WalletConnect is not configured for this site.';
+  if (message.includes('connection_not_established')) return 'Your WalletConnect session has ended. Connect your wallet again.';
+  if (message.includes('did not load')) return 'WalletConnect could not load. Reload the page and try again.';
+  return 'WalletConnect could not connect. Open your wallet, check the connection request, and try again.';
+}
 
 /** Check if a wallet extension is available in the browser */
 export function isWalletAvailable(option) {
@@ -161,6 +216,7 @@ export function isWalletAvailable(option) {
     case WalletOption.VULTISIG: return !!window.vultisig;
     case WalletOption.KEYSTORE: return true; // always available (local key)
     case WalletOption.LEDGER: return true; // always available (USB)
+    case WalletOption.WALLETCONNECT: return walletConnectEnabled();
     default: return false;
   }
 }
@@ -173,6 +229,7 @@ export function isWalletAvailable(option) {
  * @returns {Promise<Array<{address: string, network: string, provider: string}>>}
  */
 export async function connectWallet(option, chains, config) {
+  if (option === WalletOption.WALLETCONNECT) return walletConnectSession.connect(chains, config);
   const uSwap = getUSwap();
 
   const connectEach = async (connectFn) => {
@@ -230,7 +287,7 @@ export async function connectWallet(option, chains, config) {
 
   const accounts = chains
     .map(chain => {
-      const address = uSwap.getAddress(chain);
+      const address = uSwap.getWallet(option, chain)?.address;
       return address ? { address, network: chain, provider: option } : null;
     })
     .filter(Boolean);
@@ -242,12 +299,9 @@ export async function connectWallet(option, chains, config) {
 
 /** Disconnect a wallet provider */
 export function disconnectWallet(option) {
+  if (option === WalletOption.WALLETCONNECT) return walletConnectSession.disconnect();
   const uSwap = getUSwap();
-  const chains = supportedChains[option] || [];
-  chains.forEach(chain => {
-    try { uSwap.disconnectChain(chain); } catch (e) { /* ignore */ }
-  });
-
+  uSwap.disconnectWallet(option);
   disconnectWalletAccounts(option);
 }
 
