@@ -26,6 +26,38 @@ distribution. The dashboard is visible in navigation.
 
 ## Storage and operations
 
+### Endpoint isolation and bounded health recovery — November 3, 2026
+
+An unrelated Midgard `/network` HTTP 500 at 23:46:25 UTC set the generic
+dedicated-Midgard breaker until 23:47:25. Pool Analysis hit that breaker at its
+23:47 scheduled start and exited at 23:47:03, preserving the 23:30 activity
+cutoff for all 44 pools. This repeated October 30's `/churns` and `/health`
+failure pattern. Daily admission was still available: 13,805/20,000 total and
+4,661/5,000 bulk requests at the November 3 observation.
+
+The shared Midgard client now isolates ordinary failures by bounded endpoint
+family: actions, health, churns, network, bonds, and swaps/depths/earnings history.
+Pool/address/query variants share a family; unknown routes retain the generic
+service breaker. Real gateway rate limits and Retry-After responses remain
+shared, with the existing public/dedicated boundaries and admission budgets.
+
+The pinned-provider Pool Analysis health gate gets up to three attempts and
+120 seconds of total cooldown waiting. Short ordinary service cooldowns wait
+for their expiry; transient server/transport failures wait the configured
+failure cooldown. Long or gateway cooldowns, quotas, rate limits, Retry-After,
+and invalid/out-of-sync watermarks yield. Cancellation stops the run, and
+recovery across UTC midnight advances its calendar before acquiring live data.
+Healthy runs add no requests. Neither the full pool sweep nor historical
+backfill is retried, and freshness thresholds remain unchanged.
+
+Backend deployment verification is documented in `docs/deployment.md`. Source
+cutoffs, not publication timestamps alone, establish that acquisition advanced.
+The reproducing tests failed before implementation. Validation then passed all
+1,082 backend tests against disposable PostgreSQL with zero skips, including
+public/dedicated isolation, gateway protection, actual transport error shapes,
+short cooldown recovery, cancellation, and midnight rollover. Frontend boundary,
+surface, and diagnostics checks passed with zero errors and 56 existing warnings.
+
 ### Table metric correction — October 29, 2026
 
 The Volume / Depth heading hid a daily normalization: the selected window's

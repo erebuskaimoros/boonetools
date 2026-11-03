@@ -1,7 +1,9 @@
+import { setTimeout as waitForTimeout } from 'node:timers/promises';
 import { fetchPoolAnalysisSnapshot, combinePoolAnalysisSnapshots } from './pool-analysis-rolling.js';
 import { config } from '../lib/config.js';
 import { sleep } from '../lib/utils.js';
 import { fetchMidgard, isMidgardRateLimitError, MIDGARD_BASES } from './midgard.js';
+import { ProviderCooldownError } from './provider-cooldown.js';
 import { coreSnapshotValue, getThorNodeCoreSnapshot } from './thornode-core-snapshot.js';
 import {
   POOL_ANALYSIS_START_DATE,
@@ -26,6 +28,8 @@ import {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HISTORY_DAYS = { swaps: 100, depth: 400 };
+const HEALTH_MAX_ATTEMPTS = 3;
+const HEALTH_MAX_WAIT_MS = 120_000;
 
 function dateKey(value) {
   const date = value instanceof Date ? value : new Date(value);
@@ -205,14 +209,48 @@ function missing24hBoundary(cutoff, daily, prefixes) {
   return completedDay ? { boundary, completedDay } : null;
 }
 
+function healthRetryDelay(error, now) {
+  if (String(error?.code || '').startsWith('MIDGARD_BUDGET_') || isMidgardRateLimitError(error)
+    || Number(error?.retryAfterSeconds) > 0) return null;
+  if (error instanceof ProviderCooldownError) {
+    if (!String(error.providerKey).startsWith('service:')) return null;
+    const expiry = Date.parse(error.blockedUntil);
+    return Number.isFinite(expiry) ? Math.max(0, expiry - now) : null;
+  }
+  const status = Number(error?.status);
+  const transportFailure = error?.name === 'AbortError' || error?.name === 'TimeoutError'
+    || error instanceof TypeError && /fetch failed|network|terminated/i.test(error.message);
+  return status === 408 || status === 425 || status >= 500 || transportFailure
+    ? Math.max(0, config.providerFailureCooldownMs) : null;
+}
+
 async function historyWatermark(client, options, bases) {
-  const health = await (options.fetchMidgard || fetchMidgard)('/health', {
-    cooldownClient: client, bases,
-    validateResponse: (_path, payload) => !payload || typeof payload !== 'object'
-  });
+  const signal = options.signal || options.request?.signal;
+  let health, waited = 0;
+  for (let attempt = 1; attempt <= HEALTH_MAX_ATTEMPTS; attempt++) {
+    signal?.throwIfAborted();
+    try {
+      health = await (options.fetchMidgard || fetchMidgard)('/health', {
+        cooldownClient: client, bases, ...(signal ? { signal } : {}),
+        validateResponse: (_path, payload) => !payload || typeof payload !== 'object'
+      });
+      signal?.throwIfAborted();
+      break;
+    } catch (error) {
+      signal?.throwIfAborted();
+      const delay = healthRetryDelay(error, resolvedNow(options.healthNow).getTime());
+      if (attempt === HEALTH_MAX_ATTEMPTS || delay === null || waited + delay > HEALTH_MAX_WAIT_MS) throw error;
+      // Keep the pinned provider and its normal admission/cooldown checks. A
+      // brief outage may recover inside this run; quotas and long outages yield.
+      waited += delay;
+      if (options.wait) await options.wait(delay, { signal });
+      else await waitForTimeout(delay, undefined, { signal });
+      signal?.throwIfAborted();
+    }
+  }
   const timestamp = Number(health?.lastAggregated?.timestamp) * 1000;
   const receivedAt = resolvedNow(options.healthNow); // Health follows the live sweep, which can take minutes.
-  if (health.database !== true || health.inSync !== true || !(Number(health.lastAggregated?.height) > 0)
+  if (health?.database !== true || health?.inSync !== true || !(Number(health?.lastAggregated?.height) > 0)
     || !Number.isFinite(timestamp) || timestamp <= 0 || timestamp > receivedAt.getTime()) {
     throw new Error('Midgard aggregation watermark unavailable or not in sync');
   }
@@ -220,11 +258,13 @@ async function historyWatermark(client, options, bases) {
 }
 
 export async function ingestPoolAnalysisHistory(client, options = {}) {
-  const now = resolvedNow(options.now);
-  const today = dateKey(now);
-  const yesterday = shiftDay(today, -1);
+  const signal = options.signal || options.request?.signal;
+  signal?.throwIfAborted();
+  let now = resolvedNow(options.now);
+  let today = dateKey(now);
+  let yesterday = shiftDay(today, -1);
   const recentDays = Math.max(1, Math.trunc(Number(options.recentDays ?? config.poolAnalysisRecentLookbackDays)) || 35);
-  const startDate = dateKey(options.startDate || (options.full
+  let startDate = dateKey(options.startDate || (options.full
     ? config.poolAnalysisStartDate || POOL_ANALYSIS_START_DATE : shiftDay(today, -(recentDays - 1))));
   const configuredAssets = Array.isArray(options.assets) ? options.assets : null;
   let core = options.coreSnapshot;
@@ -274,8 +314,21 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
   const bases = [options.historyBase || MIDGARD_BASES[0]];
   const rollingEdges = new Map();
   if (options.rolling) {
-    try { watermark = await historyWatermark(client, options, bases); }
-    catch (error) { watermarkError = error?.message || String(error); }
+    try {
+      watermark = await historyWatermark(client, options, bases);
+      // A retry may cross midnight. Keep live prefixes, pending-day selection,
+      // and freshness metadata on the same UTC day after recovery.
+      if (dateKey(new Date(watermark)) > today) {
+        now = new Date(watermark);
+        today = dateKey(now);
+        yesterday = shiftDay(today, -1);
+        startDate = dateKey(options.startDate || (options.full
+          ? config.poolAnalysisStartDate || POOL_ANALYSIS_START_DATE : shiftDay(today, -(recentDays - 1))));
+      }
+    } catch (error) {
+      signal?.throwIfAborted();
+      watermarkError = error?.message || String(error);
+    }
     await mapWithConcurrency(assets, concurrency, async (asset) => {
       const state = byAsset.get(asset).swaps;
       try {
@@ -327,7 +380,10 @@ export async function ingestPoolAnalysisHistory(client, options = {}) {
   )) || 0);
   if (!options.rolling && ranges.length && limit > 0) {
     try { watermark = await historyWatermark(client, options, bases); }
-    catch (error) { watermarkError = error?.message || String(error); }
+    catch (error) {
+      signal?.throwIfAborted();
+      watermarkError = error?.message || String(error);
+    }
   }
   // Health and closed history share exactly one provider; a different fallback
   // must not borrow this provider's aggregation watermark.

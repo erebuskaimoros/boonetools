@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { ProviderCooldownError } from '../src/shared/provider-cooldown.js';
+import { fetchMidgard } from '../src/shared/midgard.js';
+import { ProviderRequestError, thorchainProviderPool } from '../src/lib/provider-client.js';
+import { createThorchainProviderPool } from '../../shared/thorchain-provider-pool.js';
 import {
   fetchPoolAnalysisSwapHistory,
   fetchPoolAnalysisDepthHistory,
@@ -49,6 +53,221 @@ function fixture({ swaps = [], depths = [], pending = [] } = {}) {
     updateSyncState: async (_client, state) => { states.push(state); }
   } };
 }
+
+test('a transient health 503 recovers within the same scheduled pool refresh after the failure cooldown', async () => {
+  const f = fixture();
+  let clock = Date.parse(NOW);
+  const waits = [], requests = [], failures = [];
+  let healthCalls = 0;
+  const result = await ingestPoolAnalysisHistory({}, { ...f.options, rolling: true,
+    healthNow: () => new Date(clock),
+    wait: async ms => { waits.push(ms); clock += ms; },
+    fetchMidgard: async route => {
+      requests.push(route);
+      if (route === '/health') {
+        if (++healthCalls === 1) throw Object.assign(new Error('Midgard error: 503 Service Unavailable for /health'), { status: 503 });
+        return { database: true, inSync: true, lastAggregated: { height: 1, timestamp: clock / 1000 } };
+      }
+      const query = new URL(route, 'https://midgard.test').searchParams;
+      return { meta: { startTime: query.get('from'), endTime: query.get('to'), totalVolume: '100',
+        totalVolumeUSD: '200', totalFees: '3', runePriceUSD: '2' } };
+    },
+    loadRollingEdges: async () => null,
+    saveIntradaySnapshot: async () => {},
+    loadCompletedDays: async () => [], loadBoundarySnapshots: async () => [],
+    saveRollingSnapshot: async () => {},
+    markRollingFailure: async (...args) => failures.push(args)
+  });
+  assert.equal(healthCalls, 2, 'a brief health error must not waste the full 15-minute refresh cycle');
+  assert.equal(waits.length, 1);
+  assert.ok(waits[0] >= 60_000 && waits[0] <= 120_000, 'respect the short provider cooldown before retrying');
+  assert.equal(result.successful_pools, 1);
+  assert.equal(result.failed_pools, 0);
+  assert.equal(result.watermark_error, '');
+  assert.equal(f.data.swaps.get('2026-09-02').volume_rune_e8, '100');
+  assert.equal(requests.length, 3, 'retry the health gate once, then acquire the live prefix once');
+  assert.deepEqual(failures, []);
+});
+
+function healthRecoveryFixture(response) {
+  const f = fixture({ pending: [{ asset: ASSET, day: '2026-09-01', lane: 'swaps' }] });
+  let clock = Date.parse(NOW);
+  const waits = [], requests = [];
+  const options = { ...f.options,
+    historyBase: 'https://midgard.example.invalid/v2',
+    healthNow: () => new Date(clock),
+    wait: async ms => { waits.push(ms); clock += ms; },
+    fetchMidgard: async (route, requestOptions) => {
+      requests.push({ route, ...requestOptions });
+      return response(requests.length, clock);
+    }
+  };
+  return { ...f, waits, requests, options };
+}
+const readyHealth = clock => ({ database: true, inSync: true,
+  lastAggregated: { height: 1, timestamp: clock / 1000 } });
+
+for (const failure of ['HTTP 503', 'transport timeout', 'existing service cooldown']) {
+  test(`real Midgard ${failure} recovers through ordinary cooldown admission on the pinned provider`, async t => {
+    const base = 'https://gateway.liquify.com/api=pool-health-test/v2';
+    const f = fixture({ pending: [{ asset: ASSET, day: '2026-09-01', lane: 'swaps' }] });
+    let clock = Date.parse(NOW);
+    const calls = [], waits = [], errors = [], breakers = new Map();
+    const localPool = createThorchainProviderPool({ now: () => clock });
+    t.mock.method(Date, 'now', () => clock);
+    for (const method of ['acquire', 'failure']) t.mock.method(thorchainProviderPool, method, localPool[method]);
+    const client = { query: async (sql, params) => {
+      if (sql.includes('select provider_key')) return { rows: params[0].flatMap(key => breakers.has(key) ? [breakers.get(key)] : []) };
+      if (sql.includes('insert into provider_circuit_breakers')) breakers.set(params[0], {
+        provider_key: params[0], failure_count: 1, last_error: params[2], blocked_until: params[3]
+      });
+      if (sql.includes('update provider_circuit_breakers')) breakers.delete(params[0]);
+      return { rows: [] };
+    } };
+    if (failure === 'existing service cooldown') {
+      // This is the actual process-local error, which lacks a stored reason.
+      localPool.failure(base, new ProviderRequestError('health unavailable', { status: 503 }), 'midgard-health');
+      clock += 25_000;
+    }
+    t.mock.method(globalThis, 'fetch', async url => {
+      calls.push({ url: String(url), at: clock });
+      if (calls.length === 1 && failure === 'HTTP 503') return new Response('no available nodes', { status: 503 });
+      if (calls.length === 1 && failure === 'transport timeout') throw new DOMException('This operation was aborted', 'AbortError');
+      return new Response(JSON.stringify(readyHealth(clock)), { headers: { 'content-type': 'application/json' } });
+    });
+    const result = await ingestPoolAnalysisHistory(client, { ...f.options,
+      historyBase: base, healthNow: () => new Date(clock),
+      wait: async ms => { waits.push(ms); clock += ms; },
+      fetchMidgard: async (route, options) => {
+        try { return await fetchMidgard(route, { ...options, sharedCooldown: true, midgardBudget: false }); }
+        catch (error) { errors.push(error); throw error; }
+      }
+    });
+    assert.equal(result.watermark_error, '');
+    assert.equal(result.historical_requests, 1);
+    assert.equal(f.data.swaps.get('2026-09-01').completed_at, NOW);
+    assert.deepEqual(waits, [failure === 'existing service cooldown' ? 35_000 : 60_000]);
+    assert.equal(calls.length, failure === 'existing service cooldown' ? 1 : 2);
+    assert.ok(calls.every(call => call.url === `${base}/health`));
+    assert.equal(errors.length, 1);
+    if (failure === 'HTTP 503') assert.ok(errors[0] instanceof ProviderRequestError);
+    if (failure === 'transport timeout') assert.equal(errors[0].name, 'AbortError');
+    if (failure === 'existing service cooldown') assert.ok(errors[0] instanceof ProviderCooldownError);
+  });
+}
+
+test('an active short health service cooldown waits until its expiry and keeps the pinned provider', async () => {
+  const f = healthRecoveryFixture((attempt, clock) => {
+    if (attempt === 1) throw new ProviderCooldownError('service:midgard.example.invalid/v2:health',
+      new Date(clock + 35_000).toISOString());
+    return readyHealth(clock);
+  });
+  const result = await ingestPoolAnalysisHistory({}, f.options);
+  assert.deepEqual(f.waits, [35_000]);
+  assert.equal(result.watermark_error, '');
+  assert.equal(result.historical_requests, 1);
+  assert.equal(f.data.swaps.get('2026-09-01').completed_at, NOW);
+  assert.equal(f.requests.length, 2);
+  for (const request of f.requests) assert.deepEqual(request.bases, ['https://midgard.example.invalid/v2']);
+});
+
+test('repeated health failures stop after three attempts and two minutes of total cooldown waiting', async () => {
+  const f = healthRecoveryFixture(() => { throw Object.assign(new Error('health unavailable'), { status: 503 }); });
+  const result = await ingestPoolAnalysisHistory({}, f.options);
+  assert.equal(f.requests.length, 3);
+  assert.deepEqual(f.waits, [60_000, 60_000]);
+  assert.equal(result.watermark_error, 'health unavailable');
+  assert.equal(result.historical_requests, 0);
+  assert.equal(f.data.swaps.has('2026-09-01'), false);
+});
+
+test('long or gateway cooldowns, quota deferrals, and non-transient health failures do not retry', async () => {
+  const errors = [
+    new ProviderCooldownError('service:midgard.example.invalid/v2:health', new Date(Date.parse(NOW) + 121_000).toISOString()),
+    new ProviderCooldownError('global:midgard.example.invalid', new Date(Date.parse(NOW) + 30_000).toISOString()),
+    Object.assign(new Error('quota exhausted'), { code: 'MIDGARD_BUDGET_DEFERRED', retryAt: new Date(Date.parse(NOW) + 30_000).toISOString() }),
+    Object.assign(new Error('budget admission canceled'), { code: 'MIDGARD_BUDGET_ABORTED', name: 'AbortError' }),
+    Object.assign(new Error('rate limited'), { status: 429 }),
+    Object.assign(new Error('gateway Retry-After'), { status: 503, retryAfterSeconds: 30 }),
+    Object.assign(new Error('not found'), { status: 404 }),
+    new ProviderRequestError('Midgard returned an unusable response for /health'),
+    new ProviderRequestError('Invalid JSON from health', { cause: new SyntaxError('Unexpected token') })
+  ];
+  for (const failure of errors) {
+    const f = healthRecoveryFixture(() => { throw failure; });
+    const result = await ingestPoolAnalysisHistory({}, f.options);
+    assert.equal(f.requests.length, 1, failure.message);
+    assert.deepEqual(f.waits, [], failure.message);
+    assert.equal(result.watermark_error, failure.message);
+    assert.equal(f.data.swaps.has('2026-09-01'), false);
+  }
+});
+
+test('invalid or out-of-sync successful health payloads remain unavailable without retries', async () => {
+  for (const payload of [null, {}, { ...readyHealth(Date.parse(NOW)), inSync: false }, readyHealth(Date.parse(NOW) + 1)]) {
+    const f = healthRecoveryFixture(() => payload);
+    const result = await ingestPoolAnalysisHistory({}, f.options);
+    assert.equal(f.requests.length, 1);
+    assert.deepEqual(f.waits, []);
+    assert.match(result.watermark_error, /watermark unavailable or not in sync/);
+    assert.equal(f.data.swaps.has('2026-09-01'), false);
+  }
+});
+
+test('canceling during health cooldown prevents the retry and stops the run', async () => {
+  const controller = new AbortController();
+  const reason = new Error('refresh canceled');
+  const f = healthRecoveryFixture(() => { throw Object.assign(new Error('health unavailable'), { status: 503 }); });
+  await assert.rejects(() => ingestPoolAnalysisHistory({}, { ...f.options, signal: controller.signal,
+    wait: async () => controller.abort(reason)
+  }), error => error === reason);
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.requests[0].signal, controller.signal);
+  assert.equal(f.states.length, 0);
+});
+
+test('an already canceled refresh stops before acquiring or publishing any data', async () => {
+  const reason = new Error('refresh already canceled');
+  const f = healthRecoveryFixture((_attempt, clock) => readyHealth(clock));
+  await assert.rejects(() => ingestPoolAnalysisHistory({}, { ...f.options, signal: AbortSignal.abort(reason) }),
+    error => error === reason);
+  assert.deepEqual(f.requests, []);
+  assert.deepEqual(f.calls, []);
+  assert.deepEqual(f.states, []);
+});
+
+test('health recovery crossing UTC midnight advances the live day and finalizes the newly closed day', async () => {
+  const f = fixture({ pending: [{ asset: ASSET, day: '2026-09-02', lane: 'swaps' }] });
+  let clock = Date.parse('2026-09-02T23:59:30Z');
+  let healthCalls = 0;
+  const pendingOptions = [];
+  const result = await ingestPoolAnalysisHistory({}, { ...f.options, rolling: true,
+    now: new Date(clock), healthNow: () => new Date(clock),
+    coreSnapshot: core('2026-09-02T23:59:00Z'),
+    wait: async ms => { clock += ms; },
+    fetchMidgard: async route => {
+      assert.equal(route, '/health');
+      if (++healthCalls === 1) throw Object.assign(new Error('health unavailable'), { status: 503 });
+      return readyHealth(clock);
+    },
+    loadPendingDays: async (_client, options) => {
+      pendingOptions.push(options);
+      return [{ asset: ASSET, day: '2026-09-02', lane: 'swaps' }];
+    },
+    loadRollingEdges: async () => null, saveIntradaySnapshot: async () => {},
+    loadCompletedDays: async () => [], loadBoundarySnapshots: async () => [],
+    saveRollingSnapshot: async () => {}, markRollingFailure: async () => assert.fail('rolling recovery should succeed')
+  });
+  assert.equal(result.end_date, '2026-09-03');
+  assert.equal(pendingOptions[0].today, '2026-09-03');
+  assert.equal(pendingOptions[0].startDate, '2026-07-31');
+  assert.equal(f.data.swaps.get('2026-09-03').partial, true);
+  assert.equal(f.data.swaps.get('2026-09-03').interval_start, '2026-09-03T00:00:00.000Z');
+  assert.equal(f.data.swaps.get('2026-09-02').partial, false);
+  assert.equal(f.data.swaps.get('2026-09-02').completed_at, '2026-09-03T00:00:30.000Z');
+  assert.equal(f.data.depth.size, 0, 'previous-day core depth cannot be labeled as current-day depth');
+  assert.equal(f.states[0].stats.end_date, '2026-09-03');
+});
 
 test('steady-state refresh asks only for live swaps, reuses current core depth, and skips completed days durably', async () => {
   const f = fixture({ swaps: [swap('2026-09-01', { completed_at: NOW })],

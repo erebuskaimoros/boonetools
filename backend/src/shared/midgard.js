@@ -18,6 +18,15 @@ function createMidgardError(message, details = {}) {
 
 export const isMidgardRateLimitError = isProviderRateLimitError;
 
+function cooldownScope(path) {
+  const route = String(path).split(/[?#]/, 1)[0];
+  if (/^\/actions\/?$/.test(route)) return 'actions';
+  const endpoint = route.match(/^\/(health|churns|network|bonds)(?:\/|$)/)?.[1];
+  if (endpoint) return `midgard-${endpoint}`;
+  const history = route.match(/^\/history\/(swaps|depths|earnings)(?:\/|$)/)?.[1];
+  return history ? `midgard-history-${history}` : undefined;
+}
+
 export async function fetchMidgard(path, options = {}) {
   const {
     bases = MIDGARD_BASES,
@@ -39,8 +48,9 @@ export async function fetchMidgard(path, options = {}) {
     ...providerLifecycleHooks({
       client: options.cooldownClient,
       enabled: options.sharedCooldown,
-      // Slow actions queries should not block health/history; gateway limits stay shared.
-      scope: /^\/actions\/?(?:[?#]|$)/.test(path) ? 'actions' : undefined
+      // Ordinary endpoint failures stay local to their bounded family, shared
+      // across assets and query variants. Gateway limits still block every family.
+      scope: cooldownScope(path)
     }),
     validateResponse: (payload) => (
       typeof validateResponse === 'function' && validateResponse(path, payload)

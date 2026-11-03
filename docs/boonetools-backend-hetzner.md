@@ -406,13 +406,16 @@ to quota exhaustion. Heights or hashes containing `429` are not HTTP status
 evidence. See the [September 2 investigation](../knowledge/liquify-cooldowns-2026-09-02.md)
 for observed failures and remaining request budgets.
 
-Midgard `/actions` uses an `actions` cooldown scope shared by every collector
-and query on that endpoint. An actions timeout or ordinary HTTP 5xx pauses
-actions requests without blocking `/health`, pool history, or current network
-reads. HTTP 429 and `Retry-After` responses still use the shared gateway
-cooldown. This prevents an unrelated action collector timeout from skipping
-Pool Analysis's entire fifteen-minute refresh; it does not bypass failures
-from Pool Analysis's own endpoints or change its historical catch-up budget.
+The shared Midgard client isolates ordinary failures by endpoint family:
+`actions`, `midgard-health`, `midgard-churns`, `midgard-network`,
+`midgard-bonds`, and `midgard-history-{swaps,depths,earnings}`. All assets,
+addresses, and query variants within a family share its cooldown; unknown
+routes retain the unscoped service lane. Both process-local and durable
+breakers use these scopes. A `/network`, `/churns`, or actions timeout/HTTP 5xx therefore
+does not suppress Pool Analysis health/history. HTTP 429 and `Retry-After`
+responses still use the unchanged shared gateway cooldown. Endpoint isolation
+does not bypass failures from Pool Analysis's own endpoints, alter admission
+budgets, or increase its historical catch-up allowance.
 
 `POOL_DISLOCATION_THORNODE_URLS` is an independent ordered list for this
 sampler and its historical repair; an empty list uses Liquify then NativeSwap.
@@ -713,6 +716,15 @@ crosses its unchanged twenty-minute freshness limit. Calendar alignment survives
 timer restarts; `Persistent=true` catches up one missed calendar activation after
 downtime, with no separate startup request. Slow or failed upstream acquisition
 can still leave data stale. See [rollout checks](deployment.md#pool-analysis-refresh-alignment).
+Within a run, the same-provider health gate can make up to three attempts with
+at most 120 seconds of total waiting. Transient HTTP/transport failures wait
+the configured ordinary-failure cooldown; an active service breaker waits until
+its recorded expiry. Gateway cooldowns, HTTP 429, Retry-After responses, budget
+deferrals, invalid/out-of-sync health, and waits beyond that bound yield without
+retrying. Cancellation stops recovery. A recovered watermark across UTC midnight
+advances the run's calendar before acquiring live prefixes and selecting newly
+closed history. This adds no healthy-run requests and does not retry the entire
+pool sweep or relax source freshness.
 The job reuses the shared fresh pool snapshot for today's partial depth and
 publishes the compact `/pool-analysis` table model with rolling 24-hour, 7-day,
 30-day, 90-day, and 365-day volume and liquidity-fee windows, including coverage

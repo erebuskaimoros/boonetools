@@ -155,6 +155,22 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### Pool Analysis endpoint isolation and short health recovery
+
+Backend-only release; no migration, timer change, cache deletion, budget reset,
+or manual historical scan is needed. The shared Midgard client isolates ordinary
+failures by endpoint family, while retaining the shared gateway breaker for 429
+and Retry-After responses. Pool Analysis retries a short health failure within
+the same run, up to three attempts and 120 seconds of total cooldown waiting.
+
+Let active jobs finish and the ordinary quarter-hour timer load the release.
+Verify the live backend release, the per-endpoint breaker keys, and the next
+Pool Analysis acquisition summary. A healthy run still makes one health request
+plus one current-day prefix per pool. A recovering run may show a health retry
+but must not rescan the entire pool set or reset quota state. Check the API's
+`period.through_time` and per-pool window cutoffs; a newer `as_of` alone does not
+prove fresh acquisition. Longer upstream outages must still surface as stale.
+
 ### Browser-local timestamp display
 
 The October 25 timezone change is frontend-only. Deploy through the frontend
