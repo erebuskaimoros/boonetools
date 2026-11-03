@@ -663,6 +663,17 @@ ssh root@boone.tools 'journalctl -u boonetools-api --since "10 min ago"'
 After a frontend change, hard refresh to load new hashed assets. If routing itself
 is unhealthy, inspect Caddy independently rather than changing it in an app deploy.
 
+### Thorfolio THORName payout assets
+
+Frontend-only; no migration, collector restart, backfill or cache reset is needed.
+After deploying and reloading Thorfolio, open a bond's payout form and verify the
+two destinations: RUNE to the provider or stream to THORName. Connected providers
+can select verified owned names; manual names load before asset/address controls
+appear. A changed name asset/alias must show its own reviewed transaction before
+the bond configuration; submission alone does not unlock the second signature.
+Production smoke checks do not sign or broadcast wallet transactions. See
+[Bond Yield configuration](thorfolio-bond-yield.md) for the protocol and checks.
+
 ### Thorfolio operator-fee churn column
 
 Deploy the backend (including migration `071_bond_operator_fees.sql`) before the

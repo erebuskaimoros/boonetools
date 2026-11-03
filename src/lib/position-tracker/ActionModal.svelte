@@ -1,5 +1,5 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount } from 'svelte';
   import {
     planAddLiquidityAsset,
     planAddLiquidityRune,
@@ -13,8 +13,9 @@
   } from './memos.js';
   import { pickSigner } from './actions-signer.js';
   import { fmtAmount, poolTicker, shortAddr, txUrl } from './format.js';
-  import { loadBondYieldReview } from './bond-yield.js';
-  import { thornode } from '../api/index.js';
+  import { bondYieldAssetOptions, loadBondYieldReview, recheckBondYieldBeforeSigning, requireBondYieldName } from './bond-yield.js';
+  import { bondYieldNameFields, connectedBondYieldOwner, createBondYieldNameLookup, loadBondYieldName } from './bond-yield-names.js';
+  import { midgard, thornode } from '../api/index.js';
 
   export let spec;
   export let accounts = [];
@@ -70,8 +71,13 @@
   let claimDestination = thorAddresses[0] || '';
   let signerKeys = {};
   let payoutPercent = String((spec.bondYield?.bps ?? 0) / 100);
-  let payoutMode = spec.bondYield?.target ? 'custom' : 'provider';
-  let payoutTarget = spec.bondYield?.target || '';
+  const savedPayoutTarget = spec.bondYield?.target || '';
+  let payoutMode = savedPayoutTarget && !(/^thor1/i.test(savedPayoutTarget) && savedPayoutTarget.length > 30) ? 'thorname' : 'provider';
+  let payoutTarget = payoutMode === 'thorname' ? savedPayoutTarget : '';
+  let payoutAsset = '';
+  let payoutAddress = '';
+  let acceptNameUpdate = false;
+  let sentNameUpdate = '';
   let yieldCheckKey = '';
   let yieldCheckedKey = '';
   let yieldChecking = false;
@@ -79,10 +85,72 @@
   let yieldDestination = null;
   let yieldRequestId = 0;
   let lastYieldKey = '';
+  let nameLookup = null;
+  let ownedNameChoice = '';
+  let nameState = { owner: '', names: [], unavailableCount: 0, loading: false, error: '' };
+  let payoutNameRecord = null;
+  let payoutNameLoading = false;
+  let payoutNameError = '';
+  let payoutNameRequest = 0;
+
+  onMount(() => {
+    if (kind !== 'bond-yield') return;
+    nameLookup = createBondYieldNameLookup(midgard, thornode, (value) => nameState = value);
+    if (payoutTarget) void loadPayoutName();
+    return () => { nameLookup?.dispose(); payoutNameRequest++; };
+  });
+  $: nameOwner = kind === 'bond-yield' ? connectedBondYieldOwner(accounts, spec.owner) : '';
+  $: if (nameLookup) void nameLookup.setOwner(nameOwner);
+  $: selectedOwnedName = nameState.names.find((record) => record.name === ownedNameChoice && record.name === payoutTarget.trim().toLowerCase());
+  $: verifiedPayoutName = payoutNameRecord?.name === payoutTarget.trim().toLowerCase() ? payoutNameRecord : null;
 
   let phase = 'form'; // form | signing | done
   let results = [];
   let signError = '';
+
+  $: payoutAssets = bondYieldAssetOptions(market.pools || []);
+  $: payoutChain = payoutAsset.split('.')[0];
+
+  function fillPayoutName(record) {
+    payoutNameRecord = record;
+    const fields = bondYieldNameFields(record, payoutAssets);
+    payoutTarget = fields.payoutTarget;
+    payoutAsset = fields.payoutAsset;
+    payoutAddress = fields.payoutAddress;
+  }
+
+  function choosePayoutName(name) {
+    payoutNameRequest++;
+    payoutNameLoading = false;
+    payoutNameError = '';
+    const record = nameState.names.find((item) => item.name === name);
+    ownedNameChoice = record?.name || '';
+    payoutNameRecord = null;
+    if (!record) { payoutTarget = ''; payoutAsset = ''; payoutAddress = ''; return; }
+    fillPayoutName(record);
+  }
+
+  async function loadPayoutName() {
+    const id = ++payoutNameRequest;
+    const target = payoutTarget.trim().toLowerCase();
+    payoutNameLoading = true;
+    payoutNameError = '';
+    payoutNameRecord = null;
+    try {
+      const record = await loadBondYieldName(thornode, spec.owner, target);
+      if (id === payoutNameRequest && payoutTarget.trim().toLowerCase() === target) fillPayoutName(record);
+    } catch (error) {
+      if (id === payoutNameRequest && payoutTarget.trim().toLowerCase() === target) payoutNameError = error.message;
+    } finally {
+      if (id === payoutNameRequest) payoutNameLoading = false;
+    }
+  }
+
+  function choosePayoutAsset(asset) {
+    payoutAsset = asset;
+    payoutAddress = verifiedPayoutName
+      ? bondYieldNameFields({ ...verifiedPayoutName, preferred_asset: asset }, payoutAssets).payoutAddress : '';
+  }
 
   $: poolInfo = (market.pools || []).find((item) => item.asset === pool) || null;
   $: assetChain = pool ? pool.split('.')[0] : '';
@@ -100,7 +168,7 @@
   $: {
     try {
       formError = '';
-      plans = buildPlans(kind, { nodeAddress, amount, assetAmount, percent, pool, lpMode, withdrawTarget, claimDestination, signerKeys, accounts, payoutPercent, payoutMode, payoutTarget });
+      plans = buildPlans(kind, { nodeAddress, amount, assetAmount, percent, pool, lpMode, withdrawTarget, claimDestination, signerKeys, accounts, payoutPercent, payoutMode, payoutTarget, verifiedPayoutName });
     } catch (error) {
       plans = [];
       formError = error.message;
@@ -122,8 +190,10 @@
         if (!form.amount) return [];
         return [planUnbond({ nodeAddress: form.nodeAddress, amount: form.amount })];
       case 'bond-yield':
-        if (Number(form.payoutPercent) > 0 && form.payoutMode === 'custom' && !form.payoutTarget.trim()) {
-          throw new Error('Enter the payout address or THORName, or choose the provider wallet.');
+        if (Number(form.payoutPercent) > 0 && form.payoutMode === 'thorname') {
+          if (!form.payoutTarget.trim()) return [];
+          requireBondYieldName(form.payoutTarget);
+          if (!form.verifiedPayoutName) return [];
         }
         return [planBondYield({ nodeAddress: form.nodeAddress, percent: form.payoutPercent,
           payoutTarget: form.payoutMode === 'provider' ? spec.owner : form.payoutTarget })];
@@ -163,20 +233,22 @@
 
   // ---------- review checks ----------
   $: yieldCheckKey = kind === 'bond-yield' && plans[0]
-    ? `${plans[0].memo}|${signerFor(plans[0], signerKeys, accounts)?.address || ''}` : '';
+    ? `${plans[0].memo}|${signerFor(plans[0], signerKeys, accounts)?.address || ''}|${payoutMode}|${payoutAsset}|${payoutAddress}` : '';
   $: if (yieldCheckKey !== lastYieldKey) {
     lastYieldKey = yieldCheckKey;
     yieldDestination = null;
     yieldCheckError = '';
+    acceptNameUpdate = false;
   }
-  $: reviews = plans.map((plan) => {
+  $: reviewPlans = kind === 'bond-yield' && yieldDestination?.setupPlan ? [yieldDestination.setupPlan] : plans;
+  $: reviews = reviewPlans.map((plan) => {
     const signer = signerFor(plan, signerKeys, accounts);
     const options = accounts.filter((account) => account.network === plan.chain);
     const owner = owners()[plan.chain];
     const warnings = [];
     let blocked = '';
     if (!signer) blocked = `Connect a wallet with a ${plan.chain} account to sign this.`;
-    const mustOwn = ['unbond', 'bond-yield', 'lp-withdraw', 'tcy-unstake', 'tcy-claim'].includes(plan.action);
+    const mustOwn = ['unbond', 'bond-yield', 'bond-yield-asset', 'lp-withdraw', 'tcy-unstake', 'tcy-claim'].includes(plan.action);
     if (signer && owner && signer.address.toLowerCase() !== owner.toLowerCase()) {
       if (mustOwn) blocked = `This position belongs to …${owner.slice(-4)}, but the connected ${plan.chain} account is …${signer.address.slice(-4)}.`;
       else warnings.push(`Signing from …${signer.address.slice(-4)}, not the tracked …${owner.slice(-4)}.`);
@@ -192,11 +264,17 @@
     if (plan.action === 'unbond' && spec.nodeStatus === 'Active') {
       warnings.push('The node is Active. THORChain only releases bond from Standby nodes, so this will likely be refunded until the node churns out.');
     }
-    if (plan.action === 'bond-yield' && !blocked) {
+    if ((plan.action === 'bond-yield' || plan.action === 'bond-yield-asset') && !blocked) {
       if (!yieldDestination || yieldCheckedKey !== yieldCheckKey) {
         blocked = yieldChecking ? 'Checking payout settings…' : yieldCheckError || gates.bondYieldReason || 'Check payout settings before signing.';
       }
-      warnings.push('This changes future reward payouts. Existing bond and already-accrued rewards stay bonded. Your wallet charges the normal RUNE network fee.');
+      if (plan.action === 'bond-yield-asset') {
+        if (!acceptNameUpdate) blocked = 'Confirm the THORName change before signing.';
+        if (sentNameUpdate === plan.memo) blocked = 'Waiting for the THORName update to confirm. Check payout settings again shortly.';
+        warnings.push('This transaction updates your THORName only. Once confirmed, review and sign the bond payout configuration separately. A normal RUNE network fee applies to each transaction.');
+      } else {
+        warnings.push('This changes future reward payouts. Existing bond and already-accrued rewards stay bonded. Your wallet charges the normal RUNE network fee.');
+      }
     }
     if (gates.globalHalt) blocked = 'THORChain is halted by mimir right now.';
     if (plan.action.startsWith('lp-') && gates.lpPaused) blocked = 'Liquidity actions are paused by mimir.';
@@ -215,8 +293,14 @@
     yieldCheckError = '';
     yieldCheckedKey = '';
     yieldDestination = null;
+    acceptNameUpdate = false;
     try {
-      const result = await loadBondYieldReview(thornode, { plan, owner: spec.owner, signer: signer.address });
+      if (plan.bps > 0 && payoutMode === 'thorname' && (!payoutAsset || !payoutAddress.trim())) {
+        throw new Error('Choose a payout asset and enter its receiving address.');
+      }
+      const result = await loadBondYieldReview(thornode, { plan, owner: spec.owner, signer: signer.address,
+        preferredAsset: plan.bps > 0 && payoutMode === 'thorname' ? payoutAsset : '',
+        payoutAddress: plan.bps > 0 && payoutMode === 'thorname' ? payoutAddress : '' });
       if (id === yieldRequestId && key === yieldCheckKey) {
         yieldCheckedKey = key;
         yieldDestination = result;
@@ -260,14 +344,17 @@
       const { plan, signer } = submittedReviews[index];
       results[index] = { ...results[index], status: 'signing', note: 'Preparing transaction…' };
       try {
-        if (plan.action === 'bond-yield') {
-          const current = await loadBondYieldReview(thornode, { plan, owner: spec.owner, signer: signer.address });
-          if (JSON.stringify(current) !== JSON.stringify(yieldDestination)) throw new Error('The payout destination changed. Reopen and check the settings again.');
+        if (plan.action === 'bond-yield' || plan.action === 'bond-yield-asset') {
+          await recheckBondYieldBeforeSigning(thornode, { plan: plans[0], owner: spec.owner, signer: signer.address,
+            preferredAsset: plans[0].bps > 0 && payoutMode === 'thorname' ? payoutAsset : '',
+            payoutAddress: plans[0].bps > 0 && payoutMode === 'thorname' ? payoutAddress : '' }, yieldDestination);
         }
         const hash = await actions.executePlan(plan, signer, {
           onStatus: (note) => { results[index] = { ...results[index], note }; }
         });
         results[index] = { ...results[index], status: 'sent', hash: String(hash || ''), note: '' };
+        if (plan.action === 'bond-yield-asset') sentNameUpdate = plan.memo;
+        if (plan.action === 'bond-yield') sentNameUpdate = '';
       } catch (error) {
         results[index] = { ...results[index], status: 'failed', note: error?.message || String(error) };
         signError = 'Stopped. Nothing after the failed step was sent.';
@@ -278,6 +365,15 @@
     }
     phase = 'done';
     dispatch('submitted');
+  }
+
+  async function continueYield() {
+    phase = 'form';
+    yieldDestination = null;
+    yieldCheckedKey = '';
+    acceptNameUpdate = false;
+    signError = '';
+    await checkYield();
   }
 
   function close() {
@@ -293,7 +389,7 @@
 <svelte:window on:keydown={onKeydown} />
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-<div class="ptrack-modal-backdrop" on:click|self={close}>
+<div class="ptrack-modal-backdrop" class:bond-yield-modal={kind === 'bond-yield'} on:click|self={close}>
   <div class="ptrack-modal wide" role="dialog" aria-modal="true" aria-label={TITLES[kind]}>
     <div class="modal-head">
       <span><span class="prompt">$</span> {TITLES[kind]}{pool ? ` --pool ${poolTicker(pool)}` : ''}</span>
@@ -331,25 +427,77 @@
           {#if plans[0]}
             <p class="hint">{plans[0].bps / 100}% paid out · {(10000 - plans[0].bps) / 100}% rebonded.</p>
           {/if}
+          <label class="field">
+            <span class="modal-label">payout destination</span>
+            <select class="field-input" bind:value={payoutMode} disabled={!(Number(payoutPercent) > 0)}>
+              <option value="provider">RUNE → bond provider address</option>
+              <option value="thorname">Stream to THORName</option>
+            </select>
+          </label>
           {#if Number(payoutPercent) > 0}
-            <label class="field">
-              <span class="modal-label">payout destination</span>
-              <select class="field-input" bind:value={payoutMode}>
-                <option value="provider">My bond provider wallet (RUNE)</option>
-                <option value="custom">Another THOR address or my THORName</option>
-              </select>
-            </label>
-            {#if payoutMode === 'custom'}
+            {#if payoutMode !== 'provider'}
+              <div class="field">
+                <label class="modal-label" for="payout-owned-name">your thornames</label>
+                <div class="field-row">
+                  <select id="payout-owned-name" class="field-input" value={selectedOwnedName?.name || ''} on:change={(event) => choosePayoutName(event.currentTarget.value)} disabled={!nameState.names.length}>
+                    <option value="">{nameState.loading ? 'looking up your THORNames…' : 'enter manually'}</option>
+                    {#each nameState.names as record (record.name)}
+                      <option value={record.name}>{record.name} · {record.preferred_asset && record.preferred_asset !== '.' ? record.preferred_asset : 'RUNE'}</option>
+                    {/each}
+                  </select>
+                  <button class="row-btn" type="button" aria-label="Refresh owned THORNames" disabled={!nameOwner || nameState.loading} on:click={() => nameLookup?.setOwner(nameOwner, { refresh: true })}>refresh</button>
+                </div>
+              </div>
+              {#if !nameOwner}
+                <p class="hint">Connect provider …{spec.owner.slice(-4)} to find its THORNames automatically.</p>
+              {:else if nameState.error}
+                <p class="hint warn-text" role="status">{nameState.error}</p>
+              {:else if !nameState.loading && !nameState.names.length && !nameState.unavailableCount}
+                <p class="hint" role="status">No active THORNames found for provider …{spec.owner.slice(-4)}. You can enter a recently registered name manually.</p>
+              {/if}
+              {#if nameState.unavailableCount}
+                <p class="hint warn-text" role="status">{nameState.unavailableCount} name(s) could not be verified. Refresh or enter a name manually.</p>
+              {/if}
+              {#if !selectedOwnedName}
+                <div class="field">
+                  <label class="modal-label" for="payout-manual-name">provider-owned thorname</label>
+                  <div class="field-row">
+                    <input id="payout-manual-name" class="field-input" bind:value={payoutTarget} on:input={() => payoutNameError = ''} placeholder="your registered THORName" spellcheck="false" autocomplete="off" />
+                    <button class="row-btn" type="button" disabled={!payoutTarget.trim() || payoutNameLoading} on:click={loadPayoutName}>{payoutNameLoading ? 'loading…' : 'load name'}</button>
+                  </div>
+                </div>
+              {/if}
+              {#if payoutNameError}<p class="hint err-text" role="status">{payoutNameError}</p>{/if}
+            {/if}
+            {#if payoutMode === 'thorname' && verifiedPayoutName}
               <label class="field">
-                <span class="modal-label">thor1 address or provider-owned thorname</span>
-                <input class="field-input" bind:value={payoutTarget} placeholder="thor1… or THORName" spellcheck="false" autocomplete="off" />
+                <span class="modal-label">payout asset</span>
+                <select class="field-input" value={payoutAsset} on:change={(event) => choosePayoutAsset(event.currentTarget.value)}>
+                  <option value="">select an asset</option>
+                  <option value="THOR.RUNE">RUNE</option>
+                  {#each payoutAssets as asset (asset)}
+                    <option value={asset}>{asset}</option>
+                  {/each}
+                </select>
               </label>
-              <p class="hint">THORNames must belong to this provider. A preferred asset uses the THORName’s affiliate collector; otherwise the THOR alias receives RUNE.</p>
+              {#if !payoutAssets.length}<p class="hint warn-text">No other payout assets loaded. Refresh the portfolio to try again.</p>{/if}
+              <label class="field">
+                <span class="modal-label">{payoutChain || 'asset chain'} receiving address</span>
+                <input class="field-input" bind:value={payoutAddress} placeholder={payoutChain ? `${payoutChain} mainnet address` : 'Choose an asset first'} disabled={!payoutAsset} spellcheck="false" autocomplete="off" />
+              </label>
+              <p class="hint">Choose the asset and receiving address for {verifiedPayoutName.name}. Any name update is reviewed and confirmed before enabling bond payouts.</p>
+              {#if payoutAsset === 'THOR.RUNE'}
+                <p class="hint">RUNE goes to this name’s THOR receiving address without a swap.</p>
+              {:else}
+                <p class="hint">Rewards accumulate as RUNE in the THORName collector, then swap and pay out when its threshold is reached. Swap and outbound fees apply; unavailable routes can delay payment.</p>
+              {/if}
+            {:else if payoutMode === 'thorname'}
+              <p class="hint">Choose a THORName or load one manually to see its payout asset and receiving address.</p>
             {:else}
               <p class="hint">RUNE goes directly to provider …{spec.owner.slice(-4)}, replacing any previously configured destination.</p>
             {/if}
           {:else if plans[0]}
-            <p class="hint">Turning payouts off rebonds all future rewards and clears the saved destination.</p>
+            <p class="hint">Turning payouts off rebonds all future rewards and clears the saved destination. Choose a payout percentage above zero to select a currency and destination.</p>
           {/if}
           {#if !gates.bondYieldEnabled && !yieldDestination}<p class="hint warn-text">{gates.bondYieldReason || 'Checking network activation…'}</p>{/if}
         {/if}
@@ -474,11 +622,24 @@
                 <dd><code class="inline-code">{review.plan.memo}</code></dd>
                 <dt>route</dt>
                 <dd>{ROUTE_NOTE[review.plan.route]}</dd>
-                {#if review.plan.action === 'bond-yield' && yieldDestination}
+                {#if (review.plan.action === 'bond-yield' || review.plan.action === 'bond-yield-asset') && yieldDestination}
                   <dt>payout</dt>
-                  <dd>{review.plan.bps === 0 ? 'Disabled; all rewards rebond' : `${review.plan.bps / 100}% in ${yieldDestination.asset} → ${yieldDestination.destination}`}{yieldDestination.collector ? ' (via THORName collector)' : ''}</dd>
+                  <dd>{plans[0]?.bps === 0 ? 'Disabled; all rewards rebond' : `${plans[0]?.bps / 100}% in ${yieldDestination.asset} → ${yieldDestination.destination}`}</dd>
+                  {#if yieldDestination.thorname}
+                    <dt>thorname</dt><dd>{yieldDestination.thorname} · collector payouts</dd>
+                  {/if}
+                  {#if yieldDestination.setupPlan}
+                    <dt>current asset</dt><dd>{yieldDestination.currentAsset || 'RUNE'}</dd>
+                    <dt>current {payoutChain} address</dt><dd>{yieldDestination.currentDestination || 'No alias for this chain'}</dd>
+                  {/if}
                 {/if}
               </dl>
+              {#if review.plan.action === 'bond-yield-asset'}
+                <label class="hint name-update-confirm">
+                  <input type="checkbox" bind:checked={acceptNameUpdate} />
+                  <span>I understand this changes the THORName’s preferred asset for all its collector payouts and its {payoutChain} receiving address for anyone using this name.</span>
+                </label>
+              {/if}
               {#each review.warnings as warning}<p class="hint warn-text">⚠ {warning}</p>{/each}
               {#if review.blocked}<p class="hint err-text">✕ {review.blocked}</p>{/if}
             </div>
@@ -499,7 +660,7 @@
         {/if}
         <button class="bracket-btn primary" disabled={!canSign} on:click={sign}>
           <span class="bracket">[</span><span class="key">S</span><span class="bracket">]</span>
-          sign {reviews.length > 1 ? `${reviews.length} transactions` : 'in wallet'}
+          {yieldDestination?.setupPlan ? 'update THORName in wallet' : reviews.length > 1 ? `sign ${reviews.length} transactions` : 'sign in wallet'}
         </button>
       </div>
     {:else}
@@ -517,8 +678,14 @@
           </div>
         {/each}
         {#if signError}<p class="hint err-text">{signError}</p>{/if}
+        {#if sentNameUpdate && !signError}
+          <p class="hint">THORName update submitted. After it confirms, check the settings again to review and sign the bond payout configuration.</p>
+        {/if}
       </div>
       <div class="modal-actions">
+        {#if sentNameUpdate && phase === 'done'}
+          <button class="bracket-btn primary" on:click={continueYield}>check confirmation & continue</button>
+        {/if}
         <button class="bracket-btn" disabled={phase === 'signing'} on:click={close}>
           <span class="bracket">[</span><span class="key">esc</span><span class="bracket">]</span> close
         </button>
