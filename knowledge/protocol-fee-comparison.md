@@ -387,6 +387,90 @@ server-owned collector resumes from this cache. Do not start concurrent writers.
 
 ## Chainflip investigation
 
+### October 30–November 4, 2026 runtime 20221 review
+
+The November 4 investigation found the shared chart cutoff stuck at **October
+29**, even though the collector had saved newer revenue, price and NEAR
+observations. Runtime **20221** had failed the issuance-review guard for October
+30 onward. The latest scheduled run also lost its THORChain source to a single
+Midgard `/health` HTTP 500. These were independent failures; the job had exited,
+not remained in progress. Preserve the shared-complete-period rule and the
+saved source checkpoints while repairing the missing inputs.
+
+Compared the previously reviewed 20219 source commit
+`14f8032692fbda7f42c07acff27c0c4500a22cbb` with official
+[`chainflip-io/chainflip-backend` release/2.2 commit
+`463984021368032062009873ed2a7ed0c28d4e6a`](https://github.com/chainflip-io/chainflip-backend/commit/463984021368032062009873ed2a7ed0c28d4e6a).
+The [20221 version bump](https://github.com/chainflip-io/chainflip-backend/commit/39422f2c9cc5b039326ee950b397bd76a3b3372d)
+is dated October 30 at 14:26:45 UTC. These source files have identical Git blob
+IDs in the reviewed 20219 and 20221 commits:
+
+| Source path | Identical blob ID |
+| --- | --- |
+| `state-chain/pallets/cf-emissions/src/lib.rs` | `cd126b1bbac358f395675d9ed1975ca62896b714` |
+| `state-chain/pallets/cf-validator/src/delegation.rs` | `bd439d8ae99978adc55a33caba9656ed3cf6c45d` |
+| `state-chain/runtime/src/constants.rs` | `d2d8cb74911630c739e205efde688c53d0456023` |
+| `state-chain/runtime/src/runtime_apis.rs` | `9f8419e5526e24e7464eb769ba327643a1c54211` |
+
+The unchanged [emission hook](https://github.com/chainflip-io/chainflip-backend/blob/463984021368032062009873ed2a7ed0c28d4e6a/state-chain/pallets/cf-emissions/src/lib.rs#L173-L194)
+compounds every 150 blocks, before
+[Authorship in the execution order](https://github.com/chainflip-io/chainflip-backend/blob/463984021368032062009873ed2a7ed0c28d4e6a/state-chain/runtime/src/lib.rs#L323-L341).
+The [authorship callback](https://github.com/chainflip-io/chainflip-backend/blob/463984021368032062009873ed2a7ed0c28d4e6a/state-chain/pallets/cf-emissions/src/lib.rs#L343-L349)
+distributes the same-block stored authority budget. The unchanged delegation
+arithmetic assigns the rounding remainder to the operator so the individual
+amounts sum to the full budget. Its settlement still calls `FlipIssuance::mint`,
+which emits `FlipMinted`. `cf-flip` adds a bond getter; validator changes exclude
+brokers from delegation and expose delegation status. Runtime configuration
+changes affect deposit recovery, transaction charging and delegation eligibility,
+but preserve the emission configuration, payout implementation and hook order.
+No issuance arithmetic changed in BooneTools.
+
+The public Chainflip archive shows a direct **20219 → 20221** transition at
+block **15,477,430**, timestamp **2026-10-30 17:00:18 UTC**. The preceding block
+is still 20219, so the unobserved 20220 runtime remains rejected. Decoded every
+`flip.FlipMinted` event in six blocks using each block's **parent-state metadata**
+to respect the execution version at the upgrade. Each event sum equals the
+same-block `cf_authority_emission_per_block` exactly; every sampled backup rate
+is zero:
+
+| Block | Execution / post-state runtime | Mint events | Minted atomic FLIP |
+| --- | --- | --- | --- |
+| 15,477,429 | 20219 / 20219 | 30 | 653454343971088111 |
+| 15,477,430 | 20219 / 20221 | 30 | 653454343971088111 |
+| 15,477,431 | 20221 / 20221 | 91 | 653454343971088111 |
+| 15,541,049 | 20221 / 20221 | 64 | 649728671557123997 |
+| 15,541,050 | 20221 / 20221 | 91 | 649729392309117646 |
+| 15,541,051 | 20221 / 20221 | 91 | 649729392309117646 |
+
+Admit 20221 only with deployed `state_getStorageHash(":code")`
+`0x919738d09a31a59288cceadb76161280312bdcaea56c6cf9c9ed74f654bfa952`.
+The guard still rejects unknown runtimes and different code hashes. This is a
+focused source-path review plus deployed-state/event reconciliation, not a full
+runtime audit or a reproducible-build claim. Block hashes, metadata/event
+digests and recipient mint amounts are in
+[`chainflip-runtime-20221-verification.json`](chainflip-runtime-20221-verification.json).
+
+Two read-only replays of the patched reader independently verified copied date
+boundary hints against archive hashes and adjacent timestamps:
+
+| UTC day | Block range (end exclusive) | Checkpoints | Runtime(s) | Atomic FLIP |
+| --- | --- | --- | --- | --- |
+| 2026-10-30 | 15,467,227–15,481,619 | 99 | 20219, 20221 | 9402838212424192389164 |
+| 2026-11-03 | 15,524,819–15,539,215 | 97 | 20221 | 9365722114373291724196 |
+
+The October 30 replay includes the upgrade and following block explicitly.
+These probes did not write production state. Recovery uses the existing saved
+cache and collects only missing issuance days; completed source observations
+are retained.
+
+The comparison collector also now retries only its failed Midgard health gate,
+up to **three attempts and 120 seconds of total cooldown waiting**, inside the
+existing acquisition deadline. Waiting is abortable. Budget exhaustion, 429,
+Retry-After, gateway-wide cooldowns and long deferrals are not bypassed or
+retried. A brief health failure can recover in the same run instead of losing
+the entire six-hour refresh. Deploy through the normal CI-verified backend
+release process, then resume the existing collector without resetting its cache.
+
 ### October 15–19, 2026 runtime 20219 review
 
 The comparison's shared cutoff stayed October 14 because runtime **20219**

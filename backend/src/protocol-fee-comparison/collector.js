@@ -3,10 +3,29 @@ import { createChainflipReader } from './chainflip.js';
 import { nearWalletDays } from './near.js';
 import { collectNearNetSupply, NEAR_NET_SUPPLY_METHOD } from './near-net-supply.js';
 import { LLAMA_API, LLAMA_COINS } from '../../../shared/external-providers.js';
+import { ProviderCooldownError, isProviderRateLimitError } from '../../../shared/provider-policy.js';
+import { setTimeout as waitForTimeout } from 'node:timers/promises';
 
 export const WALLET_QUERY_ID = '8767542';
 // Leave time for final persistence/publication before the service's 30m limit.
 export const COMPARISON_MAX_RUN_MS = 20 * 60_000;
+const HEALTH_MAX_ATTEMPTS = 3;
+const HEALTH_MAX_WAIT_MS = 120_000;
+
+function healthRetryDelay(error, now) {
+  if (String(error?.code || '').startsWith('MIDGARD_BUDGET_') || isProviderRateLimitError(error)
+    || Number(error?.retryAfterSeconds) > 0 || /\bRetry-After\b/i.test(error?.message || '')) return null;
+  if (error instanceof ProviderCooldownError) {
+    if (!String(error.providerKey).startsWith('service:')) return null;
+    const expiry = Date.parse(error.blockedUntil);
+    return Number.isFinite(expiry) ? Math.max(0, expiry - now) : null;
+  }
+  const status = Number(error?.status);
+  const transportFailure = error?.name === 'AbortError' || error?.name === 'TimeoutError'
+    || error instanceof TypeError && /fetch failed|network|terminated/i.test(error.message);
+  return status === 408 || status === 425 || status >= 500 || transportFailure ? 60_000 : null;
+}
+
 export function emptyComparisonCache() { return { version: 1, days: {}, boundaries: {} }; }
 
 export function parseNearEmissions(html) {
@@ -149,7 +168,8 @@ function daysSourceMethod(cache, startDay, endDay, key, field, fallback) {
 /** Independent scheduler. Each source and finalized FLIP day is persisted before moving on. */
 export async function collectComparison({ cache = emptyComparisonCache(), request, walletQuery, save = async () => {},
   now = Date.now(), startDay = comparisonStartDay(now), log = () => {}, chainflipReader, maxFlipDays = 400,
-  nearNetSupplyReader = collectNearNetSupply, maxRunMs = COMPARISON_MAX_RUN_MS, clock = Date.now, rewardAccounting = {} } = {}) {
+  nearNetSupplyReader = collectNearNetSupply, maxRunMs = COMPARISON_MAX_RUN_MS, clock = Date.now, rewardAccounting = {},
+  wait = (milliseconds, { signal }) => waitForTimeout(milliseconds, undefined, { signal }) } = {}) {
   if (cache.version !== 1) throw new Error('Unsupported protocol comparison cache');
   if (!(Number.isFinite(maxRunMs) && maxRunMs > 0)) throw new Error('Comparison runtime budget must be positive and finite');
   const endDay = dayOf(now), days = calendarDays(startDay, endDay);
@@ -187,9 +207,26 @@ export async function collectComparison({ cache = emptyComparisonCache(), reques
   }
   const firstMissing = (field) => days.find((day) => cache.days[day]?.[field] == null)
     || [startDay, dayOf(now - 7 * DAY_MS)].sort().at(-1);
+  async function healthWithRetry() {
+    let waited = 0;
+    for (let attempt = 1; attempt <= HEALTH_MAX_ATTEMPTS; attempt++) {
+      checkBudget();
+      try { return await request('/health', { service: 'midgard' }); }
+      catch (error) {
+        checkBudget();
+        const delay = healthRetryDelay(error, clock());
+        if (attempt === HEALTH_MAX_ATTEMPTS || delay === null || waited + delay > HEALTH_MAX_WAIT_MS) throw error;
+        // Retry only this failed gate through normal provider admission. Keep
+        // quota and gateway deferrals intact, and stop at the collector deadline.
+        waited += delay;
+        await wait(Math.min(delay, Math.max(0, deadline - clock())), { signal: controller.signal });
+        checkBudget();
+      }
+    }
+  }
   try {
     await source('THORChain', async () => {
-      const health = await request('/health', { service: 'midgard' });
+      const health = await healthWithRetry();
       const watermark = Number(health?.lastAggregated?.timestamp);
       if (!(watermark > 0)) throw new Error('Missing aggregation watermark');
       for (let from = dayTime(firstMissing('earnings')); from < dayTime(endDay); from += 60 * DAY_MS) {
