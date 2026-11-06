@@ -3,7 +3,7 @@ import {
   loadCurrentNodeVoteChainState
 } from '../handlers/node-votes.js';
 import { ANALYTICS_READ_MODEL_KEYS } from './analytics-read-model-keys.js';
-import { buildAndPublishReadModel, publishReadModel } from './read-models.js';
+import { buildAndPublishReadModel, publishReadModel, getReadModel } from './read-models.js';
 import {
   getRecentlyBuiltReadModel,
   minimumIntervalResult,
@@ -52,11 +52,14 @@ export async function refreshNodeVotesReadModel(options = {}) {
       }
       // Rejecting the build leaves the previously published summary untouched;
       // old chain state is never republished with a fresh timestamp.
-      return buildNodeVotesSummaryPayload(client, {
+      const result = await buildNodeVotesSummaryPayload(client, {
         now: now(),
         chainState,
         allowProvider: false
       });
+      const catalog = await getReadModel('vote-key-references:v1', { client, allowStale: true });
+      result.payload.key_references = catalog?.payload?.references || {};
+      return result;
     }
   });
 }

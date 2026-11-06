@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for new vote-key descriptions every five minutes
+
+[Timer]
+OnCalendar=*-*-* *:0/5:40
+Persistent=true
+Unit=boonetools-vote-key-references.service
+
+[Install]
+WantedBy=timers.target

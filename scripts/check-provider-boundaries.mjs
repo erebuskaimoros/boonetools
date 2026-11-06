@@ -6,12 +6,16 @@ import ts from 'typescript';
 // Explicit transport/catalog owners. Independent L1 custody adapters retain
 // their reviewed chain-specific transport; this guard does not migrate them.
 const TRANSPORTS = new Set(['shared/provider-client.js', 'backend/src/lib/provider-client.js',
-  'backend/src/treasury/providers.js', 'backend/src/vault-balances/common.js']);
+  'backend/src/treasury/providers.js', 'backend/src/vault-balances/common.js',
+  // OAuth/streaming has its own private credential lock and bounded requests.
+  'backend/src/lib/chatgpt-subscription.js']);
 const CATALOGS = new Set(['shared/thorchain-providers.js', 'shared/external-providers.js',
   'backend/src/lib/config.js', 'backend/src/treasury/providers.js',
-  'backend/src/vault-balances/chains.js', 'backend/src/vault-balances/evm.js', 'backend/src/vault-balances/tron.js']);
+  'backend/src/vault-balances/chains.js', 'backend/src/vault-balances/evm.js', 'backend/src/vault-balances/tron.js',
+  'backend/src/lib/chatgpt-subscription.js']);
 // Exact attribution links, not provider requests; additional links need review.
 const ATTRIBUTIONS = new Map([
+  ['shared/node-votes/key-reference.js', new Set(['https://gitlab.com/thorchain/thornode'])],
   ['backend/src/protocol-fee-comparison/collector.js', new Set(['https://docs.fastnear.com/transfers/query'])]
 ]);
 const RAW_HTTP_MODULES = /^(?:node:)?https?$|^(?:axios|node-fetch|undici)(?:\/|$)/;

@@ -8,6 +8,7 @@ import { runBurnTrackerBackfill, runBurnTrackerScheduler } from './jobs/burn-tra
 import { runNodeopScheduler } from './jobs/nodeop-scheduler.js';
 import { runNodeVotesBackfill } from './jobs/node-votes-backfill.js';
 import { runNodeVotesSummary } from './jobs/node-votes-summary.js';
+import { runVoteKeyReferences } from './jobs/vote-key-references.js';
 import { runPoolDislocationBackfill } from './jobs/pool-dislocation-backfill.js';
 import { runPoolDislocationRepair } from './jobs/pool-dislocation-repair.js';
 import { runPoolDislocationScheduler } from './jobs/pool-dislocation-scheduler.js';
@@ -41,6 +42,7 @@ const runners = {
   'nodeop-scheduler': runNodeopScheduler,
   'node-votes-backfill': runNodeVotesBackfill,
   'node-votes-summary': runNodeVotesSummary,
+  'vote-key-references': runVoteKeyReferences,
   'pool-dislocation-backfill': runPoolDislocationBackfill,
   'pool-dislocation-repair': runPoolDislocationRepair,
   'pool-dislocation-scheduler': runPoolDislocationScheduler,

@@ -15,6 +15,9 @@
     networkValueText
   } from './node-votes/network-values.js';
   import VoteKeyCopy from './node-votes/VoteKeyCopy.svelte';
+  import VoteKeyInfo from './node-votes/VoteKeyInfo.svelte';
+  import VoteKeyInfoPanel from './node-votes/VoteKeyInfoPanel.svelte';
+  import { buildAdrPreferences } from './node-votes/adr-preference.js';
   import { formatNumber } from '$lib/utils/formatting';
 
   const REFRESH_INTERVAL_MS = 60000;
@@ -37,12 +40,14 @@
   let nodeDetailLoading = {};
   let nodeDetailErrors = {};
   let dashboardRequestId = 0;
+  let infoTarget = null;
 
   $: stats = dashboard?.stats || {};
   $: categoryStats = stats.categories || {};
   $: backend = dashboard?.backend || {};
   $: voteRows = dashboard?.by_vote || [];
   $: activeNodes = dashboard?.active_nodes || [];
+  $: adrPreferences = buildAdrPreferences(voteRows, activeNodes, dashboard?.chain_state?.complete === true);
   $: nodeRows = dashboard?.by_node || [];
   $: latestEvents = dashboard?.latest_events || [];
   $: networkValues = dashboard?.network_values || {
@@ -739,6 +744,7 @@
                         <strong>{row.mimir_key}</strong>
                       </button>
                       <VoteKeyCopy voteKey={row.mimir_key} />
+                      <VoteKeyInfo voteKey={row.mimir_key} preference={adrPreferences[row.mimir_key]} expanded={infoTarget?.key === row.mimir_key} on:open={(event) => infoTarget = event.detail} />
                     </div>
                     <span
                       class="type-pill {voteCategory(row)}"
@@ -1115,6 +1121,7 @@
                                         <span class="vote-key-line compact">
                                           <strong>{vote.mimir_key}</strong>
                                           <VoteKeyCopy voteKey={vote.mimir_key} />
+                                          <VoteKeyInfo voteKey={vote.mimir_key} expanded={infoTarget?.key === vote.mimir_key} on:open={(event) => infoTarget = event.detail} />
                                         </span>
                                       </td>
                                       <td>
@@ -1206,6 +1213,9 @@
                         voteKey={row.key}
                         keyLabel={row.source === 'mimir' ? 'Mimir key' : 'constant key'}
                       />
+                      {#if row.source === 'mimir'}
+                        <VoteKeyInfo voteKey={row.key} preference={adrPreferences[row.key]} expanded={infoTarget?.key === row.key} on:open={(event) => infoTarget = event.detail} />
+                      {/if}
                     </span>
                   </td>
                   <td class="network-value-cell">
@@ -1253,12 +1263,16 @@
                 >{categoryLabel(voteCategory(event))}</i>{event.mimir_key}={displayNodeVote(event)}
               </strong>
               <VoteKeyCopy voteKey={event.mimir_key} />
+              <VoteKeyInfo voteKey={event.mimir_key} expanded={infoTarget?.key === event.mimir_key} on:open={(event) => infoTarget = event.detail} />
             </div>
             <em>{shortAddress(event.operator_address)}</em>
           </div>
         {/each}
       </div>
     </section>
+  {/if}
+  {#if infoTarget}
+    <VoteKeyInfoPanel target={infoTarget} catalog={dashboard?.key_references || {}} preference={adrPreferences[infoTarget.key]} on:close={() => infoTarget = null} />
   {/if}
 </div>
 

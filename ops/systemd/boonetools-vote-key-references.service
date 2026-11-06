@@ -1,0 +1,21 @@
+[Unit]
+Description=Maintain BooneTools vote-key reference catalog
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=deploy
+WorkingDirectory=/opt/boonetools-backend/current/backend
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/boonetools-backend/config/backend.env
+StateDirectory=boonetools-vote-references
+StateDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/bin/node src/run-job.js vote-key-references
+TimeoutStartSec=8min
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=boonetools-vote-key-references

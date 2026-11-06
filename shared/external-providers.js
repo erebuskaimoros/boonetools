@@ -6,4 +6,7 @@ export const CHAINFLIP_RPC = 'https://mainnet-archive.chainflip.io';
 export const NEAR_RPC = 'https://archival-rpc.mainnet.fastnear.com';
 export const NEAR_TRANSFERS_ORIGIN = 'https://transfers.main.fastnear.com';
 export const COINGECKO_BASE = 'https://api.coingecko.com';
+export const THORNODE_SOURCE_REPO = 'https://gitlab.com/thorchain/thornode.git';
+export const THORNODE_SOURCE_WEB = 'https://gitlab.com/thorchain/thornode';
+export const THORNODE_GITLAB_API = 'https://gitlab.com/api/v4/projects/thorchain%2Fthornode';
 export const YAHOO_CHART = 'https://query1.finance.yahoo.com/v8/finance/chart';

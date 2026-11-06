@@ -903,6 +903,16 @@ verify every public route after activation and must never install the app-only
 - Hetzner cron wrappers should remain disabled once the systemd timers are active.
 - The listener and schedulers rely on Postgres advisory locks and durable tables.
 
+## Vote-key reference worker
+
+Vote-key descriptions have an optional independent `boonetools-vote-key-references`
+timer and migration 079. It uses the operator's authorized ChatGPT subscription,
+with credentials outside releases under `/var/lib/boonetools-vote-references/auth`.
+Enable only after its OAuth and server inference check. See
+[vote-key descriptions](vote-key-reference.md#subscription-backed-updates) for
+setup, source provenance, revision storage, usage limits, and recovery. Website
+requests serve saved descriptions and never invoke the model.
+
 ## Large journal audits
 
 For multi-day provider audits, limit `journalctl` to the relevant units and time
