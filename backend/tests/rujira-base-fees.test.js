@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { RUJIRA_VS_CONTRACTS } from '../../shared/rujira-contracts.js';
 
 function event(type, attrs) {
   return {
@@ -59,6 +61,7 @@ function createActionIngestClient({ syncState = null, maxHeight = 0 } = {}) {
       }
       if (sql.includes('insert into "rujira_base_fee_sync_state"')) {
         savedStates.push({
+          sync_key: params[0],
           next_page_token: params[1],
           complete: params[2],
           stats_json: JSON.parse(params[5])
@@ -510,4 +513,173 @@ test('dashboard provenance reflects persisted Dune and legacy rows instead of th
     nextPageToken: 'head-next',
     error: 'temporary timeout'
   });
+});
+
+
+for (const sample of [
+  { height: 28558676, feeAtomic: 6608285, txId: '803B6D5277414548DA0CBF2C5C0DD9DD0BA2AA3317B79CD3B4A9CE9454C51D18', label: 'VS v2 swap' },
+  { height: 28531109, feeAtomic: 1114027, txId: '9AA73213939DF6FDC27BADCA1B852E51D010764CFDCE8858D354E40885FBB31E', label: 'VS v2 arbitrage' }
+]) {
+  test(`parseRujiraBaseFeeBlock includes real ${sample.label} fees from the new deployment`, async () => {
+    process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+    const { parseRujiraBaseFeeBlock } = await import('../src/shared/rujira-base-fees.js');
+    const fixture = JSON.parse(readFileSync(new URL(`./fixtures/rujira-vs-v2-${sample.height}.json`, import.meta.url), 'utf8'));
+    const parsed = parseRujiraBaseFeeBlock(sample.height, fixture);
+    const rows = parsed.events.filter(row => row.swap_id === sample.txId);
+    assert.equal(rows.length, 2, 'both executed pool legs must be tracked');
+    assert.ok(rows.every(row => row.included), 'verified app-layer swaps contribute to generated fees');
+    assert.equal(Math.round(rows.reduce((total, row) => total + row.liquidity_fee_rune, 0) * 1e8), sample.feeAtomic);
+    assert.ok(rows.every(row => row.source_contract === 'thor18wkpr24rha007awldxx5hkyxdtnw5jamnuez9e27y6qy9u0tpkrqukal6t'), 'attribute fees to the FIN market, not an unrelated event');
+  });
+}
+
+function realVsFixture(height) {
+  return JSON.parse(readFileSync(new URL(`./fixtures/rujira-vs-v2-${height}.json`, import.meta.url), 'utf8'));
+}
+
+function setAttribute(row, key, value) {
+  row.attributes.find(attribute => attribute.key === key).value = value;
+}
+
+function attribute(row, key) {
+  return row.attributes.find(item => item.key === key)?.value;
+}
+
+test('v2 arb attribution rejects missing, cross-contract, conflicting and failed-transaction evidence', async t => {
+  const { parseRujiraBaseFeeBlock } = await import('../src/shared/rujira-base-fees.js');
+  const cases = {
+    'missing native ID': rows => rows.filter(row => !attribute(row, 'native_tx_id')),
+    'wrong native ID': rows => { setAttribute(rows.find(row => attribute(row, 'native_tx_id')), 'native_tx_id', 'A'.repeat(64)); return rows; },
+    'unverified native ID emitter': rows => { setAttribute(rows.find(row => attribute(row, 'native_tx_id')), '_contract_address', RUJIRA_VS_CONTRACTS[1].address); return rows; },
+    'wrong FIN market': rows => { setAttribute(rows.find(row => attribute(row, 'action') === 'arb_swap'), 'fin', 'thor1anothermarket'); return rows; },
+    'wrong lot provider': rows => { setAttribute(rows.find(row => row.type === 'wasm-rujira-fin/arb_lot'), 'provider', RUJIRA_VS_CONTRACTS[1].address); return rows; },
+    'offer does not match either executed leg': rows => { setAttribute(rows.find(row => row.type === 'wasm-rujira-fin/arb_lot'), 'offer', '1btc-btc'); return rows; },
+    'duplicate native ID contexts': rows => [...rows.filter(row => row.type !== 'swap'), ...rows],
+    'wrong final sender': rows => { rows.filter(row => row.type === 'swap').forEach(row => setAttribute(row, 'from', RUJIRA_VS_CONTRACTS[1].address)); return rows; },
+    'failed transaction context': rows => rows
+  };
+  for (const [name, mutate] of Object.entries(cases)) await t.test(name, () => {
+    const fixture = realVsFixture(28531109);
+    fixture.result.finalize_block_events = mutate(fixture.result.finalize_block_events);
+    if (name === 'failed transaction context') {
+      const rows = fixture.result.finalize_block_events;
+      fixture.result.txs_results = [{ code: 5, events: rows.filter(row => row.type !== 'swap') }];
+      fixture.result.finalize_block_events = rows.filter(row => row.type === 'swap');
+    }
+    assert.equal(parseRujiraBaseFeeBlock(28531109, fixture).events.length, 0, name);
+  });
+});
+
+test('v2 memo matching is contract-scoped and retains direct/RUJI Swap exclusions', async () => {
+  const { parseRujiraBaseFeeBlock, RUJI_SWAP_REVENUE_COLLECTOR } = await import('../src/shared/rujira-base-fees.js');
+  const fixture = realVsFixture(28558676);
+  const swaps = fixture.result.finalize_block_events.filter(row => row.type === 'swap');
+  const memo = fixture.result.txs_results.flatMap(tx => tx.events || []).find(row => row.type === 'wasm-rujira-thorchain-swap/swap');
+  assert.ok(memo);
+  const context = [{ code: 0, events: [memo] }];
+  const direct = parseRujiraBaseFeeBlock(28558676, { result: { txs_results: context, finalize_block_events: swaps } });
+  assert.equal(direct.events.length, 2);
+  assert.ok(direct.events.every(row => !row.included && row.classification === 'direct_ruji_swap_excluded'));
+  context[0].events.unshift(event('wasm-rujira-revenue/run', { _contract_address: RUJI_SWAP_REVENUE_COLLECTOR, denom: 'rune' }));
+  const excluded = parseRujiraBaseFeeBlock(28558676, { result: { txs_results: context, finalize_block_events: swaps } });
+  assert.ok(excluded.events.every(row => !row.included && row.classification === 'ruji_swap_revenue_excluded'));
+  setAttribute(memo, '_contract_address', RUJIRA_VS_CONTRACTS[0].address);
+  const mismatched = parseRujiraBaseFeeBlock(28558676, { result: { txs_results: context, finalize_block_events: swaps } });
+  assert.equal(mismatched.events.length, 0, 'a matching memo from another deployment is insufficient');
+});
+
+test('all VS sources share a bounded scan allowance and v2 starts at deployment despite the old websocket tip', async () => {
+  const { ingestRujiraBaseFeeSources } = await import('../src/shared/rujira-base-fees.js');
+  const client = createActionIngestClient({ maxHeight: 99999999 });
+  const requests = [];
+  const result = await ingestRujiraBaseFeeSources(client, {
+    headMaxPages: 6, maxPages: 0, requestDelayMs: 0,
+    fetchForwardPage: async (request, contract) => {
+      requests.push({ ...request, contract: contract.key });
+      if (contract.key === 'vs-v1-swap') throw new Error('legacy archive timeout');
+      const action = midgardAction(contract.deployedHeight + 1);
+      action.in[0].address = contract.address;
+      return { actions: [action], meta: { prevPageToken: `more-${contract.key}` } };
+    }
+  });
+  assert.equal(requests.length, 5, 'at most six forward attempts across all deployments, including failures');
+  assert.deepEqual(requests[0], { fromHeight: 28519564, contract: 'vs-v2-swap' });
+  assert.deepEqual(requests[2], { fromHeight: 28519564, contract: 'vs-v2-arb' });
+  assert.equal(result.sources[0].actions, 2);
+  assert.equal(result.sources[1].actions, 2);
+  assert.equal(result.sources[2].head_catchup.error, 'legacy archive timeout');
+  assert.deepEqual(new Set(client.savedStates.map(row => row.sync_key)), new Set(RUJIRA_VS_CONTRACTS.map(row => row.syncKey)));
+  assert.equal(client.savedStates.find(row => row.sync_key === RUJIRA_VS_CONTRACTS[1].syncKey).stats_json.head_catchup.next_page_token, 'more-vs-v2-swap');
+});
+
+const acquisitionDatabaseUrl = process.env.ACQUISITION_TEST_DATABASE_URL;
+const integration = acquisitionDatabaseUrl ? test : test.skip;
+integration('v2 discovery durably resumes, reparses cached blocks once, deduplicates live/replay rows and reports unfinished coverage', async t => {
+  assert.match(decodeURIComponent(new URL(acquisitionDatabaseUrl).pathname.slice(1)), /^(?:boonetools_)?acquisition_test(?:_|$)/);
+  const { default: pg } = await import('pg');
+  const { ingestRujiraBaseFeeActionPages, saveParsedRujiraBaseFeeBlock, getRujiraBaseFeesDashboardPayload } = await import('../src/shared/rujira-base-fees.js');
+  const db = new pg.Client({ connectionString: acquisitionDatabaseUrl });
+  await db.connect();
+  t.after(() => db.end());
+  for (const name of ['actions', 'blocks', 'events', 'sync_state', 'job_runs']) {
+    await db.query(`create temporary table rujira_base_fee_${name} (like public.rujira_base_fee_${name} including all)`);
+  }
+  const source = RUJIRA_VS_CONTRACTS[1];
+  await db.query(`insert into rujira_base_fee_sync_state (sync_key, next_page_token, complete)
+    values ($1, 'legacy-history', false)`, [RUJIRA_VS_CONTRACTS[0].syncKey]);
+  await db.query(`insert into rujira_base_fee_blocks (height, status, scan_json)
+    values (28558676, 'fetched', '{}'), (99999999, 'fetched', '{}')`);
+  await db.query(`insert into rujira_base_fee_actions (action_key, height, raw_action)
+    select 'historical-' || n, 100000 + n, jsonb_build_object('in', jsonb_build_array(jsonb_build_object('address', $1::text)))
+    from generate_series(1, 2000) n`, [RUJIRA_VS_CONTRACTS[0].address]);
+  const action = midgardAction(28558676, '803B6D5277414548DA0CBF2C5C0DD9DD0BA2AA3317B79CD3B4A9CE9454C51D18');
+  action.in[0].address = source.address;
+  const settings = { contractKey: source.key, headMaxPages: 1, maxPages: 0, requestDelayMs: 0 };
+  await ingestRujiraBaseFeeActionPages(db, { ...settings, fetchForwardPage: async request => {
+    assert.deepEqual(request, { fromHeight: source.deployedHeight });
+    return { actions: [action], meta: { prevPageToken: 'saved-v2-page' } };
+  } });
+  assert.equal((await db.query('select status from rujira_base_fee_blocks where height = 28558676')).rows[0].status, 'pending');
+  await ingestRujiraBaseFeeActionPages(db, { ...settings, fetchForwardPage: async request => {
+    assert.deepEqual(request, { prevPageToken: 'saved-v2-page' });
+    return { actions: [], meta: { prevPageToken: '' } };
+  } });
+  let coverageQuery;
+  const reportingClient = { query: async (sql, values) => {
+    if (sql.includes('with action_heights')) coverageQuery = { sql, values };
+    return db.query(sql, values);
+  } };
+  const coverage = async () => (await getRujiraBaseFeesDashboardPayload(reportingClient)).meta.trackedContracts.find(row => row.key === source.key);
+  let tracked = await coverage();
+  assert.equal(tracked.backfillComplete, true, 'action indexing is complete');
+  assert.equal(tracked.pendingBlockCount, 1);
+  assert.equal(tracked.feesReady, false, 'candidate block has not been parsed');
+  const sourceMetadata = (await getRujiraBaseFeesDashboardPayload(reportingClient)).meta.trackedContracts;
+  assert.equal(sourceMetadata.find(row => row.key === 'vs-v1-swap').candidateBlockCount, 2000, 'historical legacy coverage is retained');
+  await db.query('analyze rujira_base_fee_actions');
+  const plan = (await db.query(`explain (analyze, format json) ${coverageQuery.sql}`, coverageQuery.values)).rows[0]['QUERY PLAN'][0].Plan;
+  const descendants = node => [node, ...(node.Plans || []).flatMap(descendants)];
+  const jsonScans = descendants(plan).filter(node => node['Function Name'] === 'jsonb_array_elements');
+  assert.ok(jsonScans.length > 0);
+  assert.ok(jsonScans.every(node => node['Actual Loops'] <= 1), 'only the one post-deployment action expands JSON; historical payloads are never expanded');
+  const fixture = realVsFixture(28558676);
+  await saveParsedRujiraBaseFeeBlock(db, 28558676, fixture, { blockTime: '2026-11-06T12:00:00Z', source: 'ws' });
+  await saveParsedRujiraBaseFeeBlock(db, 28558676, fixture, { blockTime: '2026-11-06T12:00:00Z', source: 'backfill' });
+  tracked = await coverage();
+  assert.equal(tracked.pendingBlockCount, 0);
+  assert.equal(tracked.includedEventCount, 2, 'live and address replay share canonical event identities');
+  assert.equal(tracked.unpricedEventCount, 2);
+  assert.equal(tracked.feesReady, false, 'completed action paging does not claim unpriced USD fees are ready');
+  await db.query('update rujira_base_fee_events set rune_price_usd = 0.6, liquidity_fee_usd = liquidity_fee_rune * 0.6');
+  assert.equal((await coverage()).feesReady, true);
+  await ingestRujiraBaseFeeActionPages(db, { ...settings, fetchForwardPage: async request => {
+    assert.deepEqual(request, { fromHeight: 28558676 });
+    return { actions: [action], meta: { prevPageToken: '' } };
+  } });
+  assert.equal((await db.query('select status from rujira_base_fee_blocks where height = 28558676')).rows[0].status, 'fetched', 'same candidate is not requeued after the current parser has processed it');
+  assert.equal((await db.query('select next_page_token from rujira_base_fee_sync_state where sync_key = $1', [RUJIRA_VS_CONTRACTS[0].syncKey])).rows[0].next_page_token, 'legacy-history');
+  await db.query("update rujira_base_fee_blocks set status = 'error' where height = 28558676");
+  tracked = await coverage();
+  assert.equal(tracked.errorBlockCount, 1);
+  assert.equal(tracked.feesReady, false);
 });

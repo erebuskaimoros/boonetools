@@ -1,0 +1,936 @@
+{
+  "source": "https://gateway.liquify.com/chain/thorchain_rpc/block_results?height=28558676",
+  "note": "Reduced real block: retains matching transaction contract events and final contract/swap events; unrelated events omitted.",
+  "result": {
+    "height": "28558676",
+    "txs_results": [
+      {
+        "code": 0,
+        "events": [
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1efrmwk6fzhaugu056mz3nkq4vl0fgpfacm3gp6fhgrdkm4q8rrmsd5a6r5",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1sttnfysg5e92d82gu9vg7jl9dhu29h4w8mujg7hsfdy3qj6ryuwsaqwu5m",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1sttnfysg5e92d82gu9vg7jl9dhu29h4w8mujg7hsfdy3qj6ryuwsaqwu5m",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1sttnfysg5e92d82gu9vg7jl9dhu29h4w8mujg7hsfdy3qj6ryuwsaqwu5m",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-fin/trade",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1sttnfysg5e92d82gu9vg7jl9dhu29h4w8mujg7hsfdy3qj6ryuwsaqwu5m",
+                "index": true
+              },
+              {
+                "key": "bid",
+                "value": "3876",
+                "index": true
+              },
+              {
+                "key": "offer",
+                "value": "294922578",
+                "index": true
+              },
+              {
+                "key": "price",
+                "value": "ccl:76089.416199194428328768",
+                "index": true
+              },
+              {
+                "key": "ranges",
+                "value": "4:60000-130000:1821741.815105203279786981:66142152750.168106873691944495:3876:294848847.3555::0",
+                "index": true
+              },
+              {
+                "key": "rate",
+                "value": "76089.416199194428328768",
+                "index": true
+              },
+              {
+                "key": "side",
+                "value": "base",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-fin/trade",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1sttnfysg5e92d82gu9vg7jl9dhu29h4w8mujg7hsfdy3qj6ryuwsaqwu5m",
+                "index": true
+              },
+              {
+                "key": "bid",
+                "value": "3874",
+                "index": true
+              },
+              {
+                "key": "offer",
+                "value": "295065169",
+                "index": true
+              },
+              {
+                "key": "price",
+                "value": "ccl:76165.505613995883736965",
+                "index": true
+              },
+              {
+                "key": "ranges",
+                "value": "4:60000-130000:1817867.815105203279786981:66437144152.875856873691944495:3874:294991402.70775::0",
+                "index": true
+              },
+              {
+                "key": "rate",
+                "value": "76165.505613995883736965",
+                "index": true
+              },
+              {
+                "key": "side",
+                "value": "base",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-fin/trade",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1sttnfysg5e92d82gu9vg7jl9dhu29h4w8mujg7hsfdy3qj6ryuwsaqwu5m",
+                "index": true
+              },
+              {
+                "key": "bid",
+                "value": "3106",
+                "index": true
+              },
+              {
+                "key": "offer",
+                "value": "236783219",
+                "index": true
+              },
+              {
+                "key": "price",
+                "value": "ccl:76234.133303679970523821",
+                "index": true
+              },
+              {
+                "key": "ranges",
+                "value": "4:60000-130000:1814761.815105203279786981:66673868176.071106873691944495:3106:236724023.19525::0",
+                "index": true
+              },
+              {
+                "key": "rate",
+                "value": "76234.133303679970523821",
+                "index": true
+              },
+              {
+                "key": "side",
+                "value": "base",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-fin/trade",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1sttnfysg5e92d82gu9vg7jl9dhu29h4w8mujg7hsfdy3qj6ryuwsaqwu5m",
+                "index": true
+              },
+              {
+                "key": "bid",
+                "value": "1990",
+                "index": true
+              },
+              {
+                "key": "offer",
+                "value": "151804658",
+                "index": true
+              },
+              {
+                "key": "price",
+                "value": "ccl:76283.747617095448286747",
+                "index": true
+              },
+              {
+                "key": "ranges",
+                "value": "4:60000-130000:1812827.89224701936034143:66821358177.810037097025259625:1933.922858183919445551:147490001.73893022333331513::0,2:38880.2-155521:67472.901373667260410387:4889086772.05511380641062904:56.077141816080554449:4270290.038924922001684844::6415.057644854665000027",
+                "index": true
+              },
+              {
+                "key": "rate",
+                "value": "76283.747617095448286747",
+                "index": true
+              },
+              {
+                "key": "side",
+                "value": "base",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-fin/trade",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1sttnfysg5e92d82gu9vg7jl9dhu29h4w8mujg7hsfdy3qj6ryuwsaqwu5m",
+                "index": true
+              },
+              {
+                "key": "bid",
+                "value": "13383",
+                "index": true
+              },
+              {
+                "key": "offer",
+                "value": "1021415956",
+                "index": true
+              },
+              {
+                "key": "price",
+                "value": "ccl:76321.897610229332866061",
+                "index": true
+              },
+              {
+                "key": "ranges",
+                "value": "6:50000-100000:9228101.147971378361515725:1048966739284.233162646902197439:12057.184440214461356641:918419344.674186840514105389::1577795.094703647186406377,4:60000-130000:1811539.437462041140052332:66919670907.683183102400658146:1288.454784978220289098:98312729.873146005375398521::0,2:38880.2-155521:67435.540598859942056126:4891933228.325523868074332621:37.360774807318354261:2846456.270410061663703581::4276.098553445260386134",
+                "index": true
+              },
+              {
+                "key": "rate",
+                "value": "76321.897610229332866061",
+                "index": true
+              },
+              {
+                "key": "side",
+                "value": "base",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-fin/range.fee",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1sttnfysg5e92d82gu9vg7jl9dhu29h4w8mujg7hsfdy3qj6ryuwsaqwu5m",
+                "index": true
+              },
+              {
+                "key": "base",
+                "value": "0",
+                "index": true
+              },
+              {
+                "key": "quote",
+                "value": "499993",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1efrmwk6fzhaugu056mz3nkq4vl0fgpfacm3gp6fhgrdkm4q8rrmsd5a6r5",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor18wkpr24rha007awldxx5hkyxdtnw5jamnuez9e27y6qy9u0tpkrqukal6t",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-fin/trade",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor18wkpr24rha007awldxx5hkyxdtnw5jamnuez9e27y6qy9u0tpkrqukal6t",
+                "index": true
+              },
+              {
+                "key": "bid",
+                "value": "2011769601",
+                "index": true
+              },
+              {
+                "key": "offer",
+                "value": "26189",
+                "index": true
+              },
+              {
+                "key": "price",
+                "value": "thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet:76817.350852012459537042",
+                "index": true
+              },
+              {
+                "key": "rate",
+                "value": "76817.3",
+                "index": true
+              },
+              {
+                "key": "side",
+                "value": "quote",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-thorchain-swap/swap",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet",
+                "index": true
+              },
+              {
+                "key": "amm_fee",
+                "value": "504602tron-usdt-tr7nhqjekqxgtci8q8zy4pl8otszgjlj6t",
+                "index": true
+              },
+              {
+                "key": "amount",
+                "value": "26189btc-btc",
+                "index": true
+              },
+              {
+                "key": "memo",
+                "value": "=:TRON-USDT:thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet/thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet:0/1/1",
+                "index": true
+              },
+              {
+                "key": "min_return",
+                "value": "2011769601tron-usdt-tr7nhqjekqxgtci8q8zy4pl8otszgjlj6t",
+                "index": true
+              },
+              {
+                "key": "quote_return",
+                "value": "2018411440tron-usdt-tr7nhqjekqxgtci8q8zy4pl8otszgjlj6t",
+                "index": true
+              },
+              {
+                "key": "reserve_fee",
+                "value": "6055235tron-usdt-tr7nhqjekqxgtci8q8zy4pl8otszgjlj6t",
+                "index": true
+              },
+              {
+                "key": "returned",
+                "value": "2011769601tron-usdt-tr7nhqjekqxgtci8q8zy4pl8otszgjlj6t",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor18y9xwvwt2zpap309gxkplp0f5ejwyxyh9unvfcmkfjmrp8gmzxnqd5dtqy",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-ghost-vault/repay",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor18y9xwvwt2zpap309gxkplp0f5ejwyxyh9unvfcmkfjmrp8gmzxnqd5dtqy",
+                "index": true
+              },
+              {
+                "key": "amount",
+                "value": "2459741597",
+                "index": true
+              },
+              {
+                "key": "borrower",
+                "value": "thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet",
+                "index": true
+              },
+              {
+                "key": "delegate",
+                "value": "",
+                "index": true
+              },
+              {
+                "key": "shares",
+                "value": "2459741588.898409999848101794",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1efrmwk6fzhaugu056mz3nkq4vl0fgpfacm3gp6fhgrdkm4q8rrmsd5a6r5",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1kcr3rujeadytx3l594c3ugx2mklwqt59v5krj8e3h2d4amrdpcmql2gtm5",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1kcr3rujeadytx3l594c3ugx2mklwqt59v5krj8e3h2d4amrdpcmql2gtm5",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1kcr3rujeadytx3l594c3ugx2mklwqt59v5krj8e3h2d4amrdpcmql2gtm5",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-fin/trade",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1kcr3rujeadytx3l594c3ugx2mklwqt59v5krj8e3h2d4amrdpcmql2gtm5",
+                "index": true
+              },
+              {
+                "key": "bid",
+                "value": "2009052995",
+                "index": true
+              },
+              {
+                "key": "offer",
+                "value": "2008751946",
+                "index": true
+              },
+              {
+                "key": "price",
+                "value": "ccl:1.000149868729681406",
+                "index": true
+              },
+              {
+                "key": "ranges",
+                "value": "6:0.9925-1.0095:126278365763.524864430086424296:113079610085.516062531105887903:920917278.347341522157526204:920687204.444672910166750892:0:,5:0.997-1.003:38463432141.226429107401080494:61596478077.313444536190927375:1088135716.652658477842473796:1087597339.713468711696239963:266526.647258378137009146:",
+                "index": true
+              },
+              {
+                "key": "rate",
+                "value": "1.000149868729681406",
+                "index": true
+              },
+              {
+                "key": "side",
+                "value": "quote",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-rujira-fin/range.fee",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1kcr3rujeadytx3l594c3ugx2mklwqt59v5krj8e3h2d4amrdpcmql2gtm5",
+                "index": true
+              },
+              {
+                "key": "base",
+                "value": "200874",
+                "index": true
+              },
+              {
+                "key": "quote",
+                "value": "0",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1efrmwk6fzhaugu056mz3nkq4vl0fgpfacm3gp6fhgrdkm4q8rrmsd5a6r5",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-liquidy-swap/execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1efrmwk6fzhaugu056mz3nkq4vl0fgpfacm3gp6fhgrdkm4q8rrmsd5a6r5",
+                "index": true
+              },
+              {
+                "key": "affiliate",
+                "value": "arb",
+                "index": true
+              },
+              {
+                "key": "affiliate_fee",
+                "value": "0",
+                "index": true
+              },
+              {
+                "key": "denom",
+                "value": "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "index": true
+              },
+              {
+                "key": "platform_fee",
+                "value": "1404235",
+                "index": true
+              },
+              {
+                "key": "referral_fee",
+                "value": "601814",
+                "index": true
+              },
+              {
+                "key": "volume",
+                "value": "2006048437",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "wasm-liquidy-swap/swap",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1efrmwk6fzhaugu056mz3nkq4vl0fgpfacm3gp6fhgrdkm4q8rrmsd5a6r5",
+                "index": true
+              },
+              {
+                "key": "input_amount",
+                "value": "2000000000",
+                "index": true
+              },
+              {
+                "key": "input_denom",
+                "value": "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "index": true
+              },
+              {
+                "key": "output_amount",
+                "value": "2004042388",
+                "index": true
+              },
+              {
+                "key": "output_denom",
+                "value": "eth-usdt-0xdac17f958d2ee523a2206206994597c13d831ec7",
+                "index": true
+              },
+              {
+                "key": "recipient",
+                "value": "thor1kr08pw3rtng29tj63jgwx22vp4e447mhrcvxyd",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "finalize_block_events": [
+      {
+        "type": "swap",
+        "attributes": [
+          {
+            "key": "pool",
+            "value": "BTC.BTC",
+            "index": true
+          },
+          {
+            "key": "swap_target",
+            "value": "0",
+            "index": true
+          },
+          {
+            "key": "swap_slip",
+            "value": "10",
+            "index": true
+          },
+          {
+            "key": "liquidity_fee",
+            "value": "3305664",
+            "index": true
+          },
+          {
+            "key": "liquidity_fee_in_rune",
+            "value": "3305664",
+            "index": true
+          },
+          {
+            "key": "emit_asset",
+            "value": "3302358851 THOR.RUNE",
+            "index": true
+          },
+          {
+            "key": "streaming_swap_quantity",
+            "value": "1",
+            "index": true
+          },
+          {
+            "key": "streaming_swap_count",
+            "value": "1",
+            "index": true
+          },
+          {
+            "key": "pool_slip",
+            "value": "0",
+            "index": true
+          },
+          {
+            "key": "stable_reserve",
+            "value": "false",
+            "index": true
+          },
+          {
+            "key": "id",
+            "value": "803B6D5277414548DA0CBF2C5C0DD9DD0BA2AA3317B79CD3B4A9CE9454C51D18",
+            "index": true
+          },
+          {
+            "key": "chain",
+            "value": "THOR",
+            "index": true
+          },
+          {
+            "key": "from",
+            "value": "thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet",
+            "index": true
+          },
+          {
+            "key": "to",
+            "value": "thor1g98cy3n9mmjrpn0sxmn63lztelera37n8n67c0",
+            "index": true
+          },
+          {
+            "key": "coin",
+            "value": "26189 BTC-BTC",
+            "index": true
+          },
+          {
+            "key": "memo",
+            "value": "=:TRON-USDT:thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet/thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet:0/1/1",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "swap",
+        "attributes": [
+          {
+            "key": "pool",
+            "value": "TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T",
+            "index": true
+          },
+          {
+            "key": "swap_target",
+            "value": "0",
+            "index": true
+          },
+          {
+            "key": "swap_slip",
+            "value": "10",
+            "index": true
+          },
+          {
+            "key": "liquidity_fee",
+            "value": "2004204",
+            "index": true
+          },
+          {
+            "key": "liquidity_fee_in_rune",
+            "value": "3302621",
+            "index": true
+          },
+          {
+            "key": "emit_asset",
+            "value": "2002200200 TRON-USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T",
+            "index": true
+          },
+          {
+            "key": "streaming_swap_quantity",
+            "value": "1",
+            "index": true
+          },
+          {
+            "key": "streaming_swap_count",
+            "value": "1",
+            "index": true
+          },
+          {
+            "key": "pool_slip",
+            "value": "1",
+            "index": true
+          },
+          {
+            "key": "stable_reserve",
+            "value": "false",
+            "index": true
+          },
+          {
+            "key": "id",
+            "value": "803B6D5277414548DA0CBF2C5C0DD9DD0BA2AA3317B79CD3B4A9CE9454C51D18",
+            "index": true
+          },
+          {
+            "key": "chain",
+            "value": "THOR",
+            "index": true
+          },
+          {
+            "key": "from",
+            "value": "thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet",
+            "index": true
+          },
+          {
+            "key": "to",
+            "value": "thor1g98cy3n9mmjrpn0sxmn63lztelera37n8n67c0",
+            "index": true
+          },
+          {
+            "key": "coin",
+            "value": "3302358851 THOR.RUNE",
+            "index": true
+          },
+          {
+            "key": "memo",
+            "value": "=:TRON-USDT:thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet/thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet:0/1/1",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      }
+    ]
+  }
+}

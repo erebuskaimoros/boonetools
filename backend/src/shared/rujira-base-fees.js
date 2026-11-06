@@ -11,8 +11,13 @@ import { requestFromProviders } from '../lib/provider-client.js';
 import { providerLifecycleHooks } from './provider-cooldown.js';
 import { concurrentBatchWindows } from '../lib/concurrent-batches.js';
 import { hasThorchainProviderPair } from '../../../shared/thorchain-provider-pool.js';
+import { RUJIRA_VS_CONTRACTS } from '../../../shared/rujira-contracts.js';
 
-const ACTION_SYNC_KEY = 'rujira-thorchain-swap-actions:v1';
+const ACTION_SYNC_KEY = RUJIRA_VS_CONTRACTS[0].syncKey;
+const SWAP_CONTRACTS = new Set(RUJIRA_VS_CONTRACTS.filter(row => row.kind === 'swap').map(row => row.address));
+const ARB_CONTRACTS = new Set(RUJIRA_VS_CONTRACTS.filter(row => row.kind === 'arb').map(row => row.address));
+const ALL_VS_CONTRACTS = new Set(RUJIRA_VS_CONTRACTS.map(row => row.address));
+const PARSER_VERSION = 3;
 const ACTION_PAGE_LIMIT = 50;
 const RPC_REQUEST_TIMEOUT_MS = 10000;
 const HISTORICAL_ACTION_RETRY_MS = 60 * 60 * 1000;
@@ -241,9 +246,10 @@ function collectThorchainSwapMemos(events) {
   return events
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => event?.type === 'wasm-rujira-thorchain-swap/swap')
-    .filter(({ event }) => getAttr(event, '_contract_address') === RUJIRA_THORCHAIN_SWAP_CONTRACT)
+    .filter(({ event }) => SWAP_CONTRACTS.has(getAttr(event, '_contract_address')))
     .map(({ event, index }) => ({
       index,
+      swap_contract: getAttr(event, '_contract_address'),
       memo: getAttr(event, 'memo'),
       amount: getAttr(event, 'amount'),
       ammFee: getAttr(event, 'amm_fee'),
@@ -387,11 +393,12 @@ function inferMemoContexts(events, origin) {
 
     return {
       origin,
+      swap_contract: memo.swap_contract,
       memo: memo.memo,
       amount: memo.amount,
       classification: classification.classification,
       included: classification.included,
-      source_contract: classification.source_contract,
+      source_contract: classification.classification === 'direct_ruji_swap_excluded' ? memo.swap_contract : classification.source_contract,
       source_label: classification.source_label,
       source_denom: classification.source_denom,
       context_json: {
@@ -403,6 +410,40 @@ function inferMemoContexts(events, origin) {
       }
     };
   });
+}
+
+// The v2 arb contract emits a native transaction ID, not the swap memo used by
+// the older VS. Bind one FIN lot and arb_swap action to that ID within the same
+// execution event stream. Missing/ambiguous evidence stays uncounted.
+function inferArbContexts(events, origin, height) {
+  const contexts = [];
+  const boundaries = new Map();
+  for (let index = 0; index < events.length; index += 1) {
+    const marker = events[index];
+    const contract = getAttr(marker, '_contract_address');
+    const txId = getAttr(marker, 'native_tx_id').toUpperCase();
+    if (marker.type !== 'wasm' || !ARB_CONTRACTS.has(contract) || !txId) continue;
+    const window = events.slice(boundaries.get(contract) || 0, index);
+    boundaries.set(contract, index + 1);
+    if (!/^[A-F0-9]{64}$/.test(txId) || !/^\d+$/.test(getAttr(marker, 'native_index'))) continue;
+    const actions = window.filter(event => event.type === 'wasm'
+      && getAttr(event, '_contract_address') === contract && getAttr(event, 'action') === 'arb_swap');
+    if (actions.length !== 1 || Number(getAttr(actions[0], 'height')) !== Number(height)) continue;
+    const market = getAttr(actions[0], 'fin');
+    const lots = window.filter(event => event.type === 'wasm-rujira-fin/arb_lot'
+      && getAttr(event, '_contract_address') === market && getAttr(event, 'provider') === contract);
+    if (!market || lots.length !== 1 || !parseAmountDenom(getAttr(lots[0], 'offer'))) continue;
+    contexts.push({ origin, swap_contract: contract, native_tx_id: txId,
+      amount: getAttr(lots[0], 'offer'), memo: '',
+      classification: 'fin_base_layer_execution', included: true,
+      source_contract: market, source_label: sourceLabelForClassification('fin_base_layer_execution', market),
+      source_denom: parseAmountDenom(getAttr(lots[0], 'offer')).denom,
+      context_json: { arb: { contract, market, native_tx_id: txId,
+        native_index: getAttr(marker, 'native_index'), offer: getAttr(lots[0], 'offer'),
+        ask: getAttr(lots[0], 'ask') } }
+    });
+  }
+  return contexts;
 }
 
 function mergeAmbiguousContexts(candidates) {
@@ -458,11 +499,13 @@ export function parseRujiraBaseFeeBlock(height, blockResults, options = {}) {
   const contexts = [];
 
   for (const [index, tx] of txsResults.entries()) {
-    const txContexts = inferMemoContexts(tx?.events || [], `tx_${index}`);
-    contexts.push(...txContexts);
+    if (Number(tx?.code || 0) !== 0) continue;
+    contexts.push(...inferMemoContexts(tx?.events || [], `tx_${index}`),
+      ...inferArbContexts(tx?.events || [], `tx_${index}`, height));
   }
 
-  contexts.push(...inferMemoContexts(finalizeEvents, 'finalize_block'));
+  contexts.push(...inferMemoContexts(finalizeEvents, 'finalize_block'),
+    ...inferArbContexts(finalizeEvents, 'finalize_block', height));
 
   const finalSwaps = finalizeEvents
     .map((event, index) => ({ event, index }))
@@ -478,23 +521,27 @@ export function parseRujiraBaseFeeBlock(height, blockResults, options = {}) {
         event
       };
     })
-    .filter((row) => row.from === RUJIRA_THORCHAIN_SWAP_CONTRACT)
+    .filter((row) => ALL_VS_CONTRACTS.has(row.from))
     .filter((row) => row.memo);
 
   const candidatesByMemo = new Map();
+  const arbCandidatesById = new Map();
   for (const context of contexts) {
-    if (!candidatesByMemo.has(context.memo)) {
-      candidatesByMemo.set(context.memo, []);
-    }
-    candidatesByMemo.get(context.memo).push(context);
+    const map = context.native_tx_id ? arbCandidatesById : candidatesByMemo;
+    const key = `${context.swap_contract}|${context.native_tx_id || context.memo}`;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(context);
   }
 
   const idContextMap = new Map();
   for (const finalSwap of finalSwaps) {
-    const candidates = candidatesByMemo.get(finalSwap.memo) || [];
-    const matching = candidates.filter((candidate) => memoAmountMatchesCoin(candidate.amount, finalSwap.attrs.coin));
-    if (matching.length === 1 && finalSwap.id) {
-      idContextMap.set(finalSwap.id, matching[0]);
+    const idKey = `${finalSwap.from}|${finalSwap.id.toUpperCase()}`;
+    const isArb = ARB_CONTRACTS.has(finalSwap.from);
+    const candidates = (isArb ? arbCandidatesById.get(idKey)
+      : candidatesByMemo.get(`${finalSwap.from}|${finalSwap.memo}`)) || [];
+    const matching = candidates.filter(candidate => memoAmountMatchesCoin(candidate.amount, finalSwap.attrs.coin));
+    if (matching.length === 1 && finalSwap.id && (!isArb || candidates.length === 1)) {
+      idContextMap.set(idKey, matching[0]);
     }
   }
 
@@ -503,12 +550,15 @@ export function parseRujiraBaseFeeBlock(height, blockResults, options = {}) {
   const warnings = [];
 
   for (const finalSwap of finalSwaps) {
-    const candidates = candidatesByMemo.get(finalSwap.memo) || [];
-    if (!candidates.length) {
+    const idKey = `${finalSwap.from}|${finalSwap.id.toUpperCase()}`;
+    const isArb = ARB_CONTRACTS.has(finalSwap.from);
+    const candidates = (isArb ? arbCandidatesById.get(idKey)
+      : candidatesByMemo.get(`${finalSwap.from}|${finalSwap.memo}`)) || [];
+    if (!candidates.length || (isArb && !idContextMap.has(idKey))) {
       continue;
     }
 
-    const context = pickContextForSwap(finalSwap, candidates, idContextMap);
+    const context = pickContextForSwap({ ...finalSwap, id: idKey }, candidates, idContextMap);
     if (context?.context_json?.ambiguous) {
       warnings.push({
         height,
@@ -577,6 +627,7 @@ export function parseRujiraBaseFeeBlock(height, blockResults, options = {}) {
     events: parsedEvents,
     scan: {
       height,
+      parser_version: PARSER_VERSION,
       context_count: contexts.length,
       final_rujira_swap_count: finalSwaps.length,
       matched_event_count: parsedEvents.length,
@@ -621,9 +672,9 @@ function normalizeMidgardAction(action) {
   };
 }
 
-async function fetchRujiraSwapActionPage(nextPageToken = '') {
+async function fetchRujiraSwapActionPage(nextPageToken = '', contract = RUJIRA_VS_CONTRACTS[0]) {
   const params = new URLSearchParams({
-    address: RUJIRA_THORCHAIN_SWAP_CONTRACT,
+    address: contract.address,
     type: 'swap',
     limit: String(ACTION_PAGE_LIMIT)
   });
@@ -639,9 +690,9 @@ async function fetchRujiraSwapActionPage(nextPageToken = '') {
   });
 }
 
-async function fetchRujiraSwapActionForwardPage({ fromHeight = 0, prevPageToken = '' } = {}) {
+async function fetchRujiraSwapActionForwardPage({ fromHeight = 0, prevPageToken = '' } = {}, contract = RUJIRA_VS_CONTRACTS[0]) {
   const params = new URLSearchParams({
-    address: RUJIRA_THORCHAIN_SWAP_CONTRACT,
+    address: contract.address,
     type: 'swap',
     limit: String(ACTION_PAGE_LIMIT)
   });
@@ -736,21 +787,21 @@ export async function fetchRujiraBaseFeeRpcBlockResultsBatch(heights, options = 
   return parseRujiraBaseFeeRpcBatchResponse(payload, normalizedHeights);
 }
 
-async function loadActionSyncState(client) {
+async function loadActionSyncState(client, syncKey = ACTION_SYNC_KEY) {
   const { rows } = await client.query(
     `select sync_key, next_page_token, complete, rate_limited_until, updated_at, stats_json
      from rujira_base_fee_sync_state
      where sync_key = $1
      limit 1`,
-    [ACTION_SYNC_KEY]
+    [syncKey]
   );
   return rows[0] || null;
 }
 
-async function saveActionSyncState(client, payload) {
+async function saveActionSyncState(client, payload, syncKey = ACTION_SYNC_KEY) {
   await upsertRows(client, 'rujira_base_fee_sync_state', [
     {
-      sync_key: ACTION_SYNC_KEY,
+      sync_key: syncKey,
       next_page_token: payload.next_page_token || '',
       complete: Boolean(payload.complete),
       rate_limited_until: payload.rate_limited_until || null,
@@ -768,7 +819,7 @@ function isCooldownActive(syncState) {
   return Number.isFinite(untilMs) && untilMs > Date.now();
 }
 
-async function upsertActionsAndBlocks(client, actions) {
+async function upsertActionsAndBlocks(client, actions, contract = RUJIRA_VS_CONTRACTS[0]) {
   const rows = actions
     .map(normalizeMidgardAction)
     .filter((row) => row.height > 0);
@@ -802,6 +853,17 @@ async function upsertActionsAndBlocks(client, actions) {
     updateColumns: ['block_time', 'updated_at']
   });
 
+  // A block may already have been fetched by the v1 parser or the listener.
+  // Requeue only candidate blocks whose stored parse predates v2 support.
+  // A successful reparse persists this version, so overlapping pages are cheap.
+  if (contract.key !== RUJIRA_VS_CONTRACTS[0].key) await client.query(
+    `update rujira_base_fee_blocks
+     set status = 'pending', next_retry_at = now(), error = '', updated_at = now()
+     where height = any($1::bigint[]) and status = 'fetched'
+       and coalesce((scan_json->>'parser_version')::integer, 0) < $2`,
+    [[...blockByHeight.keys()], PARSER_VERSION]
+  );
+
   return {
     actions: rows.length,
     heights: blockByHeight.size
@@ -830,7 +892,11 @@ function actionHeightRange(actions) {
 }
 
 export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
-  const syncState = await loadActionSyncState(client);
+  const contract = RUJIRA_VS_CONTRACTS.find(row => row.key === (options.contractKey || RUJIRA_VS_CONTRACTS[0].key));
+  if (!contract) throw new Error('Unknown Rujira VS deployment');
+  const forwardOnly = contract.key !== RUJIRA_VS_CONTRACTS[0].key;
+  const syncState = await loadActionSyncState(client, contract.syncKey);
+  const saveState = payload => saveActionSyncState(client, payload, contract.syncKey);
   if (isCooldownActive(syncState)) {
     return {
       skipped: true,
@@ -842,7 +908,7 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
   const alreadyComplete = Boolean(syncState?.complete);
   let nextPageToken = alreadyComplete ? '' : String(syncState?.next_page_token || '');
   let complete = alreadyComplete;
-  const maxPages = alreadyComplete
+  const maxPages = alreadyComplete || forwardOnly
     ? 0
     : Math.max(0, Number(options.maxPages ?? config.rujiraBaseFeesMidgardMaxPages) || 0);
   const headMaxPages = Math.max(
@@ -855,14 +921,14 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
       options.headLookbackBlocks ?? config.rujiraBaseFeesMidgardHeadLookbackBlocks
     ) || 1
   );
-  const fetchPage = options.fetchPage || fetchRujiraSwapActionPage;
-  const fetchForwardPage = options.fetchForwardPage || fetchRujiraSwapActionForwardPage;
+  const fetchPage = options.fetchPage || (token => fetchRujiraSwapActionPage(token, contract));
+  const fetchForwardPage = options.fetchForwardPage || (request => fetchRujiraSwapActionForwardPage(request, contract));
   const sleepFn = options.sleepFn || sleep;
   const requestDelayMs = Math.max(
     0,
     Number(options.requestDelayMs ?? config.rujiraBaseFeesRequestDelayMs) || 0
   );
-  const knownMaxHeight = await loadKnownCoverageHeight(client);
+  const knownMaxHeight = forwardOnly ? 0 : await loadKnownCoverageHeight(client);
   // Midgard can traverse forward from a height with fromHeight/prevPageToken. Keep a
   // durable forward watermark that is independent of websocket-written max heights,
   // otherwise a listener restart can advance the DB tip past an unseen outage gap.
@@ -876,13 +942,15 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
     : 0;
   const previousHeadCatchupFloor = hasForwardState
     ? Math.max(0, Number(previousHeadCatchup.floor_height) || previousHeadWatermark)
-    : Math.max(0, knownMaxHeight - headLookbackBlocks);
+    : forwardOnly ? contract.deployedHeight : Math.max(0, knownMaxHeight - headLookbackBlocks);
   const previousHeadCatchupMax = hasForwardState
     ? Math.max(previousHeadWatermark, Number(previousHeadCatchup.max_height) || 0)
     : previousHeadWatermark;
   const previousBackfill = syncState?.stats_json?.backfill || {};
   const previousBackfillRetryAt = Date.parse(String(previousBackfill.retry_after || ''));
   const stats = {
+    contract: contract.key,
+    request_attempts: 0,
     pages: 0,
     actions: 0,
     heights: 0,
@@ -929,16 +997,19 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
     if (stats.pages > 0 && requestDelayMs > 0) {
       await sleepFn(requestDelayMs);
     }
+    stats.request_attempts += 1;
     const payload = await pageFetcher(pageToken);
     const actions = Array.isArray(payload?.actions) ? payload.actions : [];
-    const inserted = await upsertActionsAndBlocks(client, actions);
+    const scopedActions = forwardOnly ? actions.filter(action => Number(action?.height) >= contract.deployedHeight
+      && (action.in || []).some(input => input.address === contract.address)) : actions;
+    const inserted = await upsertActionsAndBlocks(client, scopedActions, contract);
     stats.pages += 1;
     stats.actions += inserted.actions;
     stats.heights += inserted.heights;
     bucket.pages += 1;
     bucket.actions += inserted.actions;
     bucket.heights += inserted.heights;
-    const range = actionHeightRange(actions);
+    const range = actionHeightRange(scopedActions);
     if (range.min > 0) {
       bucket.min_height = bucket.min_height > 0
         ? Math.min(bucket.min_height, range.min)
@@ -972,7 +1043,7 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
         };
       }
       headCatchupToken = String(catchupPage.payload?.meta?.prevPageToken || '');
-      headCatchupComplete = catchupPage.inserted.actions === 0 || !headCatchupToken;
+      headCatchupComplete = !catchupPage.payload?.actions?.length || !headCatchupToken;
       if (headCatchupComplete) headCatchupToken = '';
     } catch (error) {
       headError = error;
@@ -990,9 +1061,11 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
     );
   }
 
+  if (forwardOnly && headCatchupComplete) complete = true;
+
   // Persist head progress before touching the unrelated historical cursor. A slow
   // old Midgard page must not discard recent outage recovery or starve RPC blocks.
-  await saveActionSyncState(client, {
+  await saveState({
     next_page_token: alreadyComplete ? '' : nextPageToken,
     complete,
     rate_limited_until: null,
@@ -1005,7 +1078,7 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
   });
 
   if (headError) {
-    if (isRujiraBaseFeeProviderRateLimit(headError)) throw headError;
+    if (isRujiraBaseFeeProviderRateLimit(headError)) throw Object.assign(headError, { rujiraSyncKey: contract.syncKey });
     return {
       ...stats,
       next_page_token: alreadyComplete ? '' : nextPageToken,
@@ -1040,7 +1113,7 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
     } catch (error) {
       stats.backfill.error = String(error?.message || error).slice(0, 500);
       stats.backfill.retry_after = new Date(Date.now() + HISTORICAL_ACTION_RETRY_MS).toISOString();
-      if (isRujiraBaseFeeProviderRateLimit(error)) throw error;
+      if (isRujiraBaseFeeProviderRateLimit(error)) throw Object.assign(error, { rujiraSyncKey: contract.syncKey });
     }
   }
 
@@ -1057,7 +1130,7 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
       } catch (error) {
         stats.backfill.error = String(error?.message || error).slice(0, 500);
         stats.backfill.retry_after = new Date(Date.now() + HISTORICAL_ACTION_RETRY_MS).toISOString();
-        if (isRujiraBaseFeeProviderRateLimit(error)) throw error;
+        if (isRujiraBaseFeeProviderRateLimit(error)) throw Object.assign(error, { rujiraSyncKey: contract.syncKey });
         break;
       }
     }
@@ -1065,7 +1138,7 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
 
   const mode = alreadyComplete ? 'head_refresh' : 'backfill';
 
-  await saveActionSyncState(client, {
+  await saveState({
     next_page_token: alreadyComplete ? '' : nextPageToken,
     complete,
     rate_limited_until: null,
@@ -1085,8 +1158,33 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
   };
 }
 
+// Divide the existing per-run page limits across deployments rather than
+// multiplying traffic. New deployments go first so an old archive gap cannot
+// starve them. Each saves its own forward cursor, including on ordinary errors.
+export async function ingestRujiraBaseFeeSources(client, options = {}) {
+  const order = [...RUJIRA_VS_CONTRACTS.slice(1), RUJIRA_VS_CONTRACTS[0]];
+  let remainingHead = Math.max(0, Number(options.headMaxPages ?? config.rujiraBaseFeesMidgardHeadMaxPages) || 0);
+  const historyPages = Math.max(0, Number(options.maxPages ?? config.rujiraBaseFeesMidgardMaxPages) || 0);
+  const results = [];
+  for (const [index, contract] of order.entries()) {
+    const allowance = Math.ceil(remainingHead / (order.length - index));
+    const result = await ingestRujiraBaseFeeActionPages(client, {
+      ...options, contractKey: contract.key, headMaxPages: allowance,
+      maxPages: contract.key === RUJIRA_VS_CONTRACTS[0].key ? historyPages : 0,
+      ...(options.fetchForwardPage ? { fetchForwardPage: request => options.fetchForwardPage(request, contract) } : {}),
+      ...(options.fetchPage ? { fetchPage: token => options.fetchPage(token, contract) } : {})
+    });
+    remainingHead = Math.max(0, remainingHead - Math.min(allowance, result.request_attempts || 0));
+    results.push({ contract: contract.key, ...result });
+  }
+  return { sources: results, pages: results.reduce((sum, row) => sum + (row.pages || 0), 0),
+    complete: results.every(row => row.complete),
+    actions: results.reduce((sum, row) => sum + (row.actions || 0), 0) };
+}
+
 async function putActionSyncCooldown(client, error) {
-  const syncState = await loadActionSyncState(client);
+  const syncKey = error.rujiraSyncKey || ACTION_SYNC_KEY;
+  const syncState = await loadActionSyncState(client, syncKey);
   const until = new Date(Date.now() + config.rujiraBaseFeesRateLimitCooldownMs).toISOString();
   await saveActionSyncState(client, {
     next_page_token: syncState?.next_page_token || '',
@@ -1097,7 +1195,7 @@ async function putActionSyncCooldown(client, error) {
       last_error: error?.message || String(error),
       rate_limited_at: new Date().toISOString()
     }
-  });
+  }, syncKey);
   return until;
 }
 
@@ -1601,7 +1699,7 @@ function resolveBaseFeeSourceProvider(eventSources, syncStats = {}) {
 }
 
 async function fetchDashboardStats(client) {
-  const [actions, blocks, events, sync, listener] = await Promise.all([
+  const [actions, blocks, events, sync, listener, coverage] = await Promise.all([
     client.query(
       `select count(*)::bigint as count,
               min(height)::bigint as min_height,
@@ -1621,15 +1719,20 @@ async function fetchDashboardStats(client) {
               coalesce(sum(liquidity_fee_rune) filter (where included), 0) as included_fee_rune,
               coalesce(sum(liquidity_fee_usd) filter (where included), 0) as included_fee_usd,
               coalesce(array_agg(distinct source) filter (where source is not null), array[]::text[]) as source_providers,
+              jsonb_build_array(${RUJIRA_VS_CONTRACTS.map((_, index) => `jsonb_build_object(
+                'address', $${index + 1}::text,
+                'included_events', count(*) filter (where included and from_address = $${index + 1}),
+                'unpriced_events', count(*) filter (where included and rune_price_usd <= 0 and from_address = $${index + 1})
+              )`).join(',')}) as source_coverage,
               max(updated_at) as updated_at
-       from rujira_base_fee_events`
+       from rujira_base_fee_events`,
+      RUJIRA_VS_CONTRACTS.map(row => row.address)
     ),
     client.query(
-      `select next_page_token, complete, rate_limited_until, updated_at, stats_json
+      `select sync_key, next_page_token, complete, rate_limited_until, updated_at, stats_json
        from rujira_base_fee_sync_state
-       where sync_key = $1
-       limit 1`,
-      [ACTION_SYNC_KEY]
+       where sync_key = any($1::text[])`,
+      [RUJIRA_VS_CONTRACTS.map(row => row.syncKey)]
     ),
     client.query(
       `select finished_at, status, stats_json
@@ -1637,14 +1740,48 @@ async function fetchDashboardStats(client) {
        where job_name = 'rujira-base-fees-ws-listener'
        order by finished_at desc nulls last, started_at desc
        limit 1`
+    ),
+    client.query(
+      `with action_heights as (
+         -- Before v2 all acquired candidates came from the legacy address feed.
+         -- Group only indexed heights; do not expand historical action payloads.
+         select $3::text as address, height
+         from rujira_base_fee_actions where height < $4
+         group by height
+         union all
+         select distinct input->>'address' as address, a.height
+         from rujira_base_fee_actions a
+         cross join lateral jsonb_array_elements(case when jsonb_typeof(a.raw_action->'in') = 'array'
+           then a.raw_action->'in' else '[]'::jsonb end) input
+         where a.height >= $4 and input->>'address' = any($1::text[])
+       ), action_coverage as (
+         select a.address, count(*)::bigint as candidate_blocks,
+           count(*) filter (where b.status is null or b.status = 'pending'
+             or (b.status = 'fetched' and coalesce((b.scan_json->>'parser_version')::integer, 0) < $2
+                 and a.address <> $3))::bigint as pending_blocks,
+           count(*) filter (where b.status = 'error')::bigint as error_blocks,
+           count(*) filter (where b.status = 'fetched')::bigint as fetched_blocks
+         from action_heights a left join rujira_base_fee_blocks b on b.height = a.height
+         group by a.address
+       )
+       select address, candidate_blocks, pending_blocks, error_blocks, fetched_blocks
+       from action_coverage`,
+      [RUJIRA_VS_CONTRACTS.map(row => row.address), PARSER_VERSION, RUJIRA_THORCHAIN_SWAP_CONTRACT,
+        Math.min(...RUJIRA_VS_CONTRACTS.slice(1).map(row => row.deployedHeight))]
     )
   ]);
 
   return {
+    sourceSync: sync.rows,
+    coverage: RUJIRA_VS_CONTRACTS.map(contract => ({
+      ...coverage.rows.find(row => row.address === contract.address),
+      ...(events.rows[0]?.source_coverage || []).find(row => row.address === contract.address),
+      address: contract.address
+    })),
     actions: actions.rows[0] || {},
     blockCounts: Object.fromEntries(blocks.rows.map((row) => [row.status, Number(row.count) || 0])),
     events: events.rows[0] || {},
-    sync: sync.rows[0] || null,
+    sync: sync.rows.find(row => row.sync_key === ACTION_SYNC_KEY) || sync.rows.find(row => !row.sync_key) || null,
     listener: listener.rows[0] || null
   };
 }
@@ -1734,6 +1871,26 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
   const duneStats = sync?.stats_json || {};
   const sourceProvider = resolveBaseFeeSourceProvider(stats.events.source_providers, duneStats);
   const usesDune = sourceProvider === 'dune' || sourceProvider === 'mixed';
+  const trackedContracts = RUJIRA_VS_CONTRACTS.map(({ syncKey, ...contract }) => {
+    const state = stats.sourceSync.find(row => row.sync_key === syncKey)
+      || (syncKey === ACTION_SYNC_KEY ? stats.sync : null);
+    const sourceCoverage = stats.coverage.find(row => row.address === contract.address) || {};
+    const head = state?.stats_json?.head_catchup;
+    const pending = Number(sourceCoverage.pending_blocks) || 0;
+    const errors = Number(sourceCoverage.error_blocks) || 0;
+    const unpriced = Number(sourceCoverage.unpriced_events) || 0;
+    return { ...contract, backfillComplete: Boolean(state?.complete),
+      headCatchup: head ? { complete: Boolean(head.complete), floorHeight: Number(head.floor_height) || 0,
+        watermarkHeight: Number(head.watermark_height) || 0, maxHeight: Number(head.max_height) || 0,
+        error: String(head.error || '') } : null,
+      candidateBlockCount: Number(sourceCoverage.candidate_blocks) || 0,
+      pendingBlockCount: pending, errorBlockCount: errors,
+      includedEventCount: Number(sourceCoverage.included_events) || 0, unpricedEventCount: unpriced,
+      feesReady: Boolean(state?.complete && head?.complete && !head.error
+        && !isCooldownActive(state) && !pending && !errors && !unpriced),
+      lastScanAt: toIsoString(state?.updated_at), rateLimitedUntil: toIsoString(state?.rate_limited_until)
+    };
+  });
 
   return {
     schema_version: 2,
@@ -1753,10 +1910,11 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
           ? 'Execute the BooneTools Rujira Base Fees Dune source query over thorchain.core_wasm_contracts_events and thorchain.defi_swaps, classify Rujira app context by WASM event type, and upsert generated base-layer swap-fee rows into the local dashboard cache.'
           : sourceProvider === 'mixed'
             ? 'Use validated Dune rows where available and the legacy THORNode RPC/Midgard parser for fallback or live rows. Canonical swap identities prevent the overlapping sources from being counted twice.'
-          : 'Listen to THORChain NewBlock websocket events for steady-state heights, independently page the current Midgard head with a durable catch-up cursor, fetch candidate block_results payloads by RPC, match Rujira-emitted swap memos to final THORNode swap events, and sum liquidity_fee_in_rune for non-RUJI-Swap app contexts. Historical Midgard paging retains its own backfill cursor.',
+          : 'Listen to THORChain NewBlock websocket events for steady-state heights, independently page each verified VS deployment with durable catch-up cursors, fetch candidate block_results payloads by RPC, match contract-scoped swap memos or verified arb native transaction IDs to final THORNode swap events, and sum liquidity_fee_in_rune for non-RUJI-Swap app contexts. Historical Midgard paging retains its own backfill cursor.',
       caveat:
         'This tracks base-layer liquidity fees generated by app-layer activity. It is separate from explicit Reserve revenue-share deposits and intentionally keeps excluded RUJI Swap/direct contexts out of the headline total.',
       rujiraThorchainSwapContract: RUJIRA_THORCHAIN_SWAP_CONTRACT,
+      trackedContracts,
       excludedRujiSwapRevenueCollector: RUJI_SWAP_REVENUE_COLLECTOR,
       actionCount: Number(stats.actions.count) || 0,
       actionMinHeight: Number(stats.actions.min_height) || 0,
@@ -1765,7 +1923,7 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
       pendingBlockCount: blockCounts.pending || 0,
       fetchedBlockCount: blockCounts.fetched || 0,
       errorBlockCount: blockCounts.error || 0,
-      backfillComplete: Boolean(sync.complete),
+      backfillComplete: trackedContracts.every(row => row.backfillComplete),
       nextPageToken: sync.next_page_token || '',
       headCatchup: sync.stats_json?.head_catchup
         ? {
@@ -1847,7 +2005,7 @@ async function runRujiraBaseFeesLegacyIngestion(client, initialStats = {}) {
   };
 
   try {
-    stats.action_scan = await ingestRujiraBaseFeeActionPages(client);
+    stats.action_scan = await ingestRujiraBaseFeeSources(client);
   } catch (error) {
     if (!isRujiraBaseFeeProviderRateLimit(error)) {
       throw error;

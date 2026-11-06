@@ -323,9 +323,11 @@
     generatedFeeMeta?.totalLiquidityFeeUsd || latestGeneratedFeeWeek?.cumulative_usd || 0;
   $: generatedFeeScope = generatedFeeMeta?.scope || 'pending generated-fee scan';
   $: generatedFeeSource = formatDataSource(generatedFeeMeta?.source);
-  $: generatedFeeBackfillLabel = generatedFeeMeta?.backfillComplete
-    ? 'backfill complete'
-    : `${number2.format(Number(generatedFeeMeta?.pendingBlockCount || 0))} blocks queued`;
+  $: generatedFeeTrackedContracts = generatedFeeMeta?.trackedContracts || [];
+  $: generatedFeePendingBlocks = Number(generatedFeeMeta?.pendingBlockCount || 0);
+  $: generatedFeeBackfillLabel = generatedFeeMeta?.backfillComplete && !generatedFeePendingBlocks
+    ? 'history indexed'
+    : `history syncing · ${number2.format(generatedFeePendingBlocks)} blocks queued`;
 
   // Realized value to TC is the Reserve destination plus System Income. POL
   // capital remains visible but separate, and 01 is excluded because it is an
@@ -1257,6 +1259,22 @@
       {generatedFeeSource} · {generatedFeeBackfillLabel}. Scan scope:
       {generatedFeeScope}
     </p>
+    {#if generatedFeeTrackedContracts.length}
+      <p class="scope-note">
+        Tracking:
+        {#each generatedFeeTrackedContracts as contract, index}
+          {#if index > 0} · {/if}
+          <a href={`${THORCHAIN_NET_BASE}/address/${contract.address}`} target="_blank" rel="noopener noreferrer" title={contract.address}>{contract.label}</a>
+          {#if contract.headCatchup?.error}
+            (updates retrying)
+          {:else if !contract.backfillComplete || !contract.headCatchup?.complete}
+            (history syncing)
+          {:else if !contract.feesReady}
+            (fees processing)
+          {/if}
+        {/each}
+      </p>
+    {/if}
 
     <div class="side-layout">
       <div class="chart-frame">

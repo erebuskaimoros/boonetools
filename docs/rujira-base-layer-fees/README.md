@@ -67,3 +67,36 @@ latest three days and retain older verified rows; use
 `RUJIRA_INFLOW_FULL_REBUILD=1` only with a full historical archive. The
 generator writes `backend/data/rujira-base-layer-inflows.json` and the public
 fallback together.
+
+## 03 generated fees: VS deployments
+
+The live parser and scheduled collector share the verified mainnet catalog in
+`shared/rujira-contracts.js`. The original VS swap contract remains tracked.
+VS v2 added a swap contract and a separate arbitrage contract at block
+`28519564`, November 3, 2026 at 18:13:46 UTC. Contract history and CW2 state
+confirm swap version 1.4.0 (code 207), and arb version 0.1.0 (initial code 208,
+subsequently migrated to 210):
+
+- [VS v2 swap deployment](https://gateway.liquify.com/chain/thorchain_api/cosmwasm/wasm/v1/contract/thor1prh3ue5nd4he254eyg3vq4lxvzed65afp9prv9qvdl2cwfq6xcnqah3aet/history)
+- [VS v2 arbitrage deployment](https://gateway.liquify.com/chain/thorchain_api/cosmwasm/wasm/v1/contract/thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf/history)
+
+Swap fees require matching contract-scoped memo/input evidence. Arb fees require
+the matching FIN lot, arb action, native transaction ID and executed input;
+failed or ambiguous execution evidence is excluded. Both pool legs are counted
+once using the existing canonical swap identities. Direct/RUJI Swap collector
+exclusions remain in effect. The VS contracts are execution sources, not
+additional revenue collectors or inventory in lane 01.
+
+Each deployment has an independent durable scan cursor. New contracts start at
+their deployment block even when the websocket tip is newer. Candidate blocks
+previously parsed without v2 support are queued for one reparse. The existing
+per-run Midgard allowance is shared across all three sources, with v2 scanned
+first; no quota reset or whole-chain scan is needed.
+
+Deploy backend before frontend through the normal guarded release workflow.
+There is no migration or new timer. Existing websocket ingestion and scheduled
+base-fee jobs load the new parser and resume bounded recovery. Verify
+`meta.trackedContracts` on `/functions/v1/app-layer-base-fees`: indexing status,
+pending/error blocks, unpriced events and `feesReady` are separate. History is
+not ready merely because action paging finished. The dashboard links each
+deployment and shows syncing/retry/processing status while recovery continues.

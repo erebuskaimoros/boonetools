@@ -1,0 +1,541 @@
+{
+  "source": "https://gateway.liquify.com/chain/thorchain_rpc/block_results?height=28531109",
+  "note": "Reduced real block: retains matching transaction contract events and final contract/swap events; unrelated events omitted.",
+  "result": {
+    "height": "28531109",
+    "txs_results": [
+      {
+        "code": 0,
+        "events": [
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor18wkpr24rha007awldxx5hkyxdtnw5jamnuez9e27y6qy9u0tpkrqukal6t",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "0",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1gm8q2gr25nzzsxzdp2mpja4hyvyhjlr4s6krcsgv2y953uu0js3qhwpus7",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "1",
+                "index": true
+              }
+            ]
+          },
+          {
+            "type": "execute",
+            "attributes": [
+              {
+                "key": "_contract_address",
+                "value": "thor1gm8q2gr25nzzsxzdp2mpja4hyvyhjlr4s6krcsgv2y953uu0js3qhwpus7",
+                "index": true
+              },
+              {
+                "key": "msg_index",
+                "value": "1",
+                "index": true
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "finalize_block_events": [
+      {
+        "type": "execute",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "execute",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "execute",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "execute",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "execute",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor18wkpr24rha007awldxx5hkyxdtnw5jamnuez9e27y6qy9u0tpkrqukal6t",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "wasm-rujira-fin/trade",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor18wkpr24rha007awldxx5hkyxdtnw5jamnuez9e27y6qy9u0tpkrqukal6t",
+            "index": true
+          },
+          {
+            "key": "rate",
+            "value": "78545.697672335065832227",
+            "index": true
+          },
+          {
+            "key": "offer",
+            "value": "4903",
+            "index": true
+          },
+          {
+            "key": "bid",
+            "value": "385109555",
+            "index": true
+          },
+          {
+            "key": "price",
+            "value": "ccl:78545.697672335065832227",
+            "index": true
+          },
+          {
+            "key": "side",
+            "value": "quote",
+            "index": true
+          },
+          {
+            "key": "ranges",
+            "value": "2:70000-90000:713888.119047390169419547:48978150336.423281845451674847:385109555:4893.36770716125:8.40654283875:",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "wasm-rujira-fin/arb_lot",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor18wkpr24rha007awldxx5hkyxdtnw5jamnuez9e27y6qy9u0tpkrqukal6t",
+            "index": true
+          },
+          {
+            "key": "provider",
+            "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+            "index": true
+          },
+          {
+            "key": "offer",
+            "value": "385033427tron-usdt-tr7nhqjekqxgtci8q8zy4pl8otszgjlj6t",
+            "index": true
+          },
+          {
+            "key": "ask",
+            "value": "4903btc-btc",
+            "index": true
+          },
+          {
+            "key": "protocol_range_fee_value",
+            "value": "78259.277761089416241113",
+            "index": true
+          },
+          {
+            "key": "fin_surplus_value",
+            "value": "154387.277761089416241113",
+            "index": true
+          },
+          {
+            "key": "total_surplus_value",
+            "value": "232646.555522178832482226",
+            "index": true
+          },
+          {
+            "key": "arb_objective",
+            "value": "total_rujira_surplus",
+            "index": true
+          },
+          {
+            "key": "valuation",
+            "value": "78259.277761089416241113",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "wasm-rujira-fin/range.fee",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor18wkpr24rha007awldxx5hkyxdtnw5jamnuez9e27y6qy9u0tpkrqukal6t",
+            "index": true
+          },
+          {
+            "key": "base",
+            "value": "1",
+            "index": true
+          },
+          {
+            "key": "quote",
+            "value": "0",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "execute",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "wasm",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+            "index": true
+          },
+          {
+            "key": "action",
+            "value": "arb_swap",
+            "index": true
+          },
+          {
+            "key": "fin",
+            "value": "thor18wkpr24rha007awldxx5hkyxdtnw5jamnuez9e27y6qy9u0tpkrqukal6t",
+            "index": true
+          },
+          {
+            "key": "height",
+            "value": "28531109",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "execute",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor18wkpr24rha007awldxx5hkyxdtnw5jamnuez9e27y6qy9u0tpkrqukal6t",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "wasm",
+        "attributes": [
+          {
+            "key": "_contract_address",
+            "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+            "index": true
+          },
+          {
+            "key": "native_index",
+            "value": "0",
+            "index": true
+          },
+          {
+            "key": "native_tx_id",
+            "value": "9AA73213939DF6FDC27BADCA1B852E51D010764CFDCE8858D354E40885FBB31E",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "swap",
+        "attributes": [
+          {
+            "key": "pool",
+            "value": "TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T",
+            "index": true
+          },
+          {
+            "key": "swap_target",
+            "value": "0",
+            "index": true
+          },
+          {
+            "key": "swap_slip",
+            "value": "10",
+            "index": true
+          },
+          {
+            "key": "liquidity_fee",
+            "value": "614193",
+            "index": true
+          },
+          {
+            "key": "liquidity_fee_in_rune",
+            "value": "614193",
+            "index": true
+          },
+          {
+            "key": "emit_asset",
+            "value": "613579500 THOR.RUNE",
+            "index": true
+          },
+          {
+            "key": "streaming_swap_quantity",
+            "value": "1",
+            "index": true
+          },
+          {
+            "key": "streaming_swap_count",
+            "value": "1",
+            "index": true
+          },
+          {
+            "key": "pool_slip",
+            "value": "0",
+            "index": true
+          },
+          {
+            "key": "stable_reserve",
+            "value": "false",
+            "index": true
+          },
+          {
+            "key": "id",
+            "value": "9AA73213939DF6FDC27BADCA1B852E51D010764CFDCE8858D354E40885FBB31E",
+            "index": true
+          },
+          {
+            "key": "chain",
+            "value": "THOR",
+            "index": true
+          },
+          {
+            "key": "from",
+            "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+            "index": true
+          },
+          {
+            "key": "to",
+            "value": "thor1g98cy3n9mmjrpn0sxmn63lztelera37n8n67c0",
+            "index": true
+          },
+          {
+            "key": "coin",
+            "value": "385033427 TRON-USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T",
+            "index": true
+          },
+          {
+            "key": "memo",
+            "value": "=:BTC-BTC:thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf:4903/1/1",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      },
+      {
+        "type": "swap",
+        "attributes": [
+          {
+            "key": "pool",
+            "value": "BTC.BTC",
+            "index": true
+          },
+          {
+            "key": "swap_target",
+            "value": "4903",
+            "index": true
+          },
+          {
+            "key": "swap_slip",
+            "value": "10",
+            "index": true
+          },
+          {
+            "key": "liquidity_fee",
+            "value": "4",
+            "index": true
+          },
+          {
+            "key": "liquidity_fee_in_rune",
+            "value": "499834",
+            "index": true
+          },
+          {
+            "key": "emit_asset",
+            "value": "4906 BTC-BTC",
+            "index": true
+          },
+          {
+            "key": "streaming_swap_quantity",
+            "value": "1",
+            "index": true
+          },
+          {
+            "key": "streaming_swap_count",
+            "value": "1",
+            "index": true
+          },
+          {
+            "key": "pool_slip",
+            "value": "0",
+            "index": true
+          },
+          {
+            "key": "stable_reserve",
+            "value": "false",
+            "index": true
+          },
+          {
+            "key": "id",
+            "value": "9AA73213939DF6FDC27BADCA1B852E51D010764CFDCE8858D354E40885FBB31E",
+            "index": true
+          },
+          {
+            "key": "chain",
+            "value": "THOR",
+            "index": true
+          },
+          {
+            "key": "from",
+            "value": "thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf",
+            "index": true
+          },
+          {
+            "key": "to",
+            "value": "thor1g98cy3n9mmjrpn0sxmn63lztelera37n8n67c0",
+            "index": true
+          },
+          {
+            "key": "coin",
+            "value": "613579500 THOR.RUNE",
+            "index": true
+          },
+          {
+            "key": "memo",
+            "value": "=:BTC-BTC:thor1g7cqgq389q738jrwnxhuah0u86t2pwnruvsdq70l7yt6egj6q9jq4kfeqf:4903/1/1",
+            "index": true
+          },
+          {
+            "key": "mode",
+            "value": "EndBlock",
+            "index": true
+          }
+        ]
+      }
+    ]
+  }
+}
