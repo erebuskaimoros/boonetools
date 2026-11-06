@@ -99,7 +99,13 @@ default.
   A real ADR030 generation passed validation and browser inspection.
 - Local validation: 807 frontend tests, 1,127 backend tests using disposable
   PostgreSQL, 0 Svelte errors/56 baseline warnings, and production build passed.
-  Deployment is pending the exact commit's CI and server inference check.
+  CI passed for `a0765415ef90dfd2816c257df051737373b3df0e`; that exact release
+  is deployed and verified for both backend and frontend. The server CLI inference
+  check passed, the five-minute timer is enabled, and its first jobs completed
+  successfully. The public summary includes 225 saved reference entries from
+  329 observed vote/current-Mimir keys. The first two generation attempts remained
+  unresolved; their original evidence and attempt history are saved. The live
+  ADR030 panel and distinct-voter spelling comparison passed browser verification.
 - Operator setup/recovery: `docs/vote-key-reference.md`. Source/auth state lives
   outside releases under `/var/lib/boonetools-vote-references`. No Midgard calls,
   per-visitor model calls, or API-key billing fallback are used.
