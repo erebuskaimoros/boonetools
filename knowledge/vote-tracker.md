@@ -109,3 +109,17 @@ default.
 - Operator setup/recovery: `docs/vote-key-reference.md`. Source/auth state lives
   outside releases under `/var/lib/boonetools-vote-references`. No Midgard calls,
   per-visitor model calls, or API-key billing fallback are used.
+
+## ADR032 source exception — November 6, 2026
+
+The operator supplied the Discord-only proposal text identifying the tracked
+`ADR032 = 1` signal as **No Bond Retribution for Dissent**, a nonbinding pledge
+against retaliation against operator or bond-provider funds for voting, speech,
+or political alignment. Its stated acceptance threshold is two-thirds of active
+validators; this does not change protocol code or establish live acceptance.
+
+The official GitLab limit-orders proposal uses the same number but is a different
+proposal. Number equality is therefore insufficient to identify this vote.
+ADR030 remains the delegated-node-operator proposal. The correction must take
+precedence over cached/generated GitLab descriptions and preserve old revisions.
+Discord provenance is explicit, with the [original message](https://discord.com/channels/838986635756044328/839001804812451873/1557035254051770391) supplied by the operator.

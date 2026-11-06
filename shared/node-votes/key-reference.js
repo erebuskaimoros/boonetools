@@ -1,4 +1,5 @@
 import { adrNumber } from './keys.js';
+import { getManualVoteKeyReference } from './manual-references.js';
 
 // Reviewed against the mainnet version reported on 2026-11-06. Descriptions are
 // editorial summaries of the linked consumers, not inferred from key names.
@@ -172,10 +173,6 @@ const adrs = {
     'Asks validators to choose between closer cooperation with shared revenue and POL, limited cooperation, or discontinuing the App Layer on THORChain. It also proposes how future exploit losses should be handled.',
     'adr-031-rujira-alignment.md', 'c39c90774a4bccb4b4f648e251b7037810ae0062',
     'Proposal options: 1 = reinforce cooperation; 2 = limited cooperation; 3 = discontinue the App Layer. This document is from the proposal’s GitLab revision.'],
-  32: ['Base-layer limit orders',
-    'Add fixed-price resting liquidity inside the AMM swap path, initially using trade assets. Orders can partially fill as swaps cross their price, alongside the existing limit-swap mechanism.',
-    'adr-032-limit-orders.md', '67361992361c018eeca2d1fc4cfe13db740f48b9',
-    'This document is from the proposal’s GitLab revision. A vote does not itself deploy the proposed feature.']
 };
 
 const chains = 'BTC|ETH|BSC|BASE|AVAX|LTC|BCH|DOGE|GAIA|TRON|XRP|SOL|ZEC|THOR';
@@ -256,6 +253,8 @@ function family(key) {
 
 export function getVoteKeyReference(rawKey) {
   const key = String(rawKey ?? '').trim().toUpperCase();
+  const manual = getManualVoteKeyReference(key);
+  if (manual) return manual;
   const number = adrNumber(key);
   if (number != null && adrs[number]) {
     const [title, summary, file, commit, note = 'ADR votes signal a governance decision; the document does not establish whether every proposed change is deployed.'] = adrs[number];
@@ -281,6 +280,9 @@ export function getVoteKeyReference(rawKey) {
 // servers and malformed/new schemas fall back to the bundled reviewed copy.
 export function resolveVoteKeyReference(rawKey, catalog = {}) {
   const fallback = getVoteKeyReference(rawKey);
+  // Only the bundled allowlist grants manual precedence. Stale central entries
+  // and later generated text cannot reassign a colliding document number.
+  if (fallback.maintenance === 'manual') return fallback;
   const entry = Object.hasOwn(catalog || {}, fallback.key) ? catalog[fallback.key] : null;
   if (!entry || entry.key !== fallback.key || !['reviewed', 'generated', 'unrecognized'].includes(entry.status)
     || !['mimir', 'adr', 'upgrade'].includes(entry.kind)
@@ -289,5 +291,6 @@ export function resolveVoteKeyReference(rawKey, catalog = {}) {
     || !Array.isArray(entry.sources) || !entry.sources.length
     || !entry.sources.every(link => typeof link.label === 'string' &&
       /^https:\/\/gitlab\.com\/thorchain\/thornode\/-\/blob\/[a-f0-9]{40}\/[a-zA-Z0-9_./-]+(?:#L\d+)?$/.test(link.url))) return fallback;
-  return entry;
+  const { maintenance, nonbinding, provenance, ...validated } = entry;
+  return validated;
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { getVoteKeyReference, REFERENCE_REVIEW } from '../src/lib/node-votes/key-reference.js';
+import { getVoteKeyReference, resolveVoteKeyReference, REFERENCE_REVIEW } from '../src/lib/node-votes/key-reference.js';
 import { adrNumber, buildAdrPreferences } from '../src/lib/node-votes/adr-preference.js';
 
 const inventory = JSON.parse(readFileSync(new URL('./fixtures/node-votes/reference-keys.json', import.meta.url)));
@@ -9,12 +9,38 @@ const active = ['a', 'b', 'c'].map((node_address) => ({ node_address }));
 const row = (key, nodes, extra = {}) => ({ mimir_key: key, current_vote_source: 'thornode-active-node-mimir',
   values: [{ value: '1', nodes, count: nodes.length }], ...extra });
 
+test('ADR032 uses the nonbinding Discord commitment despite the GitLab number collision', () => {
+  for (const key of ['ADR032', 'ADR32', 'ADR-032']) {
+    const reference = getVoteKeyReference(key);
+    assert.equal(reference.title, 'ADR 32: No Bond Retribution for Dissent');
+    assert.equal(reference.key, key);
+    assert.equal(reference.nonbinding, true);
+    assert.equal(reference.maintenance, 'manual');
+    assert.equal(reference.provenance.kind, 'discord');
+    assert.equal(reference.sources.some(source => source.url?.includes('gitlab.com')), false);
+    const stale = { ...reference, title: 'ADR 32: Base-layer limit orders', maintenance: undefined,
+      sources: [{ label: 'Official ADR on GitLab', url: `https://gitlab.com/thorchain/thornode/-/blob/${'a'.repeat(40)}/docs/architecture/adr-032-limit-orders.md` }] };
+    assert.equal(resolveVoteKeyReference(key, { [key]: stale }).title, reference.title);
+    assert.equal(resolveVoteKeyReference(key, { [key]: { ...stale, status: 'generated' } }).title, reference.title);
+  }
+  assert.equal(getVoteKeyReference('ADR030').sources[0].file, 'docs/architecture/adr-030-delegated-node-operator-permissions.md');
+  assert.equal(getVoteKeyReference('ADR032EXTRA').status, 'unknown');
+});
+
 test('every observed vote key has a reviewed explanation or an explicit reviewed mismatch', () => {
   assert.equal(new Set(inventory.keys).size, 165);
   for (const key of inventory.keys) {
     const reference = getVoteKeyReference(key);
     assert.equal(reference.key, key);
     assert.ok(['reviewed', 'unrecognized'].includes(reference.status), key);
+    if (reference.maintenance === 'manual') {
+      assert.equal(reference.provenance.kind, 'discord');
+      assert.equal(reference.provenance.suppliedBy, 'site-operator');
+      assert.ok(reference.provenance.text.length > 100);
+      assert.deepEqual(reference.sources, [{ label: 'Original proposal on Discord',
+        url: 'https://discord.com/channels/838986635756044328/839001804812451873/1557035254051770391' }]);
+      continue;
+    }
     assert.ok(reference.sources.length > 0, key);
     for (const link of reference.sources) {
       const url = new URL(link.url);
@@ -38,7 +64,7 @@ test('ADR aliases share the official document without replacing raw key identity
 });
 
 test('archived and unmerged ADRs link to the actual reviewed document revisions', () => {
-  for (const key of ['ADR024', 'ADR031', 'ADR032']) {
+  for (const key of ['ADR024', 'ADR031']) {
     const result = getVoteKeyReference(key);
     assert.equal(result.kind, 'adr');
     assert.notEqual(result.sources[0].commit, REFERENCE_REVIEW.commit);

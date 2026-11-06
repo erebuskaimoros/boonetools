@@ -28,14 +28,20 @@ recent events. Compiled constants are not presented as vote keys.
   architecture tree; the panel explains that the implemented Mimir names differ.
 - ADR 31: proposal revision `c39c90774a4bccb4b4f648e251b7037810ae0062`,
   `docs/architecture/adr-031-rujira-alignment.md` (MR !4971).
-- ADR 32: proposal revision `67361992361c018eeca2d1fc4cfe13db740f48b9`,
-  `docs/architecture/adr-032-limit-orders.md` (MR !4944).
+- ADR 32: one-off, nonbinding **No Bond Retribution for Dissent** proposal,
+  published in [Discord](https://discord.com/channels/838986635756044328/839001804812451873/1557035254051770391).
+  The site operator supplied the full proposal text and its direct message URL
+  on November 6. The full supplied text is retained in
+  `shared/node-votes/manual-references.js` and in the saved revision evidence.
+  The distinct GitLab limit-orders proposal uses the same number; it is not
+  the meaning of this tracked vote.
 - Other covered ADRs use their documents in the reviewed release. A document’s
   proposal status and a vote count do not imply deployment; the panels say so.
 
-All 67 distinct source permalinks were checked against the release files or
-the official GitLab repository file API, including the three non-release ADRs.
-Source URLs pin commits so lines cannot drift beneath an existing explanation.
+GitLab source permalinks were checked against the release files or the official
+repository file API and pin commits so lines cannot drift beneath an existing
+explanation. The ADR 32 exception links to the operator-supplied Discord message
+and is explicitly distinguished from code-derived summaries.
 
 To refresh the catalog, compare current tracker keys and the deployed THORNode
 version, review affected consumers and ADR documents, update explanations and
@@ -85,6 +91,25 @@ is correct: the UI explicitly labels these **AI summary · not human reviewed**.
 Prior revisions remain in the database, and failed updates retain the saved
 explanation. Reviewed entries are reused at their reviewed release. Source
 checks retry daily; network-version changes bring entries forward in the queue.
+
+### Manual vote exceptions
+
+ADR032, ADR32, and ADR-032 share a bundled manual reference for the nonbinding
+Discord pledge while retaining their separate on-chain vote identities. The
+proposal asks operators not to use bans, upgrades, or Mimir changes to punish
+votes, expression, or affiliations by taking or restricting bond funds. It
+excludes automatic protocol slashing and conduct-based action for theft/exploit
+participation, vault collusion, ongoing harmful negligence, and ADR-028 recovery.
+The panel states the proposal's `ADR032 = 1` signal and two-thirds acceptance
+criterion without claiming that acceptance has occurred or that code enforces it.
+
+Only the bundled exception allowlist grants manual precedence. It overrides
+stale/generated central entries, and the worker skips GitLab discovery and
+inference for these keys. Seeding repairs previously saved aliases even if they
+have left the current vote inventory, preserves their prior revision, and records
+the supplied Discord evidence once. Automatic saves cannot overwrite the
+exception; ordinary central entries cannot grant themselves manual provenance.
+Other references retain the strict pinned-GitLab-link validation.
 
 The default operational ceiling is two keys per run and 20 model calls per UTC
 day, configurable with `VOTE_REFERENCE_MAX_CALLS_PER_DAY` (maximum 100). This is

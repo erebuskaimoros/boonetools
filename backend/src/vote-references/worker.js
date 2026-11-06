@@ -3,6 +3,7 @@ import { withCredentialLock, accessCredentials, listModels, generateWithSubscrip
 import { collectReferenceKeys } from './catalog.js';
 import { createSourceRepository, evidenceHash } from './sources.js';
 import { REFERENCE_PROMPT, validateGeneratedReference } from './generate.js';
+import { getManualVoteKeyReference } from '../../../shared/node-votes/manual-references.js';
 
 export async function processReferences({ store, payload, version, authDirectory, sourceDirectory,
   model, maxCalls = 20, maxItems = 2, now = new Date(), source = createSourceRepository(sourceDirectory),
@@ -12,7 +13,7 @@ export async function processReferences({ store, payload, version, authDirectory
   const state = await store.state();
   if (state?.paused_until && new Date(state.paused_until) > now) return { skipped: true, reason: state.last_error };
   if (!/^\d+\.\d+\.\d+$/.test(version || '')) return { skipped: true, reason: 'source_version_unavailable' };
-  const due = await store.due(version, maxItems);
+  const due = (await store.due(version, maxItems)).filter(row => !getManualVoteKeyReference(row.vote_key));
   if (!due.length) return { processed: 0 };
   await source.init(version);
   let processed = 0;

@@ -67,6 +67,7 @@
   <div class="body">
     <code class="key">{target.key}</code>
     <h2 id="vote-reference-title">{reference.title}</h2>
+    {#if reference.nonbinding}<span class="warning">NONBINDING · DISCORD PROPOSAL</span>{/if}
     {#if reference.status !== 'reviewed'}
       <span class="warning">{reference.status === 'unrecognized' ? 'UNRECOGNIZED IN REVIEWED CODE' : reference.status === 'generated' ? 'AI SUMMARY · NOT HUMAN REVIEWED' : 'NOT YET REVIEWED'}</span>
     {/if}
@@ -101,7 +102,13 @@
     {#each reference.sources as link}
       <a href={link.url} target="_blank" rel="noopener noreferrer">{link.label} ↗</a>
     {/each}
-    <footer>{reference.status === 'generated' ? 'Generated' : 'Reviewed'} {reference.review.date}{reference.kind !== 'adr' ? ` · THORNode ${reference.review.version}` : ''}</footer>
+    {#if reference.maintenance === 'manual'}
+      <section aria-label="Proposal source">
+        <h3>Source</h3>
+        <p class="note">{reference.provenance.label}. {reference.provenance.note}</p>
+      </section>
+    {/if}
+    <footer>{reference.maintenance === 'manual' ? 'Recorded from supplied text' : reference.status === 'generated' ? 'Generated' : 'Reviewed'} {reference.review.date}{reference.kind !== 'adr' ? ` · THORNode ${reference.review.version}` : ''}</footer>
   </div>
 </dialog>
 
