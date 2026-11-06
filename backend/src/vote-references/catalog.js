@@ -15,9 +15,15 @@ export function createReferenceStore(client) {
       for (const key of keys) {
         const seed = getVoteKeyReference(key);
         const known = seed.status !== 'unknown';
-        await query(`insert into vote_key_references(vote_key, reference_json, source_version, next_attempt_at)
+        await query(`with inserted as (
+          insert into vote_key_references(vote_key, reference_json, source_version, next_attempt_at)
           values($1,$2,$3,now() + case when $4 then interval '1 day' else interval '0 seconds' end)
-          on conflict(vote_key) do nothing`, [key, known ? seed : null, known ? seed.review.version : '', known]);
+          on conflict(vote_key) do nothing returning vote_key
+        ) insert into vote_key_reference_revisions
+          (vote_key,evidence_hash,source_version,reference_json,evidence_json,model,outcome)
+          select vote_key,'',$3,$2,$5,'','reviewed_seed' from inserted where $4`,
+        [key, known ? seed : null, known ? seed.review.version : '', known,
+          { bundled: true, sources: seed.sources, review: seed.review }]);
       }
     },
     async state() { return (await query('select * from vote_key_reference_worker where singleton')).rows[0]; },

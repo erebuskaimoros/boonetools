@@ -81,3 +81,25 @@ by every protocol constant. Constants are not removed when a matching Mimir
 exists; the default remains visible and is marked `OVERRIDDEN` with the active
 Mimir value so the page distinguishes current network state from the compiled
 default.
+
+## Vote reference catalog — November 6, 2026
+
+- `be93747` adds the full 165-key reviewed reference inventory, info panels, and
+  distinct-active-validator ADR spelling preference. No vote identities or quorum
+  logic change.
+- The operator authorized BooneTools Vote References through OpenAI subscription
+  OAuth. Live model discovery and completed inference succeeded. Credentials were
+  transferred privately to the server; only the server will own future refreshes.
+  Credential contents and account identifiers are intentionally not recorded here.
+- The independent five-minute worker queues exact keys from existing snapshots,
+  reads pinned release/MR sources, validates generated citations, and stores
+  revision history. Incomplete evidence remains unresolved; generated explanations
+  are labeled not human reviewed. The first live Mimir trial correctly abstained
+  because lookup helpers were missing; retrieval now includes those helpers.
+  A real ADR030 generation passed validation and browser inspection.
+- Local validation: 807 frontend tests, 1,127 backend tests using disposable
+  PostgreSQL, 0 Svelte errors/56 baseline warnings, and production build passed.
+  Deployment is pending the exact commit's CI and server inference check.
+- Operator setup/recovery: `docs/vote-key-reference.md`. Source/auth state lives
+  outside releases under `/var/lib/boonetools-vote-references`. No Midgard calls,
+  per-visitor model calls, or API-key billing fallback are used.

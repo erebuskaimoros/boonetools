@@ -103,6 +103,8 @@ test('Postgres catalog retains revision history and idempotent queueing', { skip
   await store.seed(['NEWCONTROL']);
   assert.equal((await client.query("select count(*) from vote_key_references where vote_key='NEWCONTROL'")).rows[0].count, '1');
   assert.equal((await store.publicCatalog()).ADR30.status, 'reviewed');
+  await store.seed(['ADR30']);
+  assert.equal((await client.query("select count(*) from vote_key_reference_revisions where vote_key='ADR30' and outcome='reviewed_seed'")).rows[0].count, '1');
   const result = validateGeneratedReference(JSON.stringify(generated), evidence);
   await store.save('NEWCONTROL', evidence, evidenceHash(evidence), result, 'model', { input_tokens: 10 });
   await store.save('NEWCONTROL', evidence, evidenceHash(evidence), { resolved: false, reason: 'ambiguous' }, 'model', {});
