@@ -130,3 +130,17 @@ test('POL TVL summarizes each stock independently without summing dollars across
   assert.deepEqual(cards.map(card => card.value), [15, 20, 35, 20]);
   assert.deepEqual(cards.map(card => card.secondary.value), [20, null, 40, 0]);
 });
+
+
+test('App Layer fee summaries count only valued observations, not unpriced fees or missing days', () => {
+  const rows = prepareAppLayerChart({ grain: 'daily', rows: [
+    { bucket_start: '2026-11-03', liquidity_fee_usd: 1, liquidity_fee_rune: 2, rune_price_usd: .5, unpriced_events: 0 },
+    { bucket_start: '2026-11-05', liquidity_fee_usd: 0, liquidity_fee_rune: 10, rune_price_usd: 0, unpriced_events: 2, unpriced_fee_rune: 10 }
+  ] }, 'generated');
+  const result = summarizeMetric(rows, appLayerSummaryMetrics('generated')[0]);
+  assert.equal(result.count, 1);
+  assert.equal(result.total, 1);
+  const unpriced = summarizeMetric([rows.at(-1)], appLayerSummaryMetrics('generated')[0]);
+  assert.equal(unpriced.total, null);
+  assert.equal(unpriced.count, 0);
+});

@@ -295,6 +295,17 @@ stop: clearing a Wasm halt does not recreate missing collector schedules.
 The performance and freshness contract for every dashboard read model is in
 [`performance-architecture.md`](./performance-architecture.md).
 
+Generated App Layer liquidity fees use the independent
+`boonetools-rujira-base-fees.timer` (five minutes) and
+`/functions/v1/app-layer-base-fees`. Saved RUNE fees remain usable while USD
+valuation is pending. `unpriced_events`, `unpriced_fee_rune`, and
+`priced_fee_usd` describe each aggregate; `liquidity_fee_usd` is null when
+positive fees lack prices. Corresponding global metadata carries
+`unpricedEventCount`, `unpricedFeeRune`, and `pricedLiquidityFeeUsd`.
+Unpriced fees are distinct from verified zero fees and missing action history.
+Inspect the job's `stats_json.pricing` even when its overall status is success.
+See [pricing recovery deployment](deployment.md#app-layer-generated-fee-pricing-recovery).
+
 ## Local / Server Runtime Env
 
 Start from `backend/.env.example` and set at least:

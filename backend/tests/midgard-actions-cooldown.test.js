@@ -45,7 +45,9 @@ function fixture(t, actionFailure, failurePath = '/actions', base = BASE) {
     if (route.startsWith(failurePath)) return actionFailure();
     return new Response(JSON.stringify(route === '/health'
       ? { database: true, inSync: true, lastAggregated: { height: 1, timestamp: 1788999300 } }
-      : { intervals: [], meta: { totalVolume: '100', totalFees: '2' } }), {
+      : route.startsWith('/history/rune')
+        ? { intervals: [{ startTime: '1', endTime: '2', runePriceUSD: '0.6' }] }
+        : { intervals: [], meta: { totalVolume: '100', totalFees: '2' } }), {
       headers: { 'content-type': 'application/json' }
     });
   });
@@ -82,7 +84,8 @@ for (const [failed, variant, healthy] of [
   ['/health', '/health/?check=another', '/network'],
   ['/bonds/thor1first', '/bonds/thor1second', '/health'],
   ['/history/depths/BTC.BTC?from=1', '/history/depths/ZEC.ZEC?from=2', '/history/swaps?pool=BTC.BTC'],
-  ['/history/earnings?from=1', '/history/earnings/?from=2', '/history/swaps?pool=BTC.BTC']
+  ['/history/earnings?from=1', '/history/earnings/?from=2', '/history/swaps?pool=BTC.BTC'],
+  ['/history/rune?interval=week&from=1', '/history/rune/?interval=day&from=2', '/health']
 ]) {
   test(`${failed} shares its failure across resource/query variants without blocking ${healthy}`, async t => {
     const f = fixture(t, () => new Response('upstream unavailable', { status: 503 }), failed);
@@ -124,7 +127,7 @@ for (const base of [BASE, 'https://gateway.liquify.com/api=test-shared-cooldown/
       test(`Midgard ${endpoint} ${response.name} still blocks other endpoints on ${base.includes('api=') ? 'dedicated' : 'public'} Midgard`, async (t) => {
         const f = fixture(t, () => new Response('provider unavailable', response), endpoint, base);
         await assert.rejects(() => fetchMidgard(endpoint, f.options));
-        for (const route of ['/health', '/history/swaps?pool=BTC.BTC', '/history/depths/BTC.BTC', '/network', '/bonds/thor1test']) {
+        for (const route of ['/health', '/history/swaps?pool=BTC.BTC', '/history/depths/BTC.BTC', '/history/rune?interval=week&from=1&to=2', '/network', '/bonds/thor1test']) {
           await assert.rejects(() => fetchMidgard(route, f.options), ProviderCooldownError);
         }
         assert.equal(f.calls.length, 1, 'A gateway cooldown must prevent further outbound requests');
@@ -132,3 +135,13 @@ for (const base of [BASE, 'https://gateway.liquify.com/api=test-shared-cooldown/
     }
   }
 }
+
+
+test('RUNE pricing is isolated from generic service failures but shares its own history cooldown', async t => {
+  const f = fixture(t, () => { throw new DOMException('This operation was aborted', 'AbortError'); },
+    '/pools', 'https://gateway.liquify.com/api=test-rune-pricing-isolation/v2');
+  await assert.rejects(() => fetchMidgard('/pools', f.options));
+  await fetchMidgard('/history/rune?interval=week&from=1&to=2', f.options);
+  await assert.rejects(() => fetchMidgard('/pools', f.options), ProviderCooldownError);
+  assert.equal(f.calls.length, 2, 'unrelated service failure must not suppress available fee pricing');
+});

@@ -683,3 +683,77 @@ integration('v2 discovery durably resumes, reparses cached blocks once, deduplic
   assert.equal(tracked.errorBlockCount, 1);
   assert.equal(tracked.feesReady, false);
 });
+
+
+integration('dashboard distinguishes unpriced positive fees from true zero across all aggregations', async t => {
+  const { default: pg } = await import('pg');
+  const { getRujiraBaseFeesDashboardPayload } = await import('../src/shared/rujira-base-fees.js');
+  const db = new pg.Client({ connectionString: acquisitionDatabaseUrl });
+  await db.connect();
+  t.after(() => db.end());
+  for (const name of ['actions', 'blocks', 'events', 'sync_state', 'job_runs']) {
+    await db.query(`create temporary table rujira_base_fee_${name} (like public.rujira_base_fee_${name} including all)`);
+  }
+  const source = RUJIRA_VS_CONTRACTS[1];
+  const entries = [
+    ['priced-before', '2026-10-25T12:00:00Z', 2, 0.5, 'BTC.BTC'],
+    ['priced-mixed', '2026-11-03T12:00:00Z', 4, 0.6, 'BTC.BTC'],
+    ['unpriced', '2026-11-03T13:00:00Z', 3, 0, 'BTC.BTC'],
+    ['zero-fee', '2026-11-04T12:00:00Z', 0, 0, 'ETH.ETH'],
+    ['priced-after', '2026-11-10T12:00:00Z', 5, 0.7, 'ETH.ETH']
+  ];
+  for (const [key, time, fee, price, pool] of entries) {
+    await db.query(`insert into rujira_base_fee_events
+      (event_key, canonical_key, height, block_time, liquidity_fee_rune, rune_price_usd,
+       liquidity_fee_usd, included, from_address, pool, classification)
+      values ($1, $1, 28558676, $2, $3, $4, $3::double precision * $4::double precision, true, $5, $6, $6)`,
+    [key, time, fee, price, source.address, pool]);
+  }
+  const payload = await getRujiraBaseFeesDashboardPayload(db);
+  assert.equal(payload.meta.totalLiquidityFeeRune, 14);
+  assert.equal(payload.meta.totalLiquidityFeeUsd, null, 'partial USD must not masquerade as the total');
+  assert.equal(payload.meta.pricedLiquidityFeeUsd, 6.9);
+  assert.equal(payload.meta.unpricedEventCount, 1);
+  assert.equal(payload.meta.unpricedFeeRune, 3);
+  assert.equal(payload.meta.pricingComplete, false);
+  assert.equal(payload.meta.trackedContracts.find(row => row.key === source.key).unpricedEventCount, 1);
+  for (const rows of [payload.daily, payload.weekly, payload.routes, payload.pools]) {
+    const mixed = rows.find(row => row.unpriced_events === 1);
+    assert.ok(mixed, 'each grouping discloses the missing positive-fee event');
+    assert.equal(mixed.liquidity_fee_usd, null);
+    assert.equal(mixed.pricing_complete, false);
+    assert.equal(mixed.unpriced_fee_rune, 3);
+    assert.ok(mixed.priced_fee_usd > 0, 'priced subtotal remains available');
+  }
+  assert.equal(payload.daily.find(row => row.day_start === '2026-11-03').priced_fee_usd, 2.4);
+  assert.equal(payload.daily.find(row => row.day_start === '2026-11-04').liquidity_fee_usd, 0);
+  assert.equal(payload.daily.find(row => row.day_start === '2026-11-04').pricing_complete, true);
+  for (const rows of [payload.daily, payload.weekly]) {
+    assert.equal(rows[0].cumulative_usd, 1);
+    assert.equal(rows.at(-1).liquidity_fee_usd, 3.5);
+    assert.equal(rows.at(-1).cumulative_usd, null, 'later priced buckets do not close an earlier gap');
+    assert.equal(rows.at(-1).cumulative_priced_usd, 6.9);
+    assert.equal(rows.at(-1).cumulative_unpriced_events, 1);
+    assert.equal(rows.at(-1).cumulative_unpriced_fee_rune, 3);
+    assert.equal(rows.at(-1).cumulative_pricing_complete, false);
+  }
+  const byKey = Object.fromEntries(payload.recent_events.map(row => [row.event_key, row]));
+  assert.equal(byKey.unpriced.liquidity_fee_usd, null);
+  assert.equal(byKey.unpriced.unpriced_events, 1);
+  assert.equal(byKey.unpriced.priced_fee_usd, 0);
+  assert.equal(byKey['zero-fee'].liquidity_fee_usd, 0);
+  assert.equal(byKey['zero-fee'].unpriced_events, 0);
+  assert.equal(byKey['zero-fee'].pricing_complete, true);
+  assert.equal(byKey['priced-before'].liquidity_fee_usd, 1);
+
+  // Normal price recovery fills only missing values; existing native and USD
+  // amounts remain unchanged and cumulative completeness can recover naturally.
+  await db.query("update rujira_base_fee_events set rune_price_usd = 0.6, liquidity_fee_usd = 1.8 where event_key = 'unpriced'");
+  const recovered = await getRujiraBaseFeesDashboardPayload(db);
+  assert.equal(recovered.meta.totalLiquidityFeeRune, 14);
+  assert.equal(recovered.meta.totalLiquidityFeeUsd, 8.7);
+  assert.equal(recovered.meta.unpricedEventCount, 0);
+  assert.equal(recovered.meta.pricingComplete, true);
+  assert.equal(recovered.daily.at(-1).cumulative_usd, 8.7);
+  assert.equal(recovered.weekly.at(-1).cumulative_usd, 8.7);
+});

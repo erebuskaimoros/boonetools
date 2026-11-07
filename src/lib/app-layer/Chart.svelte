@@ -2,7 +2,7 @@
   import RangeSummary from '../charts/RangeSummary.svelte';
   import TimeSeriesChart from '../charts/TimeSeriesChart.svelte';
   import { utcDayIndices } from '../charts/viewport.js';
-  import { appLayerPresetWindow, appLayerSeries, appLayerSummaryMetrics, buildAppLayerOption, prepareAppLayerChart } from './charts.js';
+  import { appLayerPresetWindow, appLayerSeries, appLayerSummary, buildAppLayerOption, prepareAppLayerChart } from './charts.js';
 
   export let pick;
   export let chartKey;
@@ -24,6 +24,7 @@
   $: syncControls(chartKey, pick.grain, view, range);
   $: zoomWindow = custom ? customWindow : presetWindow;
   $: bounds = utcDayIndices(points, zoomWindow);
+  $: summary = appLayerSummary(points, chartKey, zoomWindow, pick.grain === 'weekly' ? 'week' : 'day');
   $: plotLabel = ariaLabel + (points.length
     ? `. Visible ${points[bounds.start].day} through ${points[bounds.end].day}; ${pick.grain} UTC buckets.` : '');
   $: options = { key: chartKey, grain: pick.grain, view, hidden };
@@ -60,8 +61,8 @@
       <button aria-label="Zoom out" on:click={() => host?.zoomBy(1.5)} disabled={points.length < 2}>[−]</button>
     </div>
   </div>
-  <RangeSummary rows={points} window={zoomWindow} metrics={appLayerSummaryMetrics(chartKey)} bucket={pick.grain === 'weekly' ? 'week' : 'day'} {loading}
-    note="Periodic values, including known empty activity buckets; never sums of the cumulative line." />
+  <RangeSummary rows={points} window={zoomWindow} cards={summary.cards} bucket={pick.grain === 'weekly' ? 'week' : 'day'} {loading}
+    note={summary.note} />
   <div class="plot">
     <TimeSeriesChart bind:this={host} {points} {options} buildOption={buildAppLayerOption}
       {zoomWindow} resetWindow={presetWindow} onZoom={zoomChanged}

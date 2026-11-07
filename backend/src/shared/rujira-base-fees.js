@@ -1583,7 +1583,7 @@ export async function refreshRujiraBaseFeePrices(client, options = {}) {
     `select distinct to_char(date_trunc('week', block_time at time zone 'UTC'), 'YYYY-MM-DD') as bucket_start
      from rujira_base_fee_events
      where block_time is not null and included = true and source <> 'dune'
-       and rune_price_usd = 0
+       and rune_price_usd = 0 and liquidity_fee_rune > 0
      order by bucket_start`
   );
   if (!rows.length) return { weeks: 0, priced_events: 0 };
@@ -1619,51 +1619,56 @@ export async function refreshRujiraBaseFeePrices(client, options = {}) {
   );
   return { weeks: prices.length, priced_events: Number(updateResult.rowCount) || 0,
     requests: loaded.requests || 0, pending_buckets: loaded.pending_buckets || 0,
+    recovery_retries: loaded.recovery_retries || 0, recovery_wait_ms: loaded.recovery_wait_ms || 0,
     ...(loaded.errors?.length ? { error: loaded.errors.join('; ') } : {}) };
 }
 
-function normalizeWeeklyRows(rows) {
-  let cumulativeRune = 0;
-  let cumulativeUsd = 0;
-  return rows.map((row) => {
-    const liquidityFeeRune = Number(row.liquidity_fee_rune) || 0;
-    const liquidityFeeUsd = Number(row.liquidity_fee_usd) || 0;
-    cumulativeRune += liquidityFeeRune;
-    cumulativeUsd += liquidityFeeUsd;
-    const weekStart = dateKey(row.week_start);
-    return {
-      week_start: weekStart,
-      week_end: dateKey(addDays(new Date(`${weekStart}T00:00:00.000Z`), 7)),
-      swap_events: Number(row.swap_events) || 0,
-      active_heights: Number(row.active_heights) || 0,
-      liquidity_fee_rune: roundNumber(liquidityFeeRune, 8),
-      rune_price_usd: Number(row.rune_price_usd) || 0,
-      liquidity_fee_usd: roundNumber(liquidityFeeUsd, 8),
-      cumulative_rune: roundNumber(cumulativeRune, 8),
-      cumulative_usd: roundNumber(cumulativeUsd, 8)
-    };
-  });
+// A native zero fee is known to be $0 without a price. Positive fees need
+// their saved historical valuation; a partial priced subtotal is never a total.
+const UNPRICED_BASE_FEE = 'liquidity_fee_rune > 0 and rune_price_usd <= 0';
+const PRICING_AGGREGATES = `count(*) filter (where ${UNPRICED_BASE_FEE})::bigint as unpriced_events,
+              coalesce(sum(liquidity_fee_rune) filter (where ${UNPRICED_BASE_FEE}), 0) as unpriced_fee_rune,
+              coalesce(sum(liquidity_fee_usd) filter (where not (${UNPRICED_BASE_FEE})), 0) as priced_fee_usd`;
+
+function normalizeFeePricing(row) {
+  const unpricedEvents = Number(row.unpriced_events) || 0;
+  const pricedFeeUsd = roundNumber(row.priced_fee_usd ?? row.liquidity_fee_usd, 8);
+  return {
+    unpriced_events: unpricedEvents,
+    unpriced_fee_rune: roundNumber(row.unpriced_fee_rune, 8),
+    priced_fee_usd: pricedFeeUsd,
+    pricing_complete: unpricedEvents === 0,
+    liquidity_fee_usd: unpricedEvents === 0 ? pricedFeeUsd : null
+  };
 }
 
-function normalizeDailyRows(rows) {
+function normalizePeriodRows(rows, interval) {
   let cumulativeRune = 0;
-  let cumulativeUsd = 0;
+  let cumulativePricedUsd = 0;
+  let cumulativeUnpricedEvents = 0;
+  let cumulativeUnpricedRune = 0;
   return rows.map((row) => {
     const liquidityFeeRune = Number(row.liquidity_fee_rune) || 0;
-    const liquidityFeeUsd = Number(row.liquidity_fee_usd) || 0;
+    const pricing = normalizeFeePricing(row);
     cumulativeRune += liquidityFeeRune;
-    cumulativeUsd += liquidityFeeUsd;
-    const dayStart = dateKey(row.day_start);
+    cumulativePricedUsd += pricing.priced_fee_usd;
+    cumulativeUnpricedEvents += pricing.unpriced_events;
+    cumulativeUnpricedRune += pricing.unpriced_fee_rune;
+    const start = dateKey(row[`${interval}_start`]);
     return {
-      day_start: dayStart,
-      day_end: dateKey(addDays(new Date(`${dayStart}T00:00:00.000Z`), 1)),
+      [`${interval}_start`]: start,
+      [`${interval}_end`]: dateKey(addDays(new Date(`${start}T00:00:00.000Z`), interval === 'week' ? 7 : 1)),
       swap_events: Number(row.swap_events) || 0,
       active_heights: Number(row.active_heights) || 0,
       liquidity_fee_rune: roundNumber(liquidityFeeRune, 8),
       rune_price_usd: Number(row.rune_price_usd) || 0,
-      liquidity_fee_usd: roundNumber(liquidityFeeUsd, 8),
+      ...pricing,
       cumulative_rune: roundNumber(cumulativeRune, 8),
-      cumulative_usd: roundNumber(cumulativeUsd, 8)
+      cumulative_priced_usd: roundNumber(cumulativePricedUsd, 8),
+      cumulative_unpriced_events: cumulativeUnpricedEvents,
+      cumulative_unpriced_fee_rune: roundNumber(cumulativeUnpricedRune, 8),
+      cumulative_pricing_complete: cumulativeUnpricedEvents === 0,
+      cumulative_usd: cumulativeUnpricedEvents === 0 ? roundNumber(cumulativePricedUsd, 8) : null
     };
   });
 }
@@ -1679,7 +1684,7 @@ function normalizeAggregateRows(rows) {
     swap_events: Number(row.swap_events) || 0,
     active_heights: Number(row.active_heights) || 0,
     liquidity_fee_rune: roundNumber(row.liquidity_fee_rune, 8),
-    liquidity_fee_usd: roundNumber(row.liquidity_fee_usd, 8)
+    ...normalizeFeePricing(row)
   }));
 }
 
@@ -1718,11 +1723,14 @@ async function fetchDashboardStats(client) {
               count(distinct height) filter (where included)::bigint as active_heights,
               coalesce(sum(liquidity_fee_rune) filter (where included), 0) as included_fee_rune,
               coalesce(sum(liquidity_fee_usd) filter (where included), 0) as included_fee_usd,
+              count(*) filter (where included and ${UNPRICED_BASE_FEE})::bigint as unpriced_events,
+              coalesce(sum(liquidity_fee_rune) filter (where included and ${UNPRICED_BASE_FEE}), 0) as unpriced_fee_rune,
+              coalesce(sum(liquidity_fee_usd) filter (where included and not (${UNPRICED_BASE_FEE})), 0) as priced_fee_usd,
               coalesce(array_agg(distinct source) filter (where source is not null), array[]::text[]) as source_providers,
               jsonb_build_array(${RUJIRA_VS_CONTRACTS.map((_, index) => `jsonb_build_object(
                 'address', $${index + 1}::text,
                 'included_events', count(*) filter (where included and from_address = $${index + 1}),
-                'unpriced_events', count(*) filter (where included and rune_price_usd <= 0 and from_address = $${index + 1})
+                'unpriced_events', count(*) filter (where included and ${UNPRICED_BASE_FEE} and from_address = $${index + 1})
               )`).join(',')}) as source_coverage,
               max(updated_at) as updated_at
        from rujira_base_fee_events`,
@@ -1794,6 +1802,7 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
               count(distinct height)::bigint as active_heights,
               coalesce(sum(liquidity_fee_rune), 0) as liquidity_fee_rune,
               coalesce(sum(liquidity_fee_usd), 0) as liquidity_fee_usd,
+              ${PRICING_AGGREGATES},
               coalesce(avg(nullif(rune_price_usd, 0)), 0) as rune_price_usd
        from rujira_base_fee_events
        where included = true
@@ -1807,6 +1816,7 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
               count(distinct height)::bigint as active_heights,
               coalesce(sum(liquidity_fee_rune), 0) as liquidity_fee_rune,
               coalesce(sum(liquidity_fee_usd), 0) as liquidity_fee_usd,
+              ${PRICING_AGGREGATES},
               coalesce(avg(nullif(rune_price_usd, 0)), 0) as rune_price_usd
        from rujira_base_fee_events
        where included = true
@@ -1819,7 +1829,8 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
               count(*)::bigint as swap_events,
               count(distinct height)::bigint as active_heights,
               coalesce(sum(liquidity_fee_rune), 0) as liquidity_fee_rune,
-              coalesce(sum(liquidity_fee_usd), 0) as liquidity_fee_usd
+              coalesce(sum(liquidity_fee_usd), 0) as liquidity_fee_usd,
+              ${PRICING_AGGREGATES}
        from rujira_base_fee_events
        where included = true
        group by classification, included, source_denom, source_contract, source_label
@@ -1830,7 +1841,8 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
               count(*)::bigint as swap_events,
               count(distinct height)::bigint as active_heights,
               coalesce(sum(liquidity_fee_rune), 0) as liquidity_fee_rune,
-              coalesce(sum(liquidity_fee_usd), 0) as liquidity_fee_usd
+              coalesce(sum(liquidity_fee_usd), 0) as liquidity_fee_usd,
+              ${PRICING_AGGREGATES}
        from rujira_base_fee_events
        where included = true
        group by pool
@@ -1841,7 +1853,8 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
               count(*)::bigint as swap_events,
               count(distinct height)::bigint as active_heights,
               coalesce(sum(liquidity_fee_rune), 0) as liquidity_fee_rune,
-              coalesce(sum(liquidity_fee_usd), 0) as liquidity_fee_usd
+              coalesce(sum(liquidity_fee_usd), 0) as liquidity_fee_usd,
+              ${PRICING_AGGREGATES}
        from rujira_base_fee_events
        where included = false
        group by classification, included, source_denom, source_contract, source_label
@@ -1849,7 +1862,10 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
     ),
     client.query(
       `select event_key, height, block_time, swap_id, pool, coin, memo,
-              liquidity_fee_rune, liquidity_fee_usd, classification,
+              liquidity_fee_rune, liquidity_fee_usd, rune_price_usd, classification,
+              case when ${UNPRICED_BASE_FEE} then 1 else 0 end as unpriced_events,
+              case when ${UNPRICED_BASE_FEE} then liquidity_fee_rune else 0 end as unpriced_fee_rune,
+              case when ${UNPRICED_BASE_FEE} then 0 else liquidity_fee_usd end as priced_fee_usd,
               source_contract, source_label, source_denom, source
        from rujira_base_fee_events
        where included = true
@@ -1859,13 +1875,13 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
     fetchDashboardStats(client)
   ]);
 
-  const weekly = normalizeWeeklyRows(weeklyResult.rows);
-  const daily = normalizeDailyRows(dailyResult.rows);
+  const weekly = normalizePeriodRows(weeklyResult.rows, 'week');
+  const daily = normalizePeriodRows(dailyResult.rows, 'day');
   const routes = normalizeAggregateRows(routesResult.rows);
   const pools = normalizeAggregateRows(poolsResult.rows);
   const excluded = normalizeAggregateRows(excludedResult.rows);
   const totalFeeRune = Number(stats.events.included_fee_rune) || 0;
-  const totalFeeUsd = Number(stats.events.included_fee_usd) || 0;
+  const pricing = normalizeFeePricing({ ...stats.events, liquidity_fee_usd: stats.events.included_fee_usd });
   const blockCounts = stats.blockCounts || {};
   const sync = stats.sync || {};
   const duneStats = sync?.stats_json || {};
@@ -1893,7 +1909,7 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
   });
 
   return {
-    schema_version: 2,
+    schema_version: 3,
     meta: {
       generatedAt: new Date().toISOString(),
       source: sourceProvider === 'dune'
@@ -1946,7 +1962,11 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
       excludedSwapFeeEventCount: Number(stats.events.excluded_events) || 0,
       activeHeightCount: Number(stats.events.active_heights) || 0,
       totalLiquidityFeeRune: roundNumber(totalFeeRune, 8),
-      totalLiquidityFeeUsd: roundNumber(totalFeeUsd, 8),
+      totalLiquidityFeeUsd: pricing.liquidity_fee_usd,
+      pricedLiquidityFeeUsd: pricing.priced_fee_usd,
+      unpricedEventCount: pricing.unpriced_events,
+      unpricedFeeRune: pricing.unpriced_fee_rune,
+      pricingComplete: pricing.pricing_complete,
       updatedAt: toIsoString(stats.events.updated_at || sync.updated_at),
       wsListener: stats.listener
         ? {
@@ -1970,7 +1990,8 @@ export async function getRujiraBaseFeesDashboardPayload(client = { query }) {
       coin: String(row.coin || ''),
       memo: String(row.memo || ''),
       liquidity_fee_rune: roundNumber(row.liquidity_fee_rune, 8),
-      liquidity_fee_usd: roundNumber(row.liquidity_fee_usd, 8),
+      rune_price_usd: Number(row.rune_price_usd) || 0,
+      ...normalizeFeePricing(row),
       classification: String(row.classification || ''),
       source_contract: String(row.source_contract || ''),
       source_label: String(row.source_label || ''),

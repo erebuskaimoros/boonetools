@@ -155,6 +155,29 @@ No database migration or cache reset is required. See
 
 ## Troubleshooting
 
+### App Layer generated-fee pricing recovery
+
+Deploy backend before frontend. No migration, new timer, quota reset, cache
+deletion, or historical action rescan is required. The normal five-minute
+`boonetools-rujira-base-fees.service` prices already saved events using the
+matching weekly RUNE/USD observation. Let an active job finish; an idle job may
+be started once deliberately to verify recovery.
+
+Ordinary `/history/rune` failures have their own cooldown family. Pricing has
+a shared bound of two recovery retries and 120 seconds of waiting across the
+invocation; gateway 429/Retry-After and request-budget deferrals remain binding.
+The configured primary, interval boundaries, cache provenance, and existing
+nonzero event valuations remain unchanged.
+
+Check the recorded job's pricing result and the public
+`app-layer-base-fees` response: unpriced event/RUNE counts should decrease and
+known USD subtotals should increase without changing native fee totals.
+Missing prices must remain nullable USD values, including mixed buckets and
+cumulative totals. Reload the dashboard and verify Unpriced/partial labels,
+native RUNE amounts, chart gaps, and daily/weekly/monthly summaries. A successful
+pricing pass does not repair missing legacy action history; those gaps remain
+unavailable instead of becoming zero-fee days.
+
 ### Pool Analysis endpoint isolation and short health recovery
 
 Backend-only release; no migration, timer change, cache deletion, budget reset,

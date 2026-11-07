@@ -161,3 +161,47 @@ test('hover callback resolves original UTC day after zoom, clears on exit, and i
     assert.equal(hovered, 'unchanged');
   } finally { controller.destroy(); }
 });
+
+
+test('App Layer generated fees keep unpriced observations and unknown gaps out of USD bars', () => {
+  const input = [
+    { bucket_start: '2026-11-03', liquidity_fee_rune: 2, liquidity_fee_usd: 1, rune_price_usd: .5, cumulative_usd: 1, swap_events: 1, unpriced_events: 0 },
+    { bucket_start: '2026-11-05', liquidity_fee_rune: 10, liquidity_fee_usd: 0, rune_price_usd: 0, cumulative_usd: 1, swap_events: 2, unpriced_events: 2, unpriced_fee_rune: 10 },
+    { bucket_start: '2026-11-06', liquidity_fee_rune: 0, liquidity_fee_usd: 0, rune_price_usd: .5, cumulative_usd: 1, swap_events: 1, unpriced_events: 0 }
+  ];
+  const rows = prepareAppLayerChart({ rows: input, grain: 'daily' }, 'generated');
+  assert.equal(rows[1].liquidity_fee_usd, null, 'a missing activity day is not a verified zero');
+  assert.equal(rows[2].liquidity_fee_usd, null, 'observed positive RUNE with missing price is not zero USD');
+  assert.equal(rows[3].liquidity_fee_usd, 0, 'genuine zero fee remains visible as zero');
+  const series = buildAppLayerOption(rows, { key: 'generated' }).series[0].data;
+  assert.deepEqual(series, [1, null, null, 0]);
+});
+
+test('unpriced fee coverage survives weekly/monthly grouping and rolling averages', () => {
+  const input = Array.from({ length: 30 }, (_, index) => ({
+    bucket_start: new Date(Date.UTC(2026, 10, index + 2)).toISOString().slice(0, 10),
+    liquidity_fee_usd: index === 4 ? null : 1,
+    liquidity_fee_rune: 2,
+    priced_fee_usd: index === 4 ? 0 : 1,
+    unpriced_events: index === 4 ? 1 : 0,
+    unpriced_fee_rune: index === 4 ? 2 : 0,
+    cumulative_usd: index < 4 ? index + 1 : null
+  })).filter((_, index) => index !== 8);
+  const points = prepareAppLayerChart({ rows: input, grain: 'daily' }, 'generated');
+  const weekly = buildAppLayerOption(points, { key: 'generated', analysis: { grain: 'week' } });
+  assert.deepEqual(weekly.series[0].data.slice(0, 3), [null, null, 7]);
+  const monthly = buildAppLayerOption(points, { key: 'generated', analysis: { grain: 'month' } });
+  assert.equal(monthly.series[0].data[0], null);
+  const rolling = buildAppLayerOption(points, { key: 'generated', analysis: { rolling: ['generated-7d'] } });
+  assert.equal(rolling.series[1].data[6], null);
+  assert.equal(rolling.series[1].data[14], null);
+  assert.equal(rolling.series[1].data[15], 1);
+  assert.equal(buildAppLayerOption(points, { key: 'generated', view: 'cumulative' }).series[0].data.at(-1), null);
+  const unknownTooltip = appLayerTooltip(points[8], { key: 'generated' });
+  assert.match(unknownTooltip, /RUNE fees unavailable/);
+  assert.doesNotMatch(unknownTooltip, /0 RUNE fees|0 cumulative RUNE/);
+  const groupedTooltip = weekly.tooltip.formatter([{ dataIndex: 1 }]);
+  assert.match(groupedTooltip, /Unavailable/);
+  assert.match(groupedTooltip, /observed RUNE fees/);
+  assert.match(groupedTooltip, /Fee coverage unavailable/);
+});

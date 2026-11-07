@@ -37,12 +37,12 @@ async function fixture(t) {
     // matching weekly observation rather than discard or substitute it.
     return { rows: [], requests: 0, pending_buckets: 0, errors: [] };
   } };
-  const add = (key, time, { included = true, price = 0, source = 'legacy' } = {}) => db.query(
+  const add = (key, time, { included = true, price = 0, source = 'legacy', fee = 10 } = {}) => db.query(
     `insert into rujira_base_fee_events
        (event_key, canonical_key, height, block_time, liquidity_fee_rune,
         rune_price_usd, liquidity_fee_usd, included, source, updated_at)
-     values ($1, $1, 1, $2, 10, $3::double precision, $3::double precision * 10, $4, $5, '2026-08-12T00:00:00Z')`,
-    [key, time, price, included, source]);
+     values ($1, $1, 1, $2, $6, $3::double precision, $3::double precision * $6::double precision, $4, $5, '2026-08-12T00:00:00Z')`,
+    [key, time, price, included, source, fee]);
   const rows = async () => Object.fromEntries((await db.query(`select event_key,
     rune_price_usd, liquidity_fee_usd, updated_at from rujira_base_fee_events order by event_key`))
     .rows.map(row => [row.event_key, { price: row.rune_price_usd, usd: row.liquidity_fee_usd, updated: row.updated_at.toISOString() }]));
@@ -98,4 +98,55 @@ integration('excluded rows alone do not schedule weekly price acquisition', asyn
   assert.deepEqual(f.calls, []);
   assert.equal(f.updates().length, 0);
   assert.deepEqual(await f.rows(), before);
+});
+
+
+integration('zero native fees need no USD price and do not schedule acquisition', async t => {
+  const f = await fixture(t);
+  await f.add('zero', '2026-08-04T12:00:00Z', { fee: 0 });
+  const before = await f.rows();
+  const result = await refreshRujiraBaseFeePrices(f.client, f.options);
+  assert.deepEqual(f.calls, []);
+  assert.equal(result.priced_events, 0);
+  assert.deepEqual(await f.rows(), before);
+});
+
+integration('a transient pricing timeout recovers the matching current week without rewriting old valuations', async t => {
+  const f = await fixture(t);
+  await f.add('old-valued', '2026-07-28T12:00:00Z', { price: 1.25 });
+  await f.add('new-v2-fee', '2026-11-03T12:00:00Z', { fee: 2 });
+  await f.add('dune-owned', '2026-11-03T13:00:00Z', { source: 'dune' });
+  const before = await f.rows();
+  let clock = Date.parse('2026-11-07T12:00:00Z');
+  const requests = [], waits = [], cached = [];
+  const result = await refreshRujiraBaseFeePrices(f.client, { ...f.options,
+    loadPrices: undefined,
+    now: () => new Date(clock),
+    loadCached: async () => null,
+    saveCached: async (_client, observation) => { cached.push(observation); },
+    sleep: async ms => { waits.push(ms); clock += ms; },
+    fetchMidgard: async (route, settings) => {
+      assert.equal(settings.bases.length, 1, 'price request remains pinned');
+      requests.push(route);
+      if (requests.length === 1) throw new DOMException('timeout', 'TimeoutError');
+      const params = new URL(route, 'https://midgard.example.invalid').searchParams;
+      assert.equal(params.get('interval'), 'week');
+      assert.equal(Number(params.get('from')), Date.parse('2026-11-02T00:00:00Z') / 1000);
+      assert.equal(Number(params.get('to')), Date.parse('2026-11-09T00:00:00Z') / 1000);
+      return { intervals: [{ startTime: params.get('from'), endTime: params.get('to'), runePriceUSD: '0.6' }] };
+    }
+  });
+  const after = await f.rows();
+  assert.equal(requests.length, 2);
+  assert.equal(waits.length, 1);
+  assert.ok(waits[0] <= 120000);
+  assert.equal(result.priced_events, 1);
+  assert.equal(after['new-v2-fee'].price, 0.6);
+  assert.equal(after['new-v2-fee'].usd, 1.2);
+  assert.deepEqual(after['old-valued'], before['old-valued']);
+  assert.deepEqual(after['dune-owned'], before['dune-owned']);
+  assert.equal(cached.length, 1);
+  assert.equal(cached[0].completedAt, null, 'current week remains provisional');
+  assert.equal((await f.db.query("select liquidity_fee_rune from rujira_base_fee_events where event_key = 'new-v2-fee'")).rows[0].liquidity_fee_rune, 2);
+  assert.equal((await f.db.query("select rune_price_usd from rujira_base_fee_rune_price_weeks where week_start = '2026-11-02'")).rows[0].rune_price_usd, 0.6);
 });

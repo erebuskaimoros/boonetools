@@ -23,7 +23,7 @@ function cooldownScope(path) {
   if (/^\/actions\/?$/.test(route)) return 'actions';
   const endpoint = route.match(/^\/(health|churns|network|bonds)(?:\/|$)/)?.[1];
   if (endpoint) return `midgard-${endpoint}`;
-  const history = route.match(/^\/history\/(swaps|depths|earnings)(?:\/|$)/)?.[1];
+  const history = route.match(/^\/history\/(swaps|depths|earnings|rune)(?:\/|$)/)?.[1];
   return history ? `midgard-history-${history}` : undefined;
 }
 

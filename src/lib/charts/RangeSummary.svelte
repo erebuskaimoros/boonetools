@@ -15,7 +15,7 @@
   $: partial = selected.filter(row => row.partial || row.provisional || row.priceProvisional).length;
   $: first = selected[0]?.day || selected[0]?.month;
   $: last = selected.at(-1)?.day || selected.at(-1)?.month;
-  const display = (item, exact = false) => !Number.isFinite(item.value) ? '—'
+  const display = (item, exact = false) => !Number.isFinite(item.value) ? item.unavailableLabel || '—'
     : item.format ? item.format(item.value) : formatSummaryValue(item.value, item.unit, exact);
 </script>
 

@@ -12,6 +12,7 @@ import {
   summarizeAppLayerValue,
   summarizeCollectorInventory
 } from '../src/lib/app-layer/model.js';
+import { normalizeGeneratedFees } from '../src/lib/app-layer/fee-pricing.js';
 
 test('app-layer CSV and reserve event normalization remain deterministic', () => {
   const rows = parseCsv(
@@ -168,7 +169,9 @@ test('accrued TC value aligns 01 and 03 without double-counting 02', () => {
     ]
   };
 
-  assert.deepEqual(pickAccruedValueRows(inflows, generatedFees, 'daily'), {
+  const combined = pickAccruedValueRows(inflows, generatedFees, 'daily');
+  assert.deepEqual({ ...combined, rows: combined.rows.map(({ bucket_start, accrued_value_usd, cumulative_usd, inflow_usd, liquidity_fee_usd }) =>
+    ({ bucket_start, accrued_value_usd, cumulative_usd, inflow_usd, liquidity_fee_usd })) }, {
     grain: 'daily',
     rows: [
       {
@@ -323,4 +326,56 @@ test('app-layer target resolution preserves live weights and fallback metadata',
     { address: 'a', label: 'A', percent: 25, isFallback: false },
     { address: 'b', label: 'B', percent: 75, isFallback: false }
   ]);
+});
+
+test('generated fee valuation preserves unpriced native fees, priced subtotals, and genuine zeros', () => {
+  const payload = normalizeGeneratedFees({
+    meta: { totalLiquidityFeeUsd: 3 },
+    daily: [
+      { day_start: '2026-11-02', liquidity_fee_rune: 2, liquidity_fee_usd: 1, rune_price_usd: 0.5, swap_events: 1, cumulative_usd: 1 },
+      { day_start: '2026-11-03', liquidity_fee_rune: 10, liquidity_fee_usd: 0, rune_price_usd: 0, swap_events: 2, cumulative_usd: 1 },
+      { day_start: '2026-11-04', liquidity_fee_rune: 0, liquidity_fee_usd: 0, rune_price_usd: 0, swap_events: 1, cumulative_usd: 1 },
+      { day_start: '2026-11-05', liquidity_fee_rune: 8, liquidity_fee_usd: null, priced_fee_usd: 2, unpriced_events: 1, unpriced_fee_rune: 4, swap_events: 3, cumulative_usd: null }
+    ],
+    weekly: [{ week_start: '2026-11-02', liquidity_fee_rune: 20, liquidity_fee_usd: 3, cumulative_usd: 3 }],
+    routes: [{ liquidity_fee_rune: 10, liquidity_fee_usd: 0, swap_events: 2 }]
+  });
+  assert.deepEqual(payload.daily.map(row => row.liquidity_fee_usd), [1, null, 0, null]);
+  assert.deepEqual(payload.daily.map(row => row.cumulative_usd), [1, null, null, null]);
+  assert.equal(payload.meta.unpricedEventCount, 3);
+  assert.equal(payload.meta.unpricedFeeRune, 14);
+  assert.equal(payload.meta.pricedLiquidityFeeUsd, 3);
+  assert.equal(payload.meta.totalLiquidityFeeUsd, null);
+  assert.equal(payload.weekly[0].liquidity_fee_usd, null);
+  assert.equal(payload.weekly[0].unpriced_events, 3);
+  assert.equal(payload.weekly[0].priced_fee_usd, 3);
+  assert.equal(payload.routes[0].liquidity_fee_usd, null);
+  assert.deepEqual(normalizeGeneratedFees(payload), payload);
+});
+
+test('unknown fee history remains unavailable after prices recover and through 01 plus 03 composition', () => {
+  const fees = normalizeGeneratedFees({ daily: [
+    { day_start: '2026-11-02', liquidity_fee_usd: 1, cumulative_usd: 1 },
+    { day_start: '2026-11-04', liquidity_fee_usd: 2, cumulative_usd: 3 }
+  ], weekly: [{ week_start: '2026-11-02', liquidity_fee_usd: 3, cumulative_usd: 3 }] });
+  assert.equal(fees.meta.unpricedEventCount, 0);
+  assert.equal(fees.meta.historyIncomplete, true);
+  assert.equal(fees.meta.totalLiquidityFeeUsd, null);
+  assert.equal(fees.meta.pricedLiquidityFeeUsd, 3);
+  assert.equal(fees.daily[1].liquidity_fee_usd, 2);
+  assert.equal(fees.daily[1].cumulative_usd, null);
+  assert.equal(fees.weekly[0].liquidity_fee_usd, null);
+  const combined = pickAccruedValueRows({ daily: [
+    { day_start: '2026-11-02', inflow_usd: 10, cumulative_usd: 10 },
+    { day_start: '2026-11-03', inflow_usd: 20, cumulative_usd: 30 },
+    { day_start: '2026-11-04', inflow_usd: 30, cumulative_usd: 60 }
+  ] }, fees, 'daily');
+  assert.deepEqual(combined.rows.map(row => row.accrued_value_usd), [11, null, 32]);
+  assert.deepEqual(combined.rows.map(row => row.cumulative_usd), [11, null, null]);
+  assert.equal(combined.rows[1].fee_coverage_unknown, true);
+  const totals = summarizeAppLayerValue({ reserveUsd: 10, polUsd: 2, liquidityFeeUsd: null });
+  assert.equal(totals.realizedTcUsd, null);
+  assert.equal(totals.totalTrackedUsd, null);
+  assert.equal(totals.reserveShare, null);
+  assert.equal(totals.liquidityFeeShare, null);
 });

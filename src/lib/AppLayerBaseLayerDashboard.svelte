@@ -38,6 +38,7 @@
     targetSummary
   } from './app-layer/model.js';
   import AppLayerChart from './app-layer/Chart.svelte';
+  import { normalizeGeneratedFees } from './app-layer/fee-pricing.js';
 
   const DATA_BASE = '/data/rujira-base-layer-fees';
   const THORCHAIN_NET_BASE = 'https://thorchain.net';
@@ -312,15 +313,25 @@
   $: reservePaymentSource = formatDataSource(reservePaymentMeta.source);
   $: latestReservePrice = latestWeek?.settlement_rune_price_usd || latestWeek?.rune_price_usd || 0;
   $: reservePriceRange = getWeeklyPriceRange(settlementWeeklyRows, 'settlement_rune_price_usd');
-  $: generatedFeeRows = generatedFees?.weekly || [];
+  $: valuedGeneratedFees = normalizeGeneratedFees(generatedFees);
+  $: generatedFeeRows = valuedGeneratedFees?.weekly || [];
   $: latestGeneratedFeeWeek = generatedFeeRows.at(-1) || null;
-  $: generatedFeeMeta = generatedFees?.meta || null;
-  $: generatedFeeRoutes = generatedFees?.routes || [];
-  $: topGeneratedFeeRoutes = generatedFeeRoutes.slice(0, 8);
+  $: generatedFeeMeta = valuedGeneratedFees?.meta || null;
+  $: generatedFeeRoutes = valuedGeneratedFees?.routes || [];
+  $: topGeneratedFeeRoutes = [...generatedFeeRoutes].sort((a, b) => b.unpriced_events - a.unpriced_events || b.priced_fee_usd - a.priced_fee_usd).slice(0, 8);
   $: totalGeneratedFeeRune =
     generatedFeeMeta?.totalLiquidityFeeRune || latestGeneratedFeeWeek?.cumulative_rune || 0;
-  $: totalGeneratedFeeUsd =
-    generatedFeeMeta?.totalLiquidityFeeUsd || latestGeneratedFeeWeek?.cumulative_usd || 0;
+  $: totalGeneratedFeeUsd = generatedFeeMeta ? generatedFeeMeta.totalLiquidityFeeUsd : null;
+  $: generatedFeeUnpricedCount = generatedFeeMeta?.unpricedEventCount || 0;
+  $: generatedFeeUnpricedRune = generatedFeeMeta?.unpricedFeeRune || 0;
+  $: pricedGeneratedFeeUsd = generatedFeeMeta?.pricedLiquidityFeeUsd || 0;
+  $: generatedFeeUsdLabel = feeUsdLabel(totalGeneratedFeeUsd, pricedGeneratedFeeUsd, generatedFeeUnpricedCount);
+  $: generatedFeePricingNote = generatedFeeUnpricedCount
+    ? `${number4.format(generatedFeeUnpricedRune)} RUNE in ${number2.format(generatedFeeUnpricedCount)} fee events is unpriced. ${usd2.format(pricedGeneratedFeeUsd)} is the known USD subtotal; USD totals remain incomplete.${generatedFeeMeta?.historyIncomplete ? ' Earlier fee history also has gaps.' : ''}`
+    : generatedFeeMeta?.historyIncomplete ? `${usd2.format(pricedGeneratedFeeUsd)} known USD subtotal. Earlier fee history has gaps; all-time totals remain incomplete.` : '';
+  function feeUsdLabel(value, knownUsd = 0, unpricedEvents = 0) {
+    return Number.isFinite(value) ? usd2.format(value) : knownUsd > 0 ? `${usd2.format(knownUsd)} known` : unpricedEvents ? 'Unpriced' : 'Unavailable';
+  }
   $: generatedFeeScope = generatedFeeMeta?.scope || 'pending generated-fee scan';
   $: generatedFeeSource = formatDataSource(generatedFeeMeta?.source);
   $: generatedFeeTrackedContracts = generatedFeeMeta?.trackedContracts || [];
@@ -378,7 +389,7 @@
     inflowMeta?.polAccruedUsd ?? inflowRows.at(-1)?.cumulative_pol_accrued_usd ?? 0
   );
   $: inflowDayCount = Number(inflowMeta?.dayCount || 0);
-  $: totalAccruedValueUsd = totalInflowUsd + totalGeneratedFeeUsd;
+  $: totalAccruedValueUsd = totalGeneratedFeeUsd === null ? null : totalInflowUsd + totalGeneratedFeeUsd;
   $: accruedValueLoading =
     (tcInflowsLoading && !inflowRows.length) ||
     (generatedFeesLoading && !generatedFeeRows.length);
@@ -454,11 +465,11 @@
     .slice(0, 8);
   $: baseRuneRatePerSecond = targetRatePerSecond(configs.base, 'rune');
 
-  $: accruedValuePick = pickAccruedValueRows(tcInflows, generatedFees, granularity.accrued);
+  $: accruedValuePick = pickAccruedValueRows(tcInflows, valuedGeneratedFees, granularity.accrued);
   $: collectedPick = pickAggRows(tcInflows, granularity.collected);
   $: paidPick = pickPaidRows(reserveEvents, weeklyRows, granularity.paid, reserveDailyRows);
   $: polPick = pickAggRows(tcInflows, granularity.pol);
-  $: generatedPick = pickAggRows(generatedFees, granularity.generated);
+  $: generatedPick = pickAggRows(valuedGeneratedFees, granularity.generated);
 
   async function refreshDashboard() {
     if (dashboardRefreshRunning) return;
@@ -866,7 +877,7 @@
         <a class="fnode blue stage fchannel-node" href="#chart-generated">
           <span class="fnode-kicker"><i>03</i> generated</span>
           <strong class="fnode-name">TC Liquidity Fees</strong>
-          <strong class="fnode-fig">{generatedFeesLoading && !generatedFeeRows.length ? '—' : usd2.format(totalGeneratedFeeUsd)}</strong>
+          <strong class="fnode-fig">{generatedFeesLoading && !generatedFeeRows.length ? '—' : generatedFeeUsdLabel}</strong>
           <p class="fnode-sub">flows to THORChain System Income; counted in Σ beside Reserve, while POL capital stays separate</p>
         </a>
       </div>
@@ -894,8 +905,9 @@
         <span class="benefit-hero-sigma">Σ</span>
         <span class="metric-label">realized value to tc</span>
       </div>
-      <strong class="benefit-hero-value">{topTotalsLoading ? '—' : usd2.format(totalRealizedTcUsd)}</strong>
+      <strong class="benefit-hero-value">{topTotalsLoading ? '—' : feeUsdLabel(totalRealizedTcUsd, totalReservePaidUsd + pricedGeneratedFeeUsd, generatedFeeUnpricedCount)}</strong>
       <small class="metric-foot">
+        {#if generatedFeePricingNote}{generatedFeePricingNote}<br />{/if}
         <b class="k-paid">02</b> TC Reserve + <b class="k-generated">03</b> System Income · excludes accrual lane 01 and separate POL capital
       </small>
     </div>
@@ -907,13 +919,13 @@
       </div>
       <div class="benefit-hero-leg blue">
         <span>03 → system income</span>
-        <strong>{generatedFeesLoading && !generatedFeeRows.length ? '—' : usd2.format(totalGeneratedFeeUsd)}</strong>
+        <strong>{generatedFeesLoading && !generatedFeeRows.length ? '—' : generatedFeeUsdLabel}</strong>
         <small>{totalRealizedTcUsd > 0 ? `${benefitLpShare.toFixed(0)}% of Σ` : 'liq fees'}</small>
       </div>
       <div class="benefit-hero-leg amber separate">
         <span>P → pol settled</span>
         <strong>{reservePaymentsLoading && !weeklyRows.length ? '—' : usd2.format(totalPolPaidUsd)}</strong>
-        <small>outside Σ · {topTotalsLoading ? '—' : usd2.format(totalObservedOutputUsd)} total observed paid outputs</small>
+        <small>outside Σ · {topTotalsLoading ? '—' : feeUsdLabel(totalObservedOutputUsd, totalReservePaidUsd + totalPolPaidUsd + pricedGeneratedFeeUsd, generatedFeeUnpricedCount)} total observed paid outputs</small>
       </div>
     </div>
   </article>
@@ -952,9 +964,9 @@
         <span class="metric-label">tc liq fees generated</span>
       </div>
       <strong class="metric-value">
-        {generatedFeesLoading && !generatedFeeRows.length ? '—' : usd2.format(totalGeneratedFeeUsd)}
+        {generatedFeesLoading && !generatedFeeRows.length ? '—' : generatedFeeUsdLabel}
       </strong>
-      <small class="metric-foot">{number4.format(totalGeneratedFeeRune)} RUNE · System Income side of Σ</small>
+      <small class="metric-foot">{number4.format(totalGeneratedFeeRune)} RUNE · System Income side of Σ{generatedFeeUnpricedCount ? ` · ${number4.format(generatedFeeUnpricedRune)} RUNE unpriced` : ''}</small>
     </article>
   </div>
 
@@ -983,7 +995,8 @@
     <p class="block-lede">
       Each bar combines TC-retained Base Layer earnings from <b class="k-collected">01</b>
       with non-overlapping TC liquidity fees from <b class="k-generated">03</b> in the same UTC
-      bucket. Current cumulative TC-retained value: {accruedValueLoading ? '—' : usd2.format(totalAccruedValueUsd)}.
+      bucket. Current cumulative TC-retained value: {accruedValueLoading ? '—' : feeUsdLabel(totalAccruedValueUsd, totalInflowUsd + pricedGeneratedFeeUsd, generatedFeeUnpricedCount)}.
+      {#if generatedFeePricingNote}{generatedFeePricingNote}{/if}
       Lane 01 retains 100% before the Aug 13, 2026 UTC bucket and two-thirds beginning with that
       daily bucket; the other third accrues to the separate P chart. Settlement timing does not
       alter either series, and pre-cutover inventory paid later is not recast as new POL accrual.
@@ -1259,6 +1272,7 @@
       {generatedFeeSource} · {generatedFeeBackfillLabel}. Scan scope:
       {generatedFeeScope}
     </p>
+    {#if generatedFeePricingNote}<TerminalAlert tone="warn">{generatedFeePricingNote}</TerminalAlert>{/if}
     {#if generatedFeeTrackedContracts.length}
       <p class="scope-note">
         Tracking:
@@ -1269,6 +1283,8 @@
             (updates retrying)
           {:else if !contract.backfillComplete || !contract.headCatchup?.complete}
             (history syncing)
+          {:else if contract.unpricedEventCount > 0}
+            ({number2.format(contract.unpricedEventCount)} fee events unpriced)
           {:else if !contract.feesReady}
             (fees processing)
           {/if}
@@ -1287,8 +1303,9 @@
       <div class="side-panel blue-p">
         <div class="side-card">
           <span>generated fees</span>
-          <strong>{usd2.format(totalGeneratedFeeUsd)}</strong>
+          <strong>{generatedFeeUsdLabel}</strong>
           <small>{number4.format(totalGeneratedFeeRune)} RUNE · {number2.format(generatedFeeMeta?.matchedSwapFeeEventCount || 0)} swap events</small>
+          {#if generatedFeeUnpricedCount}<small>{number4.format(generatedFeeUnpricedRune)} RUNE unpriced · {number2.format(generatedFeeUnpricedCount)} events</small>{/if}
         </div>
         {#if topGeneratedFeeRoutes.length}
           <div class="table-scroll side-table">
@@ -1307,7 +1324,10 @@
                       {route.source_label || route.source_denom || route.classification}
                     </td>
                     <td class="num">{number2.format(route.swap_events || 0)}</td>
-                    <td class="num accent-blue">{usd2.format(route.liquidity_fee_usd || 0)}</td>
+                    <td class="num accent-blue">
+                      {feeUsdLabel(route.liquidity_fee_usd, route.priced_fee_usd, route.unpriced_events)}
+                      {#if route.unpriced_events}<small>{number4.format(route.unpriced_fee_rune)} RUNE unpriced</small>{/if}
+                    </td>
                   </tr>
                 {/each}
               </tbody>

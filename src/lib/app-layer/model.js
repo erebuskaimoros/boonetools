@@ -1,5 +1,6 @@
 import { fromBaseUnit } from '../utils/blockchain.js';
 import { formatLocalDateTime as formatDateTime } from '../utils/datetime.js';
+import { normalizeGeneratedFeeHistory } from './fee-pricing.js';
 
 const number2 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const number4 = new Intl.NumberFormat('en-US', { maximumFractionDigits: 4 });
@@ -137,19 +138,19 @@ export function summarizeAppLayerValue(value = {}) {
   const { reserveUsd, polUsd, liquidityFeeUsd } = value;
   const normalizedReserveUsd = finiteNumber(reserveUsd);
   const normalizedPolUsd = finiteNumber(polUsd);
-  const normalizedLiquidityFeeUsd = finiteNumber(liquidityFeeUsd);
-  const realizedTcUsd = normalizedReserveUsd + normalizedLiquidityFeeUsd;
+  const normalizedLiquidityFeeUsd = liquidityFeeUsd === null ? null : finiteNumber(liquidityFeeUsd);
+  const realizedTcUsd = normalizedLiquidityFeeUsd === null ? null : normalizedReserveUsd + normalizedLiquidityFeeUsd;
 
   return {
     reserveUsd: normalizedReserveUsd,
     polAllocatedUsd: normalizedPolUsd,
     liquidityFeeUsd: normalizedLiquidityFeeUsd,
     realizedTcUsd,
-    totalTrackedUsd: realizedTcUsd + normalizedPolUsd,
-    reserveShare: realizedTcUsd > 0 ? normalizedReserveUsd / realizedTcUsd * 100 : 0,
+    totalTrackedUsd: realizedTcUsd === null ? null : realizedTcUsd + normalizedPolUsd,
+    reserveShare: realizedTcUsd === null ? null : realizedTcUsd > 0 ? normalizedReserveUsd / realizedTcUsd * 100 : 0,
     liquidityFeeShare: realizedTcUsd > 0
       ? normalizedLiquidityFeeUsd / realizedTcUsd * 100
-      : 0
+      : realizedTcUsd === null ? null : 0
   };
 }
 
@@ -295,7 +296,7 @@ export function pickAccruedValueRows(inflows, generatedFees, grain) {
   }
 
   const inflowRows = normalizeBuckets(inflows[selectedGrain], selectedGrain);
-  const generatedFeeRows = normalizeBuckets(generatedFees[selectedGrain], selectedGrain);
+  const generatedFeeRows = normalizeGeneratedFeeHistory(normalizeBuckets(generatedFees[selectedGrain], selectedGrain), selectedGrain === 'weekly' ? 7 : 1);
   const inflowsByBucket = new Map(inflowRows.map((row) => [row.bucket_start, row]));
   const generatedFeesByBucket = new Map(generatedFeeRows.map((row) => [row.bucket_start, row]));
   const bucketStarts = [...new Set([
@@ -304,14 +305,16 @@ export function pickAccruedValueRows(inflows, generatedFees, grain) {
   ])].sort();
   let inflowCumulativeUsd = 0;
   let generatedFeeCumulativeUsd = 0;
+  let generatedFeeCoverageMissing = false;
 
   const rows = bucketStarts.map((bucketStart) => {
     const inflow = inflowsByBucket.get(bucketStart);
     const generatedFee = generatedFeesByBucket.get(bucketStart);
     const inflowUsd = Number(inflow?.inflow_usd) || 0;
-    const generatedFeeUsd = Number(generatedFee?.liquidity_fee_usd) || 0;
+    const generatedFeeUsd = generatedFee?.liquidity_fee_usd ?? null;
     const nextInflowCumulativeUsd = Number(inflow?.cumulative_usd);
-    const nextGeneratedFeeCumulativeUsd = Number(generatedFee?.cumulative_usd);
+    const nextGeneratedFeeCumulativeUsd = generatedFee?.cumulative_usd;
+    generatedFeeCoverageMissing ||= generatedFeeUsd === null || Boolean(generatedFee?.history_incomplete);
 
     if (Number.isFinite(nextInflowCumulativeUsd)) inflowCumulativeUsd = nextInflowCumulativeUsd;
     if (Number.isFinite(nextGeneratedFeeCumulativeUsd)) {
@@ -328,10 +331,18 @@ export function pickAccruedValueRows(inflows, generatedFees, grain) {
 
     return {
       bucket_start: bucketStart,
-      accrued_value_usd: inflowUsd + generatedFeeUsd,
-      cumulative_usd: inflowCumulativeUsd + generatedFeeCumulativeUsd,
+      accrued_value_usd: generatedFeeUsd === null ? null : inflowUsd + generatedFeeUsd,
+      cumulative_usd: generatedFeeCoverageMissing ? null : inflowCumulativeUsd + generatedFeeCumulativeUsd,
       inflow_usd: inflowUsd,
       liquidity_fee_usd: generatedFeeUsd,
+      liquidity_fee_rune: generatedFee?.liquidity_fee_rune,
+      priced_fee_usd: generatedFee?.priced_fee_usd || 0,
+      unpriced_events: generatedFee?.unpriced_events || 0,
+      unpriced_fee_rune: generatedFee?.unpriced_fee_rune || 0,
+      fee_coverage_tracked: true,
+      fee_coverage_unknown: !generatedFee || Boolean(generatedFee.fee_coverage_unknown),
+      cumulative_unpriced_events: generatedFee?.cumulative_unpriced_events || 0,
+      cumulative_unpriced_fee_rune: generatedFee?.cumulative_unpriced_fee_rune || 0,
       ...allocation
     };
   });

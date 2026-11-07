@@ -5,6 +5,9 @@ import { denomLabel, fillBucketGaps, formatWeekLabel } from './model.js';
 import { buildAccruedValueTooltipDetails, buildPolAccrualTooltipDetails } from './chart-tooltips.js';
 import { buildTimeSeriesOption, timeSeriesTooltip } from '../charts/time-series.js';
 import { utcDayWindow } from '../charts/viewport.js';
+import { buildSummaryCards, selectSummaryRows } from '../charts/summary.js';
+import { reduceObservations } from '../charts/analytics.js';
+import { generatedFeeCoverage, normalizeGeneratedFeeHistory } from './fee-pricing.js';
 
 const usd0 = new Intl.NumberFormat('en-US', {
   style: 'currency',
@@ -119,20 +122,43 @@ export const APP_LAYER_CHARTS = Object.freeze({
     valueField: 'liquidity_fee_usd', cumulativeField: 'cumulative_usd',
     barLabel: 'Generated fees USD', cumulativeLabel: 'Cumulative generated fees USD',
     details: row => [
-      `${number4.format(row.liquidity_fee_rune || 0)} RUNE fees`,
-      `${number4.format(row.rune_price_usd || 0)} RUNE/USD`,
-      `${number4.format(row.cumulative_rune || 0)} cumulative RUNE`
+      Number.isFinite(row.liquidity_fee_rune)
+        ? `${number4.format(row.liquidity_fee_rune)} ${row.fee_coverage_unknown ? 'observed ' : ''}RUNE fees` : 'RUNE fees unavailable',
+      ...(row.rune_price_usd > 0 ? [`${number4.format(row.rune_price_usd)} RUNE/USD`] : []),
+      Number.isFinite(row.cumulative_rune) && !row.history_incomplete
+        ? `${number4.format(row.cumulative_rune)} cumulative RUNE` : 'Cumulative RUNE unavailable'
     ]
   }
 });
 
-// App Layer's existing activity-bucket policy belongs here, not in the host:
-// absent activity buckets are zero, and their all-history totals carry forward.
+// Collector/settlement records keep their existing empty-activity policy. Fee
+// history has independent capture/pricing coverage: an absent bucket is unknown.
 export function prepareAppLayerChart(pick, key) {
   const config = APP_LAYER_CHARTS[key];
-  const observed = new Set(pick.rows.map(row => row.bucket_start));
-  return fillBucketGaps(pick.rows, config.valueField, config.cumulativeField, pick.grain === 'weekly' ? 7 : 1)
-    .map(row => ({ ...row, day: row.bucket_start, filledBucket: !observed.has(row.bucket_start) }));
+  const step = pick.grain === 'weekly' ? 7 : 1;
+  const input = key === 'generated' ? normalizeGeneratedFeeHistory(pick.rows, step) : pick.rows;
+  const trackFeeCoverage = key === 'generated' || key === 'accrued' && input.some(row => row.fee_coverage_tracked);
+  const observed = new Set(input.map(row => row.bucket_start));
+  let cumulativeMissing = false;
+  return fillBucketGaps(input, config.valueField, config.cumulativeField, step).map(row => {
+    const filledBucket = !observed.has(row.bucket_start);
+    const missingFee = trackFeeCoverage && (filledBucket || row.liquidity_fee_usd === null);
+    cumulativeMissing ||= missingFee || trackFeeCoverage && row[config.cumulativeField] === null;
+    return {
+      ...row, day: row.bucket_start, filledBucket,
+      ...(trackFeeCoverage && filledBucket ? {
+        fee_coverage_tracked: true, fee_coverage_unknown: true,
+        liquidity_fee_usd: null, [config.valueField]: null
+      } : {}),
+      ...(cumulativeMissing ? { [config.cumulativeField]: null } : {})
+    };
+  });
+}
+
+function chartValue(row, field, key) {
+  const value = row[field];
+  if (Number.isFinite(value)) return value;
+  return value === null || key === 'generated' || key === 'accrued' && row.fee_coverage_tracked && field !== 'inflow_usd' ? null : 0;
 }
 
 export function appLayerSummaryMetrics(key) {
@@ -140,8 +166,23 @@ export function appLayerSummaryMetrics(key) {
   const fields = key === 'accrued'
     ? [{ field: 'inflow_usd', label: 'Retained earnings' }, { field: 'liquidity_fee_usd', label: 'Liquidity fees' }]
     : [{ field: APP_LAYER_CHARTS[key].valueField, label: labels[key] }];
-  // This feature explicitly fills empty activity buckets with zero, as in its bars.
-  return fields.map(item => ({ ...item, value: row => row[item.field] || 0, kind: 'flow', unit: 'usd' }));
+  return fields.map(item => ({ ...item, value: row => chartValue(row, item.field, key), kind: 'flow', unit: 'usd' }));
+}
+
+export function appLayerSummary(rows, key, window = null, bucket = 'day') {
+  const selected = selectSummaryRows(rows, window);
+  const coverage = generatedFeeCoverage(selected);
+  const cards = buildSummaryCards(selected, appLayerSummaryMetrics(key), bucket).map((card, index) => ({
+    ...card,
+    unavailableLabel: coverage.unpricedEvents && (key === 'generated' || key === 'accrued' && index >= 2) ? 'Unpriced' : 'Unavailable'
+  }));
+  const feeNote = [
+    ...(coverage.unpricedEvents ? [`${number4.format(coverage.unpricedRune)} RUNE in ${number2.format(coverage.unpricedEvents)} fee events is unpriced; ${usd2.format(coverage.pricedUsd)} is the known USD subtotal.`] : []),
+    ...(coverage.unknownBuckets ? [`${coverage.unknownBuckets} ${bucket} buckets have unknown fee coverage.`] : []),
+    'Unpriced fees and unknown fee buckets are excluded from USD statistics; they are not zero.'
+  ].join(' ');
+  return { cards, note: key === 'generated' || key === 'accrued' && rows.some(row => row.fee_coverage_tracked)
+    ? feeNote : 'Periodic values, including known empty activity buckets; never sums of the cumulative line.' };
 }
 
 export function appLayerPresetWindow(rows, range = '30d', grain = 'daily') {
@@ -161,13 +202,18 @@ export function appLayerSeries(key, view = 'bars') {
 export function appLayerTooltip(row, { key, view = 'bars', grain = 'daily', hidden = [] }) {
   const config = APP_LAYER_CHARTS[key];
   return timeSeriesTooltip([
-    `${row.day} · ${grain === 'weekly' ? 'WEEK START' : 'DAY'} (UTC)`,
+    `${row.day} · ${grain === 'weekly' || grain === 'week' ? 'WEEK' : grain === 'month' ? 'MONTH' : 'DAY'} (UTC)`,
     ...appLayerSeries(key, view).filter(item => !hidden.includes(item.id)).map(item => ({
       id: item.id, color: item.colors.mark, fill: view === 'bars' ? item.colors.fill : item.colors.faint,
-      text: `${item.label}: ${usd2.format(row[item.valueField] || 0)}`
+      text: `${item.label}: ${Number.isFinite(chartValue(row, item.valueField, key)) ? usd2.format(chartValue(row, item.valueField, key))
+        : (view === 'cumulative' ? row.cumulative_unpriced_events : row.unpriced_events) > 0 ? 'Unpriced' : 'Unavailable'}`
     })),
     ...(config.details?.(row, grain) || []),
-    ...(row.filledBucket ? ['Empty activity bucket · cumulative carried forward'] : [])
+    ...(row.unpriced_events > 0 ? [`${number4.format(row.unpriced_fee_rune)} RUNE in ${number2.format(row.unpriced_events)} fee events is unpriced`, `${usd2.format(row.priced_fee_usd || 0)} known USD subtotal`] : []),
+    ...(view === 'cumulative' && row.cumulative_unpriced_events > 0 ? [`${number4.format(row.cumulative_unpriced_fee_rune)} cumulative RUNE fees are unpriced`] : []),
+    ...(row.fee_coverage_unknown ? ['Fee coverage unavailable · not a verified zero']
+      : row.filledBucket ? ['Empty activity bucket · cumulative carried forward'] : []),
+    ...(view === 'cumulative' && row.history_incomplete ? ['Earlier fee history has unknown coverage'] : [])
   ]);
 }
 
@@ -185,8 +231,22 @@ export function buildAppLayerOption(rows, { key = 'accrued', view = 'bars', grai
       stack: view === 'bars' && descriptors.length > 1 ? 'app-value' : undefined,
       areaFill: view === 'cumulative' ? item.colors.faint : undefined,
       symbolSize: view === 'cumulative' && rows.length <= 45 ? 5 : 0,
-      data: rows.map(row => row[item.valueField] || 0)
+      data: rows.map(row => chartValue(row, item.valueField, key))
     })),
-    tooltip: row => appLayerTooltip(row, { key, view, grain, hidden })
+    tooltip: row => appLayerTooltip(row, { key, view, grain, hidden }),
+    groupedTooltip: key === 'generated' || key === 'accrued' ? (row, context) => {
+      const selected = context.rows;
+      const coverage = generatedFeeCoverage(selected);
+      const combined = {
+        ...selected.at(-1), day: `${row.fromDay} → ${row.throughDay}`,
+        unpriced_events: coverage.unpricedEvents, unpriced_fee_rune: coverage.unpricedRune,
+        priced_fee_usd: coverage.pricedUsd, fee_coverage_unknown: coverage.unknownBuckets > 0,
+        liquidity_fee_rune: selected.some(point => Number.isFinite(point.liquidity_fee_rune))
+          ? selected.reduce((sum, point) => sum + (point.liquidity_fee_rune || 0), 0) : null,
+        accrued_value_usd: reduceObservations(selected, selected.map(point => chartValue(point, 'accrued_value_usd', key)), 'sum')
+      };
+      for (const item of descriptors) combined[item.valueField] = reduceObservations(selected, selected.map(point => chartValue(point, item.valueField, key)), view === 'cumulative' ? 'last' : 'sum');
+      return appLayerTooltip(combined, { key, view, grain: context.grain, hidden: context.hidden });
+    } : null
   });
 }

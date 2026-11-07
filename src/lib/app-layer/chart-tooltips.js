@@ -6,7 +6,7 @@ const usd2 = new Intl.NumberFormat('en-US', {
 
 export function buildAccruedValueTooltipDetails(row) {
   return [
-    `TC-retained 01 + 03: ${usd2.format(row.accrued_value_usd || 0)}`
+    `TC-retained 01 + 03: ${Number.isFinite(row.accrued_value_usd) ? usd2.format(row.accrued_value_usd) : row.unpriced_events ? 'Unpriced' : 'Unavailable'}`
   ];
 }
 
