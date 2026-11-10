@@ -3,7 +3,7 @@ import test from 'node:test';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
-import { parseFinancialPoolSwapFees, verifyFinancialSwapCandidates, readFinancialSwapLedgerDay, FINANCIAL_SWAP_CANDIDATE_RANK } from '../src/shared/financials-swap-candidates.js';
+import { parseFinancialPoolSwapFees, verifyFinancialSwapCandidates, loadSwapVerificationCandidates, readFinancialSwapLedgerDay, FINANCIAL_SWAP_CANDIDATE_RANK } from '../src/shared/financials-swap-candidates.js';
 import { parseFinancialRevshareBlock, saveFinancialRewardBlocks } from '../src/shared/financials-reward-source.js';
 import { readFinancialPoolSwapDay, loadPoolSwapVerificationCandidates } from '../src/shared/financials-pool-swaps.js';
 import { handlePoolAnalysisSwaps } from '../src/handlers/pool-analysis.js';
@@ -218,20 +218,50 @@ test('the shared verification pause covers new pool arrivals and clears after an
   assert.equal((await client.query('select verification_deferred_until from financials_swap_ledger')).rows[0].verification_deferred_until,null);
 }));
 
-test('the pool candidate query keeps only each pool window\'s fee leaders plus every unverified candidate',postgres,async()=>database(async client=>{
-  const limit=8*FINANCIAL_SWAP_CANDIDATE_RANK;
-  await save(client,[block(10,'2026-10-29T08:01:00Z',[...Array.from({length:limit+50},(_,i)=>event(`done-${i}`,'ZEC.ZEC',1000000000+i)),
-    event('waiting','ZEC.ZEC',1),event('other-pool','BTC.BTC',1)])]);
-  await client.query("update financials_swap_candidates set status='verified',verified_row=jsonb_build_object('feeRune',10) where tx_id<>'WAITING'");
-  const rows=(await loadPoolSwapVerificationCandidates(client,now,limit)).filter(row=>new Date(row.window_from).toISOString()==='2026-10-29T00:00:00.000Z');
-  const zec=rows.filter(row=>row.pool_asset==='ZEC.ZEC'),verified=zec.filter(row=>row.status==='verified');
-  assert.equal(verified.length,limit);
-  assert.equal(Math.min(...verified.map(row=>Number(row.fee_rune_e8))),1000000050);
-  assert.deepEqual(zec.filter(row=>row.status!=='verified').map(row=>[row.tx_id,row.fee_rune_e8]),[['WAITING','1']]);
-  assert.deepEqual(rows.filter(row=>row.pool_asset==='BTC.BTC').map(row=>row.tx_id),['OTHER-POOL']);
-  assert.equal(new Set(rows.map(row=>`${row.pool_asset}/${row.tx_id}`)).size,rows.length);
-}));
+test('a long-lived collector reuses its candidate selection between passes and refreshes it after five minutes',async()=>{
+  const from=new Date('2026-10-29T00:00:00Z'),to=new Date('2026-10-30T00:00:00Z');
+  const row=tx_id=>({tx_id,status:'observed',checks:0,next_check_at:null,complete:true,completed_at:new Date('2026-10-29T08:01:00Z'),
+    first_seen_at:new Date('2026-10-29T08:01:00Z'),fee_rune_e8:tx_id==='A'?'300000000':'200000000',verified_row:null,
+    pool_asset:'ZEC.ZEC',window_from:from,window_to:to});
+  let selections=0;
+  const client={query:async sql=>{
+    if(/financials_swap_pool_fees/.test(sql)&&/^\s*with windows/.test(sql)){selections++;return {rows:[row('A'),row('B')]};}
+    return {rows:[]};
+  }};
+  const selection={},calls=[];
+  const pass=at=>verifyFinancialSwapCandidates(client,{poolScopes:true,selection,now:()=>at,maxRequests:1,getJson:async route=>{
+    const id=new URL(route,'https://test.invalid').searchParams.get('txid');calls.push(id);return {actions:[action(id)]};
+  }});
+  await pass(now);await pass(now+30_000);
+  // The second pass sees A as verified from the first and moves to B without re-ranking in SQL.
+  assert.deepEqual(calls,['A','B']);assert.equal(selections,1);
+  await pass(now+5*60_000+1);assert.equal(selections,2);
+});
 
+test('a production-sized unverified backlog stays bounded in verification and both day reads',postgres,async()=>database(async client=>{
+  // Production holds ~100k unverified candidates a day; loading them all exhausted the collector heap.
+  const limit=4*FINANCIAL_SWAP_CANDIDATE_RANK,backlog=3000;
+  await save(client,[block(10,'2026-10-29T08:01:00Z',[...Array.from({length:backlog},(_,i)=>event(`bulk-${i}`,'ZEC.ZEC',1000+i)),
+    event('leader','ZEC.ZEC',900000000),event('other-pool','BTC.BTC',1)])]);
+  const utcDay=row=>new Date(row.window_from).toISOString()==='2026-10-29T00:00:00.000Z';
+  const pool=(await loadPoolSwapVerificationCandidates(client,now,limit)).filter(utcDay);
+  const zec=pool.filter(row=>row.pool_asset==='ZEC.ZEC');
+  assert.equal(zec.length,limit);assert.equal(zec.some(row=>row.tx_id==='LEADER'),true);
+  assert.equal(Math.min(...zec.map(row=>Number(row.fee_rune_e8))),1000+backlog-(limit-1));
+  assert.deepEqual(pool.filter(row=>row.pool_asset==='BTC.BTC').map(row=>row.tx_id),['OTHER-POOL']);
+  assert.equal(new Set(pool.map(row=>`${row.pool_asset}/${row.tx_id}`)).size,pool.length);
+  const all=(await loadSwapVerificationCandidates(client,now,limit)).filter(utcDay);
+  assert.equal(all.length,limit);assert.equal(all.some(row=>row.tx_id==='LEADER'),true);
+  const calls=[];
+  await verifyFinancialSwapCandidates(client,{poolScopes:true,now:()=>now,maxRequests:1,getJson:async route=>{
+    const id=new URL(route,'https://test.invalid').searchParams.get('txid');calls.push(id);return {actions:[action(id,'900000000')]};
+  }});
+  assert.deepEqual(calls,['LEADER']);
+  const day=await readFinancialSwapLedgerDay(client,'2026-10-29',now);
+  assert.deepEqual(day.swaps.map(row=>row.txId),['LEADER']);assert.ok(day.pending.length<=2*FINANCIAL_SWAP_CANDIDATE_RANK);
+  const detail=await readFinancialPoolSwapDay(client,'ZEC.ZEC','2026-10-29',{now});
+  assert.deepEqual(detail.swaps.map(row=>row.txId),['LEADER']);assert.ok(detail.pendingSwaps<=2*FINANCIAL_SWAP_CANDIDATE_RANK);
+}));
 test('a pool candidate set larger than the engine argument limit is still verified',async()=>{
   // Production reached ~125k window×pool rows; spreading them into push() threw
   // "Maximum call stack size exceeded" before any candidate was checked.
