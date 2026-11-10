@@ -21,6 +21,12 @@ const PARSER_VERSION = 3;
 const ACTION_PAGE_LIMIT = 50;
 const RPC_REQUEST_TIMEOUT_MS = 10000;
 const HISTORICAL_ACTION_RETRY_MS = 60 * 60 * 1000;
+// Midgard scans every block from the forward floor to its tip, so a contract
+// idle for weeks answers slowly (about 20 s for 600,000 blocks) until its
+// watermark is moved up; see FORWARD_WATERMARK_LAG_BLOCKS.
+const FORWARD_ACTION_TIMEOUT_MS = 30_000;
+// Kept behind Midgard's reported height when an empty scan advances the watermark.
+const FORWARD_WATERMARK_LAG_BLOCKS = 1000;
 
 export const BASE_LAYER_REVENUE_COLLECTOR =
   'thor1txum04wp8ykqudphxy9prtwsd9jpcm2kwdaxctxeeyr6g0r0we9qpfdktr';
@@ -704,8 +710,14 @@ async function fetchRujiraSwapActionForwardPage({ fromHeight = 0, prevPageToken 
 
   return fetchMidgard(`/actions?${params.toString()}`, {
     bases: config.rujiraBaseFeesMidgardUrls,
+    timeoutMs: FORWARD_ACTION_TIMEOUT_MS,
     validateResponse: (_path, data) => !Array.isArray(data?.actions)
   });
+}
+
+async function fetchRujiraMidgardHeight() {
+  const health = await fetchMidgard('/health', { bases: config.rujiraBaseFeesMidgardUrls });
+  return health?.inSync === false ? 0 : Number(health?.lastAggregated?.height) || 0;
 }
 
 function createHttpError(message, details = {}) {
@@ -923,6 +935,7 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
   );
   const fetchPage = options.fetchPage || (token => fetchRujiraSwapActionPage(token, contract));
   const fetchForwardPage = options.fetchForwardPage || (request => fetchRujiraSwapActionForwardPage(request, contract));
+  const fetchMidgardHeight = options.fetchMidgardHeight || fetchRujiraMidgardHeight;
   const sleepFn = options.sleepFn || sleep;
   const requestDelayMs = Math.max(
     0,
@@ -1059,6 +1072,15 @@ export async function ingestRujiraBaseFeeActionPages(client, options = {}) {
       previousHeadWatermark,
       stats.head_catchup.max_height
     );
+    // Nothing newer than the watermark: the gap up to Midgard's own height is
+    // verified empty, so the next scan need not cover it again.
+    if (stats.head_catchup.max_height <= previousHeadWatermark) {
+      const midgardHeight = Number(await fetchMidgardHeight().catch(() => 0)) || 0;
+      stats.head_catchup.watermark_height = Math.max(
+        stats.head_catchup.watermark_height,
+        Math.trunc(midgardHeight) - FORWARD_WATERMARK_LAG_BLOCKS
+      );
+    }
   }
 
   if (forwardOnly && headCatchupComplete) complete = true;
