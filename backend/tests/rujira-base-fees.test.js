@@ -331,6 +331,56 @@ test('generated-fee head catch-up resumes its forward cursor and advances the wa
   assert.equal(client.savedStates.at(-1).next_page_token, 'history-cursor');
 });
 
+test('a forward scan that finds nothing newer moves its watermark up to Midgard\'s own height', async () => {
+  process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
+  const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
+  const dormant = () => createActionIngestClient({
+    maxHeight: 9000,
+    syncState: {
+      next_page_token: '', complete: true, rate_limited_until: null,
+      stats_json: { head_catchup: { direction: 'forward', next_page_token: 'stale-cursor',
+        floor_height: 100, watermark_height: 100, max_height: 100, complete: false } }
+    }
+  });
+  const run = (client, options) => ingestRujiraBaseFeeActionPages(client, {
+    maxPages: 0, headMaxPages: 2, requestDelayMs: 0, ...options });
+
+  // A contract with no swaps for weeks makes Midgard scan the whole gap on
+  // every run; once the gap is verified empty the next scan starts near the tip.
+  const client = dormant();
+  const empty = await run(client, {
+    fetchForwardPage: async () => ({ actions: [], meta: { prevPageToken: '' } }),
+    fetchMidgardHeight: async () => 9000
+  });
+  assert.equal(empty.head_catchup.complete, true);
+  assert.equal(empty.head_catchup.watermark_height, 8000);
+  const requests = [];
+  const resumed = createActionIngestClient({ maxHeight: 9000, syncState: {
+    next_page_token: '', complete: true, rate_limited_until: null, stats_json: client.savedStates.at(-1).stats_json } });
+  await run(resumed, {
+    fetchForwardPage: async (request) => { requests.push(request); return { actions: [], meta: { prevPageToken: '' } }; },
+    fetchMidgardHeight: async () => 9000
+  });
+  assert.deepEqual(requests, [{ fromHeight: 8000 }]);
+
+  // Newer actions set the watermark themselves; Midgard's height is not asked for.
+  let heightReads = 0;
+  const active = await run(dormant(), {
+    fetchForwardPage: async () => ({ actions: [midgardAction(250)], meta: { prevPageToken: '' } }),
+    fetchMidgardHeight: async () => { heightReads += 1; return 9000; }
+  });
+  assert.equal(active.head_catchup.watermark_height, 250);
+  assert.equal(heightReads, 0);
+
+  // Without a verified Midgard height the watermark stays where it was.
+  const unknown = await run(dormant(), {
+    fetchForwardPage: async () => ({ actions: [], meta: { prevPageToken: '' } }),
+    fetchMidgardHeight: async () => { throw new Error('health unavailable'); }
+  });
+  assert.equal(unknown.head_catchup.complete, true);
+  assert.equal(unknown.head_catchup.watermark_height, 100);
+});
+
 test('generated-fee first run starts historical reverse paging independently', async () => {
   process.env.DATABASE_URL ||= 'postgresql://boonetools:test@127.0.0.1:5433/boonetools';
   const { ingestRujiraBaseFeeActionPages } = await import('../src/shared/rujira-base-fees.js');
