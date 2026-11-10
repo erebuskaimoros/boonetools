@@ -72,8 +72,11 @@ for (const file of unreachable) {
   unreachableLines += source === '' ? 0 : source.split(/\r?\n/).length;
 }
 
+// ip-info.json is rewritten by the Update IP Info workflow, whose commits skip
+// CI; counting it let routine data growth fail the next unrelated change.
 let publicBytes = 0;
 for (const file of await walkFiles(publicRoot)) {
+  if (path.relative(publicRoot, file) === 'ip-info.json') continue;
   publicBytes += (await stat(file)).size;
 }
 

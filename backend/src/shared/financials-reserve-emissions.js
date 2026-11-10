@@ -3,9 +3,9 @@ import { QueryBalanceRequest, QueryBalanceResponse } from 'cosmjs-types/cosmos/b
 
 export const FINANCIAL_RESERVE_ADDRESS = 'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
 const METHOD = 'historical-reserve-formula-v1';
-const REVIEWED_VERSIONS = new Set(['3.20.3', '3.21.0']);
+const REVIEWED_VERSIONS = new Set(['3.20.3', '3.21.0', '3.21.1', '3.21.2']);
 // Reviewed upgrade -> predecessor whose formula governs the blocks before it.
-const REVIEWED_TRANSITIONS = new Map([['3.21.0', '3.20.3']]);
+const REVIEWED_TRANSITIONS = new Map([['3.21.0', '3.20.3'], ['3.21.1', '3.21.0'], ['3.21.2', '3.21.1']]);
 const BLOCKS_PER_YEAR = '5256000';
 const PRECISION = 10n ** 18n;
 const INT64_MAX = (1n << 63n) - 1n;
@@ -25,6 +25,11 @@ const RELEVANT_MIMIRS = new Set(['EMISSIONCURVE', 'RESERVEMAXCAP']);
 // math v1.5.3 are unchanged. Replaying 1,000 production blocks 28367099→28366100
 // across the upgrade from a Liquify height-verified anchor reproduced the
 // verified Reserve balance at 28366099 exactly.
+// Reviewed v3.21.1 (72b7c6348833bb9b933655c265bddcee79699184) and v3.21.2
+// (ebd7af34944987f6535646036b7f2cea22fbc5ad): no file under x/thorchain or
+// constants changed from v3.21.0; go.mod only moves the Go toolchain and
+// klauspost/compress. A network that skips 3.21.1 still replays correctly:
+// every 3.21.x predecessor runs the same formula.
 // Unknown protocol versions/config transitions intentionally require review.
 function integer(value, label, { signed = false } = {}) {
   if (typeof value === 'number' && !Number.isSafeInteger(value)) throw new Error(`Invalid ${label}`);

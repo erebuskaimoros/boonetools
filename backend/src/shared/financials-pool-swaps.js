@@ -4,7 +4,7 @@ import { readFinancialSwapVerificationPause, financialSwapVerificationSchedule }
 
 /** Reuse the Financials verifier's request limit, cooldowns and saved IDs. Each
  * pool gets its own candidate selection before the bounded batch is chosen. */
-export async function loadPoolSwapVerificationCandidates(client, now) {
+export async function loadPoolSwapVerificationCandidates(client, now, rankLimit) {
   const { rows } = await client.query(`with windows as (
       select start_at as window_from, start_at + interval '24 hours' as window_to, null::text as asset
       from generate_series(date_trunc('day', $1::timestamptz at time zone 'UTC') at time zone 'UTC' - interval '3 days',
@@ -15,15 +15,22 @@ export async function loadPoolSwapVerificationCandidates(client, now) {
         join financials_swap_candidates waiting on waiting.tx_id = remembered.tx_id
         where waiting.status in ('observed','pending') and waiting.complete
           and coalesce(waiting.next_check_at, waiting.completed_at + interval '2 minutes') <= $1::timestamptz
-    ) select distinct candidate.tx_id, candidate.status, candidate.checks, candidate.next_check_at, candidate.complete,
-      candidate.completed_at, candidate.first_seen_at, fees.fee_rune_e8::text, candidate.verified_row,
-      fees.asset as pool_asset, windows.window_from, windows.window_to
-    from windows join financials_swap_candidates candidate on candidate.started
-      and candidate.first_seen_at >= greatest(windows.window_from, (select pool_started_at from financials_swap_ledger))
-      and candidate.first_seen_at < windows.window_to
-    join financials_swap_pool_fees fees on fees.tx_id = candidate.tx_id
-      and (windows.asset is null or windows.asset = fees.asset)
-    where candidate.status <> 'excluded'`, [new Date(now).toISOString()]);
+    ), ranked as (select scoped.*, row_number() over (partition by window_from, window_to, pool_asset
+        order by fee_rune_e8 desc, tx_id) as fee_rank
+      from (select distinct candidate.tx_id, candidate.status, candidate.checks, candidate.next_check_at, candidate.complete,
+        candidate.completed_at, candidate.first_seen_at, fees.fee_rune_e8, candidate.verified_row,
+        fees.asset as pool_asset, windows.window_from, windows.window_to
+      from windows join financials_swap_candidates candidate on candidate.started
+        and candidate.first_seen_at >= greatest(windows.window_from, (select pool_started_at from financials_swap_ledger))
+        and candidate.first_seen_at < windows.window_to
+      join financials_swap_pool_fees fees on fees.tx_id = candidate.tx_id
+        and (windows.asset is null or windows.asset = fees.asset)
+      where candidate.status <> 'excluded') scoped
+    ) select tx_id, status, checks, next_check_at, complete, completed_at, first_seen_at, fee_rune_e8::text, verified_row,
+      pool_asset, window_from, window_to
+    from ranked
+    -- Only each pool window's fee leaders can be selected; unsettled rows must stay remembered.
+    where fee_rank <= $2::int or not complete or status in ('observed','pending')`, [new Date(now).toISOString(), rankLimit]);
   return rows;
 }
 

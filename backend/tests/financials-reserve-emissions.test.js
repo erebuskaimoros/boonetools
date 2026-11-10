@@ -182,6 +182,19 @@ test('the 3.20.3 to 3.21.0 upgrade block replays against verified historical bal
   assert.equal(result.previousReserveBalanceE8, '2535934532744358');
 });
 
+test('THORNode 3.21.1 and 3.21.2 change no emission source and replay across their upgrade blocks', () => {
+  for (const version of ['3.21.1', '3.21.2']) {
+    assert.equal(calculateFinancialReserveEmissionE8('2534440353693046', { ...anchor, version }),
+      calculateFinancialReserveEmissionE8('2534440353693046', anchor));
+  }
+  const [top, boundary, below] = upgradeObservations;
+  const expected = replayFinancialReserveEmissions(upgradeObservations, upgradeAnchor).blocks;
+  for (const version of ['3.21.1', '3.21.2']) {
+    const bump = { ...boundary, configChanges: [{ type: 'version', version }] };
+    assert.deepEqual(replayFinancialReserveEmissions([top, bump, below], { ...upgradeAnchor, version }).blocks, expected);
+  }
+});
+
 test('unreviewed versions and version transitions still require an explicit review', () => {
   const [top, boundary, below] = upgradeObservations;
   const bump = { ...boundary, configChanges: [{ type: 'version', version: '3.22.0' }] };
