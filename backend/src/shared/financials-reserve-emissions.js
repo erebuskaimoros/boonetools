@@ -3,9 +3,10 @@ import { QueryBalanceRequest, QueryBalanceResponse } from 'cosmjs-types/cosmos/b
 
 export const FINANCIAL_RESERVE_ADDRESS = 'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
 const METHOD = 'historical-reserve-formula-v1';
-const REVIEWED_VERSIONS = new Set(['3.20.3', '3.21.0', '3.21.1', '3.21.2']);
+const REVIEWED_VERSIONS = new Set(['3.20.3', '3.21.0', '3.21.1', '3.21.2', '3.21.3']);
 // Reviewed upgrade -> predecessor whose formula governs the blocks before it.
-const REVIEWED_TRANSITIONS = new Map([['3.21.0', '3.20.3'], ['3.21.1', '3.21.0'], ['3.21.2', '3.21.1']]);
+const REVIEWED_TRANSITIONS = new Map([['3.21.0', '3.20.3'], ['3.21.1', '3.21.0'], ['3.21.2', '3.21.1'],
+  ['3.21.3', '3.21.2']]);
 const BLOCKS_PER_YEAR = '5256000';
 const PRECISION = 10n ** 18n;
 const INT64_MAX = (1n << 63n) - 1n;
@@ -30,6 +31,12 @@ const RELEVANT_MIMIRS = new Set(['EMISSIONCURVE', 'RESERVEMAXCAP']);
 // constants changed from v3.21.0; go.mod only moves the Go toolchain and
 // klauspost/compress. A network that skips 3.21.1 still replays correctly:
 // every 3.21.x predecessor runs the same formula.
+// Reviewed v3.21.3 by behaviour only: it activated at 28610436 on 2026-11-10
+// with no public tag or source. Replaying 200 production blocks on each side of
+// the upgrade reproduced the height-verified Reserve balance exactly, and in
+// every block without other EndBlock Reserve income the Reserve's net payout
+// equalled this formula within 2 base units (104 of 200 blocks after, 163 of
+// 200 before). Repeat the source review when the tag is published.
 // Unknown protocol versions/config transitions intentionally require review.
 function integer(value, label, { signed = false } = {}) {
   if (typeof value === 'number' && !Number.isSafeInteger(value)) throw new Error(`Invalid ${label}`);
