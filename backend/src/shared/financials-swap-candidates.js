@@ -6,6 +6,7 @@ import { readFinancialSwapVerificationPause, deferFinancialSwapVerification, cle
   financialSwapVerificationSchedule } from './financials-swap-verification-pause.js';
 
 export const FINANCIAL_SWAP_CANDIDATE_RANK = 25;
+export const FINANCIAL_SWAP_SELECTION_TTL_MS = 5 * 60_000;
 const VERIFY_BACKOFF_MS = [10 * 60_000, 30 * 60_000, 3600_000, 6 * 3600_000, 24 * 3600_000];
 const RUNE = 'THOR.RUNE';
 const positive = value => value !== null && value !== '' && Number.isFinite(Number(value)) && Number(value) > 0;
@@ -142,14 +143,10 @@ export function financialSwapSettlement(actions, txId) {
   return { related, action: action || null };
 }
 
-/** Price all retained candidates before choosing a bounded verification batch.
- * Local windows are independent rankings: filtering the UTC top 25 would lose
- * a small high-fee swap when another part of that UTC day is busier. */
-export async function verifyFinancialSwapCandidates(client, { getJson, now = Date.now, maxRequests = 5, signal, poolScopes = false } = {}) {
-  if (signal?.aborted) return 0;
-  const atStart = now();
-  const pause = await readFinancialSwapVerificationPause(client, atStart);
-  const { rows: candidates } = await client.query(`with windows as (
+/** Each window's fee leaders plus in-progress streams. Ranking happens in SQL:
+ * a UTC day holds ~100k swaps and only the top few are ever verified. */
+export async function loadSwapVerificationCandidates(client, now, rankLimit) {
+  const { rows } = await client.query(`with windows as (
       select start_at as window_from, start_at + interval '24 hours' as window_to
       from generate_series(date_trunc('day', $1::timestamptz at time zone 'UTC') at time zone 'UTC' - interval '3 days',
         date_trunc('day', $1::timestamptz at time zone 'UTC') at time zone 'UTC', interval '24 hours') start_at
@@ -164,14 +161,48 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
       join financials_swap_candidates waiting on waiting.tx_id = remembered.tx_id
       where waiting.status in ('observed','pending') and waiting.complete
         and coalesce(waiting.next_check_at, waiting.completed_at + interval '2 minutes') <= $1::timestamptz
-    ) select candidate.tx_id, candidate.status, candidate.checks, candidate.next_check_at, candidate.complete,
-      candidate.completed_at, candidate.first_seen_at, candidate.fee_rune_e8::text, candidate.verified_row,
-      windows.window_from, windows.window_to
+    ), ranked as (select candidate.tx_id, candidate.status, candidate.checks, candidate.next_check_at, candidate.complete,
+      candidate.completed_at, candidate.first_seen_at, candidate.fee_rune_e8, candidate.verified_row,
+      windows.window_from, windows.window_to,
+      row_number() over (partition by windows.window_from, windows.window_to
+        order by candidate.fee_rune_e8 desc nulls last, candidate.tx_id) as fee_rank
     from windows join financials_swap_candidates candidate on candidate.started
       and candidate.first_seen_at >= windows.window_from and candidate.first_seen_at < windows.window_to
     where candidate.status <> 'excluded'
-      and windows.window_from >= (select fee_started_at from financials_swap_ledger)`, [new Date(atStart).toISOString()]);
-  if (poolScopes) for (const row of await loadPoolSwapVerificationCandidates(client, atStart, 8 * FINANCIAL_SWAP_CANDIDATE_RANK)) candidates.push(row);
+      and windows.window_from >= (select fee_started_at from financials_swap_ledger)
+    ) select tx_id, status, checks, next_check_at, complete, completed_at, first_seen_at, fee_rune_e8::text,
+      verified_row, window_from, window_to
+    from ranked
+    -- Only a window's fee leaders can rank; never load the day's full swap set.
+    where fee_rank <= $2::int or not complete`, [new Date(now).toISOString(), rankLimit]);
+  return rows;
+}
+
+/** Price all retained candidates before choosing a bounded verification batch.
+ * Local windows are independent rankings: filtering the UTC top 25 would lose
+ * a small high-fee swap when another part of that UTC day is busier. */
+export async function verifyFinancialSwapCandidates(client, { getJson, now = Date.now, maxRequests = 5, signal, poolScopes = false, selection = null } = {}) {
+  if (signal?.aborted) return 0;
+  const atStart = now();
+  const pause = await readFinancialSwapVerificationPause(client, atStart);
+  const rankLimit = 4 * FINANCIAL_SWAP_CANDIDATE_RANK;
+  // Ranking four days of swaps takes seconds in Postgres. A long-lived caller
+  // passes `selection` to reuse it between passes; checked rows are updated in place.
+  let candidates = selection?.candidates && atStart - selection.at < FINANCIAL_SWAP_SELECTION_TTL_MS && atStart >= selection.at
+    ? selection.candidates : null;
+  if (!candidates) {
+    candidates = await loadSwapVerificationCandidates(client, atStart, rankLimit);
+    if (poolScopes) for (const row of await loadPoolSwapVerificationCandidates(client, atStart, rankLimit)) candidates.push(row);
+    if (selection) Object.assign(selection, { at: atStart, candidates });
+  }
+  const remember = (txId, changes) => {
+    // Excluded rows leave the ranking, as they would on a fresh selection.
+    for (let index = candidates.length - 1; index >= 0; index--) {
+      if (candidates[index].tx_id !== txId) continue;
+      if (changes.status === 'excluded') candidates.splice(index, 1);
+      else Object.assign(candidates[index], changes);
+    }
+  };
   if (!candidates.length) return 0;
   const from = candidates.reduce((earliest, row) => Math.min(earliest, new Date(row.window_from).getTime()), Infinity) / 1000;
   const to = candidates.reduce((latest, row) => Math.max(latest, new Date(row.window_to).getTime()), -Infinity) / 1000;
@@ -233,8 +264,10 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
         await deferFinancialSwapVerification(client, error, row.tx_id, now());
         break;
       }
+      const retryAt = new Date(now() + 60_000).toISOString();
       await client.query(`update financials_swap_candidates set last_error = $2, next_check_at = $3::timestamptz
-        where tx_id = $1`, [row.tx_id, error.message, new Date(now() + 60_000).toISOString()]);
+        where tx_id = $1`, [row.tx_id, error.message, retryAt]);
+      remember(row.tx_id, { next_check_at: retryAt });
       continue;
     }
     const at = now();
@@ -244,16 +277,17 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
     const valid = ranked && ranked.feeRune !== null;
     // The first finalized sub-swap owns the day even if Midgard's action date
     // changes later. SQL uses the latest stored start if repair races lookup.
+    const status = valid ? 'verified' : action ? 'excluded' : related.length ? 'pending' : row.status;
+    const nextCheckAt = action ? null : new Date(at + VERIFY_BACKOFF_MS[Math.min(row.checks, VERIFY_BACKOFF_MS.length - 1)]).toISOString();
     await client.query(`update financials_swap_candidates set status = $2,
         verified_row = case when $3::jsonb is null then null else jsonb_set($3::jsonb, '{timestamp}',
           to_jsonb(to_char(first_seen_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'))) end,
         checks = checks + 1, next_check_at = $4::timestamptz, last_error = $5,
         updated_at = $6::timestamptz where tx_id = $1`,
-    [row.tx_id, valid ? 'verified' : action ? 'excluded' : related.length ? 'pending' : row.status,
-      valid ? JSON.stringify(ranked) : null,
-      action ? null : new Date(at + VERIFY_BACKOFF_MS[Math.min(row.checks, VERIFY_BACKOFF_MS.length - 1)]).toISOString(),
+    [row.tx_id, status, valid ? JSON.stringify(ranked) : null, nextCheckAt,
       valid || !action ? '' : action.type === 'swap' ? 'unpriced' : 'refunded', new Date(at).toISOString()]);
     if (action) await client.query('delete from financials_swap_verification_windows where tx_id = $1', [row.tx_id]);
+    remember(row.tx_id, { status, checks: row.checks + 1, next_check_at: nextCheckAt, ...(valid ? { verified_row: ranked } : {}) });
     checked++;
   }
   return checked;
@@ -317,10 +351,17 @@ export async function readFinancialSwapLedgerDay(client, dayOrBounds, now = Date
   const pause = await readFinancialSwapVerificationPause(client, now);
   const from = typeof dayOrBounds === 'string' ? Date.parse(`${dayOrBounds}T00:00:00Z`) / 1000 : dayOrBounds.from;
   const to = typeof dayOrBounds === 'string' ? from + 86400 : dayOrBounds.to;
+  // Fee leaders, in-progress streams and disclosed unpriced exclusions only: a
+  // day holds ~100k candidates and the ranking below needs a few dozen.
   const { rows } = await client.query(`select tx_id, status, verified_row, last_error, checks, updated_at,
-      first_seen_at, complete, fee_rune_e8::text, coalesce(next_check_at, completed_at + interval '2 minutes') as due_at
-    from financials_swap_candidates where started and first_seen_at >= $1::timestamptz
-      and first_seen_at < $2::timestamptz`, [new Date(from * 1000).toISOString(), new Date(to * 1000).toISOString()]);
+      first_seen_at, complete, fee_rune_e8::text, due_at
+    from (select *, coalesce(next_check_at, completed_at + interval '2 minutes') as due_at,
+        row_number() over (partition by status = 'excluded' order by fee_rune_e8 desc nulls last, tx_id) as fee_rank
+      from financials_swap_candidates where started and first_seen_at >= $1::timestamptz
+        and first_seen_at < $2::timestamptz) ranked
+    where (status <> 'excluded' and (fee_rank <= $3::int or not complete))
+      or (status = 'excluded' and last_error = 'unpriced' and fee_rank <= $3::int)`,
+  [new Date(from * 1000).toISOString(), new Date(to * 1000).toISOString(), 4 * FINANCIAL_SWAP_CANDIDATE_RANK]);
   const priced = new Map((await priceFinancialSwapRows(client, rows.map(candidatePricingRow), { from, to }))
     .map(row => [row.txId, row]));
   const ranked = rows.filter(row => row.status !== 'excluded').map(row => ({ ...row, feeUsd: priced.get(row.tx_id).feeUsd }))
@@ -336,6 +377,6 @@ export async function readFinancialSwapLedgerDay(client, dayOrBounds, now = Date
   return { swaps: ranked.filter(row => row.status === 'verified' && row.verified_row && row.feeUsd !== null)
       .map(row => priced.get(row.tx_id)),
     pending: pending.map(row => row.tx_id), unpriced,
-    checkedAt: checked.length ? new Date(Math.max(...checked)).toISOString() : null,
+    checkedAt: checked.length ? new Date(checked.reduce((latest, at) => Math.max(latest, at), -Infinity)).toISOString() : null,
     ...financialSwapVerificationSchedule(due, pause, now) };
 }

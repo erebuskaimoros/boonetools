@@ -15,22 +15,29 @@ export async function loadPoolSwapVerificationCandidates(client, now, rankLimit)
         join financials_swap_candidates waiting on waiting.tx_id = remembered.tx_id
         where waiting.status in ('observed','pending') and waiting.complete
           and coalesce(waiting.next_check_at, waiting.completed_at + interval '2 minutes') <= $1::timestamptz
-    ), ranked as (select scoped.*, row_number() over (partition by window_from, window_to, pool_asset
-        order by fee_rune_e8 desc, tx_id) as fee_rank
-      from (select distinct candidate.tx_id, candidate.status, candidate.checks, candidate.next_check_at, candidate.complete,
-        candidate.completed_at, candidate.first_seen_at, fees.fee_rune_e8, candidate.verified_row,
-        fees.asset as pool_asset, windows.window_from, windows.window_to
-      from windows join financials_swap_candidates candidate on candidate.started
+    ), scopes as (
+      -- An all-pools window already covers a pool-specific one with the same
+      -- bounds; dropping the overlap here avoids de-duplicating millions of rows.
+      select window_from, window_to, asset from windows scope where asset is null or not exists (
+        select 1 from windows whole where whole.asset is null
+          and whole.window_from = scope.window_from and whole.window_to = scope.window_to)
+    ), scoped as (select windows.window_from, windows.window_to, fees.asset as pool_asset, fees.tx_id,
+        fees.fee_rune_e8, candidate.complete
+      from scopes windows join financials_swap_candidates candidate on candidate.started
         and candidate.first_seen_at >= greatest(windows.window_from, (select pool_started_at from financials_swap_ledger))
         and candidate.first_seen_at < windows.window_to
       join financials_swap_pool_fees fees on fees.tx_id = candidate.tx_id
         and (windows.asset is null or windows.asset = fees.asset)
-      where candidate.status <> 'excluded') scoped
-    ) select tx_id, status, checks, next_check_at, complete, completed_at, first_seen_at, fee_rune_e8::text, verified_row,
-      pool_asset, window_from, window_to
-    from ranked
-    -- Only each pool window's fee leaders can be selected; unsettled rows must stay remembered.
-    where fee_rank <= $2::int or not complete or status in ('observed','pending')`, [new Date(now).toISOString(), rankLimit]);
+      where candidate.status <> 'excluded'
+    ), ranked as (select scoped.*, row_number() over (partition by window_from, window_to, pool_asset
+        order by fee_rune_e8 desc, tx_id) as fee_rank from scoped
+    ) select candidate.tx_id, candidate.status, candidate.checks, candidate.next_check_at, candidate.complete,
+      candidate.completed_at, candidate.first_seen_at, ranked.fee_rune_e8::text, candidate.verified_row,
+      ranked.pool_asset, ranked.window_from, ranked.window_to
+    from ranked join financials_swap_candidates candidate on candidate.tx_id = ranked.tx_id
+    -- Rank narrow rows first, then load details only for each pool window's fee
+    -- leaders. Production holds ~100k unverified candidates a day.
+    where ranked.fee_rank <= $2::int or not ranked.complete`, [new Date(now).toISOString(), rankLimit]);
   return rows;
 }
 
@@ -79,11 +86,18 @@ export async function readFinancialPoolSwapDay(client, asset, day, { timeZone = 
   const complete = missingBlocks === 0 && coverage.unattributed === 0 && coverage.start_bounded
     && (coverage.end_bounded || payload.partial && !stale);
 
-  const { rows } = await client.query(`select candidate.*, fees.fee_rune_e8::text as pool_fee_rune_e8
-    from financials_swap_pool_fees fees join financials_swap_candidates candidate using(tx_id)
-    where fees.asset = $1 and candidate.started and candidate.first_seen_at >= $2::timestamptz
-      and candidate.first_seen_at < $3::timestamptz order by candidate.first_seen_at, candidate.tx_id`,
-  [asset, coverageFrom, windowTo]);
+  // Same bound as verification: this pool's fee leaders, in-progress streams and
+  // disclosed unpriced exclusions, never the day's full swap set.
+  const { rows } = await client.query(`select * from (select candidate.*, fees.fee_rune_e8::text as pool_fee_rune_e8,
+        row_number() over (partition by candidate.status = 'excluded'
+          order by fees.fee_rune_e8 desc nulls last, candidate.tx_id) as fee_rank
+      from financials_swap_pool_fees fees join financials_swap_candidates candidate using(tx_id)
+      where fees.asset = $1 and candidate.started and candidate.first_seen_at >= $2::timestamptz
+        and candidate.first_seen_at < $3::timestamptz) ranked
+    where (status <> 'excluded' and (fee_rank <= $4::int or not complete))
+      or (status = 'excluded' and last_error = 'unpriced' and fee_rank <= $4::int)
+    order by first_seen_at, tx_id`,
+  [asset, coverageFrom, windowTo, 100]);
   const priced = await priceFinancialSwapRows(client, rows.map(row => ({ ...row.verified_row,
     txId: row.tx_id, timestamp: iso(row.first_seen_at), feeRune: Number(row.pool_fee_rune_e8) / 1e8 })),
   { from: captureFrom / 1000, to: bounds.to });
@@ -105,7 +119,7 @@ export async function readFinancialPoolSwapDay(client, asset, day, { timeZone = 
       || byId.get(row.txId).status === 'excluded' && byId.get(row.txId).last_error === 'unpriced').length,
     refreshing: !complete,
     settlement: { status: pending.size ? 'pending' : 'complete',
-      checkedAt: checks.length ? iso(Math.max(...checks)) : null,
+      checkedAt: checks.length ? iso(checks.reduce((latest, at) => Math.max(latest, at), -Infinity)) : null,
       ...financialSwapVerificationSchedule(due, pause, now) }
   };
 }

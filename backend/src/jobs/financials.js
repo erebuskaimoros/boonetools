@@ -99,6 +99,7 @@ export async function runFinancialsCollector(options = {}) {
     const verificationRequest = route => providerRequest(route,
       { lane: 'swap-verification', midgardBudgetClass: 'verification', signal });
     const verifySwaps = options.verifySwapCandidates || (!options.service && verifyFinancialSwapCandidates);
+    const swapSelection = {};
     let stopping;
     const stop = () => {
       controller.abort();
@@ -126,7 +127,8 @@ export async function runFinancialsCollector(options = {}) {
         // Saved transaction checks use a separate cooldown lane and the live
         // allowance, while retaining shared total caps and provider pacing.
         ...(!verifySwaps ? [] : [loop(30_000, () =>
-          verifySwaps(client, { signal, getJson: verificationRequest, maxRequests: 5, poolScopes: true }))]),
+          verifySwaps(client, { signal, getJson: verificationRequest, maxRequests: 5, poolScopes: true,
+            selection: swapSelection }))]),
         loop(60_000, () => {
           const acquisition = acquisitionMetrics({ reset: true });
           if (acquisition) log({ type: 'acquisition_metrics', window_seconds: 60, acquisition });
