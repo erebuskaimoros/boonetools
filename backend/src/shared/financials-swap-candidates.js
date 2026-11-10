@@ -171,7 +171,7 @@ export async function verifyFinancialSwapCandidates(client, { getJson, now = Dat
       and candidate.first_seen_at >= windows.window_from and candidate.first_seen_at < windows.window_to
     where candidate.status <> 'excluded'
       and windows.window_from >= (select fee_started_at from financials_swap_ledger)`, [new Date(atStart).toISOString()]);
-  if (poolScopes) candidates.push(...await loadPoolSwapVerificationCandidates(client, atStart));
+  if (poolScopes) for (const row of await loadPoolSwapVerificationCandidates(client, atStart, 8 * FINANCIAL_SWAP_CANDIDATE_RANK)) candidates.push(row);
   if (!candidates.length) return 0;
   const from = candidates.reduce((earliest, row) => Math.min(earliest, new Date(row.window_from).getTime()), Infinity) / 1000;
   const to = candidates.reduce((latest, row) => Math.max(latest, new Date(row.window_to).getTime()), -Infinity) / 1000;
