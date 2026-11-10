@@ -9,7 +9,10 @@ const TIMESTAMP_KEY = '0xf0c365c3cf59d671eb72da0e7a4113c49f1f0515f462cdcf84e0f1d
 // Delegated runtimes refresh every 150 blocks before authorship; all cuts,
 // including the operator's rounding remainder, sum exactly to the mint budget.
 // Legacy runtimes use the separately guarded one-block-delayed rate below.
-// Unknown runtimes fail closed, especially the future FLIP 2.1 fee-funded path.
+// 20222 has identical emission sources to 20221. 20307 is admitted only while
+// its fee-reward switch is inactive, checked at each day's last block; evidence
+// is in knowledge/chainflip-runtime-20307-verification.json.
+// Unknown runtimes fail closed.
 export const LEGACY_CHAINFLIP_RUNTIMES = new Set([11003, 11005, 11006]);
 export const AUDITED_CHAINFLIP_RUNTIMES = new Set([
   11100, 11101, 11102, 11103, 11104, 11105, 11106, 11107, 11108, 11109, 11110, 11111, 11112,
@@ -18,8 +21,15 @@ export const AUDITED_CHAINFLIP_RUNTIMES = new Set([
   20100, 20101, 20102, 20103, 20104, 20105, 20106, 20107, 20108, 20109, 20110, 20111,
   20112, 20113, 20114, 20115, 20116, 20117, 20118, 20119, 20120,
   20200, 20201, 20202, 20203, 20204, 20205, 20206, 20207, 20208, 20209, 20210, 20211, 20212, 20213, 20214,
-  20215, 20216, 20218, 20219, 20221
+  20215, 20216, 20218, 20219, 20221, 20222,
+  20307
 ]);
+// Runtimes where validator rewards switch from minted FLIP to collected fees
+// once Validator.CurrentEpoch >= Flip.FeeRewardsActivationEpoch.
+export const FEE_REWARD_SWITCH_CHAINFLIP_RUNTIMES = new Set([20307]);
+const FEE_REWARDS_ACTIVATION_KEY = '0xeb20d33519ac778c3e52b5f3678a05c84ed00ccd7fce2be012d284c859cdad44';
+const CURRENT_EPOCH_KEY = '0xb6f721401e7d28a603334d8815fea1682fab6b64c3edd8d1058aa85954ea5db9';
+const FEE_REWARDS_INACTIVE_EPOCH = 4294967295n; // pallet default (u32::MAX) when unset
 export const CHAINFLIP_20210_CODE_HASH = '0xc4a17f29d03d3d0bb084e48d356b049cd22a3f55cbe99578e565eb5e83254cbc';
 export const CHAINFLIP_REVIEWED_CODE_HASHES = Object.freeze({
   20210: CHAINFLIP_20210_CODE_HASH,
@@ -27,7 +37,9 @@ export const CHAINFLIP_REVIEWED_CODE_HASHES = Object.freeze({
   20216: '0x869e4ddf6e4d7ae88b4dc92100a80ea9a32bd7763c640b9bf12b70a20f6aa073',
   20218: '0x7db87aa30a2c91bb9fc4148f9e70f79d00fd0dd549d5e5b19d819ca99eac79de',
   20219: '0x9643c0fc68dbecf366fb348422c66573c05eaf2e5019ee045ca154cd069ffb09',
-  20221: '0x919738d09a31a59288cceadb76161280312bdcaea56c6cf9c9ed74f654bfa952'
+  20221: '0x919738d09a31a59288cceadb76161280312bdcaea56c6cf9c9ed74f654bfa952',
+  20222: '0xa096af48573cf28d5012dfff0a3a87d7fed3b4dd9813b72d023db442c95794ba',
+  20307: '0x3fd3b50f343fce22605dec320a70f1ee117ff2899b45471c6c2c6a82d595eff6'
 });
 export const COMPOUNDING_BLOCKS = 150;
 
@@ -59,7 +71,7 @@ export function createChainflipReader({ request, boundaries = {} }) {
   const blocks = new Map();
   const versions = new Map();
   const rates = new Map();
-  async function batch(calls) {
+  async function batch(calls, { allowNull = false } = {}) {
     const results = [];
     for (let i = 0; i < calls.length; i += 40) {
       const messages = calls.slice(i, i + 40).map(([method, params]) => ({ jsonrpc: '2.0', id: ++sequence, method, params }));
@@ -68,7 +80,7 @@ export function createChainflipReader({ request, boundaries = {} }) {
       const indexed = new Map(payload.map((row) => [row.id, row]));
       for (const message of messages) {
         const row = indexed.get(message.id);
-        if (!row || row.error || row.result === undefined || row.result === null) {
+        if (!row || row.error || row.result === undefined || (row.result === null && !allowNull)) {
           throw new Error(`Chainflip ${message.method}: ${row?.error?.message || 'missing historical state'}`);
         }
         results.push(row.result);
@@ -155,6 +167,16 @@ export function createChainflipReader({ request, boundaries = {} }) {
     const start = await boundary(day), end = await boundary(nextDay(day));
     const firstVersion = await runtime(start.height - 1), lastVersion = await runtime(end.height - 1);
     const changes = await upgrades(start.height - 1, end.height - 1, firstVersion, lastVersion);
+    const runtimes = [...new Set([firstVersion, lastVersion, ...changes.map((height) => versions.get(height))])];
+    if (runtimes.some(version => FEE_REWARD_SWITCH_CHAINFLIP_RUNTIMES.has(version))) {
+      const [{ hash }] = await hashes([end.height - 1]);
+      const [activation] = await batch([['state_getStorage', [FEE_REWARDS_ACTIVATION_KEY, hash]]], { allowNull: true });
+      const activationEpoch = activation === null ? FEE_REWARDS_INACTIVE_EPOCH : decodeLittleEndian(activation);
+      const currentEpoch = decodeLittleEndian(await rpc('state_getStorage', [CURRENT_EPOCH_KEY, hash]));
+      if (currentEpoch >= activationEpoch) {
+        throw runtimeReview(`Chainflip fee-funded rewards are active from epoch ${activationEpoch}; minted emissions need accounting`);
+      }
+    }
     const heights = new Set([start.height]);
     const hasLegacy = LEGACY_CHAINFLIP_RUNTIMES.has(firstVersion);
     for (let height = Math.ceil(start.height / COMPOUNDING_BLOCKS) * COMPOUNDING_BLOCKS; height < end.height; height += COMPOUNDING_BLOCKS) {
@@ -184,7 +206,7 @@ export function createChainflipReader({ request, boundaries = {} }) {
     }
     const checkpoints = sorted.map((height, index) => ({ height, amount: rates.get(rateHeights[index]) }));
     return { day, atomic: sumIssuanceSegments(start.height, end.height, checkpoints), start, end,
-      runtimes: [...new Set([firstVersion, lastVersion, ...changes.map((height) => versions.get(height))])],
+      runtimes,
       checkpoints, method: hasLegacy ? 'historical-onchain-legacy-emission-segments-v1' : 'historical-onchain-emission-segments-v1' };
   }
   return { issuance, boundary, boundaries, head };
