@@ -457,6 +457,14 @@ async function loadIncrementalLookups(client, lookupType, hashes, fingerprints, 
   };
 }
 
+// THORNode reassigns overdue outbounds about every block, changing only these
+// fields; the transaction's status has not moved, so they must not refetch it.
+function withoutRescheduleFields(row) {
+  if (!row || typeof row !== 'object') return row;
+  const { height, vault_pub_key, vault_pub_key_eddsa, gas_rate, max_gas, ...obligation } = row;
+  return obligation;
+}
+
 function buildStatusFingerprints(hashes, outboundQueue, scheduledQueue, swapQueue) {
   const groupByHash = (rows, keyOf) => {
     const grouped = new Map();
@@ -472,8 +480,8 @@ function buildStatusFingerprints(hashes, outboundQueue, scheduledQueue, swapQueu
   const scheduledByHash = groupByHash(scheduledQueue, (row) => row?.in_hash);
   const swapsByHash = groupByHash(swapQueue, (row) => row?.tx?.id);
   return new Map(hashes.map((hash) => [hash, lookupFingerprint({
-    outbound: outboundByHash.get(hash) || [],
-    scheduled: scheduledByHash.get(hash) || [],
+    outbound: (outboundByHash.get(hash) || []).map(withoutRescheduleFields),
+    scheduled: (scheduledByHash.get(hash) || []).map(withoutRescheduleFields),
     swaps: swapsByHash.get(hash) || []
   })]));
 }

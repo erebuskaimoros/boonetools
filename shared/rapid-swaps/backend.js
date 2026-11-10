@@ -151,7 +151,14 @@ export async function fetchMidgardActions(options = {}) {
   if (options.nextPageToken) {
     params.set('nextPageToken', String(options.nextPageToken));
   } else if (!options.txId && !options.address && !options.fromHeight && !options.timestamp && !options.fromTimestamp) {
-    params.set('offset', String(Math.max(0, Math.trunc(safeNumber(options.offset, 0)))));
+    const offset = Math.max(0, Math.trunc(safeNumber(options.offset, 0)));
+    if (offset > 0) {
+      params.set('offset', String(offset));
+    } else {
+      // Midgard answers the newest page far faster anchored at the current
+      // time than at offset=0 (about 1 s against 13 s); both page identically.
+      params.set('timestamp', String(Math.floor(Date.now() / 1000)));
+    }
   }
 
   if (options.txId) {
