@@ -38,6 +38,14 @@ test('rapid swap backend recognizes provider rate limits and daily cooldowns', (
   assert.equal(getRapidSwapRateLimitCooldownMs(error, 60 * 60 * 1000), 60 * 60 * 1000);
 });
 
+function assertNewestSwapPageUrl(url, expectedBase, notBeforeSeconds) {
+  const parsed = new URL(url);
+  const { timestamp, ...params } = Object.fromEntries(parsed.searchParams);
+  assert.equal(`${parsed.origin}${parsed.pathname}`, expectedBase);
+  assert.deepEqual(params, { type: 'swap', limit: '1' });
+  assert.ok(Number(timestamp) >= notBeforeSeconds && Number(timestamp) <= notBeforeSeconds + 5);
+}
+
 test('rapid swap lifecycle skips a cooling provider and continues to fallback', async () => {
   const originalFetch = global.fetch;
   const urls = [];
@@ -58,10 +66,38 @@ test('rapid swap lifecycle skips a cooling provider and continues to fallback', 
     });
   };
   try {
+    const before = Math.floor(Date.now() / 1000);
     await fetchMidgardActions({ limit: 1, bases: TEST_MIDGARD_BASES });
-    assert.deepEqual(urls, [`${TEST_MIDGARD_BASES[1]}/actions?type=swap&limit=1&offset=0`]);
+    assert.equal(urls.length, 1);
+    assertNewestSwapPageUrl(urls[0], `${TEST_MIDGARD_BASES[1]}/actions`, before);
   } finally {
     configureRapidSwapProviderLifecycle();
+    global.fetch = originalFetch;
+  }
+});
+
+test('the newest swap page is requested from the current time, not by offset', async () => {
+  const originalFetch = global.fetch;
+  const urls = [];
+  global.fetch = async (url) => {
+    urls.push(new URL(url));
+    return new Response(JSON.stringify({ actions: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    // Liquify Midgard answers the offset form in about 13 seconds and the
+    // timestamp form in about one; both return the newest swaps first.
+    const before = Math.floor(Date.now() / 1000);
+    await fetchMidgardActions({ limit: 50 });
+    await fetchMidgardActions({ limit: 50, nextPageToken: '286133439000000115' });
+    await fetchMidgardActions({ limit: 50, offset: 100 });
+    const [first, next, paged] = urls.map((url) => url.searchParams);
+    assert.equal(first.has('offset'), false);
+    assert.ok(Number(first.get('timestamp')) >= before && Number(first.get('timestamp')) <= before + 5);
+    assert.equal(next.has('timestamp'), false);
+    assert.equal(next.get('nextPageToken'), '286133439000000115');
+    assert.equal(paged.get('offset'), '100');
+    assert.equal(paged.has('timestamp'), false);
+  } finally {
     global.fetch = originalFetch;
   }
 });
@@ -446,12 +482,13 @@ test('fetchMidgardActions stops on rate limits instead of probing every fallback
   };
 
   try {
+    const before = Math.floor(Date.now() / 1000);
     await assert.rejects(
       () => fetchMidgardActions({ limit: 1, offset: 0 }),
       /HTTP 429/
     );
     assert.equal(urls.length, 1);
-    assert.match(urls[0], /\/actions\?type=swap&limit=1&offset=0$/);
+    assertNewestSwapPageUrl(urls[0], `${MIDGARD_BASES[0]}/actions`, before);
   } finally {
     global.fetch = originalFetch;
   }

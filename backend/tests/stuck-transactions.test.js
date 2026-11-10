@@ -256,6 +256,56 @@ test('stuck transaction scans reuse unchanged per-hash lookups across scheduler 
 });
 
 
+test('a rescheduled outbound reuses its status lookup until the obligation itself changes', async () => {
+  const lookupRows = new Map();
+  const client = {
+    async query(sql, params = []) {
+      if (sql.includes('select tx_id, queue_fingerprint')) {
+        return { rows: params[1].flatMap((hash) => lookupRows.get(`${params[0]}:${hash}`) || []) };
+      }
+      if (sql.includes('jsonb_to_recordset')) {
+        for (const row of JSON.parse(params[0])) lookupRows.set(`${row.lookup_type}:${row.tx_id}`, row);
+      }
+      return { rows: [] };
+    }
+  };
+  let outboundQueue = baseInput().outboundQueue;
+  let statusCalls = 0;
+  const fetcher = async (path) => {
+    if (path === '/thorchain/queue/outbound') return outboundQueue;
+    if (path === '/thorchain/queue/scheduled') return [];
+    if (path.startsWith('/thorchain/queue/swap/paginated')) return { swap_queue: [] };
+    if (path === '/thorchain/swaps/streaming') return [];
+    if (path.startsWith('/thorchain/tx/status/')) {
+      statusCalls += 1;
+      return baseInput().statuses.get(TX_ID);
+    }
+    throw new Error(`Unexpected endpoint ${path}`);
+  };
+  const coreSnapshot = {
+    lastblock: baseInput().lastBlocks,
+    mimir: baseInput().mimir,
+    constants: baseInput().constants,
+    inbound_addresses: baseInput().inboundAddresses,
+    stale: false
+  };
+  const scan = () => buildStuckTransactionSnapshot(fetcher, { client, coreSnapshot });
+
+  await scan();
+  // THORNode reassigns an overdue outbound to another vault at a later height
+  // with fresh gas; the transaction's own status has not moved.
+  outboundQueue = [{ ...outboundQueue[0], height: 9960, vault_pub_key: 'thorpub1next',
+    vault_pub_key_eddsa: 'thorpub1nexteddsa', gas_rate: '31', max_gas: [{ asset: 'TRON.TRX', amount: '42' }] }];
+  const rescheduled = await scan();
+  assert.equal(statusCalls, 1);
+  assert.equal(rescheduled.lookups.reused, 1);
+  assert.equal(rescheduled.transactions[0].retry_height, 9960);
+
+  outboundQueue = [{ ...outboundQueue[0], coin: { ...MAIN_COIN, amount: '111397537000' } }];
+  await scan();
+  assert.equal(statusCalls, 2);
+});
+
 test('swap queue scanning uses bounded pages and includes transactions after the first page', async () => {
   const input = baseInput();
   const offsets = [];
