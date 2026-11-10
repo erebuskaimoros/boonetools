@@ -387,6 +387,50 @@ server-owned collector resumes from this cache. Do not start concurrent writers.
 
 ## Chainflip investigation
 
+### November 9–10, 2026 runtime 20222 and 20307 review
+
+On November 10 the comparison's shared cutoff was stuck at **November 8** while
+the Financials chart above it ran through November 10, so the two November
+totals disagreed. Per-day THORChain figures matched; the comparison simply had
+fewer days. Chainflip had upgraded twice and both runtimes failed the
+issuance-review guard:
+
+| Post-state block | Runtime | Time (UTC) | Deployed `:code` hash |
+| --- | --- | --- | --- |
+| 15,619,322 | 20221 → 20222 | 2026-11-09 13:31:48 | `0xa096af48573cf28d5012dfff0a3a87d7fed3b4dd9813b72d023db442c95794ba` |
+| 15,632,240 | 20222 → 20307 | 2026-11-10 11:03:48 | `0x3fd3b50f343fce22605dec320a70f1ee117ff2899b45471c6c2c6a82d595eff6` |
+
+**20222** is release/2.2 commit `f02ec665c664dc7c4c6ffc423d9fb739afa31162`.
+`cf-emissions/src/lib.rs`, `cf-validator/src/delegation.rs`,
+`runtime/src/constants.rs`, `runtime/src/runtime_apis.rs` and
+`cf-flip/src/lib.rs` have the same Git blob IDs as the reviewed 20221 commit.
+
+**20307** is release/2.3 commit `14ad23652a2aa8528052de6096b81f77c5aa8676` and
+does change the emission path. It introduces FLIP 2.1 fee-funded rewards behind
+`Flip.FeeRewardsActivationEpoch` (default `u32::MAX`):
+
+- While `Validator.CurrentEpoch` is below that value, `note_author` still
+  distributes `CurrentAuthorityEmissionPerBlock` and each share is minted. The
+  rewritten delegation split rounds every cut down and gives the remainder to
+  the operator, so the mints still sum to the full budget.
+- Once the epoch reaches it, nothing is minted for authors and fees are
+  reserved for distribution instead of burned. The stored emission rate keeps
+  compounding, so `cf_authority_emission_per_block` would overstate issuance.
+
+Mainnet had no stored activation value at any sampled block (epochs 496–497),
+so the switch was inactive. Decoded every `flip.FlipMinted` event in 15 blocks
+around both upgrades, a compounding boundary under each runtime and a recent
+20307 boundary; each block's mints equal the same-block authority rate exactly.
+Hashes, amounts and storage keys are in
+[`chainflip-runtime-20307-verification.json`](chainflip-runtime-20307-verification.json).
+
+Admit both runtimes only with the code hashes above. For 20307 the reader also
+reads the activation epoch and current epoch at each day's last block and fails
+closed with the runtime-review error once fee-funded rewards are active; that
+day will need event-level accounting. An activation that is set and then
+withdrawn within one day would not be seen. As before, this is a focused
+source-path review plus deployed-state reconciliation, not a runtime audit.
+
 ### October 30–November 4, 2026 runtime 20221 review
 
 The November 4 investigation found the shared chart cutoff stuck at **October

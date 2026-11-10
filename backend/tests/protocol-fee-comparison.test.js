@@ -103,8 +103,14 @@ test('issuance arithmetic is exact beyond JS safe integers, inclusive start and 
   assert.throws(() => sumIssuanceSegments(100, 200, []), /Incomplete/);
 });
 
+// Flip.FeeRewardsActivationEpoch and Validator.CurrentEpoch on Chainflip mainnet.
+const FEE_REWARDS_ACTIVATION_KEY = '0xeb20d33519ac778c3e52b5f3678a05c84ed00ccd7fce2be012d284c859cdad44';
+const CURRENT_EPOCH_KEY = '0xb6f721401e7d28a603334d8815fea1682fab6b64c3edd8d1058aa85954ea5db9';
+const littleEndian = (value, hexDigits) => '0x' + BigInt(value).toString(16).padStart(hexDigits, '0').match(/../g).reverse().join('');
+
 function rpcFixture(specVersion = 20213, {
-  codeHash, startDay = '2026-09-17', backupRate = '0x0', authorityRate = height => 100n + BigInt(Math.floor(height / 150))
+  codeHash, startDay = '2026-09-17', backupRate = '0x0', authorityRate = height => 100n + BigInt(Math.floor(height / 150)),
+  feeRewardsActivationEpoch = null
 } = {}) {
   const startTime = Date.parse(startDay);
   const calls = [];
@@ -117,6 +123,8 @@ function rpcFixture(specVersion = 20213, {
     if (method === 'chain_getFinalizedHead') result = hash(16000);
     else if (method === 'chain_getHeader') result = { number: `0x${height.toString(16)}` };
     else if (method === 'chain_getBlockHash') result = hash(params[0]);
+    else if (method === 'state_getStorage' && params[0] === FEE_REWARDS_ACTIVATION_KEY) result = feeRewardsActivationEpoch === null ? null : littleEndian(feeRewardsActivationEpoch, 8);
+    else if (method === 'state_getStorage' && params[0] === CURRENT_EPOCH_KEY) result = littleEndian(497, 8);
     else if (method === 'state_getStorage') result = '0x' + BigInt(startTime + (height - 1000) * 6000).toString(16).padStart(16, '0').match(/../g).reverse().join('');
     else if (method === 'state_getRuntimeVersion') result = { specName: 'chainflip-node', specVersion: runtimeAt(height) };
     else if (method === 'state_getStorageHash') result = (typeof codeHash === 'function' ? codeHash(height) : codeHash) ?? CHAINFLIP_REVIEWED_CODE_HASHES[runtimeAt(height)] ?? '0xunreviewed';
@@ -280,7 +288,46 @@ test('20221 deployed mint-event evidence reconciles the direct upgrade and compo
   assert.equal(proof.observations[2].executionVersion, 20221);
 });
 
-for (const specVersion of [20215, 20216, 20218, 20219, 20221]) {
+test('runtime 20307 is refused once fee-funded rewards replace minted emissions', async () => {
+  // From 20307 a governance-set epoch switches validator rewards from newly
+  // minted FLIP to collected fees; the stored emission rate then mints nothing.
+  for (const feeRewardsActivationEpoch of [497, 400]) {
+    const fixture = rpcFixture(20307, { feeRewardsActivationEpoch });
+    await assert.rejects(createChainflipReader(fixture).issuance('2026-09-17'), {
+      code: 'CHAINFLIP_RUNTIME_REVIEW', message: /fee-funded rewards/
+    });
+  }
+  // A later epoch, or no stored value (the pallet default), still mints.
+  for (const feeRewardsActivationEpoch of [498, 4294967295, null]) {
+    const row = await createChainflipReader(rpcFixture(20307, { feeRewardsActivationEpoch })).issuance('2026-09-17');
+    assert.deepEqual(row.runtimes, [20307]);
+  }
+  // Earlier runtimes have no such switch and are not asked for it.
+  const earlier = rpcFixture(20222, { feeRewardsActivationEpoch: 400 });
+  assert.deepEqual((await createChainflipReader(earlier).issuance('2026-09-17')).runtimes, [20222]);
+});
+
+test('20222 and 20307 deployed mint events equal the emission rate across both upgrades', async () => {
+  const proof = JSON.parse(await readFile(new URL('../../knowledge/chainflip-runtime-20307-verification.json', import.meta.url), 'utf8'));
+  assert.equal(proof.deployedCodeHashes[20222], CHAINFLIP_REVIEWED_CODE_HASHES[20222]);
+  assert.equal(proof.deployedCodeHashes[20307], CHAINFLIP_REVIEWED_CODE_HASHES[20307]);
+  assert.deepEqual(proof.upgradeHeights, { 20222: 15619322, 20307: 15632240 });
+  assert.equal(proof.observations.length, 15);
+  for (const row of proof.observations) {
+    assert.equal(row.codeHash, CHAINFLIP_REVIEWED_CODE_HASHES[row.postVersion]);
+    assert.equal(row.mintedAmountsAtomic.length, row.mintedEventCount);
+    const minted = row.mintedAmountsAtomic.reduce((sum, amount) => sum + BigInt(amount), 0n);
+    assert.equal(minted.toString(), row.mintedAtomic);
+    assert.equal(minted.toString(), row.authorityEmissionAtomic);
+    assert.equal(row.feeRewardsActivationEpoch, null);
+  }
+  const at = height => proof.observations.find(row => row.height === height);
+  assert.deepEqual([at(15619322).executionVersion, at(15619322).postVersion], [20221, 20222]);
+  assert.deepEqual([at(15632240).executionVersion, at(15632240).postVersion], [20222, 20307]);
+  assert.equal(at(15632241).executionVersion, 20307);
+});
+
+for (const specVersion of [20215, 20216, 20218, 20219, 20221, 20222, 20307]) {
   test(`post-September-29 Chainflip runtime ${specVersion} collects exact daily issuance`, async () => {
     assert.match(CHAINFLIP_REVIEWED_CODE_HASHES[specVersion], /^0x[0-9a-f]{64}$/);
     const fixture = rpcFixture(specVersion);
