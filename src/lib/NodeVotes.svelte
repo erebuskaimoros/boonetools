@@ -18,6 +18,8 @@
   import VoteKeyInfo from './node-votes/VoteKeyInfo.svelte';
   import VoteKeyInfoPanel from './node-votes/VoteKeyInfoPanel.svelte';
   import { buildAdrPreferences } from './node-votes/adr-preference.js';
+  import { buildVersionRolloutRows } from './node-votes/version-rollout.js';
+  import { loadCoreSnapshotField } from './api/core-snapshot.js';
   import { formatNumber } from '$lib/utils/formatting';
 
   const REFRESH_INTERVAL_MS = 60000;
@@ -41,6 +43,8 @@
   let nodeDetailErrors = {};
   let dashboardRequestId = 0;
   let infoTarget = null;
+  let rolloutNodes = [];
+  let networkVersion = '';
 
   $: stats = dashboard?.stats || {};
   $: categoryStats = stats.categories || {};
@@ -64,6 +68,9 @@
   $: constantValueCount = networkValueRows.length - mimirValueCount;
   $: upgradeProposals = currentUpgradeProposals(dashboard, voteRows);
   $: filteredVoteRows = sortVoteRows(filterVoteRows(voteRows, searchTerm, categoryFilter), voteSortMode);
+  // Releases rolling out without an on-chain proposal stay pinned above the votes.
+  $: versionRows = buildVersionRolloutRows({ nodes: rolloutNodes, networkVersion });
+  $: tableVoteRows = [...filterVoteRows(versionRows, searchTerm, categoryFilter), ...filteredVoteRows];
   $: filteredNodeRows = sortNodeRows(filterNodeRows(nodeRows, searchTerm, categoryFilter), nodeSortMode);
   $: avgResponseSortLabel = nodeSortMode === 'avg-response-asc'
     ? 'FASTEST'
@@ -81,13 +88,34 @@
 
   onMount(() => {
     loadDashboard();
-    refreshTimer = createVisiblePoll(() => loadDashboard({ silent: true }), { intervalMs: REFRESH_INTERVAL_MS, immediate: false });
+    loadVersionRollout();
+    refreshTimer = createVisiblePoll(() => {
+      loadDashboard({ silent: true });
+      loadVersionRollout();
+    }, { intervalMs: REFRESH_INTERVAL_MS, immediate: false });
   });
 
   onDestroy(() => {
     dashboardRequestId += 1;
     refreshTimer?.stop();
   });
+
+  // Node versions come from the cached core snapshot; a failed refresh keeps
+  // the last known rollout rather than hiding the row.
+  async function loadVersionRollout() {
+    try {
+      const [nodes, version] = await Promise.all([
+        loadCoreSnapshotField('nodes', { fields: 'node_address,node_operator_address,status,version' }),
+        loadCoreSnapshotField('version')
+      ]);
+      if (Array.isArray(nodes) && version?.current) {
+        rolloutNodes = nodes;
+        networkVersion = version.current;
+      }
+    } catch {
+      // The vote dashboard reports its own errors; the rollout row is supplementary.
+    }
+  }
 
   async function loadDashboard(options = {}) {
     const requestId = ++dashboardRequestId;
@@ -114,6 +142,7 @@
 
   function matchesCategory(row, category) {
     if (category === 'all') return true;
+    if (isVersionRow(row)) return category === 'upgrade';
     return voteCategory(row) === category;
   }
 
@@ -309,6 +338,7 @@
   }
 
   function categoryLabel(category) {
+    if (category === 'version') return 'VERSION';
     if (category === 'upgrade') return 'UPGRADE';
     return category === 'operational' ? 'OPERATIONAL' : 'ECONOMIC';
   }
@@ -321,6 +351,9 @@
 
   function categoryTooltip(category) {
     const threshold = formatNumber(categoryThreshold(category) || 0);
+    if (category === 'version') {
+      return 'Version rollout: not an on-chain vote. Operators update their own nodes. Once a supermajority of active validators run a release it becomes the minimum version to join; it becomes the network version when every active validator runs it.';
+    }
     if (category === 'upgrade') {
       return `Upgrade approval: active validators must approve the named release at the supermajority threshold. Reject votes never approve a proposal. Current threshold: ${threshold} approvals.`;
     }
@@ -409,6 +442,7 @@
   }
 
   function canInspectActiveVotes(row) {
+    if (isVersionRow(row)) return true;
     return (
       activeNodes.length > 0 &&
       Array.isArray(row?.values) &&
@@ -496,7 +530,12 @@
     return isUpgradeVote(vote) ? String(value).toUpperCase() : value;
   }
 
+  function isVersionRow(row) {
+    return row?.vote_kind === 'version';
+  }
+
   function voteCategory(row) {
+    if (isVersionRow(row)) return 'version';
     if (
       row?.vote_kind === 'upgrade' ||
       row?.mimir_category === 'upgrade' ||
@@ -707,7 +746,7 @@
 
     {#if activeTab === 'vote'}
       <section class="table-block">
-        <div class="block-title"><span></span> Vote-Key Rollup <em>{filteredVoteRows.length} rows</em></div>
+        <div class="block-title"><span></span> Vote-Key Rollup <em>{tableVoteRows.length} rows</em></div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -731,20 +770,24 @@
               </tr>
             </thead>
             <tbody>
-              {#each filteredVoteRows as row}
-                <tr class:expanded={expandedVoteKey === row.mimir_key}>
+              {#each tableVoteRows as row}
+                {@const versionRow = isVersionRow(row)}
+                {@const rowOpen = versionRow ? activeVotesKey === row.mimir_key : expandedVoteKey === row.mimir_key}
+                <tr class:expanded={rowOpen}>
                   <td class="key-cell">
                     <div class="vote-key-line">
                       <button
                         class="key-button"
-                        aria-expanded={expandedVoteKey === row.mimir_key}
-                        on:click={() => toggleVoteKey(row.mimir_key)}
+                        aria-expanded={rowOpen}
+                        on:click={() => versionRow ? toggleActiveVotes(row.mimir_key) : toggleVoteKey(row.mimir_key)}
                       >
-                        <span>{expandedVoteKey === row.mimir_key ? '-' : '+'}</span>
+                        <span>{rowOpen ? '-' : '+'}</span>
                         <strong>{row.mimir_key}</strong>
                       </button>
-                      <VoteKeyCopy voteKey={row.mimir_key} />
-                      <VoteKeyInfo voteKey={row.mimir_key} preference={adrPreferences[row.mimir_key]} expanded={infoTarget?.key === row.mimir_key} on:open={(event) => infoTarget = event.detail} />
+                      {#if !versionRow}
+                        <VoteKeyCopy voteKey={row.mimir_key} />
+                        <VoteKeyInfo voteKey={row.mimir_key} preference={adrPreferences[row.mimir_key]} expanded={infoTarget?.key === row.mimir_key} on:open={(event) => infoTarget = event.detail} />
+                      {/if}
                     </div>
                     <span
                       class="type-pill {voteCategory(row)}"
@@ -752,14 +795,18 @@
                       aria-label={categoryTooltip(voteCategory(row))}
                     >{categoryLabel(voteCategory(row))}</span>
                     <small>
-                      {isUpgradeVote(row)
-                        ? (isVoteApproved(row) ? 'proposal approved' : 'proposal pending')
-                        : `current ${row.current_value ?? '-'}`}
+                      {versionRow
+                        ? `network on ${row.rollout.current}`
+                        : isUpgradeVote(row)
+                          ? (isVoteApproved(row) ? 'proposal approved' : 'proposal pending')
+                          : `current ${row.current_value ?? '-'}`}
                     </small>
                   </td>
                   <td>
                     <span class="value-chip">{isUpgradeVote(row) ? 'APPROVE' : (row.leader_value || '-')}</span>
-                    <small>{formatNumber(row.leader_count || 0)} {isUpgradeVote(row) ? 'active validators' : 'nodes'}</small>
+                    <small>{versionRow
+                      ? `${formatNumber(row.rollout.updated)} of ${formatNumber(row.rollout.total)} active validators`
+                      : `${formatNumber(row.leader_count || 0)} ${isUpgradeVote(row) ? 'active validators' : 'nodes'}`}</small>
                   </td>
                   <td class="breakdown-cell">
                     {#each (row.values || []).slice(0, 4) as value}
@@ -775,8 +822,13 @@
                     {/each}
                   </td>
                   <td>
-                    <strong>{formatNumber(row.historical_vote_events || 0)}</strong>
-                    <small>{formatNumber(row.value_change_events ?? 0)} changes | {formatNumber(row.recent_7d_votes || 0)} in 7d</small>
+                    {#if versionRow}
+                      <strong>NODE VERSIONS</strong>
+                      <small>not an on-chain vote</small>
+                    {:else}
+                      <strong>{formatNumber(row.historical_vote_events || 0)}</strong>
+                      <small>{formatNumber(row.value_change_events ?? 0)} changes | {formatNumber(row.recent_7d_votes || 0)} in 7d</small>
+                    {/if}
                   </td>
                   <td>
                     {#if canInspectActiveVotes(row)}
@@ -789,9 +841,13 @@
                         on:click={() => toggleActiveVotes(row.mimir_key)}
                         title="Show every active validator grouped by its current vote value"
                       >
-                        <span>{isVoteApproved(row)
-                          ? (isUpgradeVote(row) ? 'APPROVED' : 'PASSED')
-                          : `${formatNumber(row.votes_to_consensus || 0)} short`}</span>
+                        <span>{versionRow
+                          ? (row.rollout.minVersionReached
+                            ? `${formatNumber(row.rollout.remaining)} left`
+                            : `${formatNumber(row.rollout.toSuperMajority)} short`)
+                          : isVoteApproved(row)
+                            ? (isUpgradeVote(row) ? 'APPROVED' : 'PASSED')
+                            : `${formatNumber(row.votes_to_consensus || 0)} short`}</span>
                         <i aria-hidden="true">{activeVotesKey === row.mimir_key ? '-' : '+'}</i>
                       </button>
                     {:else if isVoteApproved(row)}
@@ -799,26 +855,48 @@
                     {:else}
                       <strong>{formatNumber(row.votes_to_consensus || 0)} short</strong>
                     {/if}
-                    <small>{consensusTimingLabel(row)}</small>
+                    <small>{versionRow
+                      ? (row.rollout.minVersionReached
+                        ? `min version set · network at ${formatNumber(row.rollout.total)}`
+                        : `min version at ${formatNumber(row.rollout.superMajority)} · network at ${formatNumber(row.rollout.total)}`)
+                      : consensusTimingLabel(row)}</small>
                   </td>
                   <td>
-                    <strong>{formatDateTime(row.latest_vote_at)}</strong>
-                    <small>height {formatNumber(row.latest_height || 0)}</small>
+                    {#if versionRow}
+                      <strong>LIVE</strong>
+                      <small>current node state</small>
+                    {:else}
+                      <strong>{formatDateTime(row.latest_vote_at)}</strong>
+                      <small>height {formatNumber(row.latest_height || 0)}</small>
+                    {/if}
                   </td>
                 </tr>
                 {#if activeVotesKey === row.mimir_key}
-                  {@const activeVoteGroups = groupActiveVotersByValue(activeNodes, row.values)}
+                  {@const panelNodes = versionRow ? row.active_nodes : activeNodes}
+                  {@const activeVoteGroups = groupActiveVotersByValue(panelNodes, row.values)}
                   {@const notVotedCount = activeVoteGroups.find((group) => group.is_missing)?.count || 0}
-                  {@const votedCount = activeNodes.length - notVotedCount}
+                  {@const votedCount = panelNodes.length - notVotedCount}
                   <tr class="active-votes-row" id="active-votes-{row.mimir_key}">
                     <td colspan="6">
                       <div class="active-votes-panel">
                         <div class="active-votes-heading">
-                          <strong>Active validator vote status</strong>
-                          <span>{formatNumber(votedCount)} voted · {formatNumber(notVotedCount)} not voted · {formatNumber(activeNodes.length)} active</span>
+                          {#if versionRow}
+                            <strong>Active validator versions</strong>
+                            <span>{formatNumber(row.rollout.updated)} updated · {formatNumber(row.rollout.remaining)} not updated · {formatNumber(row.rollout.total)} active</span>
+                          {:else}
+                            <strong>Active validator vote status</strong>
+                            <span>{formatNumber(votedCount)} voted · {formatNumber(notVotedCount)} not voted · {formatNumber(activeNodes.length)} active</span>
+                          {/if}
                         </div>
                         <p>
-                          {#if isVoteApproved(row)}
+                          {#if versionRow}
+                            This release has no on-chain proposal; operators update their own nodes.
+                            {#if row.rollout.minVersionReached}
+                              A supermajority runs <strong>{row.rollout.target}</strong>, so it is the minimum version to join. The network moves to it when the remaining {formatNumber(row.rollout.remaining)} validators update or churn out.
+                            {:else}
+                              {formatNumber(row.rollout.toSuperMajority)} more validators on <strong>{row.rollout.target}</strong> make it the minimum version to join ({formatNumber(row.rollout.superMajority)} of {formatNumber(row.rollout.total)}). The network moves to it when every active validator runs it.
+                            {/if}
+                          {:else if isVoteApproved(row)}
                             Consensus has passed. These are the current active validator stances, grouped by value.
                           {:else}
                             {formatNumber(row.votes_to_consensus || 0)} more matching <strong>{row.leader_value || 'leader'}</strong> votes are needed. Every active validator remains listed below.
@@ -1953,6 +2031,11 @@
   .type-pill.upgrade {
     border-color: rgba(85, 136, 204, 0.55);
     color: #78a8e8;
+  }
+
+  .type-pill.version {
+    border-color: rgba(245, 245, 245, 0.45);
+    color: #f5f5f5;
   }
 
   .breakdown-cell {
