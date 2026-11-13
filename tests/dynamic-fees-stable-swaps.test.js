@@ -252,3 +252,38 @@ test('rolling fee-rate averages use the same volume weighting with history lookb
     .series.find((item) => item.id === 'fees-7d').data;
   assert.deepEqual(weeklyFeesRolling, [null, 10]);
 });
+
+test('mimir changes are normalized, labelled and drawn on the day or bucket that contains them', () => {
+  const withChanges = { ...payload, mimir_changes: [
+    { key: 'stableslipminbps', value: '10', previous_value: '2', day: payload.days[9].day, time: 'x', height: 1 },
+    { key: 'STABLESLIPMINBPS-ETH.USDC-0XA0', value: 5, previous_value: null, day: payload.days[2].day },
+    { key: 'STABLESLIPMINBPS', value: 'abc', day: payload.days[3].day },
+    { key: '', value: 1, day: payload.days[3].day },
+    { key: 'STABLESLIPMINBPS', value: 7, day: '2026-02-30' }
+  ] };
+  const dashboard = normalizeStableSwapsPayload(withChanges);
+  assert.deepEqual(dashboard.mimirChanges.map((change) => [change.day, change.label]), [
+    [payload.days[2].day, 'STABLE MIN FEE ETH.USDC 5 BPS'],
+    [payload.days[9].day, 'STABLE MIN FEE 2 → 10 BPS']
+  ]);
+  assert.deepEqual(normalizeStableSwapsPayload({}).mimirChanges, []);
+
+  const marks = (option) => option.series.find((item) => item.id === 'time-series-events')?.markLine.data;
+  const daily = buildStableSwapsOption(dashboard.days, { mimirChanges: dashboard.mimirChanges });
+  assert.deepEqual(marks(daily).map((mark) => [mark.xAxis, mark.label.formatter]), [
+    [payload.days[2].day, 'STABLE MIN FEE ETH.USDC 5 BPS'],
+    [payload.days[9].day, 'STABLE MIN FEE 2 → 10 BPS']
+  ]);
+  assert.match(daily.tooltip.formatter([{ axisValue: payload.days[9].day }]), /MIMIR · STABLE MIN FEE 2 → 10 BPS/);
+  assert.doesNotMatch(daily.tooltip.formatter([{ axisValue: payload.days[8].day }]), /MIMIR/);
+
+  const base = buildStableSwapsOption(dashboard.days, { hidden: [], mimirChanges: dashboard.mimirChanges })._spec;
+  const weekly = buildStableSwapsOption(dashboard.days, { mimirChanges: dashboard.mimirChanges,
+    analysis: { grain: 'week', hidden: [], rolling: [], baseSpec: base, historySpec: base, historyRows: dashboard.days } });
+  for (const mark of marks(weekly)) assert.ok(weekly._rows.some((row) => row.day === mark.xAxis));
+  assert.equal(marks(weekly).length, 2);
+
+  // Changes outside the plotted range add nothing to the chart.
+  assert.equal(buildStableSwapsOption(dashboard.days.slice(0, 1), { mimirChanges: dashboard.mimirChanges })
+    .series.some((item) => item.id === 'time-series-events'), false);
+});

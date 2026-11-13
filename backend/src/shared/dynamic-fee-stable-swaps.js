@@ -98,6 +98,35 @@ export async function readStableSwapBackfillProgress(client) {
   };
 }
 
+// The stable-to-stable minimum swap fee (global and per-asset overrides).
+const STABLE_SWAP_MIMIR_PREFIX = 'STABLESLIPMINBPS';
+
+/** Dated value changes per key; repeats of an unchanged value are dropped. */
+export function buildStableSwapMimirChanges(rows = []) {
+  const last = new Map();
+  const changes = [];
+  for (const row of rows) {
+    const key = String(row?.mimir_key ?? '').trim().toUpperCase();
+    const time = row?.block_time instanceof Date ? row.block_time.getTime() : Date.parse(String(row?.block_time ?? ''));
+    const value = String(row?.mimir_value ?? '').trim();
+    if (!key.startsWith(STABLE_SWAP_MIMIR_PREFIX) || !Number.isFinite(time) || value === '') continue;
+    const previous = last.has(key) ? last.get(key) : null;
+    last.set(key, value);
+    if (previous === value) continue;
+    changes.push({ key, value, previous_value: previous, time: new Date(time).toISOString(),
+      day: dayKey(time), height: Number(row.height) || null });
+  }
+  return changes;
+}
+
+export async function readStableSwapMimirChanges(client) {
+  const { rows = [] } = await client.query(`select mimir_key, mimir_value, height, block_time
+    from protocol_mimir_changes
+    where upper(mimir_key) like $1 and block_time is not null
+    order by height, event_index`, [`${STABLE_SWAP_MIMIR_PREFIX}%`]);
+  return buildStableSwapMimirChanges(rows);
+}
+
 export async function readStableSwapDays(client, { days, nowMs = Date.now() }) {
   const payload = {
     as_of: new Date(nowMs).toISOString(),
@@ -106,6 +135,7 @@ export async function readStableSwapDays(client, { days, nowMs = Date.now() }) {
     stable_symbols: [...STABLE_SWAP_SYMBOLS],
     source: STABLE_SWAP_SOURCE,
     backfill: null,
+    mimir_changes: [],
     days: []
   };
 
@@ -113,6 +143,7 @@ export async function readStableSwapDays(client, { days, nowMs = Date.now() }) {
   const ledgerStart = stableSwapCoverageStart(ledger[0]?.fee_started_at);
   const { state, progress } = await readStableSwapBackfillProgress(client);
   payload.ledger_start = ledgerStart;
+  payload.mimir_changes = await readStableSwapMimirChanges(client);
   payload.backfill = progress;
   payload.coverage_start = ledgerStart;
   // Backfill days belong to the ledger start they were scanned against.
