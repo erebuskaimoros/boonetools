@@ -52,12 +52,13 @@ function metricLines(values, hidden, row) {
   }]);
 }
 
-export function stableSwapsTooltip(row, { hidden = [...STABLE_SWAP_DEFAULT_HIDDEN] } = {}) {
+export function stableSwapsTooltip(row, { hidden = [...STABLE_SWAP_DEFAULT_HIDDEN], events = [] } = {}) {
   return timeSeriesTooltip([
     `${utcDayLabel(row.day)} · UTC`,
     `SWAPS: ${Number.isFinite(row.swaps) ? count.format(row.swaps) : 'unavailable'}`,
     ...metricLines([row.volumeUsd, row.feesUsd, row.feeBps], hidden, row),
     `FEES (RUNE): ${formatRune(row.feesRune)}`,
+    ...events.filter((event) => event.day === row.day).map((event) => `MIMIR · ${event.label}`),
     ...(row.partial ? ['LIVE PARTIAL UTC DAY'] : [])
   ]);
 }
@@ -80,9 +81,11 @@ export function stableSwapsGroupedTooltip(bucket, { rows = [], grain = 'week', h
   ]);
 }
 
-export function buildStableSwapsOption(rows, { hidden = [...STABLE_SWAP_DEFAULT_HIDDEN], ...viewport } = {}) {
+export function buildStableSwapsOption(rows, { hidden = [...STABLE_SWAP_DEFAULT_HIDDEN], mimirChanges = [], ...viewport } = {}) {
+  // Mimir changes are drawn as dashed vertical rules on the day they took effect.
+  const events = mimirChanges.map((change) => ({ day: change.day, label: change.label, color: palette.accent }));
   return buildTimeSeriesOption(rows, {
-    ...viewport, hidden: [...hidden],
+    ...viewport, hidden: [...hidden], events,
     axes: [
       { ...STABLE_SWAP_SERIES[0], position: 'left', baseline: 'zero', label: 'DAILY VOLUME $',
         format: compactUsd, tooltipFormat: formatStableUsd },
@@ -99,7 +102,7 @@ export function buildStableSwapsOption(rows, { hidden = [...STABLE_SWAP_DEFAULT_
       { ...STABLE_SWAP_SERIES[2], aggregate: stableSwapWeightedBpsReducer, rollingReduce: stableSwapWeightedBpsReducer,
         axis: 'feeBps', dashed: true, lineWidth: 1.5, smooth: 0.12, data: rows.map((row) => row.feeBps) }
     ],
-    tooltip: (row) => stableSwapsTooltip(row, { hidden }),
+    tooltip: (row) => stableSwapsTooltip(row, { hidden, events }),
     groupedTooltip: stableSwapsGroupedTooltip
   });
 }

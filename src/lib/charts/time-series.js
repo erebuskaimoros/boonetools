@@ -35,7 +35,7 @@ export function buildTimeSeriesOption(rows, {
   axes, series, tooltip, groupedTooltip = null, hidden = [], window = null, width = 1000,
   zoomId = TIME_SERIES_ZOOM_ID, minSpan = 1, xLabel = utcDayLabel,
   zoom = true, compact = false, tooltipEnabled = true, sourceGrain = 'day', calendar = 'UTC', analysis = null,
-  rollingSeries = []
+  rollingSeries = [], events = []
 }) {
   const spec = { rows, axes, series, sourceGrain, calendar, rollingSeries };
   if (analysis) {
@@ -155,7 +155,7 @@ export function buildTimeSeriesOption(rows, {
       }
     },
     yAxis,
-    series: series.map((item) => ({
+    series: [...series.map((item) => ({
       id: item.id, name: item.label, type: item.mark,
       ...(item.stack ? { stack: item.stack } : {}),
       yAxisIndex: axes.findIndex((axis) => axis.id === item.axis),
@@ -176,6 +176,23 @@ export function buildTimeSeriesOption(rows, {
         coord: [marker.day, marker.value], value: marker.text,
         label: { show: true, formatter: '{c}', offset: [0, -8], color: marker.color || item.color, fontFamily, fontSize: 12 }
       })) }
-    }))
+    })), ...eventSeries(rows, events, fontFamily)]
   };
+}
+
+// Dated annotations as dashed vertical rules. On calendar buckets an event is
+// drawn on the bucket that contains its day; events outside the rows are skipped.
+function eventSeries(rows, events, fontFamily) {
+  const data = (Array.isArray(events) ? events : []).flatMap((event) => {
+    const row = rows.find((point) => point.day <= event.day && event.day <= (point.endDay || point.throughDay || point.day));
+    return row ? [{ xAxis: row.day, lineStyle: { color: event.color || palette.muted },
+      label: { formatter: String(event.label ?? ''), color: event.color || palette.muted } }] : [];
+  });
+  return data.length ? [{
+    id: 'time-series-events', type: 'line', xAxisIndex: 0, yAxisIndex: 0, data: rows.map(() => null),
+    silent: true, showSymbol: false, z: 4,
+    markLine: { silent: true, symbol: 'none', animation: false, data,
+      lineStyle: { type: 'dashed', width: 1 },
+      label: { show: true, position: 'insideEndTop', fontFamily, fontSize: 10 } }
+  }] : [];
 }

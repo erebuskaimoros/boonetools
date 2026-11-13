@@ -18,7 +18,7 @@ async function withDatabase(run) {
     await client.query('begin');
     await client.query(`create schema "${schema}"`);
     await client.query(`set local search_path to "${schema}"`);
-    for (const migration of ['073_financials_swap_candidates.sql', '076_financials_fee_candidates.sql',
+    for (const migration of ['053_protocol_mimir_changes.sql', '073_financials_swap_candidates.sql', '076_financials_fee_candidates.sql',
       '080_dynamic_fee_stable_swap_backfill.sql']) {
       const sql = await readFile(new URL(`../migrations/${migration}`, import.meta.url), 'utf8');
       await client.query(sql.replace(/^\s*(begin|commit);\s*$/gim, '').replaceAll('public.', ''));
@@ -57,6 +57,7 @@ test('readStableSwapDays aggregates non-excluded stable routes from the fee cove
       stable_symbols: ['USDC', 'USDT', 'DAI', 'GUSD', 'LUSD', 'USDP', 'BUSD'],
       source: 'finalized-block swap ledger',
       backfill: null,
+      mimir_changes: [],
       days: [
         { day: '2026-11-11', swaps: 2, volume_usd: 1300, fees_rune: 1.5, fees_usd: 3.5, partial: false },
         { day: '2026-11-12', swaps: 1, volume_usd: 70, fees_rune: 0.3, fees_usd: null, partial: false },
@@ -120,6 +121,8 @@ test('readStableSwapDays prepends contiguous completed backfill days priced at t
       { key: 'PARTIAL', input: usdc, inputE8: '10000000000', output: usdt, feeE8: '30000000' }
     ]);
 
+    await client.query(`insert into protocol_mimir_changes (event_key, height, block_time, mimir_key, mimir_value) values
+      ('a', 100, '2026-11-10T02:41:47Z', 'STABLESLIPMINBPS', '10'), ('b', 90, '2026-11-09T00:00:00Z', 'L1SLIPMINBPS', '5')`);
     const payload = await readStableSwapDays(client, { days: 400, nowMs });
     assert.deepEqual(payload, {
       as_of: '2026-11-13T15:00:00.000Z',
@@ -128,6 +131,9 @@ test('readStableSwapDays prepends contiguous completed backfill days priced at t
       stable_symbols: ['USDC', 'USDT', 'DAI', 'GUSD', 'LUSD', 'USDP', 'BUSD'],
       source: 'finalized-block swap ledger',
       backfill: { target_start: '2026-11-06', complete_from: '2026-11-09', complete: false, floor_reason: null },
+      mimir_changes: [
+        { key: 'STABLESLIPMINBPS', value: '10', previous_value: null, time: '2026-11-10T02:41:47.000Z', day: '2026-11-10', height: 100 }
+      ],
       days: [
         { day: '2026-11-09', swaps: 1, volume_usd: 100, fees_rune: 0.3, fees_usd: null, partial: false },
         { day: '2026-11-10', swaps: 1, volume_usd: 250, fees_rune: 1, fees_usd: 2, partial: false },

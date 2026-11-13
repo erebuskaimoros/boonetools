@@ -8,7 +8,7 @@ import {
   stableSwapSymbol
 } from '../../shared/dynamic-fees/stable-swaps.js';
 import { isStablecoin } from '../../shared/blockchain.js';
-import { stableSwapCoverageStart, stableSwapDayRange } from '../src/shared/dynamic-fee-stable-swaps.js';
+import { stableSwapCoverageStart, stableSwapDayRange, buildStableSwapMimirChanges } from '../src/shared/dynamic-fee-stable-swaps.js';
 import { buildDynamicFeeStableSwapsParams } from '../src/handlers/dynamic-fee-stable-swaps.js';
 
 const USDC = 'ETH.USDC-0XA0B86991C6218B36C1D19D4A2E9EB0CE3606EB48';
@@ -92,4 +92,19 @@ test('stable swap coverage begins on the first fully recorded UTC day', () => {
   assert.deepEqual(stableSwapDayRange({ coverageStart: '2026-10-06', days: 400, nowMs }), { fromDay: '2026-10-06', toDay: '2026-11-13' });
   assert.deepEqual(stableSwapDayRange({ coverageStart: '2026-10-06', days: 7, nowMs }), { fromDay: '2026-11-07', toDay: '2026-11-13' });
   assert.equal(stableSwapDayRange({ coverageStart: null, days: 7, nowMs }), null);
+});
+
+test('stable swap mimir changes keep dated value changes per key', () => {
+  assert.deepEqual(buildStableSwapMimirChanges([
+    { mimir_key: 'StableSlipMinBps', mimir_value: '2', height: '10', block_time: '2026-04-30T22:39:04Z' },
+    { mimir_key: 'STABLESLIPMINBPS', mimir_value: '2', height: 11, block_time: '2026-05-01T00:00:00Z' },
+    { mimir_key: 'STABLESLIPMINBPS-ETH.USDC', mimir_value: '5', height: 12, block_time: new Date('2026-06-01T12:00:00Z') },
+    { mimir_key: 'STABLESLIPMINBPS', mimir_value: '10', height: 13, block_time: '2026-11-11T02:41:47Z' },
+    { mimir_key: 'L1SLIPMINBPS', mimir_value: '5', height: 14, block_time: '2026-11-11T03:00:00Z' },
+    { mimir_key: 'STABLESLIPMINBPS', mimir_value: '12', height: 15, block_time: null }
+  ]), [
+    { key: 'STABLESLIPMINBPS', value: '2', previous_value: null, time: '2026-04-30T22:39:04.000Z', day: '2026-04-30', height: 10 },
+    { key: 'STABLESLIPMINBPS-ETH.USDC', value: '5', previous_value: null, time: '2026-06-01T12:00:00.000Z', day: '2026-06-01', height: 12 },
+    { key: 'STABLESLIPMINBPS', value: '10', previous_value: '2', time: '2026-11-11T02:41:47.000Z', day: '2026-11-11', height: 13 }
+  ]);
 });

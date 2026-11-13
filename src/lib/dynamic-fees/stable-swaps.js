@@ -68,6 +68,12 @@ export function weightedStableSwapFeeBps(rows = []) {
   return stableSwapFeeBps(fees, volume);
 }
 
+/** `STABLE MIN FEE 2 → 10 BPS`, with the asset for a per-asset override. */
+export function stableSwapMimirLabel(key, value, previousValue = null) {
+  const asset = key.includes('-') ? ` ${key.slice(key.indexOf('-') + 1).split('-')[0]}` : '';
+  return `STABLE MIN FEE${asset} ${previousValue === null ? '' : `${previousValue} → `}${value} BPS`;
+}
+
 export function normalizeStableSwapsPayload(payload) {
   const source = payload && typeof payload === 'object' ? payload : {};
   const byDay = new Map();
@@ -88,6 +94,14 @@ export function normalizeStableSwapsPayload(payload) {
     });
   }
   const days = [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day));
+  const mimirChanges = (Array.isArray(source.mimir_changes) ? source.mimir_changes : []).flatMap((item) => {
+    const day = utcDay(item?.day);
+    const key = typeof item?.key === 'string' ? item.key.trim().toUpperCase() : '';
+    const value = nonNegative(item?.value);
+    return day && key && value !== null
+      ? [{ key, day, value, previousValue: nonNegative(item.previous_value), label: stableSwapMimirLabel(key, value, nonNegative(item.previous_value)) }]
+      : [];
+  }).sort((a, b) => a.day.localeCompare(b.day));
   const backfill = source.backfill && typeof source.backfill === 'object' && !Array.isArray(source.backfill)
     ? {
       targetStart: utcDay(source.backfill.target_start) || null,
@@ -106,6 +120,7 @@ export function normalizeStableSwapsPayload(payload) {
       ? source.stable_symbols.filter((symbol) => typeof symbol === 'string' && symbol.trim()).map((symbol) => symbol.trim())
       : [],
     source: typeof source.source === 'string' && source.source.trim() ? source.source.trim() : 'finalized-block swap ledger',
+    mimirChanges,
     days
   };
 }
