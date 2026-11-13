@@ -156,7 +156,7 @@ test('chart builder declares volume/fees flows and a hidden, volume-weighted fee
   assert.deepEqual(STABLE_SWAP_DEFAULT_HIDDEN, ['feeBps']);
   const spec = option._spec;
   assert.deepEqual(spec.series.map((item) => [item.id, item.mark, item.axis]),
-    [['volume', 'bar', 'volume'], ['fees', 'line', 'fees'], ['feeBps', 'line', 'feeBps']]);
+    [['volume', 'bar', 'volume'], ['fees', 'bar', 'fees'], ['feeBps', 'line', 'feeBps']]);
   assert.equal(spec.series[0].aggregate, 'sum');
   assert.equal(spec.series[1].aggregate, stableSwapObservedFeesReducer);
   // Fees average as a daily mean in the rolling menu; no custom rolling reducer.

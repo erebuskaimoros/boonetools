@@ -4,12 +4,13 @@ import { weightedStableSwapFeeBps } from './stable-swaps.js';
 
 export const STABLE_SWAP_SERIES = Object.freeze([
   { id: 'volume', label: 'VOLUME', mark: 'bar', color: palette.info },
-  { id: 'fees', label: 'FEES', mark: 'line', color: palette.amber },
+  { id: 'fees', label: 'FEES', mark: 'bar', color: palette.amber },
   { id: 'feeBps', label: 'EFFECTIVE FEE (BPS)', mark: 'line', color: palette.accent }
 ]);
 export const STABLE_SWAP_DEFAULT_HIDDEN = Object.freeze(['feeBps']);
 
 const volumeFill = (row) => row?.partial ? 'rgba(85,136,204,0.16)' : 'rgba(85,136,204,0.34)';
+const feesFill = (row) => row?.partial ? 'rgba(212,160,23,0.16)' : 'rgba(212,160,23,0.34)';
 const usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
 const rune = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
 const count = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
@@ -44,9 +45,9 @@ const sumField = (rows, field) => {
  */
 export const stableSwapObservedFeesReducer = (sample) => sumField(sample, 'feesUsd');
 
-function metricLines(values, hidden, fill) {
+function metricLines(values, hidden, row) {
   return STABLE_SWAP_SERIES.flatMap((series, index) => hidden.includes(series.id) ? [] : [{
-    ...series, fill: index === 0 ? fill : series.color,
+    ...series, fill: index === 0 ? volumeFill(row) : index === 1 ? feesFill(row) : series.color,
     text: `${series.label}: ${index === 2 ? formatStableBps(values[index]) : formatStableUsd(values[index])}`
   }]);
 }
@@ -55,7 +56,7 @@ export function stableSwapsTooltip(row, { hidden = [...STABLE_SWAP_DEFAULT_HIDDE
   return timeSeriesTooltip([
     `${utcDayLabel(row.day)} · UTC`,
     `SWAPS: ${Number.isFinite(row.swaps) ? count.format(row.swaps) : 'unavailable'}`,
-    ...metricLines([row.volumeUsd, row.feesUsd, row.feeBps], hidden, volumeFill(row)),
+    ...metricLines([row.volumeUsd, row.feesUsd, row.feeBps], hidden, row),
     `FEES (RUNE): ${formatRune(row.feesRune)}`,
     ...(row.partial ? ['LIVE PARTIAL UTC DAY'] : [])
   ]);
@@ -71,7 +72,7 @@ export function stableSwapsGroupedTooltip(bucket, { rows = [], grain = 'week', h
     `${bucket.fromDay} → ${bucket.throughDay} · UTC ${String(grain).toUpperCase()}${partial ? ' · PARTIAL BUCKET' : ''}`,
     `SWAPS: ${count.format(sumField(rows, 'swaps') ?? 0)}`,
     ...metricLines([strictSum('volumeUsd'), stableSwapObservedFeesReducer(rows), weightedStableSwapFeeBps(rows)],
-      hidden, volumeFill({ partial: false })),
+      hidden, { partial: false }),
     `FEES (RUNE): ${formatRune(sumField(rows, 'feesRune'))}`,
     ...(unpriced ? [`USD FEES MISSING ON ${unpriced}/${rows.length} DAYS · FEES ARE THE OBSERVED SUM · RATE USES PRICED DAYS`] : []),
     'Volume: sum · fees: observed sum · effective fee: sum fees / sum volume.',
@@ -93,8 +94,8 @@ export function buildStableSwapsOption(rows, { hidden = [...STABLE_SWAP_DEFAULT_
     series: [
       { ...STABLE_SWAP_SERIES[0], aggregate: 'sum', axis: 'volume', barMaxWidth: 22,
         fill: (item) => volumeFill(rows[item.dataIndex]), data: rows.map((row) => row.volumeUsd) },
-      { ...STABLE_SWAP_SERIES[1], aggregate: stableSwapObservedFeesReducer, axis: 'fees', smooth: 0.08,
-        data: rows.map((row) => row.feesUsd) },
+      { ...STABLE_SWAP_SERIES[1], aggregate: stableSwapObservedFeesReducer, axis: 'fees', barMaxWidth: 22,
+        fill: (item) => feesFill(rows[item.dataIndex]), data: rows.map((row) => row.feesUsd) },
       { ...STABLE_SWAP_SERIES[2], aggregate: stableSwapWeightedBpsReducer, rollingReduce: stableSwapWeightedBpsReducer,
         axis: 'feeBps', dashed: true, lineWidth: 1.5, smooth: 0.12, data: rows.map((row) => row.feeBps) }
     ],
