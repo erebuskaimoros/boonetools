@@ -150,7 +150,7 @@
     narrowHeight="340px"
     loadingText="LOADING STABLE SWAP HISTORY"
     {emptyText}
-    ariaLabel="Stablecoin-to-stablecoin swap volume in US dollars as daily bars, fees in US dollars as a line, and an optional dashed effective fee rate in basis points. Drag to zoom; the range summary above lists totals for the visible window."
+    ariaLabel="Stablecoin-to-stablecoin swap volume and fees in US dollars as paired daily bars on separate axes, and an optional dashed effective fee rate in basis points. Drag to zoom; the range summary above lists totals for the visible window."
   />
 
   <div class="chart-foot">
