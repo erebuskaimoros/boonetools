@@ -13,6 +13,7 @@
     "./rapid-swaps/reconciliation": "./rapid-swaps/reconciliation.js",
     "./rapid-swaps/volume": "./rapid-swaps/volume.js",
     "./dynamic-fees/affiliate-volume": "./dynamic-fees/affiliate-volume.js",
+    "./dynamic-fees/stable-swaps": "./dynamic-fees/stable-swaps.js",
     "./status/model": "./status/model.js"
   }
 }

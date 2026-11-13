@@ -661,6 +661,24 @@ retry horizon without incrementing `checks` or advancing `checkedAt`; the UI
 must describe an earliest retry rather than a scheduled near-current check.
 Do not reset budgets, mark candidates verified manually, or rescan any day.
 
+#### ADR26 stable-swap history backfill (November 13, 2026)
+
+Deploy backend before frontend. Migration 080 adds the
+`dynamic_fee_stable_swap_backfill*` tables only; Financials tables, rankings and
+verification are untouched. No manual trigger and no new unit are needed: the
+existing `boonetools-visitor-data` timer runs the lane after its other work. It
+computes the 90-day window from `financials_swap_ledger.fee_started_at`,
+discovers the stable assets from Midgard `/pools`, then reads one bulk
+`/actions` page per run (at most 1,440 pages per day at the one-minute
+cadence, within the shared bulk budget). Expect roughly 12,000-15,000 pages
+(about 7,000 stable-touching actions a day across ten four-asset groups,
+including trade and secured stables), so about 8-10 days to finish. Watch
+`select scan_day, group_index, last_error, available_at, completed_at from
+dynamic_fee_stable_swap_backfill`, the completed days in
+`dynamic_fee_stable_swap_backfill_days`, the job's `Stable swap backfill` log
+lines, and the `backfill` field of `/functions/v1/dynamic-fee-stable-swaps`,
+which serves backfilled days only as they complete.
+
 ### Crosschain comparison stuck at a shared date
 
 Check the public `protocol-fee-comparison` endpoint's `errors` and the
