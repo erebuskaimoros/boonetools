@@ -7,7 +7,7 @@
     fetchNodeVoteNodeDetails,
     fetchNodeVotesDashboard
   } from './node-votes/api.js';
-  import { mergeNodeVotesDashboard } from './node-votes/dashboard-state.js';
+  import { mergeNodeVotesDashboard, voteTrackerKeyFilter, voteTrackerSearchWithKey } from './node-votes/dashboard-state.js';
   import { groupActiveVotersByValue } from './node-votes/missing-voters.js';
   import {
     buildNetworkValueRows,
@@ -86,7 +86,19 @@
   $: backfillStatus = backend?.backfill?.status || 'unknown';
   $: ingestionSource = dashboardIngestionSource(backend);
 
+  // `?key=` links open pre-filtered; the address bar then follows the filter
+  // so the current view can be copied as a link.
+  let urlFilterReady = false;
+  function syncUrlFilter(term) {
+    const next = voteTrackerSearchWithKey(window.location.search, term);
+    if (next === window.location.search) return;
+    history.replaceState(history.state, '', `${window.location.pathname}${next}${window.location.hash}`);
+  }
+  $: if (urlFilterReady) syncUrlFilter(searchTerm);
+
   onMount(() => {
+    searchTerm = voteTrackerKeyFilter(window.location.search);
+    urlFilterReady = true;
     loadDashboard();
     loadVersionRollout();
     refreshTimer = createVisiblePoll(() => {

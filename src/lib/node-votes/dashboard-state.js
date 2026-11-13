@@ -43,3 +43,22 @@ export function mergeNodeVotesDashboard(currentDashboard, refreshedDashboard) {
     )
   };
 }
+
+const KEY_PARAM = 'key';
+const MAX_KEY_FILTER_LENGTH = 120;
+
+/** The pre-filter from a `?key=` link, e.g. `/vote-tracker?key=ADR030`. */
+export function voteTrackerKeyFilter(search) {
+  const value = new URLSearchParams(String(search ?? '')).get(KEY_PARAM);
+  return String(value ?? '').trim().slice(0, MAX_KEY_FILTER_LENGTH);
+}
+
+/** The query string with `key` set to the filter, or removed when it is empty. */
+export function voteTrackerSearchWithKey(search, filter) {
+  const params = new URLSearchParams(String(search ?? ''));
+  const value = String(filter ?? '').trim().slice(0, MAX_KEY_FILTER_LENGTH);
+  if (value) params.set(KEY_PARAM, value);
+  else params.delete(KEY_PARAM);
+  const query = params.toString();
+  return query ? `?${query}` : '';
+}

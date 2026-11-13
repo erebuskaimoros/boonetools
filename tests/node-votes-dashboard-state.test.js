@@ -62,3 +62,18 @@ test('summary refresh does not resurrect drill-down state for rows no longer ret
   assert.deepEqual(merged.by_vote, [{ mimir_key: 'NEW' }]);
   assert.deepEqual(merged.by_node, [{ node_address: 'thor1new' }]);
 });
+
+test('vote tracker key links read and write the key query parameter', async () => {
+  const { voteTrackerKeyFilter, voteTrackerSearchWithKey } = await import('../src/lib/node-votes/dashboard-state.js');
+  assert.equal(voteTrackerKeyFilter('?key=ADR030'), 'ADR030');
+  assert.equal(voteTrackerKeyFilter('?source=desktop-app&key=%20L1SLIPMINBPS-BTC.BTC%20'), 'L1SLIPMINBPS-BTC.BTC');
+  assert.equal(voteTrackerKeyFilter('?other=1'), '');
+  assert.equal(voteTrackerKeyFilter(''), '');
+  assert.equal(voteTrackerKeyFilter(`?key=${'A'.repeat(500)}`).length, 120);
+
+  assert.equal(voteTrackerSearchWithKey('', 'ADR030'), '?key=ADR030');
+  assert.equal(voteTrackerSearchWithKey('?source=desktop-app', ' ADR030 '), '?source=desktop-app&key=ADR030');
+  assert.equal(voteTrackerSearchWithKey('?key=ADR030&source=desktop-app', ''), '?source=desktop-app');
+  assert.equal(voteTrackerSearchWithKey('?key=ADR030', '   '), '');
+  assert.equal(voteTrackerSearchWithKey('?key=ADR030', 'ADR030'), '?key=ADR030');
+});
