@@ -22,6 +22,7 @@ import { handleBlockProduction } from './handlers/block-production.js';
 import { handleBurnTracker } from './handlers/burn-tracker.js';
 import { handleCurrencyRates } from './handlers/currency-rates.js';
 import { handleDynamicFeeAffiliateVolume } from './handlers/dynamic-fee-affiliate-volume.js';
+import { handleDynamicFeeStableSwaps } from './handlers/dynamic-fee-stable-swaps.js';
 import { handleDynamicFeeTransactions } from './handlers/dynamic-fee-transactions.js';
 import { handleDynamicFeeSnapshot, handleDynamicFeeHistory, handleVaultExplorerSnapshot } from './handlers/visitor-snapshots.js';
 import { handleHealth } from './handlers/health.js';
@@ -91,6 +92,7 @@ const routes = new Map([
   ['/block-production', route(handleBlockProduction, 1, 64)],
   ['/chain-events', streamRoute(1, 100)],
   ['/dynamic-fee-affiliate-volume', route(handleDynamicFeeAffiliateVolume, 2, 16)],
+  ['/dynamic-fee-stable-swaps', route(handleDynamicFeeStableSwaps, 2, 16)],
   ['/dynamic-fee-snapshot', route(handleDynamicFeeSnapshot, 1, 64)],
   ['/dynamic-fee-history', route(handleDynamicFeeHistory, 1, 32)],
   ['/vault-explorer-snapshot', route(handleVaultExplorerSnapshot, 1, 64)],

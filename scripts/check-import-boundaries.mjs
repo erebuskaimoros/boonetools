@@ -103,6 +103,7 @@ const smokeModules = [
   ['shared/rapid-swaps/reconciliation.js', 'normalizeRapidSwapHint', 'function'],
   ['shared/rapid-swaps/volume.js', 'getRapidSwapLegVolumeUsd', 'function'],
   ['shared/dynamic-fees/affiliate-volume.js', 'EXECUTED_LEG_VOLUME_BASIS', 'string'],
+  ['shared/dynamic-fees/stable-swaps.js', 'STABLE_SWAP_ASSET_PATTERN', 'string'],
   ['backend/src/shared/rapid-swaps.js', 'fetchRapidSwapRows', 'function']
 ];
 

@@ -228,6 +228,44 @@ after exhaustive acquisition against that source's watermark. Failed/capped
 work resumes the same range; it does not restart the 400-day scan. Transaction
 details are derived from those same stored actions.
 
+The public `/functions/v1/dynamic-fee-stable-swaps` endpoint returns a
+zero-filled UTC daily series of stablecoin-to-stablecoin swap volume and
+liquidity fees from the finalized-block `financials_swap_candidates` ledger
+(non-excluded rows only). It starts at the first full UTC day after the
+ledger's `fee_started_at`, prices each fee with the RUNE price implied by that
+swap's own stable input, makes no provider calls, and caches the aggregate in
+memory for 60 seconds.
+
+Days before that ledger start come from a self-terminating Midgard-actions
+backfill run as the last step of the existing `boonetools-visitor-data` job,
+after snapshots and the affiliate queue; its failures never fail that job.
+It covers the 90 UTC days before the ledger start, fixed when first computed,
+and scans one UTC day at a time, newest first, so served history always
+extends contiguously back from the ledger. On its first run it reads Midgard
+`/pools`, takes every stable pool's layer-1, trade (`~`) and secured (`-`)
+asset, and drops the layer-1 asset of the stable pool with the largest
+`volume24h`. Midgard's `asset` filter is an OR, and a stable-to-stable swap
+always involves two different stable assets, so omitting one asset loses no
+such swap. The list is stored in the state row and reused. Midgard accepts at
+most four assets per request, so each day is scanned group by group with
+`type=swap`, `timestamp` = day end and `fromTimestamp` = day start minus one
+second, filtered locally, then `prevPageToken` pages from one pinned source.
+Each page's rows and cursor commit together. Only `success` swaps whose input
+and non-affiliate output (or streaming `outCoin`) are both stables are stored
+in `dynamic_fee_stable_swap_backfill_swaps`, with the inbound input coins as
+volume and `liquidityFee` as the fee. Finishing a day stores Midgard's daily
+`/history/rune` price in `dynamic_fee_stable_swap_backfill_days`. Backfilled
+fees use that daily RUNE/USD price, whereas live days use each swap's implied
+price; a day without a daily price reports `fees_usd: null` when it has fees.
+The endpoint serves completed backfill days contiguous back from the ledger
+start and counts a stream straddling the ledger start only on its ledger day.
+Progress lives in the singleton `dynamic_fee_stable_swap_backfill` row:
+`scan_day`, `group_index`, `page_token`, `last_error`, `available_at` (retry
+after a provider error or budget deferral) and `completed_at`. The endpoint's
+`backfill` object reports `target_start`, `complete_from` and `complete`
+(`floor_reason` is always null). The job logs `Stable swap backfill: N pages
+...` while it runs; once complete, each run is one state query.
+
 `/dynamic-fee-snapshot`, `/dynamic-fee-history`, and
 `/vault-explorer-snapshot` also read shared observations and enqueue refreshes.
 Cold responses return 503 with Retry-After; browsers retry while visible and

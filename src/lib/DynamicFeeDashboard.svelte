@@ -28,6 +28,7 @@
     getEpochBlockRange,
     getPairFilterAsset
   } from '$lib/dynamic-fees/transactions.js';
+  import StableSwapsTab from '$lib/dynamic-fees/StableSwapsTab.svelte';
 
   Chart.register(zoomPlugin);
 
@@ -1229,6 +1230,16 @@
       Affiliate
       <small>{affiliates.length}</small>
     </button>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={activeDashboardTab === 'stable'}
+      class:active={activeDashboardTab === 'stable'}
+      on:click={() => selectDashboardTab('stable')}
+    >
+      Stable ↔ Stable
+      <small>volume + fees</small>
+    </button>
   </div>
 
   {#if activeDashboardTab === 'pair'}
@@ -1528,6 +1539,8 @@
       </table>
     </div>
   </section>
+  {:else if activeDashboardTab === 'stable'}
+    <StableSwapsTab />
   {:else}
     <div class="affiliate-metrics">
       <article class="affiliate-metric">
