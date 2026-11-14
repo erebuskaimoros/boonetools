@@ -9,6 +9,9 @@ import { normalizeSystemIncomePolPayload, buildSystemIncomePolChart, applySystem
 import { buildSystemIncomePolDepositOption, polDepositBuckets, polDepositTooltip, polPoolSeries } from '../src/lib/system-income-pol/charts.js';
 import { replaySystemIncomePolHeads } from '../src/lib/system-income-pol/live.js';
 
+// Zero bars are ECharts data items ({ value, itemStyle }) so they draw no border.
+const barValue = (entry) => (entry !== null && typeof entry === 'object' ? entry.value : entry);
+
 const deposit = (asset, rune) => ({ asset, deployed_e8: String(rune * 1e8) });
 const payload = { live: { through_height: 10 }, daily: [
   { day: '2026-09-01', deployed_e8: '10000000000', cumulative_deployed_e8: '50000000000', rune_price_usd: '2', pool_deposits: [deposit('TRON.USDT', 80), deposit('XRP.XRP', 20)] },
@@ -52,7 +55,7 @@ test('zero-deposit pools do not paint colored outlines across another coin’s s
         if (hidden.includes(series.id)) assert.equal(data.count(), 0);
         for (let index = 0; index < data.count(); index++) {
           const element = data.getItemGraphicEl(index);
-          const value = data.getRawDataItem(index);
+          const value = barValue(data.getRawDataItem(index));
           if (value === 0) {
             checkedZeros++;
             const noVisibleStroke = !element || element.ignore || element.invisible || element.style.opacity === 0
@@ -117,7 +120,7 @@ test('stacked recipient bars reconcile to daily totals in both denominations; cu
     const bars = option.series.filter(item => item.type === 'bar');
     assert.equal(bars.length, 2);
     assert.ok(bars.every(item => item.stack === 'deposits' && item.yAxisIndex === 0));
-    rows.forEach((row, index) => assert.equal(bars.reduce((sum, series) => sum + series.data[index], 0), row.depositedPlotValue));
+    rows.forEach((row, index) => assert.equal(bars.reduce((sum, series) => sum + barValue(series.data[index]), 0), row.depositedPlotValue));
     assert.equal(option.series.at(-1).data.at(-1), unit === 'rune' ? 520 : 260);
     const narrowed = buildSystemIncomePolDepositOption(rows.slice(1), { unit });
     assert.equal(narrowed.series[0].itemStyle.color, option.series.find(item => item.id === narrowed.series[0].id).itemStyle.color);
@@ -142,7 +145,7 @@ test('missing historical prices and interior calendar gaps never become zero or 
   const rows = points({ daily: payload.daily.map((row, i) => ({ ...row, rune_price_usd: i ? null : row.rune_price_usd })) }, 'usd');
   const option = buildSystemIncomePolDepositOption(rows, { unit: 'usd' });
   assert.deepEqual(option.series[1].data, [40, null]);
-  assert.deepEqual(option.series[0].data, [160, 0]);
+  assert.deepEqual(option.series[0].data.map(barValue), [160, 0]);
   assert.equal(polDepositBuckets(rows, 'month')[0].depositedPlotValue, null);
   const gapped = [points()[0], { ...points()[1], day: '2026-09-04' }];
   assert.equal(polDepositBuckets(gapped, 'week')[0].poolDeposits[0].value, null);

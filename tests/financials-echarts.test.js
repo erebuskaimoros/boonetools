@@ -4,6 +4,9 @@ import { buildFinancialEChartsOption as buildOption, financialEChartsTooltip as 
 import { financialChartIndices, financialChartWindow } from '../src/lib/financials/series.js';
 import { formatLocalDateTime } from '../src/lib/utils/datetime.js';
 
+// Zero bars are ECharts data items ({ value, itemStyle }) so they draw no border.
+const barValue = (entry) => (entry !== null && typeof entry === 'object' ? entry.value : entry);
+
 // Keep the accounting/APR regression suite explicitly on the APR selection.
 // Default-price behavior and metric switching have their own interaction suite.
 const buildFinancialEChartsOption = (rows, options = {}) => buildOption(rows, { lineMetric: 'bondingApr', ...options });
@@ -23,10 +26,10 @@ test('ECharts uses the same units, three independent axes, colors and drawing or
   assert.deepEqual(options.series.slice(0, 3).map((series) => series.yAxisIndex), [0, 1, 2]);
   assert.deepEqual(options.series.slice(0, 3).map((series) => series.z), [2, 1, 3]);
   assert.deepEqual(options.yAxis.map((axis) => axis.axisLine.lineStyle.color), ['#5588cc', '#d4a017', '#00cc66']);
-  assert.deepEqual(options.series[0].data, rows.map((row) => row.volumeUsd));
+  assert.deepEqual(options.series[0].data.map(barValue), rows.map((row) => row.volumeUsd));
   const rune = buildFinancialEChartsOption(rows, { currency: 'rune' });
-  assert.deepEqual(rune.series[0].data, rows.map((row) => row.volumeRune));
-  assert.deepEqual(rune.series[1].data, rows.map((row) => row.incomeRune));
+  assert.deepEqual(rune.series[0].data.map(barValue), rows.map((row) => row.volumeRune));
+  assert.deepEqual(rune.series[1].data.map(barValue), rows.map((row) => row.incomeRune));
   assert.deepEqual(rune.series[2].data, options.series[2].data);
 });
 
@@ -44,7 +47,7 @@ test('null amounts stay missing, real zero stays zero, and inputs are not mutate
   const points = rows.map((row, index) => Object.freeze(index === 1 ? { ...row, volumeUsd: null } : { ...row }));
   Object.freeze(points);
   const options = buildFinancialEChartsOption(points);
-  assert.equal(options.series[0].data[0], 0);
+  assert.equal(barValue(options.series[0].data[0]), 0);
   assert.equal(options.series[0].data[1], null);
 });
 

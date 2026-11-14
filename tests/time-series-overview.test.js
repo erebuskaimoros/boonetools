@@ -13,6 +13,9 @@ import { buildRapidSwapOverviewOption, rapidSwapOverviewPoints, rapidSwapOvervie
 import { buildSystemIncomePolChart, buildSystemIncomePolFeeChart, normalizeSystemIncomePolPayload, applySystemIncomePolHead } from '../src/lib/system-income-pol/model.js';
 import { buildSystemIncomePolDepositOption, buildSystemIncomePolFeeOption, polDepositTooltip, polFeeTooltip } from '../src/lib/system-income-pol/charts.js';
 
+// Zero bars are ECharts data items ({ value, itemStyle }) so they draw no border.
+const barValue = (entry) => (entry !== null && typeof entry === 'object' ? entry.value : entry);
+
 use([BarChart, LineChart, DataZoomInsideComponent, GridComponent, MarkPointComponent, ToolboxComponent, TooltipComponent, SVGRenderer]);
 
 const rapidData = computeDailyBucketData([
@@ -80,8 +83,8 @@ test('POL deposits keep separate zero-based axes, exact all-time RUNE and incomp
   const usdPoints = buildSystemIncomePolChart(polDaily, { unit: 'usd' }).points;
   const rune = buildSystemIncomePolDepositOption(runePoints);
   const usd = buildSystemIncomePolDepositOption(usdPoints, { unit: 'usd' });
-  assert.deepEqual(rune.series.map(series => series.data), [[2, 3, 0, 5, 0], [100, 103, 103, 108, 108]]);
-  assert.deepEqual(usd.series.map(series => series.data), [[4, null, 0, 20, 0], [4, null, null, null, null]]);
+  assert.deepEqual(rune.series.map(series => series.data.map(barValue)), [[2, 3, 0, 5, 0], [100, 103, 103, 108, 108]]);
+  assert.deepEqual(usd.series.map(series => series.data.map(barValue)), [[4, null, 0, 20, 0], [4, null, null, null, null]]);
   assert.ok(usd.yAxis.every(axis => axis.min === 0));
   assert.equal(usd.series[1].connectNulls, false);
   assert.match(polDepositTooltip(usdPoints[3], 'usd'), /PROVISIONAL/);

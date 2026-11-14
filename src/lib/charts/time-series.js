@@ -159,7 +159,7 @@ export function buildTimeSeriesOption(rows, {
       id: item.id, name: item.label, type: item.mark,
       ...(item.stack ? { stack: item.stack } : {}),
       yAxisIndex: axes.findIndex((axis) => axis.id === item.axis),
-      data: hidden.includes(item.visibilityId || item.id) ? [] : item.data,
+      data: hidden.includes(item.visibilityId || item.id) ? [] : item.mark === 'bar' ? item.data.map(borderlessZero) : item.data,
       z: item.order ?? (item.mark === 'line' ? 3 : 2), emphasis: { disabled: true },
       ...(item.mark === 'bar' ? {
         ...(item.barMaxWidth == null ? {} : { barMaxWidth: item.barMaxWidth }),
@@ -178,6 +178,11 @@ export function buildTimeSeriesOption(rows, {
       })) }
     })), ...eventSeries(rows, events, fontFamily)]
   };
+}
+
+// A 1px border on a zero-height bar strokes a line along the baseline.
+function borderlessZero(value) {
+  return value === 0 ? { value: 0, itemStyle: { borderWidth: 0 } } : value;
 }
 
 // Dated annotations as dashed vertical rules. On calendar buckets an event is
