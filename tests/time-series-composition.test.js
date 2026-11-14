@@ -9,6 +9,9 @@ import { utcDayZoomWindow } from '../src/lib/charts/viewport.js';
 import { APP_LAYER_CHARTS, appLayerPresetWindow, appLayerTooltip, buildAppLayerOption, prepareAppLayerChart } from '../src/lib/app-layer/charts.js';
 import { buildPolTrackerOption, polTrackerTooltip } from '../src/lib/pol-tracker/charts.js';
 
+// Zero bars are ECharts data items ({ value, itemStyle }) so they draw no border.
+const barValue = (entry) => (entry !== null && typeof entry === 'object' ? entry.value : entry);
+
 use([BarChart, LineChart, DataZoomInsideComponent, GridComponent, ToolboxComponent, TooltipComponent, SVGRenderer]);
 const appRows = Array.from({ length: 90 }, (_, index) => Object.freeze({
   bucket_start: new Date(Date.UTC(2026, 5, index + 1)).toISOString().slice(0, 10),
@@ -43,8 +46,8 @@ test('all five App Layer adapters retain periodic values and full-history cumula
   const points = prepareAppLayerChart({ rows: appRows, grain: 'daily' }, 'accrued');
   const bars = buildAppLayerOption(points);
   assert.deepEqual(bars.series.map(s => s.stack), ['app-value', 'app-value']);
-  assert.deepEqual(bars.series[0].data, appRows.map(row => row.inflow_usd));
-  assert.deepEqual(bars.series[1].data, appRows.map(row => row.liquidity_fee_usd));
+  assert.deepEqual(bars.series[0].data.map(barValue), appRows.map(row => row.inflow_usd));
+  assert.deepEqual(bars.series[1].data.map(barValue), appRows.map(row => row.liquidity_fee_usd));
   assert.deepEqual(buildAppLayerOption(points, { hidden: ['retained'] }).series[0].data, []);
 });
 
@@ -58,7 +61,7 @@ test('App Layer alone fills activity gaps and carries cumulative baselines; week
     assert.equal(points[1].filledBucket, true);
     assert.equal(points[1].accrued_value_usd, 0);
     assert.equal(points[1].cumulative_usd, 1000);
-    assert.equal(buildAppLayerOption(points).series[0].data[1], 0);
+    assert.equal(barValue(buildAppLayerOption(points).series[0].data[1]), 0);
     assert.match(appLayerTooltip(points[1], { key: 'accrued', grain }), /cumulative carried forward/);
   }
   const weekly = prepareAppLayerChart({ rows: appRows.filter((_, i) => i % 7 === 0), grain: 'weekly' }, 'collected');
@@ -174,7 +177,7 @@ test('App Layer generated fees keep unpriced observations and unknown gaps out o
   assert.equal(rows[2].liquidity_fee_usd, null, 'observed positive RUNE with missing price is not zero USD');
   assert.equal(rows[3].liquidity_fee_usd, 0, 'genuine zero fee remains visible as zero');
   const series = buildAppLayerOption(rows, { key: 'generated' }).series[0].data;
-  assert.deepEqual(series, [1, null, null, 0]);
+  assert.deepEqual(series.map(barValue), [1, null, null, 0]);
 });
 
 test('unpriced fee coverage survives weekly/monthly grouping and rolling averages', () => {

@@ -8,6 +8,9 @@ import { normalizeBurnTrackerPayload, selectBurnTrackerRange } from '../src/lib/
 import { buildPoolAnalysisOption, poolAnalysisTooltip } from '../src/lib/pool-analysis/charts.js';
 import { buildFinancialEChartsOption } from '../src/lib/financials/echarts-options.js';
 
+// Zero bars are ECharts data items ({ value, itemStyle }) so they draw no border.
+const barValue = (entry) => (entry !== null && typeof entry === 'object' ? entry.value : entry);
+
 const rows = Array.from({ length: 10 }, (_, index) => Object.freeze({
   day: `2026-09-${String(index + 1).padStart(2, '0')}`,
   burnedRune: index, burnedUsd: index * 2, cumulativeBurnedRune: 100 + index, cumulativeBurnedUsd: 200 + index * 2,
@@ -50,8 +53,8 @@ test('shared tooltip escapes text/metadata and renders square series swatches', 
 
 test('Burn keeps orange daily bars, all-time cumulative values, gaps, partial styling and the optional third axis', () => {
   const option = buildBurnTrackerOption(rows);
-  assert.deepEqual(option.series[0].data, rows.map((row) => row.burnedRune));
-  assert.equal(option.series[0].data[0], 0);
+  assert.deepEqual(option.series[0].data.map(barValue), rows.map((row) => row.burnedRune));
+  assert.equal(barValue(option.series[0].data[0]), 0);
   assert.equal(option.series[0].itemStyle.borderColor, BURN_BAR_COLOR);
   assert.notEqual(option.series[0].itemStyle.color({ dataIndex: 0 }), option.series[0].itemStyle.color({ dataIndex: 9 }));
   assert.deepEqual(option.series[1].data, rows.map((row) => row.cumulativeBurnedRune));
@@ -59,7 +62,7 @@ test('Burn keeps orange daily bars, all-time cumulative values, gaps, partial st
   assert.equal(option.yAxis[2].show, false);
   assert.deepEqual(option.series[2].data, []);
   const visiblePrice = buildBurnTrackerOption(rows, { unit: 'usd', hidden: [] });
-  assert.deepEqual(visiblePrice.series[0].data, rows.map((row) => row.burnedUsd));
+  assert.deepEqual(visiblePrice.series[0].data.map(barValue), rows.map((row) => row.burnedUsd));
   assert.deepEqual(visiblePrice.series[1].data, rows.map((row) => row.cumulativeBurnedUsd));
   assert.equal(visiblePrice.series[2].data[2], null);
   assert.equal(visiblePrice.series[2].connectNulls, false);

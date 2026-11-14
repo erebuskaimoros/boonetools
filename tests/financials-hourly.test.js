@@ -4,6 +4,9 @@ import { financialHourlyPoint, financialHourlyWindow, sliceFinancialHourlyPayloa
 import { buildFinancialHourlyOption, buildFinancialChartOption } from '../src/lib/financials/echarts-options.js';
 import { financialEChartsWindow } from '../src/lib/financials/echarts-options.js';
 
+// Zero bars are ECharts data items ({ value, itemStyle }) so they draw no border.
+const barValue = (entry) => (entry !== null && typeof entry === 'object' ? entry.value : entry);
+
 const first = Date.parse('2026-10-24T23:00:00Z') / 1000;
 const points = Array.from({ length: 3 }, (_, index) => financialHourlyPoint(first + index * 3600,
   { totalVolume: String(index * 1e8), totalVolumeUSD: String(index * 100) },
@@ -12,7 +15,7 @@ const points = Array.from({ length: 3 }, (_, index) => financialHourlyPoint(firs
 test('hour categories remain distinct across UTC midnight and use execution USD / hourly income pricing', () => {
   const option = buildFinancialHourlyOption(points, { timeZone: 'UTC' });
   assert.deepEqual(option.xAxis.data, points.map(point => point.day));
-  assert.deepEqual(option.series[0].data, [0, 1, 2]);
+  assert.deepEqual(option.series[0].data.map(barValue), [0, 1, 2]);
   assert.deepEqual(option.series[1].data, [.5, .5, .5]);
   assert.deepEqual(option.yAxis.map(axis => axis.id), ['volume', 'income', 'runePriceUsd']);
   assert.equal(option._spec.sourceGrain, 'hour');

@@ -98,6 +98,18 @@ test('chart has monthly categories, grouped signed bars, one zero-based USD axis
   assert.ok(options.tooltip.textStyle.fontSize >= 12);
 });
 
+test('partial months outline real bars only; zero or missing values draw no baseline stub', () => {
+  const partial = months.at(-1);
+  const sparse = [months[0], { ...partial, protocols: { ...partial.protocols,
+    near: { ...partial.protocols.near, netUsd: 0 }, chainflip: { ...partial.protocols.chainflip, netUsd: null } } }];
+  const [thorchain, near, chainflip] = comparisonOption(sparse).series.map((series) => series.data[1].itemStyle);
+  assert.equal(thorchain.borderWidth, 1);
+  assert.equal(thorchain.borderType, 'dashed');
+  assert.equal(near.borderWidth, undefined);
+  assert.equal(chainflip.borderWidth, undefined);
+  assert.ok([thorchain, near, chainflip].every((style) => style.opacity === .65));
+});
+
 test('tooltip shows income, subsidy and net without the included NEAR breakdown', () => {
   const tooltip = comparisonTooltip(months[1]);
   assert.match(tooltip, /PARTIAL/);

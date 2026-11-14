@@ -46,8 +46,9 @@ export function comparisonOption(months, hidden = [], width = 1000) {
     series: PROTOCOLS.filter(({ id }) => !hidden.includes(id)).map(({ id, label, color }) => ({
       id, name: label, type: 'bar', barMaxWidth: mobile ? 38 : 64, barGap: '15%',
       itemStyle: { color, borderRadius: 0 },
+      // A zero or missing partial month has no bar to outline; a border would draw a baseline stub.
       data: months.map((month) => ({ value: month.protocols[id].netUsd,
-        itemStyle: { opacity: month.partial ? 0.65 : 1, ...(month.partial ? { borderWidth: 1, borderColor: color, borderType: 'dashed' } : {}) } })),
+        itemStyle: { opacity: month.partial ? 0.65 : 1, ...(month.partial && month.protocols[id].netUsd ? { borderWidth: 1, borderColor: color, borderType: 'dashed' } : {}) } })),
       markLine: { silent: true, symbol: 'none', label: { show: false }, lineStyle: { color: palette.muted, width: 1, type: 'solid' }, data: [{ yAxis: 0 }] }
     })) };
 }
