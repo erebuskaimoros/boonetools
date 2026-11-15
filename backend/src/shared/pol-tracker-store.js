@@ -152,10 +152,11 @@ export async function loadPolTrackerExistingDays(client, startDate, endDate) {
 
 export async function loadLatestPolTrackerPools(client) {
   const { rows } = await client.query(
-    `select day, asset, pool_status, asset_price_usd_e8, synth_units,
+    `select day, asset, pool_status, asset_price_usd_e8,
+            balance_asset_e8, balance_rune_e8, pool_units, synth_units,
             synth_supply_e8,
             synth_backing_usd_e8, synth_face_usd_e8, treasury_lp_units,
-            treasury_total_usd_e8, reserve_pol_lp_units,
+            treasury_asset_usd_e8, treasury_total_usd_e8, reserve_pol_lp_units,
             reserve_pol_rune_e8, reserve_pol_usd_e8,
             system_income_pol_lp_units, system_income_pol_rune_e8,
             system_income_pol_usd_e8

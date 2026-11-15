@@ -100,6 +100,26 @@ test('the latest-pool table keeps pools whose only tracked value is either form 
   assert.deepEqual(pools.map(({ asset }) => asset), ['BTC.BTC', 'ETH.ETH']);
 });
 
+test('latest metrics normalize separately from chart history and retain unavailable versus zero values', () => {
+  const dashboard = normalizePolTrackerPayload({
+    latest_metrics: {
+      day: '2026-11-14', height: '28675099', swap_pool_tvl_usd: '1000',
+      tracked_share_pct: '25.5', exogenous_usd: '110'
+    }
+  });
+  assert.deepEqual(dashboard.latestMetrics, {
+    day: '2026-11-14', height: 28675099, swapPoolTvlUsd: 1000,
+    trackedSharePercent: 25.5, exogenousUsd: 110
+  });
+  assert.equal(normalizePolTrackerPayload().latestMetrics.exogenousUsd, null);
+  assert.equal(normalizePolTrackerPayload().latestMetrics.trackedSharePercent, null);
+  const zero = normalizePolTrackerPayload({
+    latest_metrics: { exogenous_usd: 0, tracked_share_pct: 0 }
+  });
+  assert.equal(zero.latestMetrics.exogenousUsd, 0);
+  assert.equal(zero.latestMetrics.trackedSharePercent, 0);
+});
+
 test('the consolidated chart stacks four same-height values and totals their values', () => {
   const rows = Array.from({ length: 40 }, (_, index) => ({
     day: new Date(Date.UTC(2025, 2, index + 1)).toISOString().slice(0, 10),

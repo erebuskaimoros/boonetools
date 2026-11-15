@@ -45,9 +45,7 @@
   $: systemIncomePolUsd = currentSystemIncomePol?.positionUsd ?? latest?.systemIncomePolUsd;
   $: systemIncomePolRune = currentSystemIncomePol?.positionRune ?? latest?.systemIncomePolRune;
   $: latestTotal = totalPolTrackerValue(latest);
-  $: coveragePercent = dashboard.coverage.expected_days
-    ? (dashboard.coverage.observed_days / dashboard.coverage.expected_days) * 100
-    : 0;
+  $: latestMetrics = dashboard.latestMetrics;
 
   onMount(() => {
     load({ forceRefresh: true });
@@ -164,19 +162,14 @@
         <small>{formatPolTrackerRune(systemIncomePolRune)} · FULL TWO-SIDED POSITION</small>
       </article>
       <article class="metric">
-        <span class="metric-label">LATEST DAY</span>
-        <strong class="text-value">{fullDate(latest?.day)}</strong>
-        <small>height {latest?.height?.toLocaleString?.() || '—'}</small>
+        <span class="metric-label">SHARE OF SWAP POOLS</span>
+        <strong>{latestMetrics.trackedSharePercent === null ? '—' : `${latestMetrics.trackedSharePercent.toFixed(2)}%`}</strong>
+        <small>of {formatPolTrackerUsd(latestMetrics.swapPoolTvlUsd, true)} available pool TVL · {fullDate(latestMetrics.day)}</small>
       </article>
-      <article class="metric">
-        <span class="metric-label">COVERAGE</span>
-        <strong>{coveragePercent.toFixed(1)}%</strong>
-        <small>{dashboard.coverage.observed_days || 0}/{dashboard.coverage.expected_days || 0} UTC days</small>
-      </article>
-      <article class="metric">
-        <span class="metric-label">PARTIAL / MISSING</span>
-        <strong>{(dashboard.coverage.partial_days || 0) + (dashboard.coverage.missing_days || 0)}</strong>
-        <small>{dashboard.coverage.partial_days || 0} partial · {dashboard.coverage.missing_days || 0} missing</small>
+      <article class="metric metric--exogenous">
+        <span class="metric-label">EXOGENOUS ASSETS</span>
+        <strong>{formatPolTrackerUsd(latestMetrics.exogenousUsd, true)}</strong>
+        <small>asset legs only · excludes RUNE · {fullDate(latestMetrics.day)}</small>
       </article>
     </section>
 
@@ -284,6 +277,11 @@
         shaded areas: synth backing, Treasury locked LP, legacy Reserve POL, and the independently
         valued System Income POL position. RUNEPool ownership shares are absent.
       </p>
+      <p>
+        Swap-pool share compares the latest daily tracked total with both sides of all available
+        swap pools at the same height. Exogenous assets include only the asset legs of these
+        positions, valued at the same daily prices, excluding RUNE.
+      </p>
       <p class="source-line">TREASURY MODULE · …6r2p &nbsp;|&nbsp; LEGACY RESERVE · …xtxt &nbsp;|&nbsp; SYSTEM INCOME · POL_RESERVE &nbsp;|&nbsp; PRICES · SAME-HEIGHT TOR &nbsp;|&nbsp; GAPS · NEVER INTERPOLATED</p>
     </section>
   {/if}
@@ -341,7 +339,7 @@
   .metric { min-height: 98px; padding: 15px; border-right: 1px solid #1a1a1a; border-bottom: 1px solid #1a1a1a; }
   .metric-label { display: block; color: #888; font-size: 10px; letter-spacing: .08em; }
   .metric strong { display: block; margin: 10px 0 4px; font-size: clamp(19px, 2vw, 28px); font-weight: 500; color: #fff; }
-  .metric strong.text-value { font-size: 17px; }
+  .metric--exogenous { grid-column: span 2; }
   .metric--total {
     border-right-color: rgba(0, 204, 102, .45);
     border-bottom-color: rgba(0, 204, 102, .45);
@@ -395,6 +393,7 @@
   }
 
   @media (max-width: 520px) {
+    .metric--exogenous { grid-column: auto; }
     .metric-grid { grid-template-columns: 1fr; }
     .zoom-hint, .selected-day { display: none; }
     .range-bar .zoom-reset { margin-left: auto; }

@@ -31,6 +31,22 @@ reconciled LP legs (`RUNE held + external asset value`). This avoids presenting
 yesterday's day-end SIPOL value as the current position without contaminating
 the historical chart with mixed-height data.
 
+The headline grid also shows the latest daily tracked total as a percentage of
+all `Available` external-asset swap pools, valued as asset depth × TOR price
+plus RUNE depth × RUNE/TOR price. The denominator includes pools without tracked
+positions. A separate exogenous-assets card sums only the asset legs: half of
+synth backing, stored Treasury asset redeem USD, and each POL module's
+redeemable assets (LP units × asset depth / pool units, truncated before TOR
+valuation). It does not assume that every two-sided position is exactly half
+RUNE. Both cards retain the snapshot date and use the same completed-day height
+as Total Tracked Value; the independent live SIPOL card is not substituted.
+
+These additive `latest_metrics` fields are assembled from existing stored daily
+and pool inputs. Incomplete holdings, missing prices, mismatched pool days or a
+missing pool row produce unavailable metrics, not partial sums. A zero pool
+denominator produces an unavailable percentage. Coverage and gap information
+remain in the API and warning alerts, but have no headline cards.
+
 Savers value is intentionally absent from the dashboard, public API, and newly
 collected rows. Migration `046_pol_tracker.sql` retains nullable legacy Saver
 columns for forward-compatible rollback, but the v3 read model never selects or

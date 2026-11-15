@@ -64,6 +64,13 @@ export function normalizePolTrackerPayload(payload = {}) {
     coverage: payload.coverage || {},
     daily,
     latest: daily.filter((row) => row.height !== null).at(-1) || null,
+    latestMetrics: {
+      day: day(payload.latest_metrics?.day),
+      height: finite(payload.latest_metrics?.height),
+      swapPoolTvlUsd: finite(payload.latest_metrics?.swap_pool_tvl_usd),
+      trackedSharePercent: finite(payload.latest_metrics?.tracked_share_pct),
+      exogenousUsd: finite(payload.latest_metrics?.exogenous_usd)
+    },
     currentSystemIncomePol: currentSystemIncomePol && typeof currentSystemIncomePol === 'object'
       ? {
           asOf: currentSystemIncomePol.as_of || null,

@@ -176,6 +176,69 @@ test('Treasury lookup failures create null Treasury totals without corrupting ot
   assert.equal(observation.daily.complete, false);
 });
 
+test('latest metrics compare the tracked total with every available swap pool and value asset legs independently', () => {
+  const observation = buildPolTrackerObservation({
+    ...DAY_INPUT,
+    anchor: { height: 30_000_000, blockTime: DAY_INPUT.anchor.blockTime },
+    systemIncomePolActive: true,
+    systemIncomePolModuleAddress: 'thor1sipolmodule',
+    systemIncomePolLps: new Map([['BTC.BTC', {
+      units: '5', asset_redeem_value: '500000000', rune_redeem_value: '1000000000'
+    }]]),
+    pools: [
+      DAY_INPUT.pools[0],
+      { ...DAY_INPUT.pools[0], asset: 'ETH.ETH', synth_units: '0' },
+      { ...DAY_INPUT.pools[0], asset: 'DOGE.DOGE', status: 'Staged', synth_units: '0' }
+    ]
+  });
+  const options = { startDate: DAY_INPUT.day, endDate: DAY_INPUT.day };
+  const payload = buildPolTrackerPayload([observation.daily], observation.pools, options);
+  // Each available pool: 100 assets × $2 + 200 RUNE × $3 = $800.
+  // Tracked total: $100 synth + $17 Treasury + $300 Reserve + $60 SIPOL.
+  // Asset legs: $50 synth + $8 Treasury + $50 Reserve + $10 SIPOL.
+  assert.deepEqual(payload.latest_metrics, {
+    day: DAY_INPUT.day, height: 30_000_000,
+    swap_pool_tvl_usd: 1600, tracked_share_pct: 477 / 1600 * 100,
+    exogenous_usd: 118
+  });
+  assert.notEqual(payload.latest_metrics.exogenous_usd, 477 / 2);
+
+  const missingPool = buildPolTrackerPayload([observation.daily], observation.pools.slice(1), options);
+  assert.equal(missingPool.latest_metrics.swap_pool_tvl_usd, null);
+  assert.equal(missingPool.latest_metrics.exogenous_usd, null);
+  const wrongDay = buildPolTrackerPayload([observation.daily],
+    observation.pools.map((pool) => ({ ...pool, day: '2025-02-02' })), options);
+  assert.equal(wrongDay.latest_metrics.tracked_share_pct, null);
+});
+
+test('latest metrics preserve missing prices and holdings as unavailable instead of a partial or zero total', () => {
+  const observation = buildPolTrackerObservation(DAY_INPUT);
+  const options = { startDate: DAY_INPUT.day, endDate: DAY_INPUT.day };
+  const metrics = (overrides, daily = observation.daily) => buildPolTrackerPayload(
+    [daily], [{ ...observation.pools[0], ...overrides }], options
+  ).latest_metrics;
+  assert.equal(metrics({ asset_price_usd_e8: null }).swap_pool_tvl_usd, null);
+  assert.equal(metrics({ asset_price_usd_e8: '0' }).tracked_share_pct, null);
+  assert.equal(metrics({ reserve_pol_lp_units: null }).exogenous_usd, null);
+  assert.equal(metrics({ treasury_asset_usd_e8: null }).exogenous_usd, null);
+  assert.equal(metrics({ balance_asset_e8: '0', balance_rune_e8: '0' }).tracked_share_pct, null);
+  assert.equal(metrics({}, { ...observation.daily, synth_backing_usd_e8: null }).tracked_share_pct, null);
+  const incomplete = {
+    ...observation.daily,
+    lane_status: { ...observation.daily.lane_status, reserve_pol: { status: 'partial' } }
+  };
+  assert.equal(metrics({}, incomplete).exogenous_usd, null);
+
+  const empty = buildPolTrackerObservation({
+    ...DAY_INPUT, treasuryLps: new Map(), reserveLps: new Map(),
+    pools: [{ ...DAY_INPUT.pools[0], synth_units: '0' }],
+    runepool: { pol: { value: '0' } }
+  });
+  const zero = buildPolTrackerPayload([empty.daily], empty.pools, options).latest_metrics;
+  assert.equal(zero.exogenous_usd, 0);
+  assert.equal(zero.tracked_share_pct, 0);
+});
+
 test('Reserve lookup failures keep the aggregate value but mark its per-pool breakdown partial', () => {
   const observation = buildPolTrackerObservation({
     ...DAY_INPUT,

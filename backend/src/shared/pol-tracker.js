@@ -139,6 +139,75 @@ function publicPoolRow(row, systemIncomePolActive) {
   };
 }
 
+function unsignedInteger(value) {
+  return /^\d+$/.test(String(value ?? '')) ? BigInt(value) : null;
+}
+
+// Derive these from the stored pool snapshot, never from a newer live price or
+// the visible table (which filters out pools without protocol positions).
+function latestMetrics(latest, storedDay, pools) {
+  const metrics = {
+    day: latest?.day || null,
+    height: latest?.height || null,
+    swap_pool_tvl_usd: null,
+    tracked_share_pct: null,
+    exogenous_usd: null
+  };
+  if (!latest || !pools.length || pools.length !== Number(storedDay?.pool_count)
+    || new Set(pools.map((pool) => pool.asset)).size !== pools.length
+    || pools.some((pool) => dateString(pool.day) !== latest.day)) return metrics;
+
+  const runePrice = unsignedInteger(storedDay.rune_price_usd_e8);
+  const totals = [
+    latest.synth.backing_usd, latest.treasury_lp.total_usd,
+    latest.reserve_pol.deployed_usd, latest.system_income_pol.position_usd
+  ];
+  let swapPoolTvl = 0n;
+  let exogenous = 0n;
+  let swapPoolsComplete = runePrice !== null && runePrice > 0n;
+  let exogenousComplete = latest.complete;
+  const systemIncomePolActive = latest.height >= config.systemIncomePolActivationHeight;
+  for (const pool of pools) {
+    const assetDepth = unsignedInteger(pool.balance_asset_e8);
+    const assetPrice = unsignedInteger(pool.asset_price_usd_e8);
+    const runeDepth = unsignedInteger(pool.balance_rune_e8);
+    const poolUnits = unsignedInteger(pool.pool_units);
+    const assetValue = (units) => {
+      if (units === 0n) return 0n;
+      if (units === null || !poolUnits || assetDepth === null || !assetPrice) return null;
+      // LP queries truncate the redeemable asset amount before valuing it.
+      return ((units * assetDepth / poolUnits) * assetPrice) / 100_000_000n;
+    };
+    if (pool.pool_status === 'Available') {
+      if (assetDepth === null || runeDepth === null || !assetPrice || !runePrice) {
+        swapPoolsComplete = false;
+      } else {
+        swapPoolTvl += (assetDepth * assetPrice + runeDepth * runePrice) / 100_000_000n;
+      }
+    }
+    const synthUnits = unsignedInteger(pool.synth_units);
+    const synthBacking = unsignedInteger(pool.synth_backing_usd_e8);
+    const treasuryUnits = unsignedInteger(pool.treasury_lp_units);
+    const assetLegs = [
+      synthUnits === 0n ? 0n : synthBacking === null ? null : synthBacking / 2n,
+      treasuryUnits === 0n ? 0n : unsignedInteger(pool.treasury_asset_usd_e8),
+      assetValue(unsignedInteger(pool.reserve_pol_lp_units)),
+      systemIncomePolActive ? assetValue(unsignedInteger(pool.system_income_pol_lp_units)) : 0n
+    ];
+    if (assetLegs.some((value) => value === null)) exogenousComplete = false;
+    else exogenous += assetLegs.reduce((sum, value) => sum + value, 0n);
+  }
+  if (swapPoolsComplete) {
+    metrics.swap_pool_tvl_usd = e8ToNumber(swapPoolTvl);
+    if (swapPoolTvl > 0n && totals.every((value) => Number.isFinite(value) && value >= 0)) {
+      metrics.tracked_share_pct = totals.reduce((sum, value) => sum + value, 0)
+        / metrics.swap_pool_tvl_usd * 100;
+    }
+  }
+  if (exogenousComplete) metrics.exogenous_usd = e8ToNumber(exogenous);
+  return metrics;
+}
+
 export function buildPolTrackerPayload(rows = [], poolRows = [], options = {}) {
   const now = resolveNow(options.now);
   const startDate = options.startDate || config.polTrackerStartDate || POL_TRACKER_START_DATE;
@@ -167,6 +236,7 @@ export function buildPolTrackerPayload(rows = [], poolRows = [], options = {}) {
       last_day: latest?.day || null
     },
     latest,
+    latest_metrics: latestMetrics(latest, rowsByDay.get(latest?.day), poolRows),
     daily,
     latest_pools: poolRows.map((row) => publicPoolRow(
       row,
@@ -180,7 +250,9 @@ export function buildPolTrackerPayload(rows = [], poolRows = [], options = {}) {
       synth: 'Synth-unit share of pool liquidity, valued as 2 × asset depth × synth_units / pool_units.',
       reserve_pol: 'Gross value of LP positions held at the legacy Reserve module. The daily total comes from runepool.pol.value; each latest-pool value applies THORNode\'s rounded safe share to the module LP units and same-height RUNE depth, doubles it, and reconciles to the total.',
       system_income_pol: 'Two-sided value of LP positions held by the pol_reserve module and funded from System Income, valued independently at the same daily anchor height.',
-      aggregation: 'The tooltip total is the arithmetic sum of synth backing, Treasury locked LP, legacy Reserve POL, and System Income POL.'
+      aggregation: 'The tooltip total is the arithmetic sum of synth backing, Treasury locked LP, legacy Reserve POL, and System Income POL.',
+      swap_pool_share: 'Latest daily tracked total divided by the combined asset and RUNE USD value of all Available external-asset swap pools at the same height.',
+      exogenous: 'Latest daily asset legs only: half of synth backing, Treasury asset redeem value, and redeemable assets held by both POL modules, using same-height TOR prices. RUNE is excluded.'
     }
   };
 }

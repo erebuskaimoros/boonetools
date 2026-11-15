@@ -19,6 +19,39 @@ The guard fetches production main, requires the selected commit to belong to its
 history, and verifies that commit's latest Actions `verify` result. There is no
 dirty-tree or skip-CI bypass. Run from this repo, not the outer THORChain workspace.
 
+## POL TVL summary metrics
+
+Deploy backend before frontend. The additive `latest_metrics` values need no
+migration or provider collection: all inputs already exist in
+`pol_tracker_daily` and `pol_tracker_pool_daily`. Before deploying the frontend,
+rebuild only this cached model from stored history under its normal advisory
+lock (or wait for its daily scheduled publication):
+
+```bash
+ssh root@boone.tools 'cd /opt/boonetools-backend/current/backend && runuser -u deploy -- node --env-file=/opt/boonetools-backend/config/backend.env --input-type=module' <<'JS'
+import { closePool } from './src/db/pool.js';
+import { withAdvisoryLock } from './src/db/lock.js';
+import { buildAndPublishReadModel } from './src/shared/read-models.js';
+import { buildPolTrackerReadModel, POL_TRACKER_MODEL_KEY, POL_TRACKER_SCHEMA_VERSION, POL_TRACKER_TTL_MS } from './src/shared/pol-tracker.js';
+try {
+  const result = await withAdvisoryLock('boonetools:pol-tracker', client =>
+    buildAndPublishReadModel({
+      client, modelKey: POL_TRACKER_MODEL_KEY,
+      schemaVersion: POL_TRACKER_SCHEMA_VERSION, ttlMs: POL_TRACKER_TTL_MS,
+      build: () => buildPolTrackerReadModel(client)
+    }));
+  console.log(JSON.stringify({ ok: result.ok, skipped: result.skipped, metrics: result.model?.payload?.latest_metrics }));
+} finally { await closePool(); }
+JS
+```
+
+Verify `/functions/v1/pol-tvl` exposes finite `latest_metrics.swap_pool_tvl_usd`,
+`tracked_share_pct`, and `exogenous_usd` with the same day/height as `latest`
+when the latest snapshot is complete. A skipped lock means the collector is
+already running; wait for publication before continuing. Reload `/pol-tvl`
+and check the seven cards at desktop and mobile widths. These new metrics use
+the completed daily snapshot; the existing live SIPOL headline stays separate.
+
 ## What a deploy does
 
 Both entrypoints package the selected Git object and use the remote activation
