@@ -142,6 +142,16 @@
         <small>synth backing + Treasury locked LP + both POL forms</small>
       </article>
       <article class="metric">
+        <span class="metric-label">SHARE OF SWAP POOLS</span>
+        <strong>{latestMetrics.trackedSharePercent === null ? '—' : `${latestMetrics.trackedSharePercent.toFixed(2)}%`}</strong>
+        <small>of {formatPolTrackerUsd(latestMetrics.swapPoolTvlUsd, true)} available pool TVL · {fullDate(latestMetrics.day)}</small>
+      </article>
+      <article class="metric metric--exogenous">
+        <span class="metric-label">EXOGENOUS ASSETS</span>
+        <strong>{formatPolTrackerUsd(latestMetrics.exogenousUsd, true)}</strong>
+        <small>asset legs only · excludes RUNE · {fullDate(latestMetrics.day)}</small>
+      </article>
+      <article class="metric">
         <span class="metric-label">SYNTH BACKING</span>
         <strong>{formatPolTrackerUsd(latest?.synthBackingUsd, true)}</strong>
         <small>synth-unit pool share</small>
@@ -160,16 +170,6 @@
         <span class="metric-label">SYSTEM INCOME POL{currentSystemIncomePol ? ' · LIVE' : ''}</span>
         <strong>{formatPolTrackerUsd(systemIncomePolUsd, true)}</strong>
         <small>{formatPolTrackerRune(systemIncomePolRune)} · FULL TWO-SIDED POSITION</small>
-      </article>
-      <article class="metric">
-        <span class="metric-label">SHARE OF SWAP POOLS</span>
-        <strong>{latestMetrics.trackedSharePercent === null ? '—' : `${latestMetrics.trackedSharePercent.toFixed(2)}%`}</strong>
-        <small>of {formatPolTrackerUsd(latestMetrics.swapPoolTvlUsd, true)} available pool TVL · {fullDate(latestMetrics.day)}</small>
-      </article>
-      <article class="metric metric--exogenous">
-        <span class="metric-label">EXOGENOUS ASSETS</span>
-        <strong>{formatPolTrackerUsd(latestMetrics.exogenousUsd, true)}</strong>
-        <small>asset legs only · excludes RUNE · {fullDate(latestMetrics.day)}</small>
       </article>
     </section>
 
