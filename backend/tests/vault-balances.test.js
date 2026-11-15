@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { collectVaultBalances } from '../src/vault-balances/index.js';
 import { units } from '../src/vault-balances/common.js';
+import { zcashTransparentAddress } from '../src/vault-balances/chains.js';
 
 const selectors = { balanceOf: '0x70a08231', vaultAllowance: '0x03b6a673', decimals: '0x313ce567' };
 const encoded = value => '0x' + BigInt(value).toString(16).padStart(64, '0');
@@ -169,6 +170,64 @@ test('fallback RPC results replace only failed items, preserving successful read
   assert.equal(primary, 1); assert.equal(alternate, 1);
   assert.equal(result.vaults[0].coins[0].amount, '0');
   assert.equal(result.vaults[0].coins[0].balance_provider, 'eth-mainnet.public.blastapi.io');
+});
+
+const texAddress = 'tex1d5gsu875lekewcel0p6wvuev25ynn7ee266668';
+const zecTransparent = 't1TpJ6FzYvXzHYFGDNhy1LeDQDaxMycTUNk';
+
+test('ZIP-320 TEX vault addresses convert to their transparent P2PKH equivalent', () => {
+  assert.equal(zcashTransparentAddress(texAddress), zecTransparent);
+  assert.equal(zcashTransparentAddress(zecTransparent), zecTransparent);
+});
+
+test('ZEC is verified via Blockbook for the transparent address, including negative unconfirmed changes', async () => {
+  const urls = [];
+  const result = await collectVaultBalances([vault('ZEC', 'ZEC.ZEC', '100', texAddress)], [], { now, fetchImpl: async url => {
+    urls.push(url);
+    return response({ address: zecTransparent, balance: '1800412831', unconfirmedBalance: '-412831' });
+  } });
+  const coin = result.vaults[0].coins[0];
+  assert.equal(urls.length, 1);
+  assert.ok(urls[0].startsWith(`https://blockbook.zec.zelcore.io/api/v2/address/${zecTransparent}`));
+  assert.equal(coin.balance_status, 'verified');
+  assert.equal(coin.amount, '1800000000');
+  assert.equal(coin.thornode_amount, '100');
+  assert.equal(coin.balance_provider, 'blockbook.zec.zelcore.io');
+  assert.equal(coin.balance_scope, 'address_with_mempool');
+});
+
+test('ZEC falls back to Blockchair when Blockbook fails', async () => {
+  const result = await collectVaultBalances([vault('ZEC', 'ZEC.ZEC', '100', texAddress)], [], { now, fetchImpl: async url => {
+    if (url.includes('blockbook')) throw new Error('offline');
+    assert.ok(url.startsWith(`https://api.blockchair.com/zcash/dashboards/address/${zecTransparent}`));
+    return response({ data: { [zecTransparent]: { address: { balance: 1800412831 } } }, context: { code: 200 } });
+  } });
+  const coin = result.vaults[0].coins[0];
+  assert.equal(coin.balance_status, 'verified');
+  assert.equal(coin.amount, '1800412831');
+  assert.equal(coin.balance_provider, 'api.blockchair.com');
+  assert.equal(coin.balance_scope, 'address');
+});
+
+test('invalid TEX addresses and malformed ZEC payloads are unavailable, never an invented amount', async () => {
+  const corrupted = texAddress.slice(0, -1) + (texAddress.endsWith('8') ? 'q' : '8');
+  const bech32Checksum = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'; // valid bech32, wrong hrp/constant
+  const twentyOneBytes = 'tex1qurswpc8qurswpc8qurswpc8qurswpc8qujt2rfl'; // valid bech32m, 21-byte payload
+  for (const addr of [corrupted, bech32Checksum, twentyOneBytes, 'zs1notatransparentaddress', '']) {
+    assert.throws(() => zcashTransparentAddress(addr));
+  }
+  let calls = 0;
+  const bad = await collectVaultBalances([vault('ZEC', 'ZEC.ZEC', '100', corrupted)], [], { now, fetchImpl: async () => { calls++; return response({ balance: '1', unconfirmedBalance: '0' }); } });
+  assert.equal(calls, 0);
+  assert.equal(bad.vaults[0].coins[0].balance_status, 'unavailable');
+  assert.equal(bad.vaults[0].coins[0].amount, '100');
+  for (const payload of [{ balance: '12.5', unconfirmedBalance: '0' }, { unconfirmedBalance: '0' }, { data: {}, context: { code: 200 } }]) {
+    const result = await collectVaultBalances([vault('ZEC', 'ZEC.ZEC', '100', texAddress)], [], { now, fetchImpl: async () => response(payload) });
+    const coin = result.vaults[0].coins[0];
+    assert.equal(coin.balance_status, 'unavailable');
+    assert.equal(coin.amount, '100');
+    assert.equal(coin.balance_observed_at, undefined);
+  }
 });
 
 test('unsafe explorer integers are rejected instead of rounding a custody balance', async () => {

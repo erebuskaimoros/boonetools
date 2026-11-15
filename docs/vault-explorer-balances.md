@@ -18,12 +18,18 @@ Midgard is not used for these balances.
 | SOL | PublicNode; Solana mainnet RPC fallback | Confirmed native SOL balance |
 | XRP | XRPL Cluster; Ripple fallback | Native XRP in the validated ledger |
 | TRON | PublicNode; TronGrid fallback | Native TRX and USDT via read-only contract call |
+| ZEC | Zelcore Blockbook; Blockchair fallback | Transparent balance of the TEX address's P2PKH (`t1`) equivalent, confirmed plus unconfirmed; Blockchair reports its indexed balance |
 
 Other assets remain explicitly **THORNode only**. No independent amount is
 invented for unknown denominations, SPL tokens, other TRC-20 tokens, private
-chains, or new custody models. The model queries native assets even when they
+chains, Zcash shielded pools, or new custody models. The model queries native assets even when they
 are absent from THORNode's coin list. Token discovery uses known pool/vault
 assets, not arbitrary token scanning. Prices still come from THORNode.
+
+THORNode reports ZEC vault addresses as ZIP-320 TEX addresses (bech32m, hrp
+`tex`, 20-byte pubkey hash). The collector converts them locally to the
+equivalent transparent `t1` address that explorers index; an address that fails
+the bech32m checksum, hrp or 20-byte payload check is unavailable.
 
 ## EVM custody
 
@@ -74,6 +80,13 @@ including assets without prices. The details card value sums fresh priced L1
 observations only and shows coverage separately. Legacy snapshots from an older
 backend remain THORNode-only until the new collector publishes.
 
+A deficit raises a "lower than THORNode" alert only when it exceeds 0.01% of
+THORNode's figure (`SHORTFALL_TOLERANCE_BPS`). Smaller deficits, typically
+unsettled outbound fees, are labelled "within fee tolerance" and counted
+separately. The header says balances are delayed once the older of the
+`vaults` and `l1_balances` fields passes the same 90-second expiry
+(`BALANCE_DELAY_MS`); slower fields such as `nodes` do not trigger it.
+
 A negative difference is an investigation signal, not proof of a hack: pending
 transfers, churn and different THORNode/L1 observation times also cause gaps.
 Explorer/RPC responses are trusted observations, not cryptographic proof or
@@ -102,4 +115,7 @@ Provider references: [Esplora API](https://github.com/Blockstream/esplora/blob/m
 [Ethereum JSON-RPC](https://ethereum.org/en/developers/docs/apis/json-rpc/),
 [XRPL account_info](https://xrpl.org/docs/references/http-websocket-apis/public-api-methods/account-methods/account_info),
 [Solana getBalance](https://solana.com/docs/rpc/http/getbalance),
-[TRON contract reads](https://developers.tron.network/reference/triggerconstantcontract).
+[TRON contract reads](https://developers.tron.network/reference/triggerconstantcontract),
+[Blockbook API](https://github.com/trezor/blockbook/blob/master/docs/api.md),
+[Blockchair address dashboards](https://blockchair.com/api/docs#link_300),
+[ZIP-320 TEX addresses](https://zips.z.cash/zip-0320).
