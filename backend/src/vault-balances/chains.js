@@ -1,8 +1,9 @@
+import { createHash } from 'node:crypto';
 import { fetchJson, firstProvider, getCoin, integer, observed, unavailable, units } from './common.js';
 import { collectTron } from './tron.js';
 import { GAIA_ASSETS } from './gaia-assets.js';
 
-export const NATIVE_ASSETS = { BTC: 'BTC.BTC', BCH: 'BCH.BCH', LTC: 'LTC.LTC', DOGE: 'DOGE.DOGE', GAIA: 'GAIA.ATOM', SOL: 'SOL.SOL', XRP: 'XRP.XRP', TRON: 'TRON.TRX' };
+export const NATIVE_ASSETS = { BTC: 'BTC.BTC', BCH: 'BCH.BCH', LTC: 'LTC.LTC', DOGE: 'DOGE.DOGE', GAIA: 'GAIA.ATOM', SOL: 'SOL.SOL', XRP: 'XRP.XRP', TRON: 'TRON.TRX', ZEC: 'ZEC.ZEC' };
 const TRON_USDT = 'TRON.USDT-TR7NHQJEKQXGTCI8Q8ZY4PL8OTSZGJLJ6T';
 const host = url => new URL(url).host;
 const stats = value => integer(value?.funded_txo_sum) - integer(value?.spent_txo_sum);
@@ -12,7 +13,62 @@ const sumBalance = (confirmed, pending) => {
   return sum.toString();
 };
 
+const BECH32 = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const polymod = values => values.reduce((chk, v) => {
+  const top = chk >>> 25;
+  chk = ((chk & 0x1ffffff) << 5) ^ v;
+  for (const [i, g] of [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3].entries()) if ((top >>> i) & 1) chk ^= g;
+  return chk;
+}, 1) >>> 0;
+const sha256 = bytes => createHash('sha256').update(bytes).digest();
+
+// ZIP-320 TEX (bech32m, hrp "tex") wraps a P2PKH hash; explorers index the t1 form.
+export function zcashTransparentAddress(address) {
+  if (typeof address !== 'string') throw new Error('Invalid Zcash address');
+  if (/^t1[1-9A-HJ-NP-Za-km-z]{33}$/.test(address)) return address;
+  const lower = address.toLowerCase();
+  if (address !== lower && address !== address.toUpperCase()) throw new Error('Mixed-case TEX address');
+  const sep = lower.lastIndexOf('1');
+  if (lower.slice(0, sep) !== 'tex' || lower.length - sep - 1 < 6) throw new Error('Unsupported Zcash address format');
+  const data = [...lower.slice(sep + 1)].map(c => {
+    const v = BECH32.indexOf(c);
+    if (v < 0) throw new Error('Invalid TEX character');
+    return v;
+  });
+  const hrp = [...'tex'].map(c => c.charCodeAt(0));
+  if (polymod([...hrp.map(c => c >> 5), 0, ...hrp.map(c => c & 31), ...data]) !== 0x2bc830a3) throw new Error('Invalid TEX checksum');
+  let acc = 0, bits = 0;
+  const hash = [];
+  for (const v of data.slice(0, -6)) {
+    acc = (acc << 5) | v; bits += 5;
+    if (bits >= 8) { bits -= 8; hash.push((acc >> bits) & 0xff); }
+  }
+  if (bits >= 5 || (acc & ((1 << bits) - 1)) || hash.length !== 20) throw new Error('Invalid TEX payload');
+  const payload = Buffer.from([0x1c, 0xb8, ...hash]);
+  const bytes = Buffer.concat([payload, sha256(sha256(payload)).subarray(0, 4)]);
+  let n = BigInt('0x' + bytes.toString('hex')), out = '';
+  while (n > 0n) { out = BASE58[Number(n % 58n)] + out; n /= 58n; }
+  for (const b of bytes) { if (b !== 0) break; out = '1' + out; }
+  return out;
+}
+
+async function zcash(address, options) {
+  const t1 = zcashTransparentAddress(address);
+  return firstProvider(['https://blockbook.zec.zelcore.io/api/v2', 'https://api.blockchair.com/zcash'], async base => {
+    if (base.includes('blockbook')) {
+      const payload = await fetchJson(`${base}/address/${t1}?details=basic`, null, options);
+      if (payload?.address !== t1) throw new Error('Explorer address mismatch');
+      return { amount: sumBalance(payload.balance, payload.unconfirmedBalance), provider: host(base), balance_scope: 'address_with_mempool' };
+    }
+    const payload = await fetchJson(`${base}/dashboards/address/${t1}?limit=0`, null, options);
+    if (payload?.context?.code !== 200) throw new Error('Explorer error');
+    return { amount: integer(payload?.data?.[t1]?.address?.balance).toString(), provider: host(base), balance_scope: 'address' };
+  }, options);
+}
+
 async function utxo(chain, address, options) {
+  if (chain === 'ZEC') return zcash(address, options);
   const encoded = encodeURIComponent(address);
   if (chain === 'BTC' || chain === 'LTC') {
     const endpoints = chain === 'BTC' ? ['https://blockstream.info/api', 'https://mempool.space/api'] : ['https://litecoinspace.org/api', 'https://api.blockcypher.com/v1/ltc/main'];

@@ -15,7 +15,7 @@
   } from '$lib/utils/network';
   import { getAssetLogo, getAssetDisplayName } from '$lib/constants';
   import { Toast, LoadingBar, ChevronDownIcon } from '$lib/components';
-  import { describeBalance, getVisibleVaultCoins, summarizeVaultBalances, routerCheckStatus } from './vault-explorer/balances.js';
+  import { describeBalance, getVisibleVaultCoins, summarizeVaultBalances, routerCheckStatus, balancesDelayed, balanceObservationAge } from './vault-explorer/balances.js';
   import { fetchVaultExplorerData } from './vault-explorer/data.js';
 
   let loading = true;
@@ -40,6 +40,7 @@
   $: freshL1Checks = vaultBalanceSummaries.reduce((sum, vault) => sum + vault.fresh, 0);
   $: lowerBalanceVaults = vaultBalanceSummaries.filter(vault => vault.shortfalls > 0);
   $: routerShortfalls = (data?.routerChecks || []).filter(check => routerCheckStatus(check, balanceNow) === 'shortfall');
+  $: balanceDelayLabel = data && balancesDelayed(data.fieldMeta, balanceNow) ? formatBalanceDelay(balanceObservationAge(data.fieldMeta, balanceNow)) : '';
   $: routerUnavailable = (data?.routerChecks || []).filter(check => ['unavailable', 'stale'].includes(routerCheckStatus(check, balanceNow)));
   let expandedSignerVaultPubKeys = [];
   let toastMessage = '';
@@ -128,6 +129,12 @@
     const start = Math.ceil(maxLength / 2);
     const end = Math.floor(maxLength / 2);
     return shortenAddressUtil(address, start, end);
+  }
+
+  function formatBalanceDelay(ageMs) {
+    if (ageMs == null) return ' · balances delayed, refreshing';
+    const minutes = Math.floor(ageMs / 60_000);
+    return ` · balances ${minutes >= 60 ? `${Math.floor(minutes / 60)}h` : `${minutes}m`} old, refreshing`;
   }
 
   function getVaultExplorerUrl(vault, poolAsset) {
@@ -254,7 +261,7 @@
       <button class="tab-btn" role="tab" aria-selected={activeTab === 'details'} class:tab-active={activeTab === 'details'} on:click={() => activeTab = 'details'}>Vault Details</button>
       <div class="tab-spacer"></div>
       {#if lastUpdated}
-        <span class="last-updated">THORNode {formatLastUpdated(lastUpdated)}{data?.stale ? ' · refreshing shared data' : ''}</span>
+        <span class="last-updated">THORNode {formatLastUpdated(lastUpdated)}{balanceDelayLabel}</span>
       {/if}
       <button class="refresh-btn" on:click={() => loadVaultData(false)} disabled={refreshing}>
         {refreshing ? 'Refreshing...' : 'Refresh'}
@@ -462,7 +469,7 @@
         {#if lowerBalanceVaults.length}
           <p class="balance-alert">Lower than THORNode: {lowerBalanceVaults.map(entry => `Vault ${formatVaultName(entry.vault.pub_key)} (${entry.shortfalls})`).join(' · ')}</p>
         {/if}
-        <p>Compare what each chain holds with THORNode’s recorded inventory. Lower balances are highlighted, including zero. Pending transfers and different observation times can also cause differences.</p>
+        <p>Compare what each chain holds with THORNode’s recorded inventory. Lower balances are highlighted, including zero; differences under 0.01% of THORNode’s amount are treated as fee/timing noise and noted quietly. Pending transfers and different observation times can also cause differences.</p>
         <p>Legacy router tokens show per-vault allowances; their shared token backing is checked below. Newer routers keep tokens at the vault address. Missing or stale checks do not establish that funds are present.</p>
       </div>
       {#if data.routerChecks.length}
@@ -586,11 +593,11 @@
               <div class="vault-divider"></div>
 
               <div class="balance-coverage" class:balance-alert={balanceSummary.shortfalls > 0}>
-                {balanceSummary.fresh}/{balanceSummary.total} fresh L1 checks · {balanceSummary.shortfalls} lower than THORNode
+                {balanceSummary.fresh}/{balanceSummary.total} fresh L1 checks · {balanceSummary.shortfalls} lower than THORNode{balanceSummary.withinTolerance ? ` · ${balanceSummary.withinTolerance} within fee tolerance` : ''}
                 {#if balanceSummary.unavailable || balanceSummary.stale}
                   <span>{balanceSummary.unavailable} unchecked · {balanceSummary.stale} stale</span>
                 {/if}
-                {#if balanceSummary.unpriced}<span>{balanceSummary.unpriced} assets without a USD price</span>{/if}
+                {#if balanceSummary.unpriced}<span>{balanceSummary.unpriced} non-pool {balanceSummary.unpriced === 1 ? 'asset' : 'assets'} · no THORNode price, excluded from value</span>{/if}
               </div>
               <button class="expand-toggle" class:expanded={showAssetBalances} on:click={() => showAssetBalances = !showAssetBalances}>
                 <span>Asset Balances</span>
@@ -617,7 +624,7 @@
                       <div class="asset-vals">
                         <span><small>L1</small> {balance.amount == null ? '—' : formatAssetAmount(fromBaseUnit(balance.amount))}</span>
                         <span><small>THOR</small> {balance.expected == null ? '—' : formatAssetAmount(fromBaseUnit(balance.expected))}</span>
-                        <span title="L1 minus THORNode"><small>Δ</small> {balance.delta == null ? '—' : `${BigInt(balance.delta) > 0n ? '+' : ''}${formatAssetAmount(fromBaseUnit(balance.delta))}`}</span>
+                        <span title="L1 minus THORNode"><small>Δ</small> {balance.delta == null ? '—' : `${BigInt(balance.delta) > 0n ? '+' : ''}${formatAssetAmount(fromBaseUnit(balance.delta))}`}{#if balance.fresh && balance.withinTolerance}<small class="balance-tolerance">within fee tolerance</small>{/if}</span>
                       </div>
                       <div class="balance-observation">
                         {#if coin.balance_observed_at}
@@ -1542,6 +1549,7 @@
   .balance-coverage { margin: 12px 0; font: 11px/1.6 'JetBrains Mono', monospace; }
   .balance-coverage span { display: block; color: var(--term-text-3, #c8c8c8); }
   .balance-alert { color: var(--term-error, #e05260); }
+  .asset-vals small.balance-tolerance { margin: 4px 0 0; }
   .asset-row { padding: 10px 0; border-bottom: 1px solid #1a1a1a; }
   .asset-row:last-child { border-bottom: none; }
   .asset-id { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font: 12px 'JetBrains Mono', monospace; }
