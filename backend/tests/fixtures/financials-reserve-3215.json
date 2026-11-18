@@ -1,0 +1,1032 @@
+{
+  "source": "https://gateway.liquify.com/chain/thorchain_rpc",
+  "verifiedAt": "2026-11-18",
+  "upgradeHeight": 28720417,
+  "anchor": {
+    "height": 28720466,
+    "reserveBalanceE8": "2472116929652787",
+    "version": "3.21.5",
+    "emissionCurve": "100000",
+    "reserveMaxCapE8": "0",
+    "blocksPerYear": "5256000",
+    "method": "historical-reserve-formula-v1",
+    "source": "thorchain-rpc:height-verified-bank-version-mimirs"
+  },
+  "lowerAnchor": {
+    "height": 28720366,
+    "reserveBalanceE8": "2472114202028975",
+    "version": "3.21.3",
+    "emissionCurve": "100000",
+    "reserveMaxCapE8": "0",
+    "blocksPerYear": "5256000",
+    "method": "historical-reserve-formula-v1",
+    "source": "thorchain-rpc:height-verified-bank-version-mimirs"
+  },
+  "observations": [
+    {
+      "schemaVersion": 1,
+      "height": 28720466,
+      "reserveDeltaE8": "71263206",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1639096015",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720465,
+      "reserveDeltaE8": "83263690",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1215279071",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720464,
+      "reserveDeltaE8": "190555102",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1355278711",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "119296012"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720463,
+      "reserveDeltaE8": "71241841",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1666199149",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4704"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720462,
+      "reserveDeltaE8": "-155316713",
+      "afterRewardsDeltaE8": "-232576638",
+      "rewardTransfersE8": "1982375889",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-232581341"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720461,
+      "reserveDeltaE8": "71260416",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1330293392",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720460,
+      "reserveDeltaE8": "-358968002",
+      "afterRewardsDeltaE8": "-436222775",
+      "rewardTransfersE8": "1553779545",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-436227478"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720459,
+      "reserveDeltaE8": "2515607",
+      "afterRewardsDeltaE8": "-74742914",
+      "rewardTransfersE8": "1425716987",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-74747617"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720458,
+      "reserveDeltaE8": "17995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1472312546",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720457,
+      "reserveDeltaE8": "155184228",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1642125341",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "119184228"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720456,
+      "reserveDeltaE8": "27995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1600196660",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720455,
+      "reserveDeltaE8": "43995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1807484577",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720454,
+      "reserveDeltaE8": "47748076",
+      "afterRewardsDeltaE8": "-27493958",
+      "rewardTransfersE8": "1605221854",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "17748076"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720453,
+      "reserveDeltaE8": "840205015",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1731837574",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "717238334"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720452,
+      "reserveDeltaE8": "43995298",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1659845153",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720451,
+      "reserveDeltaE8": "10360313",
+      "afterRewardsDeltaE8": "-27644985",
+      "rewardTransfersE8": "1877412398",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-27649687"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720450,
+      "reserveDeltaE8": "4373230",
+      "afterRewardsDeltaE8": "-27622067",
+      "rewardTransfersE8": "1455798953",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-27626770"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720449,
+      "reserveDeltaE8": "-37725682",
+      "afterRewardsDeltaE8": "-75720980",
+      "rewardTransfersE8": "1228575022",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-75725682"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720448,
+      "reserveDeltaE8": "-844828249",
+      "afterRewardsDeltaE8": "-874823548",
+      "rewardTransfersE8": "1275523940",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-874828249"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720447,
+      "reserveDeltaE8": "33995298",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1585482541",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720446,
+      "reserveDeltaE8": "-13081093",
+      "afterRewardsDeltaE8": "-55079254",
+      "rewardTransfersE8": "1248604566",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-55083957"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720445,
+      "reserveDeltaE8": "-771620800",
+      "afterRewardsDeltaE8": "-803616097",
+      "rewardTransfersE8": "1455636858",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-803620800"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720444,
+      "reserveDeltaE8": "6625923",
+      "afterRewardsDeltaE8": "-27369374",
+      "rewardTransfersE8": "1772225508",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-27374077"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720443,
+      "reserveDeltaE8": "702998122",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1657694766",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "627758928"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720442,
+      "reserveDeltaE8": "41995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1977025626",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720441,
+      "reserveDeltaE8": "33995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1701430856",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720440,
+      "reserveDeltaE8": "599578766",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1933858047",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "551578766"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720439,
+      "reserveDeltaE8": "21995298",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1534819180",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720438,
+      "reserveDeltaE8": "6659674",
+      "afterRewardsDeltaE8": "-27335622",
+      "rewardTransfersE8": "2260293068",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-27340326"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720437,
+      "reserveDeltaE8": "23995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1835701451",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720436,
+      "reserveDeltaE8": "37995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2169403369",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720435,
+      "reserveDeltaE8": "23995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2106549501",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720434,
+      "reserveDeltaE8": "27995296",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1950682441",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4704"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720433,
+      "reserveDeltaE8": "29995296",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1851600365",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4704"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720432,
+      "reserveDeltaE8": "37995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2104780390",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720431,
+      "reserveDeltaE8": "25995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1712002536",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720430,
+      "reserveDeltaE8": "-40499455",
+      "afterRewardsDeltaE8": "-74494753",
+      "rewardTransfersE8": "1840661662",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-74499455"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720429,
+      "reserveDeltaE8": "35998141",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2367916127",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720428,
+      "reserveDeltaE8": "25995296",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1889488820",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4704"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720427,
+      "reserveDeltaE8": "39995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2161151118",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720426,
+      "reserveDeltaE8": "19995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1910866106",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720425,
+      "reserveDeltaE8": "96969337",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1815088264",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "76969337"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720424,
+      "reserveDeltaE8": "39995296",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2273507244",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4704"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720423,
+      "reserveDeltaE8": "19995298",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1500775382",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720422,
+      "reserveDeltaE8": "-82264268",
+      "afterRewardsDeltaE8": "-159503668",
+      "rewardTransfersE8": "1627061038",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-159508371"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720421,
+      "reserveDeltaE8": "91236409",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2099027491",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720420,
+      "reserveDeltaE8": "74293374",
+      "afterRewardsDeltaE8": "-6946814",
+      "rewardTransfersE8": "2088555419",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-6951516"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720419,
+      "reserveDeltaE8": "73251974",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1773969531",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4704"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720418,
+      "reserveDeltaE8": "83250705",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1607179036",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720417,
+      "reserveDeltaE8": "186482379",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1785299684",
+      "rewardEventCount": 1,
+      "configChanges": [
+        {
+          "type": "version",
+          "version": "3.21.5"
+        }
+      ],
+      "endBlockReserveDeltaE8": "-4704"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720416,
+      "reserveDeltaE8": "63245079",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1712810428",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720415,
+      "reserveDeltaE8": "163739526",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1752356527",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "90492522"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720414,
+      "reserveDeltaE8": "-263696753",
+      "afterRewardsDeltaE8": "-293692051",
+      "rewardTransfersE8": "1850509366",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-293696753"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720413,
+      "reserveDeltaE8": "29995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1830920292",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720412,
+      "reserveDeltaE8": "597415",
+      "afterRewardsDeltaE8": "-27397882",
+      "rewardTransfersE8": "1888826094",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-27402585"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720411,
+      "reserveDeltaE8": "-782290498",
+      "afterRewardsDeltaE8": "-804285795",
+      "rewardTransfersE8": "1861910974",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-804290498"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720410,
+      "reserveDeltaE8": "-17340217",
+      "afterRewardsDeltaE8": "-43335514",
+      "rewardTransfersE8": "2004314946",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-43340217"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720409,
+      "reserveDeltaE8": "69237623",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2069137181",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "45237623"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720408,
+      "reserveDeltaE8": "27995298",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1684974532",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720407,
+      "reserveDeltaE8": "21995298",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1639978785",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720406,
+      "reserveDeltaE8": "580804931",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1693013453",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "550804931"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720405,
+      "reserveDeltaE8": "68047107",
+      "afterRewardsDeltaE8": "-116225991",
+      "rewardTransfersE8": "2136260793",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "48047107"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720404,
+      "reserveDeltaE8": "-28953579",
+      "afterRewardsDeltaE8": "-50948875",
+      "rewardTransfersE8": "2174127604",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-50953579"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720403,
+      "reserveDeltaE8": "-98220777",
+      "afterRewardsDeltaE8": "-116216074",
+      "rewardTransfersE8": "2029523279",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-116220777"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720402,
+      "reserveDeltaE8": "23995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2029612770",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720401,
+      "reserveDeltaE8": "-96236466",
+      "afterRewardsDeltaE8": "-116231763",
+      "rewardTransfersE8": "2286472686",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-116236466"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720400,
+      "reserveDeltaE8": "71159667",
+      "afterRewardsDeltaE8": "-79759",
+      "rewardTransfersE8": "2183953473",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "45159667"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720399,
+      "reserveDeltaE8": "-90233348",
+      "afterRewardsDeltaE8": "-116228645",
+      "rewardTransfersE8": "2029696294",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-116233348"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720398,
+      "reserveDeltaE8": "-820421533",
+      "afterRewardsDeltaE8": "-846416829",
+      "rewardTransfersE8": "2132802251",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-846421533"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720397,
+      "reserveDeltaE8": "35995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2130447812",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720396,
+      "reserveDeltaE8": "-98238274",
+      "afterRewardsDeltaE8": "-116233571",
+      "rewardTransfersE8": "2277687504",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-116238274"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720395,
+      "reserveDeltaE8": "73227458",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1957078945",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "45227458"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720394,
+      "reserveDeltaE8": "25995298",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2189118024",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720393,
+      "reserveDeltaE8": "43995298",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2192237170",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720392,
+      "reserveDeltaE8": "621384199",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2696470903",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "595384199"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720391,
+      "reserveDeltaE8": "-90222181",
+      "afterRewardsDeltaE8": "-116217477",
+      "rewardTransfersE8": "2323643916",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-116222181"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720390,
+      "reserveDeltaE8": "-144532908",
+      "afterRewardsDeltaE8": "-190528205",
+      "rewardTransfersE8": "2552223328",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-190532908"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720389,
+      "reserveDeltaE8": "23995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2519636658",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720388,
+      "reserveDeltaE8": "-86218936",
+      "afterRewardsDeltaE8": "-116214234",
+      "rewardTransfersE8": "2255836673",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-116218936"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720387,
+      "reserveDeltaE8": "31995296",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2299435399",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4704"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720386,
+      "reserveDeltaE8": "103017883",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2619088958",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "77017883"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720385,
+      "reserveDeltaE8": "4547477",
+      "afterRewardsDeltaE8": "-27447820",
+      "rewardTransfersE8": "2439605246",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-27452523"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720384,
+      "reserveDeltaE8": "-235835823",
+      "afterRewardsDeltaE8": "-269831121",
+      "rewardTransfersE8": "2817196387",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-269835823"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720383,
+      "reserveDeltaE8": "67250590",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2046373705",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "45250590"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720382,
+      "reserveDeltaE8": "29998101",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2315840664",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720381,
+      "reserveDeltaE8": "41896532",
+      "afterRewardsDeltaE8": "-27353643",
+      "rewardTransfersE8": "2265460210",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-27358347"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720380,
+      "reserveDeltaE8": "17927522",
+      "afterRewardsDeltaE8": "-67775",
+      "rewardTransfersE8": "2103927507",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-72478"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720379,
+      "reserveDeltaE8": "85857151",
+      "afterRewardsDeltaE8": "-27298398",
+      "rewardTransfersE8": "2513802701",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "49857151"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720378,
+      "reserveDeltaE8": "152422188",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "2230853167",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4704"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720377,
+      "reserveDeltaE8": "4642445",
+      "afterRewardsDeltaE8": "-27352852",
+      "rewardTransfersE8": "2034518866",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-27357555"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720376,
+      "reserveDeltaE8": "998421917",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1979073318",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720375,
+      "reserveDeltaE8": "-3452555",
+      "afterRewardsDeltaE8": "-27447852",
+      "rewardTransfersE8": "2356142060",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-27452555"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720374,
+      "reserveDeltaE8": "69242658",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1898278168",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "45239875"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720373,
+      "reserveDeltaE8": "39998060",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1278919815",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720372,
+      "reserveDeltaE8": "29998040",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1083854655",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720371,
+      "reserveDeltaE8": "17995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1420643315",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720370,
+      "reserveDeltaE8": "43998020",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1585293555",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720369,
+      "reserveDeltaE8": "25995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1269464614",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720368,
+      "reserveDeltaE8": "23995298",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1369797299",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4702"
+    },
+    {
+      "schemaVersion": 1,
+      "height": 28720367,
+      "reserveDeltaE8": "27995297",
+      "afterRewardsDeltaE8": "0",
+      "rewardTransfersE8": "1401676689",
+      "rewardEventCount": 1,
+      "configChanges": [],
+      "endBlockReserveDeltaE8": "-4703"
+    }
+  ]
+}

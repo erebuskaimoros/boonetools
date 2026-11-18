@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { repairFinancialReserveEmissions } from '../src/shared/financials-reserve-service.js';
 
 const METHOD = 'historical-reserve-formula-v1';
@@ -111,6 +112,22 @@ test('the reviewed 3.21.0 upgrade block is reconstructed inside one verified chu
   assert.deepEqual(db.failures, []);
   assert.deepEqual(db.writes.map((item) => [item.height, item.reserve_emissions_e8]),
     [[28366101, '4673'], [28366100, '4673'], [28366099, '4825']]);
+});
+
+test('3.21.5 observations and its actual 3.21.3 transition recover without deferral', async () => {
+  const fixture = JSON.parse(readFileSync(new URL('./fixtures/financials-reserve-3215.json', import.meta.url)));
+  const db = database(fixture.observations.map(observed => row(observed.height, observed)));
+  const anchors = [];
+  const result = await repairFinancialReserveEmissions(db, { fetchAnchor: async height => {
+    anchors.push(height);
+    return fixture.anchor;
+  } });
+  assert.deepEqual(anchors, [fixture.anchor.height]);
+  assert.equal(result.reconstructed, 100);
+  assert.equal(result.deferred, 0);
+  assert.deepEqual(db.failures, []);
+  assert.equal(db.writes.length, 100);
+  assert.ok(db.writes.every(write => write.reserve_emissions_e8 === '4703'));
 });
 
 test('unsupported anchored versions fail closed and are deferred while an older supported chunk can complete', async () => {

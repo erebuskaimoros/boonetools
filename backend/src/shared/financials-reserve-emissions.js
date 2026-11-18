@@ -3,10 +3,10 @@ import { QueryBalanceRequest, QueryBalanceResponse } from 'cosmjs-types/cosmos/b
 
 export const FINANCIAL_RESERVE_ADDRESS = 'thor1dheycdevq39qlkxs2a6wuuzyn4aqxhve4qxtxt';
 const METHOD = 'historical-reserve-formula-v1';
-const REVIEWED_VERSIONS = new Set(['3.20.3', '3.21.0', '3.21.1', '3.21.2', '3.21.3']);
+const REVIEWED_VERSIONS = new Set(['3.20.3', '3.21.0', '3.21.1', '3.21.2', '3.21.3', '3.21.5']);
 // Reviewed upgrade -> predecessor whose formula governs the blocks before it.
 const REVIEWED_TRANSITIONS = new Map([['3.21.0', '3.20.3'], ['3.21.1', '3.21.0'], ['3.21.2', '3.21.1'],
-  ['3.21.3', '3.21.2']]);
+  ['3.21.3', '3.21.2'], ['3.21.5', '3.21.3']]);
 const BLOCKS_PER_YEAR = '5256000';
 const PRECISION = 10n ** 18n;
 const INT64_MAX = (1n << 63n) - 1n;
@@ -37,6 +37,15 @@ const RELEVANT_MIMIRS = new Set(['EMISSIONCURVE', 'RESERVEMAXCAP']);
 // every block without other EndBlock Reserve income the Reserve's net payout
 // equalled this formula within 2 base units (104 of 200 blocks after, 163 of
 // 200 before). Repeat the source review when the tag is published.
+// Reviewed v3.21.5 by behaviour only (no public source tag as of 2026-11-18):
+// activated at 28720417 directly from 3.21.3; 3.21.4 was not the predecessor.
+// A 100-block replay (28720466→28720367) matched independent height-verified
+// Reserve balances exactly. Before-rewards net EndBlock outflows independently
+// matched this formula within two RUNE base units in all 43/50 post-upgrade and
+// 39/50 pre-upgrade blocks with a net outflow; other blocks had net income.
+// The compact observed fixture retains both anchors and EndBlock bank deltas.
+// Repeat source review when the tag is published; do not infer support for
+// unobserved 3.21.4 or future patch releases.
 // Unknown protocol versions/config transitions intentionally require review.
 function integer(value, label, { signed = false } = {}) {
   if (typeof value === 'number' && !Number.isSafeInteger(value)) throw new Error(`Invalid ${label}`);

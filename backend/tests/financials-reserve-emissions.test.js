@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { BinaryWriter } from 'cosmjs-types/binary.js';
 import { QueryBalanceResponse } from 'cosmjs-types/cosmos/bank/v1beta1/query.js';
 import {
@@ -192,6 +193,54 @@ test('THORNode 3.21.1 to 3.21.3 keep the emission formula and replay across thei
   for (const version of ['3.21.1', '3.21.2', '3.21.3']) {
     const bump = { ...boundary, configChanges: [{ type: 'version', version }] };
     assert.deepEqual(replayFinancialReserveEmissions([top, bump, below], { ...upgradeAnchor, version }).blocks, expected);
+  }
+});
+
+test('THORNode 3.21.5 Reserve anchor and formula are supported', async () => {
+  const result = await fetchFinancialReserveAnchor(height, { getJson: anchorGetJson({
+    '/types.Query/Version': abciResponse(BinaryWriter.create().uint32(10).string('3.21.5').finish())
+  }) });
+  assert.equal(result.version, '3.21.5');
+  assert.equal(calculateFinancialReserveEmissionE8('2534440353693046', { ...anchor, version: '3.21.5' }),
+    calculateFinancialReserveEmissionE8('2534440353693046', anchor));
+});
+
+test('3.21.5 activation replays observed blocks and agrees with independent Reserve outflows', () => {
+  const fixture = JSON.parse(readFileSync(new URL('./fixtures/financials-reserve-3215.json', import.meta.url)));
+  const { observations, anchor: upper, lowerAnchor: lower, upgradeHeight } = fixture;
+  assert.equal(upper.version, '3.21.5');
+  assert.equal(lower.version, '3.21.3');
+  const result = replayFinancialReserveEmissions(observations, upper);
+  assert.equal(result.blocks.length, 100);
+  assert.equal(result.previousHeight, lower.height);
+  assert.equal(result.previousReserveBalanceE8, lower.reserveBalanceE8);
+  assert.deepEqual(observations.find(row => row.height === upgradeHeight).configChanges,
+    [{ type: 'version', version: '3.21.5' }]);
+
+  // Independent bank-event outflow through the rewards event, excluding later
+  // Reserve transfers. Net-income blocks contain additional receipts and cannot
+  // isolate emissions this way. Two base units = 0.00000002 RUNE.
+  const checked = { before: 0, after: 0 };
+  for (const [index, row] of observations.entries()) {
+    const netThroughRewards = BigInt(row.endBlockReserveDeltaE8) - BigInt(row.afterRewardsDeltaE8);
+    if (netThroughRewards >= 0n) continue;
+    const residual = BigInt(result.blocks[index].reserveEmissionsE8) + netThroughRewards;
+    assert.ok(residual >= -2n && residual <= 2n, `Reserve payout mismatch at ${row.height}`);
+    checked[row.height >= upgradeHeight ? 'after' : 'before']++;
+  }
+  assert.deepEqual(checked, { before: 39, after: 43 });
+});
+
+test('unobserved 3.21.4 and future 3.21.6 remain unsupported', async () => {
+  for (const version of ['3.21.4', '3.21.6']) {
+    assert.throws(() => calculateFinancialReserveEmissionE8('2534440353693046', { ...anchor, version }), /Unsupported/);
+    await assert.rejects(fetchFinancialReserveAnchor(height, { getJson: anchorGetJson({
+      '/types.Query/Version': abciResponse(BinaryWriter.create().uint32(10).string(version).finish())
+    }) }), /Unsupported/);
+    const [top, boundary, below] = upgradeObservations;
+    assert.throws(() => replayFinancialReserveEmissions([
+      top, { ...boundary, configChanges: [{ type: 'version', version }] }, below
+    ], { ...upgradeAnchor, version: '3.21.5' }), /configuration/);
   }
 });
 
