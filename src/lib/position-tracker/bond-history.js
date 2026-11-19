@@ -30,8 +30,9 @@ export function summarizeBondMetrics(rows = [], history = []) {
       : rowApy > -1 ? 365 * Math.expm1(Math.log1p(rowApy) / 365) : 0;
     return total + number(row.bond) * rowApr;
   }, 0);
-  const apr = bondRune > 0 ? weightedApr / bondRune : 0;
-  const apy = number(calculateAPY(apr));
+  const yieldAvailable = rows.every((row) => row.apy != null && Number.isFinite(Number(row.apy)));
+  const apr = yieldAvailable ? (bondRune > 0 ? weightedApr / bondRune : 0) : null;
+  const apy = yieldAvailable ? number(calculateAPY(apr)) : null;
   const nodes = [...new Set(rows.map((row) => row.nodeAddress).filter(Boolean))];
   const node = nodes.length === 1 ? rows.find((row) => row.nodeAddress === nodes[0]) : null;
   const netBondChange = history.reduce((total, entry) => total + (isBondEvent(entry.bondChange) ? number(entry.bondChange) : 0), 0);
@@ -43,7 +44,7 @@ export function summarizeBondMetrics(rows = [], history = []) {
     pendingRewardRune,
     apr,
     apy,
-    annualRewardRune: bondRune * apy,
+    annualRewardRune: yieldAvailable ? bondRune * apy : null,
     nodeCount: nodes.length,
     nodeFee: node ? number(node.operatorFee) : null,
     nodeAddress: node?.nodeAddress || '',

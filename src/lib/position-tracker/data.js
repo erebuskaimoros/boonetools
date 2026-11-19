@@ -17,6 +17,9 @@ import {
 } from './model.js';
 import { buildChurnHistory } from './bond-history.js';
 import { loadBondYieldGate } from './bond-yield.js';
+import { createBondRewardLoader, heightCheckedFetch } from './bond-rewards.js';
+
+let bondRewardLoader;
 
 const MIDGARD_MEMBER_BATCH = 10;
 const LOOKUP_CONCURRENCY = 6;
@@ -54,7 +57,10 @@ function reusableSnapshotNode(node, meta) {
   return !!selectReusableBondNode([observation], node.node_address, meta);
 }
 
-export async function loadNodes({ fresh = false } = {}) {
+export async function loadNodes({ fresh = false, blockHeight = 0, fetchImpl = globalThis.fetch } = {}) {
+  if (Number.isSafeInteger(blockHeight) && blockHeight > 0) {
+    return thornode.fetch('/thorchain/nodes', { blockHeight, cache: false, coreSnapshot: false, fetchImpl });
+  }
   if (fresh) return thornode.fetch('/thorchain/nodes', { cache: false, coreSnapshot: false });
   try {
     const snapshot = await booneToolsApi.get('/network-snapshot', { query: { field: 'nodes', include_meta: 'true' } });
@@ -90,7 +96,29 @@ export async function loadMarket() {
 export async function loadBonds(addresses, market, { fresh = false } = {}) {
   const thorAddresses = addresses.filter(isThorAddress);
   if (thorAddresses.length === 0) return { rows: [], nodes: [] };
-  const nodes = await loadNodes({ fresh });
+  bondRewardLoader ??= createBondRewardLoader(
+    async (blockHeight) => {
+      let verified = false;
+      const network = await thornode.getNetwork({ blockHeight, cache: false, coreSnapshot: false,
+        fetchImpl: heightCheckedFetch(blockHeight, (value) => { verified = value; }) });
+      if (!verified) throw new Error('Bond reward response height is unverified');
+      return network;
+    },
+    async (blockHeight) => {
+      let verified = false;
+      const vaults = await thornode.getVaults({ blockHeight, cache: false, coreSnapshot: false,
+        fetchImpl: heightCheckedFetch(blockHeight, (value) => { verified = value; }) });
+      return verified ? vaults : null;
+    }
+  );
+  // Align awards and reward-pool balances to the churn clock's observed block.
+  // A fresh clock is loaded on every portfolio refresh, including manual refresh.
+  const blockHeight = Number(market.churnState?.currentHeight);
+  let nodesVerified = false;
+  const [nodes, bondRewardContext] = await Promise.all([
+    loadNodes({ fresh, blockHeight, fetchImpl: heightCheckedFetch(blockHeight, (value) => { nodesVerified = value; }) }),
+    bondRewardLoader(market.churnState)
+  ]);
   return {
     nodes,
     rows: buildBondRows({
@@ -98,6 +126,7 @@ export async function loadBonds(addresses, market, { fresh = false } = {}) {
       addresses: thorAddresses,
       runePriceUsd: market.runePriceUsd,
       churnState: market.churnState,
+      bondRewardContext: nodesVerified ? bondRewardContext : null,
       getLeave: getLeaveStatus
     })
   };

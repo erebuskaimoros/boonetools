@@ -4,6 +4,7 @@
  */
 
 import { estimateCurrentChurnYields } from '../bond-tracker/apy.js';
+import { currentChurnRewardFraction } from './bond-rewards.js';
 import { readBondYieldConfig } from './bond-yield.js';
 import { isThorAddress } from './addresses.js';
 
@@ -58,9 +59,10 @@ export function churnEstimateInput(churnState) {
  * One row per (tracked address, node) with a bond above 1 RUNE.
  * `getLeave` is an optional (node, allNodes) → leave-status callback.
  */
-export function buildBondRows({ nodes, addresses, runePriceUsd = 0, churnState = null, getLeave = null }) {
+export function buildBondRows({ nodes, addresses, runePriceUsd = 0, churnState = null, bondRewardContext = null, getLeave = null }) {
   const tracked = new Set((addresses || []).map(lower));
   const estimate = churnEstimateInput(churnState);
+  const rewardFraction = currentChurnRewardFraction(bondRewardContext, churnState);
   const rows = [];
 
   for (const node of Array.isArray(nodes) ? nodes : []) {
@@ -80,7 +82,7 @@ export function buildBondRows({ nodes, addresses, runePriceUsd = 0, churnState =
       const netAward = isOperator
         ? award * (fee + (1 - fee) * share)
         : award * share * (1 - fee);
-      const { apr, apy } = estimateCurrentChurnYields({ reward: netAward, principal: bond, ...estimate });
+      const { apr, apy } = estimateCurrentChurnYields({ reward: netAward * (rewardFraction ?? 0), principal: bond, ...estimate });
 
       rows.push({
         key: `${address}:${node.node_address}`,
@@ -96,8 +98,8 @@ export function buildBondRows({ nodes, addresses, runePriceUsd = 0, churnState =
         bondYield: readBondYieldConfig(provider),
         pendingReward: units(netAward),
         pendingRewardUsd: units(netAward) * num(runePriceUsd),
-        apr: Number.isFinite(apr) ? apr : 0,
-        apy: Number.isFinite(apy) ? apy : 0,
+        apr: rewardFraction !== null && Number.isFinite(apr) ? apr : null,
+        apy: rewardFraction !== null && Number.isFinite(apy) ? apy : null,
         requestedToLeave: !!node.requested_to_leave,
         forcedToLeave: !!node.forced_to_leave,
         slashPoints: num(node.slash_points),

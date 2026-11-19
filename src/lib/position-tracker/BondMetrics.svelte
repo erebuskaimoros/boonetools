@@ -61,11 +61,11 @@
         {#if historyNote}<span>{historyNote}</span>{/if}
       </span>
     </div>
-    <div class="bond-metric m-apy" title="APY projected from the combined rewards and bond across nodes, assuming all rewards are reinvested with daily compounding. Paid-out rewards do not compound in the bond.">
+    <div class="bond-metric m-apy" title="APY projected from newly accrued rewards across nodes, excluding rewards carried over from earlier churns and assuming daily compounding. Paid-out rewards do not compound in the bond.">
       <span class="bond-index">05</span>
       <span class="bond-label">apy</span>
-      <strong class="bond-value accent">{currentAvailable ? fmtPct(summary.apy * 100, 2) : '—'}</strong>
-      <span class="bond-sub">{currentAvailable ? `${money(summary.annualRewardRune * runePriceUsd)}/yr` : ''}</span>
+      <strong class="bond-value accent">{currentAvailable && summary.apy != null ? fmtPct(summary.apy * 100, 2) : '—'}</strong>
+      <span class="bond-sub">{currentAvailable && summary.apy != null ? `${money(summary.annualRewardRune * runePriceUsd)}/yr` : currentAvailable ? 'yield unavailable' : ''}</span>
     </div>
     <div class="bond-metric m-price">
       <span class="bond-index">06</span>
